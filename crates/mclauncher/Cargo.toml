@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cosmic-text.workspace = true
+eframe.workspace = true
+egui.workspace = true
+serde.workspace = true
+wgpu.workspace = true

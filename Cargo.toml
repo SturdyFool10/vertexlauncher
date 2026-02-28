@@ -6,3 +6,23 @@ members = [
 default-members = [
     "crates/mclauncher",
 ]
+
+[workspace.dependencies]
+cosmic-text = "0.18.2"
+eframe = { version = "0.33.3", features = ["wgpu", "serde"] }
+egui = { version = "0.33.3", features = ["serde"] }
+serde = { version = "1.0.228", features = ["derive", "serde_derive"] }
+wgpu = "28.0.0"
+[profile.dev]
+# Your crates (workspace members): keep normal dev behavior
+opt-level = 0
+debug = 2
+incremental = true
+codegen-units = 256
+
+[profile.dev.package."*"]
+# All dependencies (everything not in your workspace): optimize hard
+opt-level = 3
+debug = 1
+incremental = true
+codegen-units = 16
