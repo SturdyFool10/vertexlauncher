@@ -7,5 +7,6 @@ edition = "2024"
 cosmic-text.workspace = true
 eframe.workspace = true
 egui.workspace = true
+egui_cosmic_text.workspace = true
 serde.workspace = true
 wgpu.workspace = true
