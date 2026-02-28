@@ -1,0 +1,71 @@
+name: Rust (CI)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: mclauncher
+
+jobs:
+  build-release:
+    name: build-release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build (release)
+        run: cargo build --release --verbose
+
+      - name: Test (release)
+        run: cargo test --release --verbose
+
+      - name: Package binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          cp "target/release/${BIN_NAME}" "dist/${BIN_NAME}"
+          chmod +x "dist/${BIN_NAME}"
+          tar -czf "dist/${BIN_NAME}-${{ runner.os }}-${{ runner.arch }}.tar.gz" -C dist "${BIN_NAME}"
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $bin = "${env:BIN_NAME}.exe"
+          Copy-Item "target\release\$bin" "dist\$bin" -Force
+          Compress-Archive -Path "dist\$bin" -DestinationPath "dist\$bin-${{ runner.os }}-${{ runner.arch }}.zip" -Force
+
+      - name: Upload artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-${{ runner.os }}-${{ runner.arch }}-release
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-${{ runner.os }}-${{ runner.arch }}-release
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 14
