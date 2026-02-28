@@ -30,7 +30,7 @@ modprovider = { path = "crates/modprovider" }
 serverbrowser = { path = "crates/serverbrowser" }
 servermanager = { path = "crates/servermanager" }
 serverprotocol = { path = "crates/serverprotocol" }
-
+egui_cosmic_glue = { path = "crates/egui_cosmic_glue" }
 
 [profile.dev]
 # Your crates (workspace members): keep normal dev behavior

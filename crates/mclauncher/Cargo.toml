@@ -10,3 +10,4 @@ egui.workspace = true
 egui_cosmic_text.workspace = true
 serde.workspace = true
 wgpu.workspace = true
+egui_cosmic_glue.workspace = true

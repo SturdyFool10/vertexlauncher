@@ -1,0 +1,23 @@
+ [package]
+ name = "egui_cosmic_glue"
+ version = "0.1.0"
+ edition = "2021"
+ description = "A lightweight integration of cosmic-text 0.18 with egui 0.33"
+ license = "MIT OR Apache-2.0"
+
+ [dependencies]
+ # Cosmic‑text provides text layout, shaping and rasterization.
+ cosmic-text = { version = "0.18.2", default-features = true }
+ # Bring in egui for the GUI context and painter.
+ egui = { version = "0.33.3", default-features = true, features = ["serde"] }
+ # Dynamic texture atlas allocator used for storing glyph bitmaps.
+ etagere = "0.2.15"
+ # imgref makes it easy to operate on subregions of a flat pixel buffer.
+ imgref = "1.10.1"
+ # An LRU cache to keep track of glyph allocations between frames.
+ lru = "0.12.3"
+ # Random state for hash maps when caching glyphs.
+ rand = { version = "0.8", optional = true }
+
+ [features]
+ default = []
