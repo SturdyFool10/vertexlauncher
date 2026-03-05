@@ -1,3 +1,4 @@
+use config::Config;
 use egui::Ui;
 
 mod legal;
@@ -31,11 +32,16 @@ impl AppScreen {
     }
 }
 
-pub fn render(ui: &mut Ui, screen: AppScreen, selected_profile_id: Option<&str>) {
+pub fn render(
+    ui: &mut Ui,
+    screen: AppScreen,
+    selected_profile_id: Option<&str>,
+    config: &mut Config,
+) {
     match screen {
         AppScreen::Library => library::render(ui, selected_profile_id),
         AppScreen::Skins => skins::render(ui, selected_profile_id),
-        AppScreen::Settings => settings::render(ui),
+        AppScreen::Settings => settings::render(ui, config),
         AppScreen::Legal => legal::render(ui),
     }
 }

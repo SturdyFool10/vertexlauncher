@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub const BELL_RINGING_SVG: &[u8] = include_bytes!("bell-ringing.svg");
 pub const BELL_SVG: &[u8] = include_bytes!("bell.svg");
 pub const CHEVRON_DOWN_SVG: &[u8] = include_bytes!("chevron-down.svg");
@@ -6,6 +8,7 @@ pub const CHEVRON_UP_SVG: &[u8] = include_bytes!("chevron-up.svg");
 pub const COPY_SVG: &[u8] = include_bytes!("copy.svg");
 pub const CREDIT_CARD_SVG: &[u8] = include_bytes!("credit-card.svg");
 pub const DOWNLOAD_SVG: &[u8] = include_bytes!("download.svg");
+pub const INFO_CIRCLE_SVG: &[u8] = include_bytes!("info-circle.svg");
 pub const LEGAL_SVG: &[u8] = include_bytes!("legal.svg");
 pub const LIBRARY_SVG: &[u8] = include_bytes!("library.svg");
 pub const MENU_2_SVG: &[u8] = include_bytes!("menu-2.svg");

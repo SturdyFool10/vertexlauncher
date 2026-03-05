@@ -24,12 +24,60 @@ impl ConfigFormat {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ToggleSettingId {
+    LowPowerGpuPreferred,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ToggleSettingSpec {
+    pub id: ToggleSettingId,
+    pub label: &'static str,
+    pub info_tooltip: Option<&'static str>,
+}
+
+impl ToggleSettingId {
+    pub const fn spec(self) -> ToggleSettingSpec {
+        match self {
+            ToggleSettingId::LowPowerGpuPreferred => ToggleSettingSpec {
+                id: ToggleSettingId::LowPowerGpuPreferred,
+                label: "Prefer Integrated Graphics",
+                info_tooltip: Some(
+                    "Uses integrated graphics when both integrated and discrete GPUs are available.(Requires Restart to take effect)",
+                ),
+            },
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Config {}
+pub struct Config {
+    low_power_gpu_preferred: bool,
+}
+
+impl Config {
+    pub fn low_power_gpu_preferred(&self) -> bool {
+        self.low_power_gpu_preferred
+    }
+
+    pub fn for_each_toggle_mut(&mut self, mut visit: impl FnMut(ToggleSettingSpec, &mut bool)) {
+        // Intentionally destructure all fields to force updates here when Config changes.
+        let Self {
+            low_power_gpu_preferred,
+        } = self;
+
+        visit(
+            ToggleSettingId::LowPowerGpuPreferred.spec(),
+            low_power_gpu_preferred,
+        );
+    }
+}
 
 impl Default for Config {
     fn default() -> Self {
-        Self {}
+        Self {
+            low_power_gpu_preferred: true, //this will not effect single GPU systems, but on systems with multiple valid GPUs it can make our app run on the less utilized integrated GPU
+        }
     }
 }
 

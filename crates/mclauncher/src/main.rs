@@ -137,6 +137,7 @@ impl VertexApp {
 impl eframe::App for VertexApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.theme.apply(ctx);
+        ui::top_bar::render(ctx, self.active_screen);
 
         let modal_open = self.show_config_format_modal;
         let sidebar_output = ui::sidebar::render(ctx, self.active_screen, &self.profile_shortcuts);
@@ -161,7 +162,12 @@ impl eframe::App for VertexApp {
                     )),
             )
             .show(ctx, |ui| {
-                screens::render(ui, self.active_screen, self.selected_profile_id.as_deref());
+                screens::render(
+                    ui,
+                    self.active_screen,
+                    self.selected_profile_id.as_deref(),
+                    &mut self.config,
+                );
             });
 
         if modal_open {
@@ -177,6 +183,7 @@ fn main() -> eframe::Result<()> {
             inner_size: Some(egui::vec2(1280.0, 800.0)),
             min_inner_size: Some(egui::vec2(320.0, 240.0)),
             resizable: Some(true),
+            decorations: Some(false),
             ..Default::default()
         },
         renderer: eframe::Renderer::Wgpu,
