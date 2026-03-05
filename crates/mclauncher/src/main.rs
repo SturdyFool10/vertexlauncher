@@ -3,9 +3,7 @@ use eframe::{self, egui};
 use egui::CentralPanel;
 use fontloader::{FontCatalog, FontSpec, Slant, Stretch, Weight};
 
-fn topbar_buttons() -> Vec<&'static str> {
-    vec!["File", "Edit", "View", "Help"]
-}
+struct UIState {}
 
 struct VertexApp {
     font_catalog: FontCatalog,
@@ -128,19 +126,7 @@ impl eframe::App for VertexApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let modal_open = self.show_config_format_modal;
 
-        CentralPanel::default().show(ctx, |ui| {
-            ui.add_enabled_ui(!modal_open, |ui| {
-                ui.horizontal_top(|ui| {
-                    for button in topbar_buttons() {
-                        let val = ui.button(button);
-                        if val.clicked() {
-                            println!("button {} clicked", button)
-                        }
-                    }
-                });
-                ui.label("Hello Vertex Launcher");
-            });
-        });
+        CentralPanel::default().show(ctx, |ui| ui.vertical(|ui| {}));
 
         if modal_open {
             self.render_config_format_modal(ctx);
