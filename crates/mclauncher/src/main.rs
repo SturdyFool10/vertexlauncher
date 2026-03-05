@@ -3,19 +3,27 @@ use eframe::{self, egui};
 use egui::CentralPanel;
 use fontloader::{FontCatalog, FontSpec, Slant, Stretch, Weight};
 
-struct UIState {}
+mod assets;
+mod screens;
+mod ui;
 
 struct VertexApp {
-    font_catalog: FontCatalog,
+    _font_catalog: FontCatalog,
     config: Config,
+    theme: ui::theme::Theme,
     show_config_format_modal: bool,
     selected_config_format: ConfigFormat,
     default_config_format: ConfigFormat,
     config_creation_error: Option<String>,
+    active_screen: screens::AppScreen,
+    profile_shortcuts: Vec<ui::sidebar::ProfileShortcut>,
+    selected_profile_id: Option<String>,
 }
 
 impl VertexApp {
     fn new(cc: &eframe::CreationContext<'_>, config_state: LoadConfigResult) -> Self {
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+
         let mut cat = FontCatalog::new();
         cat.load_system();
 
@@ -46,12 +54,16 @@ impl VertexApp {
             };
 
         Self {
-            font_catalog: cat,
+            _font_catalog: cat,
             config,
+            theme: ui::theme::Theme::default(),
             show_config_format_modal,
             selected_config_format,
             default_config_format,
             config_creation_error: None,
+            active_screen: screens::AppScreen::Library,
+            profile_shortcuts: Vec::new(),
+            selected_profile_id: None,
         }
     }
 
@@ -124,9 +136,33 @@ impl VertexApp {
 
 impl eframe::App for VertexApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let modal_open = self.show_config_format_modal;
+        self.theme.apply(ctx);
 
-        CentralPanel::default().show(ctx, |ui| ui.vertical(|ui| {}));
+        let modal_open = self.show_config_format_modal;
+        let sidebar_output = ui::sidebar::render(ctx, self.active_screen, &self.profile_shortcuts);
+
+        if let Some(next_screen) = sidebar_output.selected_screen {
+            self.active_screen = next_screen;
+        }
+
+        if let Some(profile_id) = sidebar_output.selected_profile_id {
+            self.selected_profile_id = Some(profile_id);
+        }
+
+        CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(ctx.style().visuals.panel_fill)
+                    .inner_margin(egui::Margin::ZERO)
+                    .outer_margin(egui::Margin::ZERO)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        ctx.style().visuals.widgets.noninteractive.bg_stroke.color,
+                    )),
+            )
+            .show(ctx, |ui| {
+                screens::render(ui, self.active_screen, self.selected_profile_id.as_deref());
+            });
 
         if modal_open {
             self.render_config_format_modal(ctx);
