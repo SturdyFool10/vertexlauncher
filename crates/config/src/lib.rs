@@ -140,6 +140,7 @@ impl UiFontFamily {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToggleSettingId {
     LowPowerGpuPreferred,
+    WindowBlurEnabled,
     OpenTypeFeaturesEnabled,
 }
 
@@ -158,6 +159,13 @@ impl ToggleSettingId {
                 label: "Prefer Integrated Graphics",
                 info_tooltip: Some(
                     "Uses integrated graphics when both integrated and discrete GPUs are available. Requires restart.",
+                ),
+            },
+            ToggleSettingId::WindowBlurEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::WindowBlurEnabled,
+                label: "Enable Window Blur",
+                info_tooltip: Some(
+                    "Enables acrylic (Windows), KDE blur (Linux), and vibrancy (macOS). Requires restart.",
                 ),
             },
             ToggleSettingId::OpenTypeFeaturesEnabled => ToggleSettingSpec {
@@ -289,6 +297,7 @@ impl TextSettingId {
 #[serde(default)]
 pub struct Config {
     low_power_gpu_preferred: bool,
+    window_blur_enabled: bool,
     open_type_features_enabled: bool,
     open_type_features_to_enable: String,
     ui_font_family: UiFontFamily,
@@ -303,6 +312,10 @@ impl Config {
 
     pub fn ui_font_family(&self) -> UiFontFamily {
         self.ui_font_family
+    }
+
+    pub fn window_blur_enabled(&self) -> bool {
+        self.window_blur_enabled
     }
 
     pub fn open_type_features_enabled(&self) -> bool {
@@ -332,6 +345,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred,
+            window_blur_enabled,
             open_type_features_enabled,
             open_type_features_to_enable: _,
             ui_font_family: _,
@@ -342,6 +356,10 @@ impl Config {
         visit(
             ToggleSettingId::LowPowerGpuPreferred.spec(),
             low_power_gpu_preferred,
+        );
+        visit(
+            ToggleSettingId::WindowBlurEnabled.spec(),
+            window_blur_enabled,
         );
         visit(
             ToggleSettingId::OpenTypeFeaturesEnabled.spec(),
@@ -356,6 +374,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            window_blur_enabled: _,
             open_type_features_enabled: _,
             open_type_features_to_enable: _,
             ui_font_family,
@@ -370,6 +389,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            window_blur_enabled: _,
             open_type_features_enabled: _,
             open_type_features_to_enable: _,
             ui_font_family: _,
@@ -384,6 +404,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            window_blur_enabled: _,
             open_type_features_enabled: _,
             open_type_features_to_enable: _,
             ui_font_family: _,
@@ -398,6 +419,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            window_blur_enabled: _,
             open_type_features_enabled: _,
             open_type_features_to_enable,
             ui_font_family: _,
@@ -416,6 +438,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             low_power_gpu_preferred: true,
+            window_blur_enabled: true,
             open_type_features_enabled: true,
             open_type_features_to_enable: String::new(),
             ui_font_family: UiFontFamily::MapleMonoNf,

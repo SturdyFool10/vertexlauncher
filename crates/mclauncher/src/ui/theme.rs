@@ -103,7 +103,7 @@ impl Default for Theme {
 }
 
 impl Theme {
-    pub fn apply(&self, ctx: &Context) {
+    pub fn apply(&self, ctx: &Context, blur_enabled: bool) {
         let mut style: Style = (*ctx.style()).clone();
         let mut visuals = Visuals::dark();
 
@@ -116,36 +116,44 @@ impl Theme {
         let border = self.border.to_color32();
         let border_muted = self.border_muted.to_color32();
 
-        visuals.window_fill = bg_dark;
-        visuals.panel_fill = bg;
-        visuals.faint_bg_color = bg_light;
-        visuals.extreme_bg_color = bg_dark;
-        visuals.code_bg_color = bg_dark;
+        let alpha_profile = if blur_enabled {
+            ThemeAlphaProfile::TRANSPARENT
+        } else {
+            ThemeAlphaProfile::OPAQUE
+        };
+
+        visuals.window_fill = with_alpha(bg_dark, alpha_profile.window_fill);
+        visuals.panel_fill = with_alpha(bg, alpha_profile.panel_fill);
+        visuals.faint_bg_color = with_alpha(bg_light, alpha_profile.faint_bg);
+        visuals.extreme_bg_color = with_alpha(bg_dark, alpha_profile.extreme_bg);
+        visuals.code_bg_color = with_alpha(bg_dark, alpha_profile.code_bg);
         visuals.override_text_color = Some(text);
         visuals.weak_text_color = Some(text_muted);
         visuals.window_stroke = Stroke::new(1.0, border_muted);
-        visuals.widgets.noninteractive.bg_fill = bg;
-        visuals.widgets.noninteractive.weak_bg_fill = bg;
+        visuals.widgets.noninteractive.bg_fill = with_alpha(bg, alpha_profile.noninteractive_bg);
+        visuals.widgets.noninteractive.weak_bg_fill =
+            with_alpha(bg, alpha_profile.noninteractive_weak_bg);
         visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, text_muted);
         visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, border_muted);
 
-        visuals.widgets.inactive.bg_fill = bg_light;
-        visuals.widgets.inactive.weak_bg_fill = bg_light;
+        visuals.widgets.inactive.bg_fill = with_alpha(bg_light, alpha_profile.inactive_bg);
+        visuals.widgets.inactive.weak_bg_fill =
+            with_alpha(bg_light, alpha_profile.inactive_weak_bg);
         visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
         visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, border_muted);
 
-        visuals.widgets.hovered.bg_fill = bg_light;
-        visuals.widgets.hovered.weak_bg_fill = bg_light;
+        visuals.widgets.hovered.bg_fill = with_alpha(bg_light, alpha_profile.hovered_bg);
+        visuals.widgets.hovered.weak_bg_fill = with_alpha(bg_light, alpha_profile.hovered_weak_bg);
         visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
         visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, border);
 
-        visuals.widgets.active.bg_fill = highlight;
-        visuals.widgets.active.weak_bg_fill = highlight;
+        visuals.widgets.active.bg_fill = with_alpha(highlight, alpha_profile.active_bg);
+        visuals.widgets.active.weak_bg_fill = with_alpha(highlight, alpha_profile.active_weak_bg);
         visuals.widgets.active.fg_stroke = Stroke::new(1.0, text);
         visuals.widgets.active.bg_stroke = Stroke::new(1.0, border);
 
-        visuals.widgets.open.bg_fill = bg_light;
-        visuals.widgets.open.weak_bg_fill = bg_light;
+        visuals.widgets.open.bg_fill = with_alpha(bg_light, alpha_profile.open_bg);
+        visuals.widgets.open.weak_bg_fill = with_alpha(bg_light, alpha_profile.open_weak_bg);
         visuals.widgets.open.fg_stroke = Stroke::new(1.0, text);
         visuals.widgets.open.bg_stroke = Stroke::new(1.0, border);
 
@@ -204,4 +212,65 @@ fn linear_to_srgb_u8(value: f32) -> u8 {
         1.055 * clamped.powf(1.0 / 2.4) - 0.055
     };
     (srgb * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+fn with_alpha(color: Color32, alpha: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+}
+
+#[derive(Clone, Copy)]
+struct ThemeAlphaProfile {
+    window_fill: u8,
+    panel_fill: u8,
+    faint_bg: u8,
+    extreme_bg: u8,
+    code_bg: u8,
+    noninteractive_bg: u8,
+    noninteractive_weak_bg: u8,
+    inactive_bg: u8,
+    inactive_weak_bg: u8,
+    hovered_bg: u8,
+    hovered_weak_bg: u8,
+    active_bg: u8,
+    active_weak_bg: u8,
+    open_bg: u8,
+    open_weak_bg: u8,
+}
+
+impl ThemeAlphaProfile {
+    const OPAQUE: Self = Self {
+        window_fill: 255,
+        panel_fill: 255,
+        faint_bg: 255,
+        extreme_bg: 255,
+        code_bg: 255,
+        noninteractive_bg: 255,
+        noninteractive_weak_bg: 255,
+        inactive_bg: 255,
+        inactive_weak_bg: 255,
+        hovered_bg: 255,
+        hovered_weak_bg: 255,
+        active_bg: 255,
+        active_weak_bg: 255,
+        open_bg: 255,
+        open_weak_bg: 255,
+    };
+
+    const TRANSPARENT: Self = Self {
+        window_fill: 95,
+        panel_fill: 72,
+        faint_bg: 58,
+        extreme_bg: 118,
+        code_bg: 130,
+        noninteractive_bg: 62,
+        noninteractive_weak_bg: 50,
+        inactive_bg: 60,
+        inactive_weak_bg: 48,
+        hovered_bg: 92,
+        hovered_weak_bg: 74,
+        active_bg: 132,
+        active_weak_bg: 108,
+        open_bg: 76,
+        open_weak_bg: 62,
+    };
 }

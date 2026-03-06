@@ -10,6 +10,7 @@ use textui::{ButtonOptions, LabelOptions, TextUi};
 mod assets;
 mod screens;
 mod ui;
+mod window_effects;
 
 const MAPLE_MONO_NF_REGULAR_TTF: &[u8] = include_bytes!("included_fonts/MapleMono-NF-Regular.ttf");
 
@@ -61,6 +62,7 @@ impl VertexApp {
                 }
             };
         config.normalize();
+        window_effects::apply(cc, config.window_blur_enabled());
 
         let mut cat = FontCatalog::new();
         cat.load_system();
@@ -319,7 +321,7 @@ impl VertexApp {
 impl eframe::App for VertexApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.text_ui.begin_frame(ctx);
-        self.theme.apply(ctx);
+        self.theme.apply(ctx, self.config.window_blur_enabled());
         self.ensure_selected_font_is_available();
         self.apply_ui_font_from_config(ctx);
         ui::top_bar::render(ctx, self.active_screen, &mut self.text_ui);
@@ -411,6 +413,7 @@ fn main() -> eframe::Result<()> {
             min_inner_size: Some(egui::vec2(320.0, 240.0)),
             resizable: Some(true),
             decorations: Some(false),
+            transparent: Some(startup_config.window_blur_enabled()),
             ..Default::default()
         },
         renderer: eframe::Renderer::Wgpu,
