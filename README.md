@@ -19,7 +19,6 @@ my goal is to make a launcher that:
 - works cross-platform
 - gets out of your way
 - lets you use your system to its limits(probably RAM)
-- does not ban you for being controversial / not being conformist
 - allows power users to configure it to their liking
 - is expandable enough to adapt to the future of Minecraft and modding
 - allows you to do most everything that other launchers do short of becoming a client
