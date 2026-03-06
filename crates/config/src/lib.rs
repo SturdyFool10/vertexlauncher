@@ -298,6 +298,7 @@ impl TextSettingId {
 pub struct Config {
     low_power_gpu_preferred: bool,
     window_blur_enabled: bool,
+    theme_id: String,
     open_type_features_enabled: bool,
     open_type_features_to_enable: String,
     ui_font_family: UiFontFamily,
@@ -316,6 +317,14 @@ impl Config {
 
     pub fn window_blur_enabled(&self) -> bool {
         self.window_blur_enabled
+    }
+
+    pub fn theme_id(&self) -> &str {
+        &self.theme_id
+    }
+
+    pub fn set_theme_id(&mut self, theme_id: impl Into<String>) {
+        self.theme_id = theme_id.into();
     }
 
     pub fn open_type_features_enabled(&self) -> bool {
@@ -339,6 +348,9 @@ impl Config {
         self.ui_font_weight = self
             .ui_font_weight
             .clamp(UI_FONT_WEIGHT_MIN, UI_FONT_WEIGHT_MAX);
+        if self.theme_id.trim().is_empty() {
+            self.theme_id = "matrix_oled".to_owned();
+        }
     }
 
     pub fn for_each_toggle_mut(&mut self, mut visit: impl FnMut(ToggleSettingSpec, &mut bool)) {
@@ -346,6 +358,7 @@ impl Config {
         let Self {
             low_power_gpu_preferred,
             window_blur_enabled,
+            theme_id: _,
             open_type_features_enabled,
             open_type_features_to_enable: _,
             ui_font_family: _,
@@ -375,6 +388,7 @@ impl Config {
         let Self {
             low_power_gpu_preferred: _,
             window_blur_enabled: _,
+            theme_id: _,
             open_type_features_enabled: _,
             open_type_features_to_enable: _,
             ui_font_family,
@@ -390,6 +404,7 @@ impl Config {
         let Self {
             low_power_gpu_preferred: _,
             window_blur_enabled: _,
+            theme_id: _,
             open_type_features_enabled: _,
             open_type_features_to_enable: _,
             ui_font_family: _,
@@ -405,6 +420,7 @@ impl Config {
         let Self {
             low_power_gpu_preferred: _,
             window_blur_enabled: _,
+            theme_id: _,
             open_type_features_enabled: _,
             open_type_features_to_enable: _,
             ui_font_family: _,
@@ -420,6 +436,7 @@ impl Config {
         let Self {
             low_power_gpu_preferred: _,
             window_blur_enabled: _,
+            theme_id: _,
             open_type_features_enabled: _,
             open_type_features_to_enable,
             ui_font_family: _,
@@ -439,6 +456,7 @@ impl Default for Config {
         Self {
             low_power_gpu_preferred: true,
             window_blur_enabled: true,
+            theme_id: "matrix_oled".to_owned(),
             open_type_features_enabled: true,
             open_type_features_to_enable: String::new(),
             ui_font_family: UiFontFamily::MapleMonoNf,

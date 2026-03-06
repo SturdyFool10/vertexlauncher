@@ -37,6 +37,7 @@ struct VertexApp {
     applied_font_signature: Option<AppliedFontSignature>,
     applied_text_signature: Option<AppliedTextSignature>,
     effective_ui_font_family: UiFontFamily,
+    theme_catalog: ui::theme::ThemeCatalog,
     theme: ui::theme::Theme,
     show_config_format_modal: bool,
     selected_config_format: ConfigFormat,
@@ -63,6 +64,11 @@ impl VertexApp {
             };
         config.normalize();
         window_effects::apply(cc, config.window_blur_enabled());
+        let theme_catalog = ui::theme::ThemeCatalog::load();
+        if !theme_catalog.contains(config.theme_id()) {
+            config.set_theme_id(theme_catalog.default_theme_id().to_owned());
+        }
+        let theme = theme_catalog.resolve(config.theme_id()).clone();
 
         let mut cat = FontCatalog::new();
         cat.load_system();
@@ -77,7 +83,8 @@ impl VertexApp {
             applied_font_signature: None,
             applied_text_signature: None,
             effective_ui_font_family,
-            theme: ui::theme::Theme::default(),
+            theme_catalog,
+            theme,
             show_config_format_modal,
             selected_config_format,
             default_config_format,
@@ -188,6 +195,18 @@ impl VertexApp {
             MAPLE_MONO_NF_REGULAR_TTF.to_vec(),
             size_pt,
         );
+    }
+
+    fn sync_theme_from_config(&mut self) {
+        if !self.theme_catalog.contains(self.config.theme_id()) {
+            self.config
+                .set_theme_id(self.theme_catalog.default_theme_id().to_owned());
+        }
+
+        let resolved = self.theme_catalog.resolve(self.config.theme_id());
+        if self.theme.id != resolved.id {
+            self.theme = resolved.clone();
+        }
     }
 
     fn render_config_format_modal(&mut self, ctx: &egui::Context) {
@@ -321,12 +340,13 @@ impl VertexApp {
 impl eframe::App for VertexApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.text_ui.begin_frame(ctx);
+        let previous_config = self.config.clone();
+        self.sync_theme_from_config();
         self.theme.apply(ctx, self.config.window_blur_enabled());
         self.ensure_selected_font_is_available();
         self.apply_ui_font_from_config(ctx);
         ui::top_bar::render(ctx, self.active_screen, &mut self.text_ui);
 
-        let previous_config = self.config.clone();
         let modal_open = self.show_config_format_modal;
         let sidebar_output = ui::sidebar::render(ctx, self.active_screen, &self.profile_shortcuts);
 
@@ -356,6 +376,7 @@ impl eframe::App for VertexApp {
                     self.selected_profile_id.as_deref(),
                     &mut self.config,
                     &self.available_ui_fonts,
+                    self.theme_catalog.themes(),
                     &mut self.text_ui,
                 );
             });

@@ -1,14 +1,24 @@
 use egui::{Color32, Context, CornerRadius, Stroke, Style, Visuals};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy)]
+const DEFAULT_THEME_ID: &str = "matrix_oled";
+const THEMES_DIR: &str = "themes";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Oklch {
     pub l: f32,
     pub c: f32,
     pub h: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Theme {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
     pub bg_dark: Oklch,
     pub bg: Oklch,
     pub bg_light: Oklch,
@@ -25,80 +35,57 @@ pub struct Theme {
     pub info: Oklch,
 }
 
+#[derive(Debug, Clone)]
+pub struct ThemeCatalog {
+    themes: Vec<Theme>,
+}
+
+impl ThemeCatalog {
+    pub fn load() -> Self {
+        let themes_dir = PathBuf::from(THEMES_DIR);
+        ensure_themes_dir_and_defaults(&themes_dir);
+
+        let mut themes = load_themes_from_dir(&themes_dir);
+        let mut seen = HashSet::new();
+        themes.retain(|theme| seen.insert(theme.id.clone()));
+
+        if !themes.iter().any(|theme| theme.id == DEFAULT_THEME_ID) {
+            themes.push(Theme::matrix_oled());
+        }
+
+        themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Self { themes }
+    }
+
+    pub fn themes(&self) -> &[Theme] {
+        &self.themes
+    }
+
+    pub fn contains(&self, id: &str) -> bool {
+        self.themes.iter().any(|theme| theme.id == id)
+    }
+
+    pub fn default_theme_id(&self) -> &str {
+        DEFAULT_THEME_ID
+    }
+
+    pub fn resolve(&self, id: &str) -> &Theme {
+        self.themes
+            .iter()
+            .find(|theme| theme.id == id)
+            .or_else(|| {
+                self.themes
+                    .iter()
+                    .find(|theme| theme.id == DEFAULT_THEME_ID)
+            })
+            .or_else(|| self.themes.first())
+            .expect("theme catalog must contain at least one theme")
+    }
+}
+
 impl Default for Theme {
     fn default() -> Self {
-        Self {
-            bg_dark: Oklch {
-                l: 0.10,
-                c: 0.0,
-                h: 316.0,
-            },
-            bg: Oklch {
-                l: 0.15,
-                c: 0.0,
-                h: 316.0,
-            },
-            bg_light: Oklch {
-                l: 0.20,
-                c: 0.0,
-                h: 316.0,
-            },
-            text: Oklch {
-                l: 0.96,
-                c: 0.0,
-                h: 316.0,
-            },
-            text_muted: Oklch {
-                l: 0.76,
-                c: 0.0,
-                h: 316.0,
-            },
-            highlight: Oklch {
-                l: 0.50,
-                c: 0.0,
-                h: 316.0,
-            },
-            border: Oklch {
-                l: 0.40,
-                c: 0.0,
-                h: 316.0,
-            },
-            border_muted: Oklch {
-                l: 0.30,
-                c: 0.0,
-                h: 316.0,
-            },
-            primary: Oklch {
-                l: 0.76,
-                c: 0.2,
-                h: 150.0,
-            },
-            secondary: Oklch {
-                l: 0.76,
-                c: 0.2,
-                h: 330.0,
-            },
-            danger: Oklch {
-                l: 0.70,
-                c: 0.2,
-                h: 30.0,
-            },
-            warning: Oklch {
-                l: 0.70,
-                c: 0.2,
-                h: 100.0,
-            },
-            success: Oklch {
-                l: 0.70,
-                c: 0.2,
-                h: 160.0,
-            },
-            info: Oklch {
-                l: 0.70,
-                c: 0.2,
-                h: 260.0,
-            },
-        }
+        Self::matrix_oled()
     }
 }
 
@@ -176,6 +163,319 @@ impl Theme {
         style.visuals = visuals;
         ctx.set_style(style);
     }
+
+    fn matrix_oled() -> Self {
+        Self {
+            id: "matrix_oled".to_owned(),
+            name: "Matrix OLED".to_owned(),
+            description: "Original dark matrix-inspired theme.".to_owned(),
+            bg_dark: Oklch {
+                l: 0.10,
+                c: 0.0,
+                h: 316.0,
+            },
+            bg: Oklch {
+                l: 0.15,
+                c: 0.0,
+                h: 316.0,
+            },
+            bg_light: Oklch {
+                l: 0.20,
+                c: 0.0,
+                h: 316.0,
+            },
+            text: Oklch {
+                l: 0.96,
+                c: 0.0,
+                h: 316.0,
+            },
+            text_muted: Oklch {
+                l: 0.76,
+                c: 0.0,
+                h: 316.0,
+            },
+            highlight: Oklch {
+                l: 0.50,
+                c: 0.0,
+                h: 316.0,
+            },
+            border: Oklch {
+                l: 0.40,
+                c: 0.0,
+                h: 316.0,
+            },
+            border_muted: Oklch {
+                l: 0.30,
+                c: 0.0,
+                h: 316.0,
+            },
+            primary: Oklch {
+                l: 0.76,
+                c: 0.2,
+                h: 150.0,
+            },
+            secondary: Oklch {
+                l: 0.76,
+                c: 0.2,
+                h: 330.0,
+            },
+            danger: Oklch {
+                l: 0.70,
+                c: 0.2,
+                h: 30.0,
+            },
+            warning: Oklch {
+                l: 0.70,
+                c: 0.2,
+                h: 100.0,
+            },
+            success: Oklch {
+                l: 0.70,
+                c: 0.2,
+                h: 160.0,
+            },
+            info: Oklch {
+                l: 0.70,
+                c: 0.2,
+                h: 260.0,
+            },
+        }
+    }
+
+    fn default_light() -> Self {
+        Self {
+            id: "default_light".to_owned(),
+            name: "Default Light".to_owned(),
+            description: "Light theme from RustServerController.".to_owned(),
+            bg_dark: Oklch {
+                l: 0.92,
+                c: 0.055,
+                h: 264.0,
+            },
+            bg: Oklch {
+                l: 0.96,
+                c: 0.055,
+                h: 264.0,
+            },
+            bg_light: Oklch {
+                l: 1.00,
+                c: 0.055,
+                h: 264.0,
+            },
+            text: Oklch {
+                l: 0.15,
+                c: 0.11,
+                h: 264.0,
+            },
+            text_muted: Oklch {
+                l: 0.40,
+                c: 0.11,
+                h: 264.0,
+            },
+            highlight: Oklch {
+                l: 1.00,
+                c: 0.11,
+                h: 264.0,
+            },
+            border: Oklch {
+                l: 0.60,
+                c: 0.11,
+                h: 264.0,
+            },
+            border_muted: Oklch {
+                l: 0.70,
+                c: 0.11,
+                h: 264.0,
+            },
+            primary: Oklch {
+                l: 0.40,
+                c: 0.20,
+                h: 264.0,
+            },
+            secondary: Oklch {
+                l: 0.40,
+                c: 0.20,
+                h: 84.0,
+            },
+            danger: Oklch {
+                l: 0.50,
+                c: 0.20,
+                h: 30.0,
+            },
+            warning: Oklch {
+                l: 0.50,
+                c: 0.20,
+                h: 100.0,
+            },
+            success: Oklch {
+                l: 0.50,
+                c: 0.20,
+                h: 160.0,
+            },
+            info: Oklch {
+                l: 0.50,
+                c: 0.20,
+                h: 260.0,
+            },
+        }
+    }
+
+    fn high_contrast() -> Self {
+        Self {
+            id: "high_contrast".to_owned(),
+            name: "High Contrast".to_owned(),
+            description: "Accessibility-focused high-contrast theme from RustServerController."
+                .to_owned(),
+            bg_dark: Oklch {
+                l: 0.05,
+                c: 0.01,
+                h: 256.0,
+            },
+            bg: Oklch {
+                l: 0.08,
+                c: 0.01,
+                h: 256.0,
+            },
+            bg_light: Oklch {
+                l: 0.12,
+                c: 0.01,
+                h: 256.0,
+            },
+            text: Oklch {
+                l: 0.99,
+                c: 0.03,
+                h: 256.0,
+            },
+            text_muted: Oklch {
+                l: 0.90,
+                c: 0.03,
+                h: 256.0,
+            },
+            highlight: Oklch {
+                l: 0.70,
+                c: 0.03,
+                h: 256.0,
+            },
+            border: Oklch {
+                l: 0.60,
+                c: 0.03,
+                h: 256.0,
+            },
+            border_muted: Oklch {
+                l: 0.50,
+                c: 0.03,
+                h: 256.0,
+            },
+            primary: Oklch {
+                l: 0.85,
+                c: 0.25,
+                h: 256.0,
+            },
+            secondary: Oklch {
+                l: 0.85,
+                c: 0.25,
+                h: 76.0,
+            },
+            danger: Oklch {
+                l: 0.80,
+                c: 0.25,
+                h: 30.0,
+            },
+            warning: Oklch {
+                l: 0.80,
+                c: 0.25,
+                h: 100.0,
+            },
+            success: Oklch {
+                l: 0.80,
+                c: 0.25,
+                h: 160.0,
+            },
+            info: Oklch {
+                l: 0.80,
+                c: 0.25,
+                h: 260.0,
+            },
+        }
+    }
+
+    fn purple_dream() -> Self {
+        Self {
+            id: "purple_dream".to_owned(),
+            name: "Purple Dream".to_owned(),
+            description: "Purple theme from RustServerController.".to_owned(),
+            bg_dark: Oklch {
+                l: 0.10,
+                c: 0.05,
+                h: 290.0,
+            },
+            bg: Oklch {
+                l: 0.15,
+                c: 0.05,
+                h: 290.0,
+            },
+            bg_light: Oklch {
+                l: 0.20,
+                c: 0.05,
+                h: 290.0,
+            },
+            text: Oklch {
+                l: 0.96,
+                c: 0.02,
+                h: 290.0,
+            },
+            text_muted: Oklch {
+                l: 0.76,
+                c: 0.02,
+                h: 290.0,
+            },
+            highlight: Oklch {
+                l: 0.70,
+                c: 0.20,
+                h: 290.0,
+            },
+            border: Oklch {
+                l: 0.40,
+                c: 0.02,
+                h: 256.0,
+            },
+            border_muted: Oklch {
+                l: 0.30,
+                c: 0.02,
+                h: 256.0,
+            },
+            primary: Oklch {
+                l: 0.70,
+                c: 0.25,
+                h: 290.0,
+            },
+            secondary: Oklch {
+                l: 0.70,
+                c: 0.20,
+                h: 250.0,
+            },
+            danger: Oklch {
+                l: 0.70,
+                c: 0.25,
+                h: 30.0,
+            },
+            warning: Oklch {
+                l: 0.70,
+                c: 0.20,
+                h: 80.0,
+            },
+            success: Oklch {
+                l: 0.70,
+                c: 0.20,
+                h: 140.0,
+            },
+            info: Oklch {
+                l: 0.70,
+                c: 0.20,
+                h: 210.0,
+            },
+        }
+    }
 }
 
 impl Oklch {
@@ -202,6 +502,71 @@ impl Oklch {
             linear_to_srgb_u8(b_lin),
         )
     }
+}
+
+fn ensure_themes_dir_and_defaults(dir: &Path) {
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+
+    for theme in [
+        Theme::matrix_oled(),
+        Theme::default_light(),
+        Theme::high_contrast(),
+        Theme::purple_dream(),
+    ] {
+        let path = dir.join(format!("{}.toml", theme.id));
+        if path.exists() {
+            continue;
+        }
+
+        if let Ok(contents) = toml::to_string_pretty(&theme) {
+            let _ = std::fs::write(path, contents);
+        }
+    }
+}
+
+fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut themes = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+            continue;
+        };
+        if ext != "toml" {
+            continue;
+        }
+
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(mut theme) = toml::from_str::<Theme>(&contents) else {
+            continue;
+        };
+
+        let file_stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or(DEFAULT_THEME_ID);
+        if theme.id.trim().is_empty() {
+            theme.id = file_stem.to_owned();
+        }
+        if theme.name.trim().is_empty() {
+            theme.name = file_stem.replace('_', " ");
+        }
+
+        themes.push(theme);
+    }
+
+    themes
 }
 
 fn linear_to_srgb_u8(value: f32) -> u8 {

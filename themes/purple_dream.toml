@@ -1,0 +1,17 @@
+id = "purple_dream"
+name = "Purple Dream"
+description = "Purple theme from RustServerController."
+bg_dark = { l = 0.10, c = 0.05, h = 290.0 }
+bg = { l = 0.15, c = 0.05, h = 290.0 }
+bg_light = { l = 0.20, c = 0.05, h = 290.0 }
+text = { l = 0.96, c = 0.02, h = 290.0 }
+text_muted = { l = 0.76, c = 0.02, h = 290.0 }
+highlight = { l = 0.70, c = 0.20, h = 290.0 }
+border = { l = 0.40, c = 0.02, h = 256.0 }
+border_muted = { l = 0.30, c = 0.02, h = 256.0 }
+primary = { l = 0.70, c = 0.25, h = 290.0 }
+secondary = { l = 0.70, c = 0.20, h = 250.0 }
+danger = { l = 0.70, c = 0.25, h = 30.0 }
+warning = { l = 0.70, c = 0.20, h = 80.0 }
+success = { l = 0.70, c = 0.20, h = 140.0 }
+info = { l = 0.70, c = 0.20, h = 210.0 }

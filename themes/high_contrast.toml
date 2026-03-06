@@ -1,0 +1,17 @@
+id = "high_contrast"
+name = "High Contrast"
+description = "Accessibility-focused high-contrast theme from RustServerController."
+bg_dark = { l = 0.05, c = 0.01, h = 256.0 }
+bg = { l = 0.08, c = 0.01, h = 256.0 }
+bg_light = { l = 0.12, c = 0.01, h = 256.0 }
+text = { l = 0.99, c = 0.03, h = 256.0 }
+text_muted = { l = 0.90, c = 0.03, h = 256.0 }
+highlight = { l = 0.70, c = 0.03, h = 256.0 }
+border = { l = 0.60, c = 0.03, h = 256.0 }
+border_muted = { l = 0.50, c = 0.03, h = 256.0 }
+primary = { l = 0.85, c = 0.25, h = 256.0 }
+secondary = { l = 0.85, c = 0.25, h = 76.0 }
+danger = { l = 0.80, c = 0.25, h = 30.0 }
+warning = { l = 0.80, c = 0.25, h = 100.0 }
+success = { l = 0.80, c = 0.25, h = 160.0 }
+info = { l = 0.80, c = 0.25, h = 260.0 }

@@ -2,6 +2,8 @@ use config::{Config, UiFontFamily};
 use egui::Ui;
 use textui::TextUi;
 
+use crate::ui::theme::Theme;
+
 mod legal;
 mod library;
 mod settings;
@@ -39,12 +41,15 @@ pub fn render(
     selected_profile_id: Option<&str>,
     config: &mut Config,
     available_ui_fonts: &[UiFontFamily],
+    available_themes: &[Theme],
     text_ui: &mut TextUi,
 ) {
     match screen {
         AppScreen::Library => library::render(ui, text_ui, selected_profile_id),
         AppScreen::Skins => skins::render(ui, text_ui, selected_profile_id),
-        AppScreen::Settings => settings::render(ui, text_ui, config, available_ui_fonts),
+        AppScreen::Settings => {
+            settings::render(ui, text_ui, config, available_ui_fonts, available_themes)
+        }
         AppScreen::Legal => legal::render(ui, text_ui),
     }
 }

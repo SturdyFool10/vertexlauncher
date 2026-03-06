@@ -1,0 +1,17 @@
+id = "default_light"
+name = "Default Light"
+description = "Light theme from RustServerController."
+bg_dark = { l = 0.92, c = 0.055, h = 264.0 }
+bg = { l = 0.96, c = 0.055, h = 264.0 }
+bg_light = { l = 1.00, c = 0.055, h = 264.0 }
+text = { l = 0.15, c = 0.11, h = 264.0 }
+text_muted = { l = 0.40, c = 0.11, h = 264.0 }
+highlight = { l = 1.00, c = 0.11, h = 264.0 }
+border = { l = 0.60, c = 0.11, h = 264.0 }
+border_muted = { l = 0.70, c = 0.11, h = 264.0 }
+primary = { l = 0.40, c = 0.20, h = 264.0 }
+secondary = { l = 0.40, c = 0.20, h = 84.0 }
+danger = { l = 0.50, c = 0.20, h = 30.0 }
+warning = { l = 0.50, c = 0.20, h = 100.0 }
+success = { l = 0.50, c = 0.20, h = 160.0 }
+info = { l = 0.50, c = 0.20, h = 260.0 }

@@ -2,13 +2,14 @@ use config::{Config, DropdownSettingId, UiFontFamily};
 use egui::Ui;
 use textui::TextUi;
 
-use crate::ui::components::settings_widgets;
+use crate::ui::{components::settings_widgets, theme::Theme};
 
 pub fn render(
     ui: &mut Ui,
     text_ui: &mut TextUi,
     config: &mut Config,
     available_ui_fonts: &[UiFontFamily],
+    available_themes: &[Theme],
 ) {
     ui.add_space(10.0);
     ui.separator();
@@ -20,6 +21,32 @@ pub fn render(
         });
         ui.add_space(8.0);
     });
+
+    if !available_themes.is_empty() {
+        let mut selected_theme_index = available_themes
+            .iter()
+            .position(|theme| theme.id == config.theme_id())
+            .unwrap_or(0);
+        let theme_labels: Vec<&str> = available_themes
+            .iter()
+            .map(|theme| theme.name.as_str())
+            .collect();
+        let response = settings_widgets::dropdown_row(
+            text_ui,
+            ui,
+            "theme_selector",
+            "Theme",
+            Some("Themes are loaded from the themes/ folder at startup."),
+            &mut selected_theme_index,
+            &theme_labels,
+        );
+        if response.changed() {
+            if let Some(theme) = available_themes.get(selected_theme_index) {
+                config.set_theme_id(theme.id.clone());
+            }
+        }
+        ui.add_space(8.0);
+    }
 
     config.for_each_dropdown_mut(|setting, value| {
         ui.push_id(setting.id, |ui| {
