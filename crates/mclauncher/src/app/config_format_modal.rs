@@ -17,7 +17,8 @@ pub fn render(
 ) -> ModalAction {
     let mut action = ModalAction::None;
 
-    egui::Window::new("")
+    egui::Window::new("Config format")
+        .id(egui::Id::new("config_format_modal_window"))
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .collapsible(false)
         .resizable(false)

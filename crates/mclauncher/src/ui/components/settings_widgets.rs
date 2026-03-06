@@ -81,6 +81,29 @@ pub fn dropdown_row(
 ) -> Response {
     let metrics = control_metrics(ui);
     let label_options = row_label_options(ui);
+    let compact_layout = ui.available_width() < 460.0;
+
+    if compact_layout {
+        return ui
+            .vertical(|ui| {
+                let label_response =
+                    text_ui.label(ui, ("dropdown_label", label), label, &label_options);
+
+                if info_tooltip.is_some() {
+                    ui.add_space(4.0);
+                    info_hint(text_ui, ui, ("dropdown_info", label), info_tooltip);
+                }
+
+                let mut compact_metrics = metrics;
+                compact_metrics.dropdown_width = ui.available_width().max(1.0);
+                let dropdown_response = ui.push_id(id_source, |ui| {
+                    dropdown(text_ui, ui, selected_index, options, compact_metrics)
+                });
+
+                label_response.union(dropdown_response.inner)
+            })
+            .inner;
+    }
 
     ui.horizontal(|ui| {
         let label_response = text_ui.label(ui, ("dropdown_label", label), label, &label_options);
@@ -392,12 +415,127 @@ pub fn full_width_text_input_row(
             .inner;
 
         let mut input_options = text_input_options(ui, metrics);
-        let input_width = ui.available_width().max(120.0);
+        let input_width = ui.available_width().max(1.0);
         input_options.desired_width = Some(input_width);
-        input_options.min_width = input_width;
+        input_options.min_width = 1.0;
         let input_response = text_ui.singleline_input(ui, input_id, value, &input_options);
 
         label_response.union(input_response)
+    })
+    .inner
+}
+
+pub fn full_width_dropdown_row(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    label: &str,
+    info_tooltip: Option<&str>,
+    selected_index: &mut usize,
+    options: &[&str],
+) -> Response {
+    let metrics = control_metrics(ui);
+    let label_options = row_label_options(ui);
+
+    ui.vertical(|ui| {
+        let label_response = ui
+            .horizontal_wrapped(|ui| {
+                let label_response = text_ui.label(
+                    ui,
+                    ("full_width_dropdown_label", label),
+                    label,
+                    &label_options,
+                );
+                if info_tooltip.is_some() {
+                    ui.add_space(6.0);
+                    info_hint(
+                        text_ui,
+                        ui,
+                        ("full_width_dropdown_info", label),
+                        info_tooltip,
+                    );
+                }
+                label_response
+            })
+            .inner;
+
+        let mut compact_metrics = metrics;
+        compact_metrics.dropdown_width = ui.available_width().max(1.0);
+        let dropdown_response = ui.push_id(id_source, |ui| {
+            dropdown(text_ui, ui, selected_index, options, compact_metrics)
+        });
+
+        label_response.union(dropdown_response.inner)
+    })
+    .inner
+}
+
+pub fn full_width_button(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    text: &str,
+    width: f32,
+    primary: bool,
+) -> Response {
+    let mut style = ButtonOptions {
+        min_size: egui::vec2(width.max(1.0), 30.0),
+        text_color: ui.visuals().text_color(),
+        fill: ui.visuals().widgets.inactive.bg_fill,
+        fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+        fill_active: ui.visuals().widgets.active.bg_fill,
+        fill_selected: ui.visuals().selection.bg_fill,
+        stroke: ui.visuals().widgets.inactive.bg_stroke,
+        ..ButtonOptions::default()
+    };
+    if primary {
+        style.stroke = ui.visuals().selection.stroke;
+        style.fill = ui.visuals().selection.bg_fill;
+        style.fill_hovered = ui.visuals().selection.bg_fill.gamma_multiply(1.1);
+        style.fill_active = ui.visuals().selection.bg_fill.gamma_multiply(0.9);
+        style.fill_selected = ui.visuals().selection.bg_fill;
+        style.text_color = ui.visuals().widgets.active.fg_stroke.color;
+    }
+    text_ui.button(ui, id_source, text, &style)
+}
+
+pub fn selectable_chip_button(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    text: &str,
+    selected: bool,
+    width: f32,
+    enabled: bool,
+) -> Response {
+    let mut style = ButtonOptions {
+        min_size: egui::vec2(width.max(1.0), 30.0),
+        text_color: ui.visuals().text_color(),
+        fill: ui.visuals().widgets.inactive.bg_fill,
+        fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+        fill_active: ui.visuals().widgets.active.bg_fill,
+        fill_selected: ui.visuals().selection.bg_fill,
+        stroke: ui.visuals().widgets.inactive.bg_stroke,
+        ..ButtonOptions::default()
+    };
+
+    if selected {
+        style.fill = ui.visuals().selection.bg_fill;
+        style.fill_hovered = ui.visuals().selection.bg_fill.gamma_multiply(1.08);
+        style.fill_active = ui.visuals().selection.bg_fill.gamma_multiply(0.92);
+        style.text_color = ui.visuals().widgets.active.fg_stroke.color;
+    }
+
+    if !enabled {
+        style.text_color = ui.visuals().weak_text_color();
+        style.fill = ui.visuals().widgets.noninteractive.bg_fill;
+        style.fill_hovered = ui.visuals().widgets.noninteractive.bg_fill;
+        style.fill_active = ui.visuals().widgets.noninteractive.bg_fill;
+        style.fill_selected = ui.visuals().widgets.noninteractive.bg_fill;
+    }
+
+    ui.add_enabled_ui(enabled, |ui| {
+        text_ui.selectable_button(ui, id_source, text, selected, &style)
     })
     .inner
 }
@@ -417,7 +555,7 @@ pub fn u128_slider_with_input_row(
     let label_options = row_label_options(ui);
     let id = ui.make_persistent_id(id_source);
     let input_id = id.with("u128_slider_input");
-    let full_width = ui.available_width().max(220.0);
+    let full_width = ui.available_width().max(1.0);
 
     *value = (*value).clamp(min, max);
 
@@ -699,6 +837,14 @@ fn dropdown(
         dropdown_text_budget(metrics),
         &label_style,
     );
+    let option_text_width = options.iter().fold(0.0_f32, |max_width, option| {
+        max_width.max(text_ui.measure_text_size(ui, option, &label_style).x)
+    });
+    let option_horizontal_padding = 16.0;
+    let popup_button_width = (option_text_width + option_horizontal_padding)
+        .ceil()
+        .max(metrics.control_height * 2.0);
+    let popup_width = popup_button_width + 4.0;
 
     let (button_rect, mut response) = ui.allocate_exact_size(
         egui::vec2(metrics.dropdown_width, metrics.control_height),
@@ -711,17 +857,21 @@ fn dropdown(
     let popup_response = egui::Popup::menu(&response)
         .id(open_id)
         .align(egui::RectAlign::BOTTOM_START)
-        .align_alternatives(&[])
+        .align_alternatives(&[
+            egui::RectAlign::TOP_START,
+            egui::RectAlign::BOTTOM_END,
+            egui::RectAlign::TOP_END,
+        ])
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             let mut clip_rect = ui.clip_rect();
             clip_rect.min.y = clip_rect.min.y.max(ui.ctx().available_rect().top());
             ui.set_clip_rect(clip_rect);
-            ui.set_min_width(metrics.dropdown_width);
+            ui.set_width(popup_width);
 
             let mut popup_changed = false;
             let button_options = ButtonOptions {
-                min_size: egui::vec2(metrics.dropdown_width - 4.0, metrics.control_height),
+                min_size: egui::vec2(popup_button_width, metrics.control_height),
                 corner_radius: 4,
                 padding: egui::vec2(8.0, 4.0),
                 text_color: ui.visuals().text_color(),
@@ -733,26 +883,34 @@ fn dropdown(
                 ..ButtonOptions::default()
             };
 
-            for (index, option) in options.iter().enumerate() {
-                let option_text = truncate_button_text_with_ellipsis(
-                    text_ui,
-                    ui,
-                    option,
-                    dropdown_text_budget(metrics),
-                    &label_style,
-                );
-                let option_response = text_ui.selectable_button(
-                    ui,
-                    ("dropdown_option", index),
-                    &option_text,
-                    *selected_index == index,
-                    &button_options,
-                );
-                if option_response.clicked() {
-                    *selected_index = index;
-                    popup_changed = true;
-                    egui::Popup::close_id(ui.ctx(), open_id);
-                }
+            let max_popup_height = (ui.ctx().available_rect().height() * 0.58)
+                .clamp(metrics.control_height * 4.0, metrics.control_height * 14.0);
+            let row_height = metrics.control_height + ui.spacing().item_spacing.y;
+            egui::ScrollArea::vertical()
+                .id_salt(("settings_dropdown_scroll", open_id))
+                .max_height(max_popup_height)
+                .auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                .show_rows(ui, row_height, options.len(), |ui, row_range| {
+                    for index in row_range {
+                        let option = options[index];
+                        let option_response = text_ui.selectable_button(
+                            ui,
+                            ("dropdown_option", index),
+                            option,
+                            *selected_index == index,
+                            &button_options,
+                        );
+                        if option_response.clicked() {
+                            *selected_index = index;
+                            popup_changed = true;
+                            egui::Popup::close_id(ui.ctx(), open_id);
+                        }
+                    }
+                });
+
+            if popup_changed {
+                ui.ctx().request_repaint();
             }
 
             popup_changed
@@ -973,16 +1131,17 @@ fn text_input_options(ui: &Ui, metrics: ControlMetrics) -> InputOptions {
 
 fn control_metrics(ui: &Ui) -> ControlMetrics {
     let viewport_width = ui.ctx().input(|i| i.content_rect().width()).max(320.0);
+    let local_width = ui.available_width().clamp(220.0, viewport_width);
     let text_height = ui.text_style_height(&egui::TextStyle::Body).max(14.0);
-    let control_height = (viewport_width * 0.024).clamp(22.0, 34.0);
+    let control_height = (local_width * 0.024).clamp(22.0, 34.0);
     let control_gap = (control_height * 0.20).clamp(4.0, 8.0);
-    let number_input_width = (viewport_width * 0.10).clamp(84.0, 150.0);
+    let number_input_width = (local_width * 0.10).clamp(84.0, 150.0);
     let step_button_width = control_height;
     let number_selector_width =
         number_input_width + (step_button_width * 2.0) + (control_gap * 2.0);
 
     ControlMetrics {
-        right_padding: (viewport_width * 0.01).clamp(8.0, 20.0),
+        right_padding: (local_width * 0.01).clamp(6.0, 16.0),
         control_height,
         switch_width: (control_height * 1.95).clamp(42.0, 72.0),
         dropdown_width: number_selector_width,

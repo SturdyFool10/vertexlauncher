@@ -18,6 +18,7 @@ modprovider.workspace = true
 installation.workspace = true
 raw-window-handle = "0.6.2"
 toml.workspace = true
+rfd = "0.15.4"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation"] }

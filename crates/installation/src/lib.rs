@@ -1,6 +1,6 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,9 @@ const DEFAULT_USER_AGENT: &str =
     "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
 const MOJANG_VERSION_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+const FABRIC_VERSION_MATRIX_URL: &str = "https://meta.fabricmc.net/v2/versions";
 const FABRIC_GAME_VERSIONS_URL: &str = "https://meta.fabricmc.net/v2/versions/game";
+const QUILT_VERSION_MATRIX_URL: &str = "https://meta.quiltmc.org/v3/versions";
 const QUILT_GAME_VERSIONS_URL: &str = "https://meta.quiltmc.org/v3/versions/game";
 const FORGE_MAVEN_METADATA_URL: &str =
     "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
@@ -88,9 +90,31 @@ impl LoaderSupportIndex {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoaderVersionIndex {
+    pub fabric: BTreeMap<String, Vec<String>>,
+    pub forge: BTreeMap<String, Vec<String>>,
+    pub neoforge: BTreeMap<String, Vec<String>>,
+    pub quilt: BTreeMap<String, Vec<String>>,
+}
+
+impl LoaderVersionIndex {
+    pub fn versions_for_loader(&self, loader_label: &str, game_version: &str) -> Option<&[String]> {
+        match normalized_loader_label(loader_label) {
+            LoaderKind::Fabric => self.fabric.get(game_version).map(Vec::as_slice),
+            LoaderKind::Forge => self.forge.get(game_version).map(Vec::as_slice),
+            LoaderKind::NeoForge => self.neoforge.get(game_version).map(Vec::as_slice),
+            LoaderKind::Quilt => self.quilt.get(game_version).map(Vec::as_slice),
+            LoaderKind::Vanilla | LoaderKind::Custom => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionCatalog {
     pub game_versions: Vec<MinecraftVersionEntry>,
     pub loader_support: LoaderSupportIndex,
+    #[serde(default)]
+    pub loader_versions: LoaderVersionIndex,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -188,16 +212,52 @@ fn fetch_version_catalog_uncached(
         })
         .collect();
 
+    let fabric = match fetch_fabric_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_fabric_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    };
+    let forge = match fetch_forge_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_forge_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    };
+    let neoforge = match fetch_neoforge_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_neoforge_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    };
+    let quilt = match fetch_quilt_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_quilt_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    };
+
     let loader_support = LoaderSupportIndex {
-        fabric: fetch_fabric_versions().unwrap_or_default(),
-        forge: fetch_forge_versions().unwrap_or_default(),
-        neoforge: fetch_neoforge_versions().unwrap_or_default(),
-        quilt: fetch_quilt_versions().unwrap_or_default(),
+        fabric: fabric.supported_game_versions,
+        forge: forge.supported_game_versions,
+        neoforge: neoforge.supported_game_versions,
+        quilt: quilt.supported_game_versions,
+    };
+    let loader_versions = LoaderVersionIndex {
+        fabric: fabric.versions_by_game_version,
+        forge: forge.versions_by_game_version,
+        neoforge: neoforge.versions_by_game_version,
+        quilt: quilt.versions_by_game_version,
     };
 
     Ok(VersionCatalog {
         game_versions,
         loader_support,
+        loader_versions,
     })
 }
 
@@ -328,6 +388,17 @@ fn fetch_fabric_versions() -> Result<HashSet<String>, InstallationError> {
         .collect())
 }
 
+#[derive(Clone, Debug, Default)]
+struct LoaderVersionCatalog {
+    supported_game_versions: HashSet<String>,
+    versions_by_game_version: BTreeMap<String, Vec<String>>,
+}
+
+fn fetch_fabric_loader_catalog() -> Result<LoaderVersionCatalog, InstallationError> {
+    let matrix: serde_json::Value = get_json(FABRIC_VERSION_MATRIX_URL)?;
+    Ok(parse_loader_version_matrix(&matrix))
+}
+
 fn fetch_quilt_versions() -> Result<HashSet<String>, InstallationError> {
     let versions: Vec<QuiltGameVersion> = get_json(QUILT_GAME_VERSIONS_URL)?;
     Ok(versions
@@ -344,11 +415,21 @@ fn fetch_quilt_versions() -> Result<HashSet<String>, InstallationError> {
         .collect())
 }
 
+fn fetch_quilt_loader_catalog() -> Result<LoaderVersionCatalog, InstallationError> {
+    let matrix: serde_json::Value = get_json(QUILT_VERSION_MATRIX_URL)?;
+    Ok(parse_loader_version_matrix(&matrix))
+}
+
 fn fetch_forge_versions() -> Result<HashSet<String>, InstallationError> {
     let metadata = get_text(FORGE_MAVEN_METADATA_URL)?;
     Ok(parse_minecraft_versions_from_maven_metadata(
         &metadata, true,
     ))
+}
+
+fn fetch_forge_loader_catalog() -> Result<LoaderVersionCatalog, InstallationError> {
+    let metadata = get_text(FORGE_MAVEN_METADATA_URL)?;
+    Ok(parse_forge_loader_catalog_from_metadata(&metadata))
 }
 
 fn fetch_neoforge_versions() -> Result<HashSet<String>, InstallationError> {
@@ -360,6 +441,20 @@ fn fetch_neoforge_versions() -> Result<HashSet<String>, InstallationError> {
     }
 
     Ok(versions)
+}
+
+fn fetch_neoforge_loader_catalog() -> Result<LoaderVersionCatalog, InstallationError> {
+    let primary = get_text(NEOFORGE_MAVEN_METADATA_URL)?;
+    let mut catalog = parse_neoforge_loader_catalog_from_metadata(&primary);
+
+    if let Ok(legacy) = get_text(NEOFORGE_LEGACY_FORGE_METADATA_URL) {
+        let legacy_neoforge = parse_neoforge_loader_catalog_from_metadata(&legacy);
+        merge_loader_catalog(&mut catalog, legacy_neoforge);
+        let legacy_forge_style = parse_forge_loader_catalog_from_metadata(&legacy);
+        merge_loader_catalog(&mut catalog, legacy_forge_style);
+    }
+
+    Ok(catalog)
 }
 
 fn parse_minecraft_versions_from_maven_metadata(
@@ -389,6 +484,85 @@ fn parse_minecraft_versions_from_maven_metadata(
         .collect()
 }
 
+fn parse_loader_version_matrix(matrix: &serde_json::Value) -> LoaderVersionCatalog {
+    let mut catalog = LoaderVersionCatalog::default();
+
+    let Some(entries) = matrix.as_array() else {
+        return catalog;
+    };
+
+    for entry in entries {
+        let Some(entry) = entry.as_object() else {
+            continue;
+        };
+        let Some(game_version) = entry.get("game").and_then(extract_version_from_json_value) else {
+            continue;
+        };
+        let Some(loader_version) = entry
+            .get("loader")
+            .and_then(extract_version_from_json_value)
+        else {
+            continue;
+        };
+        push_unique_loader_version(
+            &mut catalog.versions_by_game_version,
+            game_version.as_str(),
+            loader_version,
+        );
+    }
+
+    catalog.supported_game_versions = catalog.versions_by_game_version.keys().cloned().collect();
+    catalog
+}
+
+fn parse_forge_loader_catalog_from_metadata(metadata_xml: &str) -> LoaderVersionCatalog {
+    let mut catalog = LoaderVersionCatalog::default();
+    for raw in parse_xml_versions(metadata_xml) {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some((game_version, loader_version)) = trimmed.split_once('-') else {
+            continue;
+        };
+        let game_version = game_version.trim();
+        let loader_version = loader_version.trim();
+        if game_version.is_empty()
+            || loader_version.is_empty()
+            || !is_probable_minecraft_version(game_version)
+        {
+            continue;
+        }
+        push_unique_loader_version(
+            &mut catalog.versions_by_game_version,
+            game_version,
+            loader_version.to_owned(),
+        );
+    }
+    catalog.supported_game_versions = catalog.versions_by_game_version.keys().cloned().collect();
+    catalog
+}
+
+fn parse_neoforge_loader_catalog_from_metadata(metadata_xml: &str) -> LoaderVersionCatalog {
+    let mut catalog = LoaderVersionCatalog::default();
+    for raw in parse_xml_versions(metadata_xml) {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some(game_version) = infer_neoforge_game_version(trimmed) else {
+            continue;
+        };
+        push_unique_loader_version(
+            &mut catalog.versions_by_game_version,
+            game_version.as_str(),
+            trimmed.to_owned(),
+        );
+    }
+    catalog.supported_game_versions = catalog.versions_by_game_version.keys().cloned().collect();
+    catalog
+}
+
 fn parse_neoforge_versions_from_metadata(metadata_xml: &str) -> HashSet<String> {
     parse_xml_versions(metadata_xml)
         .into_iter()
@@ -400,6 +574,71 @@ fn parse_neoforge_versions_from_metadata(metadata_xml: &str) -> HashSet<String> 
             Some(format!("1.{major}.{minor}"))
         })
         .collect()
+}
+
+fn infer_neoforge_game_version(raw: &str) -> Option<String> {
+    let prefix = raw.split('-').next().unwrap_or(raw).trim();
+    if prefix.is_empty() {
+        return None;
+    }
+    if is_probable_minecraft_version(prefix) {
+        return Some(prefix.to_owned());
+    }
+
+    let mut segments = prefix.split('.');
+    let major = segments.next()?.parse::<u32>().ok()?;
+    let minor = segments.next()?.parse::<u32>().ok()?;
+    Some(format!("1.{major}.{minor}"))
+}
+
+fn extract_version_from_json_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(raw) = value.as_str() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        return Some(trimmed.to_owned());
+    }
+
+    let object = value.as_object()?;
+    for key in ["version", "id", "name"] {
+        let Some(raw) = object.get(key).and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+    None
+}
+
+fn push_unique_loader_version(
+    versions_by_game_version: &mut BTreeMap<String, Vec<String>>,
+    game_version: &str,
+    loader_version: String,
+) {
+    let versions = versions_by_game_version
+        .entry(game_version.to_owned())
+        .or_default();
+    if !versions.iter().any(|existing| existing == &loader_version) {
+        versions.push(loader_version);
+    }
+}
+
+fn merge_loader_catalog(target: &mut LoaderVersionCatalog, source: LoaderVersionCatalog) {
+    for game_version in source.supported_game_versions {
+        target.supported_game_versions.insert(game_version);
+    }
+    for (game_version, versions) in source.versions_by_game_version {
+        for version in versions {
+            push_unique_loader_version(
+                &mut target.versions_by_game_version,
+                &game_version,
+                version,
+            );
+        }
+    }
 }
 
 fn parse_xml_versions(xml: &str) -> Vec<String> {
