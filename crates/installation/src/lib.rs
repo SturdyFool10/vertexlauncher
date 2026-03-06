@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_USER_AGENT: &str =
@@ -227,15 +229,29 @@ pub fn fetch_loader_versions_for_game(
     }
 
     match fetch_loader_versions_for_game_uncached(loader_kind, game_version) {
-        Ok(versions) => {
+        Ok(result) => {
+            let LoaderVersionFetchResult {
+                selected_versions,
+                versions_by_game_version,
+            } = result;
             let mut updated_cache = cached.unwrap_or_default();
             updated_cache.fetched_at_unix_secs = now_unix_secs();
             updated_cache.loader_label = loader_label.to_owned();
-            updated_cache
-                .versions_by_game_version
-                .insert(game_version.to_owned(), versions.clone());
+            if versions_by_game_version.is_empty() {
+                updated_cache
+                    .versions_by_game_version
+                    .insert(game_version.to_owned(), selected_versions.clone());
+            } else {
+                updated_cache
+                    .versions_by_game_version
+                    .extend(versions_by_game_version);
+                updated_cache
+                    .versions_by_game_version
+                    .entry(game_version.to_owned())
+                    .or_insert_with(|| selected_versions.clone());
+            }
             let _ = write_cached_loader_versions(loader_kind, &updated_cache);
-            Ok(versions)
+            Ok(selected_versions)
         }
         Err(err) => {
             if let Some(cached) = cached
@@ -252,7 +268,27 @@ pub fn fetch_loader_versions_for_game(
 fn fetch_version_catalog_uncached(
     include_snapshots_and_betas: bool,
 ) -> Result<VersionCatalog, InstallationError> {
-    let manifest: MojangVersionManifest = get_json(MOJANG_VERSION_MANIFEST_URL)?;
+    let (manifest, fabric, forge, neoforge, quilt) = thread::scope(|scope| {
+        let manifest_task =
+            scope.spawn(|| get_json::<MojangVersionManifest>(MOJANG_VERSION_MANIFEST_URL));
+        let fabric_task = scope.spawn(fetch_fabric_loader_catalog_with_fallback);
+        let forge_task = scope.spawn(fetch_forge_loader_catalog_with_fallback);
+        let neoforge_task = scope.spawn(fetch_neoforge_loader_catalog_with_fallback);
+        let quilt_task = scope.spawn(fetch_quilt_loader_catalog_with_fallback);
+
+        let manifest = manifest_task.join().map_err(|_| {
+            InstallationError::Io(std::io::Error::new(
+                ErrorKind::Other,
+                "minecraft version manifest task panicked",
+            ))
+        })??;
+        let fabric = fabric_task.join().unwrap_or_default();
+        let forge = forge_task.join().unwrap_or_default();
+        let neoforge = neoforge_task.join().unwrap_or_default();
+        let quilt = quilt_task.join().unwrap_or_default();
+        Ok::<_, InstallationError>((manifest, fabric, forge, neoforge, quilt))
+    })?;
+
     let game_versions: Vec<MinecraftVersionEntry> = manifest
         .versions
         .into_iter()
@@ -275,35 +311,6 @@ fn fetch_version_catalog_uncached(
             }
         })
         .collect();
-
-    let fabric = match fetch_fabric_loader_catalog() {
-        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
-        _ => LoaderVersionCatalog {
-            supported_game_versions: fetch_fabric_versions().unwrap_or_default(),
-            ..LoaderVersionCatalog::default()
-        },
-    };
-    let forge = match fetch_forge_loader_catalog() {
-        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
-        _ => LoaderVersionCatalog {
-            supported_game_versions: fetch_forge_versions().unwrap_or_default(),
-            ..LoaderVersionCatalog::default()
-        },
-    };
-    let neoforge = match fetch_neoforge_loader_catalog() {
-        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
-        _ => LoaderVersionCatalog {
-            supported_game_versions: fetch_neoforge_versions().unwrap_or_default(),
-            ..LoaderVersionCatalog::default()
-        },
-    };
-    let quilt = match fetch_quilt_loader_catalog() {
-        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
-        _ => LoaderVersionCatalog {
-            supported_game_versions: fetch_quilt_versions().unwrap_or_default(),
-            ..LoaderVersionCatalog::default()
-        },
-    };
 
     let loader_support = LoaderSupportIndex {
         fabric: fabric.supported_game_versions,
@@ -474,6 +481,12 @@ struct LoaderVersionCatalog {
     versions_by_game_version: BTreeMap<String, Vec<String>>,
 }
 
+#[derive(Clone, Debug, Default)]
+struct LoaderVersionFetchResult {
+    selected_versions: Vec<String>,
+    versions_by_game_version: BTreeMap<String, Vec<String>>,
+}
+
 fn fetch_fabric_loader_catalog() -> Result<LoaderVersionCatalog, InstallationError> {
     let matrix: serde_json::Value = get_json(FABRIC_VERSION_MATRIX_URL)?;
     Ok(parse_loader_version_matrix(&matrix))
@@ -535,6 +548,46 @@ fn fetch_neoforge_loader_catalog() -> Result<LoaderVersionCatalog, InstallationE
     }
 
     Ok(catalog)
+}
+
+fn fetch_fabric_loader_catalog_with_fallback() -> LoaderVersionCatalog {
+    match fetch_fabric_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_fabric_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    }
+}
+
+fn fetch_quilt_loader_catalog_with_fallback() -> LoaderVersionCatalog {
+    match fetch_quilt_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_quilt_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    }
+}
+
+fn fetch_forge_loader_catalog_with_fallback() -> LoaderVersionCatalog {
+    match fetch_forge_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_forge_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    }
+}
+
+fn fetch_neoforge_loader_catalog_with_fallback() -> LoaderVersionCatalog {
+    match fetch_neoforge_loader_catalog() {
+        Ok(catalog) if !catalog.supported_game_versions.is_empty() => catalog,
+        _ => LoaderVersionCatalog {
+            supported_game_versions: fetch_neoforge_versions().unwrap_or_default(),
+            ..LoaderVersionCatalog::default()
+        },
+    }
 }
 
 fn parse_minecraft_versions_from_maven_metadata(
@@ -694,7 +747,7 @@ fn url_encode_component(value: &str) -> String {
 fn fetch_loader_versions_for_game_uncached(
     loader_kind: LoaderKind,
     game_version: &str,
-) -> Result<Vec<String>, InstallationError> {
+) -> Result<LoaderVersionFetchResult, InstallationError> {
     match loader_kind {
         LoaderKind::Fabric => {
             let url = format!(
@@ -703,7 +756,13 @@ fn fetch_loader_versions_for_game_uncached(
                 url_encode_component(game_version)
             );
             let payload: serde_json::Value = get_json(&url)?;
-            Ok(parse_global_loader_versions(&payload))
+            let selected_versions = parse_global_loader_versions(&payload);
+            let mut versions_by_game_version = BTreeMap::new();
+            versions_by_game_version.insert(game_version.to_owned(), selected_versions.clone());
+            Ok(LoaderVersionFetchResult {
+                selected_versions,
+                versions_by_game_version,
+            })
         }
         LoaderKind::Quilt => {
             let url = format!(
@@ -712,26 +771,40 @@ fn fetch_loader_versions_for_game_uncached(
                 url_encode_component(game_version)
             );
             let payload: serde_json::Value = get_json(&url)?;
-            Ok(parse_global_loader_versions(&payload))
+            let selected_versions = parse_global_loader_versions(&payload);
+            let mut versions_by_game_version = BTreeMap::new();
+            versions_by_game_version.insert(game_version.to_owned(), selected_versions.clone());
+            Ok(LoaderVersionFetchResult {
+                selected_versions,
+                versions_by_game_version,
+            })
         }
         LoaderKind::Forge => {
             let metadata = get_text(FORGE_MAVEN_METADATA_URL)?;
             let catalog = parse_forge_loader_catalog_from_metadata(&metadata);
-            Ok(catalog
+            let selected_versions = catalog
                 .versions_by_game_version
                 .get(game_version)
                 .cloned()
-                .unwrap_or_default())
+                .unwrap_or_default();
+            Ok(LoaderVersionFetchResult {
+                selected_versions,
+                versions_by_game_version: catalog.versions_by_game_version,
+            })
         }
         LoaderKind::NeoForge => {
             let catalog = fetch_neoforge_loader_catalog()?;
-            Ok(catalog
+            let selected_versions = catalog
                 .versions_by_game_version
                 .get(game_version)
                 .cloned()
-                .unwrap_or_default())
+                .unwrap_or_default();
+            Ok(LoaderVersionFetchResult {
+                selected_versions,
+                versions_by_game_version: catalog.versions_by_game_version,
+            })
         }
-        LoaderKind::Vanilla | LoaderKind::Custom => Ok(Vec::new()),
+        LoaderKind::Vanilla | LoaderKind::Custom => Ok(LoaderVersionFetchResult::default()),
     }
 }
 
@@ -991,8 +1064,23 @@ fn get_json<T: DeserializeOwned>(url: &str) -> Result<T, InstallationError> {
     Ok(serde_json::from_str(&raw)?)
 }
 
+fn http_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(10))
+            .timeout_read(Duration::from_secs(30))
+            .timeout_write(Duration::from_secs(30))
+            .build()
+    })
+}
+
 fn get_text(url: &str) -> Result<String, InstallationError> {
-    let response = match ureq::get(url).set("User-Agent", DEFAULT_USER_AGENT).call() {
+    let response = match http_agent()
+        .get(url)
+        .set("User-Agent", DEFAULT_USER_AGENT)
+        .call()
+    {
         Ok(ok) => ok,
         Err(ureq::Error::Status(status, response)) => {
             let body = response.into_string().unwrap_or_default();
@@ -1014,7 +1102,11 @@ fn get_text(url: &str) -> Result<String, InstallationError> {
 }
 
 fn get_bytes(url: &str) -> Result<Vec<u8>, InstallationError> {
-    let response = match ureq::get(url).set("User-Agent", DEFAULT_USER_AGENT).call() {
+    let response = match http_agent()
+        .get(url)
+        .set("User-Agent", DEFAULT_USER_AGENT)
+        .call()
+    {
         Ok(ok) => ok,
         Err(ureq::Error::Status(status, response)) => {
             let body = response.into_string().unwrap_or_default();
