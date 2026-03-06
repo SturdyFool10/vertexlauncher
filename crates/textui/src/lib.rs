@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 
 use cosmic_text::{
-    Action, Attrs, AttrsOwned, Buffer, Color, Edit, Editor, Family, FontSystem, Metrics, Motion,
-    Shaping, Style as FontStyle, SwashCache, Weight, Wrap,
+    Action, Attrs, AttrsOwned, Buffer, Color, Edit, Editor, Family, FontFeatures, FontSystem,
+    Metrics, Motion, Shaping, Style as FontStyle, SwashCache, Weight, Wrap,
 };
 use egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense, Stroke,
@@ -12,10 +12,13 @@ use egui::{
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options as MdOptions, Parser, Tag, TagEnd,
 };
+use skrifa::raw::{FontRef as SkrifaFontRef, TableProvider as _};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle as SyntectFontStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
+
+const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "liga, calt";
 
 #[derive(Clone, Debug)]
 pub struct LabelOptions {
@@ -247,6 +250,9 @@ pub struct TextUi {
     ui_font_family: Option<String>,
     ui_font_size_scale: f32,
     ui_font_weight: i32,
+    open_type_features_enabled: bool,
+    open_type_features_to_enable: String,
+    open_type_features: Option<FontFeatures>,
     current_frame: u64,
 }
 
@@ -277,6 +283,9 @@ impl TextUi {
             ui_font_family: None,
             ui_font_size_scale: 1.0,
             ui_font_weight: 400,
+            open_type_features_enabled: false,
+            open_type_features_to_enable: String::new(),
+            open_type_features: None,
             current_frame: 0,
         }
     }
@@ -309,7 +318,47 @@ impl TextUi {
         self.ui_font_size_scale = size_scale;
         self.ui_font_weight = clamped_weight;
         self.textures.clear();
-        self.input_states.clear();
+    }
+
+    pub fn apply_open_type_features(
+        &mut self,
+        enabled: bool,
+        feature_tags_csv: &str,
+        family_candidates: &[&str],
+    ) {
+        let normalized_csv = feature_tags_csv.trim().to_owned();
+        let parsed_tags = parse_feature_tag_list(&normalized_csv);
+        let active_tags = if enabled {
+            if parsed_tags.is_empty() {
+                let default_tags = parse_feature_tag_list(DEFAULT_OPEN_TYPE_FEATURE_TAGS);
+                if default_tags.is_empty() {
+                    self.collect_available_feature_tags_for_family(family_candidates)
+                } else {
+                    default_tags
+                }
+            } else {
+                parsed_tags
+            }
+        } else {
+            Vec::new()
+        };
+        let active_features = if enabled && !active_tags.is_empty() {
+            Some(build_font_features(&active_tags))
+        } else {
+            None
+        };
+
+        if self.open_type_features_enabled == enabled
+            && self.open_type_features_to_enable == normalized_csv
+            && self.open_type_features == active_features
+        {
+            return;
+        }
+
+        self.open_type_features_enabled = enabled;
+        self.open_type_features_to_enable = normalized_csv;
+        self.open_type_features = active_features;
+        self.textures.clear();
     }
 
     fn resolve_family_candidate(&self, family_candidates: &[&str]) -> Option<String> {
@@ -323,6 +372,61 @@ impl TextUi {
             }
         }
         None
+    }
+
+    fn resolve_face_id_for_family(
+        &self,
+        family_candidates: &[&str],
+    ) -> Option<cosmic_text::fontdb::ID> {
+        for candidate in family_candidates {
+            if let Some(face) = self.font_system.db().faces().find(|face| {
+                face.families
+                    .iter()
+                    .any(|(family, _)| family.eq_ignore_ascii_case(candidate))
+            }) {
+                return Some(face.id);
+            }
+        }
+        None
+    }
+
+    fn collect_available_feature_tags_for_family(
+        &self,
+        family_candidates: &[&str],
+    ) -> Vec<[u8; 4]> {
+        let Some(face_id) = self.resolve_face_id_for_family(family_candidates) else {
+            return Vec::new();
+        };
+
+        let mut tags = BTreeSet::new();
+        let _ = self
+            .font_system
+            .db()
+            .with_face_data(face_id, |font_data, face_index| {
+                let Ok(face) = SkrifaFontRef::from_index(font_data, face_index) else {
+                    return Some(());
+                };
+
+                if let Ok(gsub) = face.gsub() {
+                    if let Ok(feature_list) = gsub.feature_list() {
+                        for record in feature_list.feature_records().iter() {
+                            tags.insert(record.feature_tag().into_bytes());
+                        }
+                    }
+                }
+
+                if let Ok(gpos) = face.gpos() {
+                    if let Ok(feature_list) = gpos.feature_list() {
+                        for record in feature_list.feature_records().iter() {
+                            tags.insert(record.feature_tag().into_bytes());
+                        }
+                    }
+                }
+
+                Some(())
+            });
+
+        tags.into_iter().collect()
     }
 
     pub fn label(
@@ -833,8 +937,13 @@ impl TextUi {
             scale,
         );
 
+        let pointer_interacted = response.clicked()
+            || response.double_clicked()
+            || response.triple_clicked()
+            || response.dragged();
+
         let mut changed = false;
-        if has_focus {
+        if has_focus || pointer_interacted {
             changed = self.handle_input_events(
                 ui,
                 &response,
@@ -842,6 +951,7 @@ impl TextUi {
                 multiline,
                 content_rect,
                 scale,
+                has_focus,
             );
 
             if !multiline && ui.input(|i| i.key_pressed(Key::Enter)) {
@@ -991,6 +1101,7 @@ impl TextUi {
         multiline: bool,
         content_rect: Rect,
         scale: f32,
+        process_keyboard: bool,
     ) -> bool {
         let mut changed = false;
 
@@ -1023,43 +1134,45 @@ impl TextUi {
             }
         }
 
-        let events = ui.ctx().input(|i| i.events.clone());
-        for event in events {
-            match event {
-                egui::Event::Text(text) => {
-                    for ch in text.chars() {
-                        if !multiline && (ch == '\n' || ch == '\r') {
-                            continue;
+        if process_keyboard {
+            let events = ui.ctx().input(|i| i.events.clone());
+            for event in events {
+                match event {
+                    egui::Event::Text(text) => {
+                        for ch in text.chars() {
+                            if !multiline && (ch == '\n' || ch == '\r') {
+                                continue;
+                            }
+                            editor
+                                .borrow_with(&mut self.font_system)
+                                .action(Action::Insert(ch));
+                            changed = true;
                         }
-                        editor
-                            .borrow_with(&mut self.font_system)
-                            .action(Action::Insert(ch));
-                        changed = true;
                     }
+                    egui::Event::Paste(mut pasted) => {
+                        if !multiline {
+                            pasted = pasted.replace(['\n', '\r'], " ");
+                        }
+                        for ch in pasted.chars() {
+                            editor
+                                .borrow_with(&mut self.font_system)
+                                .action(Action::Insert(ch));
+                            changed = true;
+                        }
+                    }
+                    egui::Event::Key {
+                        key,
+                        pressed,
+                        modifiers,
+                        ..
+                    } if pressed => {
+                        if let Some(action) = key_to_action(key, modifiers, multiline) {
+                            editor.borrow_with(&mut self.font_system).action(action);
+                            changed = true;
+                        }
+                    }
+                    _ => {}
                 }
-                egui::Event::Paste(mut pasted) => {
-                    if !multiline {
-                        pasted = pasted.replace(['\n', '\r'], " ");
-                    }
-                    for ch in pasted.chars() {
-                        editor
-                            .borrow_with(&mut self.font_system)
-                            .action(Action::Insert(ch));
-                        changed = true;
-                    }
-                }
-                egui::Event::Key {
-                    key,
-                    pressed,
-                    modifiers,
-                    ..
-                } if pressed => {
-                    if let Some(action) = key_to_action(key, modifiers, multiline) {
-                        editor.borrow_with(&mut self.font_system).action(action);
-                        changed = true;
-                    }
-                }
-                _ => {}
             }
         }
 
@@ -1369,6 +1482,9 @@ impl TextUi {
         if style.italic {
             attrs = attrs.style(FontStyle::Italic);
         }
+        if let Some(features) = &self.open_type_features {
+            attrs = attrs.font_features(features.clone());
+        }
 
         AttrsOwned::new(&attrs)
     }
@@ -1387,9 +1503,38 @@ impl TextUi {
         } else if let Some(family) = self.ui_font_family.as_deref() {
             attrs = attrs.family(Family::Name(family));
         }
+        if let Some(features) = &self.open_type_features {
+            attrs = attrs.font_features(features.clone());
+        }
 
         AttrsOwned::new(&attrs)
     }
+}
+
+fn parse_feature_tag_list(feature_tags_csv: &str) -> Vec<[u8; 4]> {
+    let mut tags = BTreeSet::new();
+    for token in feature_tags_csv.split(',') {
+        let raw = token.trim();
+        if raw.len() != 4 || !raw.is_ascii() {
+            continue;
+        }
+
+        let mut tag = [0_u8; 4];
+        for (index, byte) in raw.as_bytes().iter().enumerate() {
+            tag[index] = byte.to_ascii_lowercase();
+        }
+        tags.insert(tag);
+    }
+
+    tags.into_iter().collect()
+}
+
+fn build_font_features(tags: &[[u8; 4]]) -> FontFeatures {
+    let mut features = FontFeatures::new();
+    for tag in tags {
+        features.set(cosmic_text::FeatureTag::new(tag), 1);
+    }
+    features
 }
 
 fn editor_to_string(editor: &Editor<'static>) -> String {

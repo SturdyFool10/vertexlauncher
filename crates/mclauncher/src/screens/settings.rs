@@ -95,4 +95,18 @@ pub fn render(
         });
         ui.add_space(8.0);
     });
+
+    config.for_each_text_mut(|setting, value| {
+        ui.push_id(setting.id, |ui| {
+            settings_widgets::text_input_row(
+                text_ui,
+                ui,
+                setting.id,
+                setting.label,
+                setting.info_tooltip,
+                value,
+            );
+        });
+        ui.add_space(8.0);
+    });
 }

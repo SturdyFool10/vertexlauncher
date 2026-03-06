@@ -20,11 +20,22 @@ struct AppliedFontSignature {
     weight: i32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct AppliedTextSignature {
+    family: UiFontFamily,
+    size: f32,
+    weight: i32,
+    open_type_features_enabled: bool,
+    open_type_features_to_enable: String,
+}
+
 struct VertexApp {
     font_catalog: FontCatalog,
     available_ui_fonts: Vec<UiFontFamily>,
     config: Config,
     applied_font_signature: Option<AppliedFontSignature>,
+    applied_text_signature: Option<AppliedTextSignature>,
+    effective_ui_font_family: UiFontFamily,
     theme: ui::theme::Theme,
     show_config_format_modal: bool,
     selected_config_format: ConfigFormat,
@@ -56,11 +67,14 @@ impl VertexApp {
         let available_ui_fonts = detect_available_ui_fonts(&cat);
         let mut text_ui = TextUi::new();
         text_ui.register_font_data(MAPLE_MONO_NF_REGULAR_TTF.to_vec());
+        let effective_ui_font_family = config.ui_font_family();
         let mut app = Self {
             font_catalog: cat,
             available_ui_fonts,
             config,
             applied_font_signature: None,
+            applied_text_signature: None,
+            effective_ui_font_family,
             theme: ui::theme::Theme::default(),
             show_config_format_modal,
             selected_config_format,
@@ -92,48 +106,66 @@ impl VertexApp {
     }
 
     fn apply_ui_font_from_config(&mut self, ctx: &egui::Context) {
-        let desired = AppliedFontSignature {
+        let desired_font = AppliedFontSignature {
             family: self.config.ui_font_family(),
             size: self.config.ui_font_size(),
             weight: self.config.ui_font_weight(),
         };
 
-        if self.applied_font_signature == Some(desired) {
+        if self.applied_font_signature != Some(desired_font) {
+            let mut applied_family = desired_font.family;
+            if desired_font.family.is_included_default() {
+                Self::install_included_maple_font(ctx, desired_font.size);
+            } else {
+                let spec = FontSpec::new(desired_font.family.query_families())
+                    .weight(Weight(desired_font.weight.clamp(100, 900) as u16))
+                    .slant(Slant::Upright)
+                    .stretch(Stretch::Normal);
+
+                if let Ok((bytes, _face_index)) = self.font_catalog.query_bytes(&spec) {
+                    fontloader::egui_integration::install_font_as_primary(
+                        ctx,
+                        font_key(desired_font.family),
+                        bytes,
+                        desired_font.size,
+                    );
+                } else {
+                    eprintln!(
+                        "Configured font '{}' not available; falling back to included default.",
+                        desired_font.family.label(),
+                    );
+                    Self::install_included_maple_font(ctx, desired_font.size);
+                    applied_family = UiFontFamily::MapleMonoNf;
+                }
+            }
+
+            self.effective_ui_font_family = applied_family;
+            self.applied_font_signature = Some(desired_font);
+        }
+
+        let desired_text = AppliedTextSignature {
+            family: self.effective_ui_font_family,
+            size: self.config.ui_font_size(),
+            weight: self.config.ui_font_weight(),
+            open_type_features_enabled: self.config.open_type_features_enabled(),
+            open_type_features_to_enable: self.config.open_type_features_to_enable().to_owned(),
+        };
+
+        if self.applied_text_signature == Some(desired_text.clone()) {
             return;
         }
 
-        let mut applied_family = desired.family;
-        if desired.family.is_included_default() {
-            Self::install_included_maple_font(ctx, desired.size);
-        } else {
-            let spec = FontSpec::new(desired.family.query_families())
-                .weight(Weight(desired.weight.clamp(100, 900) as u16))
-                .slant(Slant::Upright)
-                .stretch(Stretch::Normal);
-
-            if let Ok((bytes, _face_index)) = self.font_catalog.query_bytes(&spec) {
-                fontloader::egui_integration::install_font_as_primary(
-                    ctx,
-                    font_key(desired.family),
-                    bytes,
-                    desired.size,
-                );
-            } else {
-                eprintln!(
-                    "Configured font '{}' not available; falling back to included default.",
-                    desired.family.label(),
-                );
-                Self::install_included_maple_font(ctx, desired.size);
-                applied_family = UiFontFamily::MapleMonoNf;
-            }
-        }
-
         self.text_ui.apply_typography(
-            applied_family.query_families(),
-            desired.size,
-            desired.weight,
+            self.effective_ui_font_family.query_families(),
+            desired_text.size,
+            desired_text.weight,
         );
-        self.applied_font_signature = Some(desired);
+        self.text_ui.apply_open_type_features(
+            desired_text.open_type_features_enabled,
+            &desired_text.open_type_features_to_enable,
+            self.effective_ui_font_family.query_families(),
+        );
+        self.applied_text_signature = Some(desired_text);
     }
 
     fn ensure_selected_font_is_available(&mut self) {

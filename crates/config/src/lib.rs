@@ -140,6 +140,7 @@ impl UiFontFamily {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToggleSettingId {
     LowPowerGpuPreferred,
+    OpenTypeFeaturesEnabled,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -157,6 +158,13 @@ impl ToggleSettingId {
                 label: "Prefer Integrated Graphics",
                 info_tooltip: Some(
                     "Uses integrated graphics when both integrated and discrete GPUs are available. Requires restart.",
+                ),
+            },
+            ToggleSettingId::OpenTypeFeaturesEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::OpenTypeFeaturesEnabled,
+                label: "Enable OpenType Features",
+                info_tooltip: Some(
+                    "When enabled and the list below is empty, defaults to liga, calt.",
                 ),
             },
         }
@@ -251,10 +259,38 @@ impl IntSettingId {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TextSettingId {
+    OpenTypeFeaturesToEnable,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TextSettingSpec {
+    pub id: TextSettingId,
+    pub label: &'static str,
+    pub info_tooltip: Option<&'static str>,
+}
+
+impl TextSettingId {
+    pub const fn spec(self) -> TextSettingSpec {
+        match self {
+            TextSettingId::OpenTypeFeaturesToEnable => TextSettingSpec {
+                id: TextSettingId::OpenTypeFeaturesToEnable,
+                label: "OpenType Features to Enable",
+                info_tooltip: Some(
+                    "Comma-separated feature tags. Example: liga, calt. Leave empty to use the default list: liga, calt.",
+                ),
+            },
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
     low_power_gpu_preferred: bool,
+    open_type_features_enabled: bool,
+    open_type_features_to_enable: String,
     ui_font_family: UiFontFamily,
     ui_font_size: f32,
     ui_font_weight: i32,
@@ -267,6 +303,14 @@ impl Config {
 
     pub fn ui_font_family(&self) -> UiFontFamily {
         self.ui_font_family
+    }
+
+    pub fn open_type_features_enabled(&self) -> bool {
+        self.open_type_features_enabled
+    }
+
+    pub fn open_type_features_to_enable(&self) -> &str {
+        &self.open_type_features_to_enable
     }
 
     pub fn ui_font_size(&self) -> f32 {
@@ -288,6 +332,8 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred,
+            open_type_features_enabled,
+            open_type_features_to_enable: _,
             ui_font_family: _,
             ui_font_size: _,
             ui_font_weight: _,
@@ -296,6 +342,10 @@ impl Config {
         visit(
             ToggleSettingId::LowPowerGpuPreferred.spec(),
             low_power_gpu_preferred,
+        );
+        visit(
+            ToggleSettingId::OpenTypeFeaturesEnabled.spec(),
+            open_type_features_enabled,
         );
     }
 
@@ -306,6 +356,8 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            open_type_features_enabled: _,
+            open_type_features_to_enable: _,
             ui_font_family,
             ui_font_size: _,
             ui_font_weight: _,
@@ -318,6 +370,8 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            open_type_features_enabled: _,
+            open_type_features_to_enable: _,
             ui_font_family: _,
             ui_font_size,
             ui_font_weight: _,
@@ -330,6 +384,8 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            open_type_features_enabled: _,
+            open_type_features_to_enable: _,
             ui_font_family: _,
             ui_font_size: _,
             ui_font_weight,
@@ -337,12 +393,31 @@ impl Config {
 
         visit(IntSettingId::UiFontWeight.spec(), ui_font_weight);
     }
+
+    pub fn for_each_text_mut(&mut self, mut visit: impl FnMut(TextSettingSpec, &mut String)) {
+        // Intentionally destructure all fields to force updates here when Config changes.
+        let Self {
+            low_power_gpu_preferred: _,
+            open_type_features_enabled: _,
+            open_type_features_to_enable,
+            ui_font_family: _,
+            ui_font_size: _,
+            ui_font_weight: _,
+        } = self;
+
+        visit(
+            TextSettingId::OpenTypeFeaturesToEnable.spec(),
+            open_type_features_to_enable,
+        );
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             low_power_gpu_preferred: true,
+            open_type_features_enabled: true,
+            open_type_features_to_enable: String::new(),
             ui_font_family: UiFontFamily::MapleMonoNf,
             ui_font_size: 18.0,
             ui_font_weight: 400,
