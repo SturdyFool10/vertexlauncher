@@ -1,6 +1,8 @@
 use egui::{Context, ScrollArea, SidePanel, Ui};
 
+use crate::assets;
 use crate::screens::AppScreen;
+use crate::ui::components::icon_button;
 
 mod app_nav;
 mod profiles;
@@ -20,6 +22,7 @@ pub struct ProfileShortcut {
 pub struct SidebarOutput {
     pub selected_screen: Option<AppScreen>,
     pub selected_profile_id: Option<String>,
+    pub create_instance_clicked: bool,
 }
 
 pub fn render(
@@ -76,6 +79,23 @@ fn render_segments(
 ) {
     ui.vertical(|ui| {
         app_nav::render(ui, active_screen, output, layout.max_icon_width);
+
+        ui.add_space(8.0);
+        let create_response = ui
+            .horizontal_centered(|ui| {
+                icon_button::svg(
+                    ui,
+                    "create_instance",
+                    assets::PLUS_SVG,
+                    "Create instance",
+                    false,
+                    layout.max_icon_width,
+                )
+            })
+            .inner;
+        if create_response.clicked() {
+            output.create_instance_clicked = true;
+        }
 
         ui.add_space(10.0);
         ui.separator();

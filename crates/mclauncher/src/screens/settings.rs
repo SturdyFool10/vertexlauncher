@@ -3,8 +3,9 @@ use config::{
     INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP, JavaRuntimeVersion, UiFontFamily,
 };
 use egui::Ui;
+use installation::purge_cache as purge_installation_cache;
 use std::sync::OnceLock;
-use textui::{LabelOptions, TextUi};
+use textui::{ButtonOptions, LabelOptions, TextUi};
 
 use crate::ui::{components::settings_widgets, theme::Theme};
 
@@ -191,6 +192,62 @@ fn render_instance_defaults_section(ui: &mut Ui, text_ui: &mut TextUi, config: &
         "Used when creating new instances. You can still override values per instance.",
         &body_style,
     );
+    ui.add_space(8.0);
+
+    let mut installations_root = config.minecraft_installations_root().to_owned();
+    let installations_root_response = settings_widgets::full_width_text_input_row(
+        text_ui,
+        ui,
+        "instance_defaults_installations_root",
+        "Minecraft installations folder",
+        Some(
+            "New instances are created under this folder as <folder>/<instance.minecraft_root>. Relative paths are resolved from the launcher working directory.",
+        ),
+        &mut installations_root,
+    );
+    if installations_root_response.changed() {
+        config.set_minecraft_installations_root(installations_root);
+    }
+    ui.add_space(8.0);
+
+    let cache_button_style = ButtonOptions {
+        min_size: egui::vec2(220.0, 32.0),
+        text_color: ui.visuals().text_color(),
+        fill: ui.visuals().widgets.inactive.bg_fill,
+        fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+        fill_active: ui.visuals().widgets.active.bg_fill,
+        fill_selected: ui.visuals().selection.bg_fill,
+        stroke: ui.visuals().widgets.inactive.bg_stroke,
+        ..ButtonOptions::default()
+    };
+    let cache_status_id = ui.make_persistent_id("settings_cache_status_message");
+    let mut cache_status = ui.ctx().data_mut(|d| d.get_temp::<String>(cache_status_id));
+    if text_ui
+        .button(
+            ui,
+            "instance_defaults_purge_cache",
+            "Purge metadata cache",
+            &cache_button_style,
+        )
+        .clicked()
+    {
+        cache_status = Some(match purge_installation_cache() {
+            Ok(()) => {
+                "Purged local metadata cache. Version lists will be re-fetched on next refresh."
+                    .to_owned()
+            }
+            Err(err) => format!("Failed to purge metadata cache: {err}"),
+        });
+    }
+    if let Some(message) = cache_status.as_deref() {
+        let mut status_style = body_style.clone();
+        status_style.wrap = true;
+        let _ = text_ui.label(ui, "instance_defaults_cache_status", message, &status_style);
+    }
+    if let Some(message) = cache_status {
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(cache_status_id, message));
+    }
     ui.add_space(8.0);
 
     let mut default_memory = config.default_instance_max_memory_mib();

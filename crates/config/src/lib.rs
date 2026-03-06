@@ -10,6 +10,7 @@ pub const UI_FONT_WEIGHT_STEP: i32 = 100;
 pub const INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN: u128 = 512;
 pub const INSTANCE_DEFAULT_MAX_MEMORY_MIB_MAX: u128 = 1_048_576;
 pub const INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP: u128 = 256;
+pub const DEFAULT_MINECRAFT_INSTALLATIONS_ROOT: &str = "instances";
 
 const MAPLE_FONT_FAMILIES: &[&str] = &["Maple Mono NF", "Maple Mono", "Maple Mono Normal"];
 const JETBRAINS_FONT_FAMILIES: &[&str] = &[
@@ -191,6 +192,7 @@ pub enum ToggleSettingId {
     LowPowerGpuPreferred,
     WindowBlurEnabled,
     OpenTypeFeaturesEnabled,
+    SnapshotsAndBetasEnabled,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -222,6 +224,13 @@ impl ToggleSettingId {
                 label: "Enable OpenType Features",
                 info_tooltip: Some(
                     "When enabled and the list below is empty, defaults to liga, calt.",
+                ),
+            },
+            ToggleSettingId::SnapshotsAndBetasEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::SnapshotsAndBetasEnabled,
+                label: "Include Snapshots and Betas",
+                info_tooltip: Some(
+                    "Allows selecting snapshot and beta/alpha Minecraft versions in instance version dropdowns.",
                 ),
             },
         }
@@ -353,8 +362,10 @@ pub struct Config {
     ui_font_family: UiFontFamily,
     ui_font_size: f32,
     ui_font_weight: i32,
+    include_snapshots_and_betas: bool,
     default_instance_max_memory_mib: u128,
     default_instance_cli_args: String,
+    minecraft_installations_root: String,
     java_8_jvm_path: Option<String>,
     java_16_jvm_path: Option<String>,
     java_17_jvm_path: Option<String>,
@@ -398,6 +409,10 @@ impl Config {
         self.ui_font_weight
     }
 
+    pub fn include_snapshots_and_betas(&self) -> bool {
+        self.include_snapshots_and_betas
+    }
+
     pub fn default_instance_max_memory_mib(&self) -> u128 {
         self.default_instance_max_memory_mib
     }
@@ -411,6 +426,22 @@ impl Config {
 
     pub fn default_instance_cli_args_mut(&mut self) -> &mut String {
         &mut self.default_instance_cli_args
+    }
+
+    pub fn default_instance_cli_args(&self) -> &str {
+        &self.default_instance_cli_args
+    }
+
+    pub fn minecraft_installations_root(&self) -> &str {
+        &self.minecraft_installations_root
+    }
+
+    pub fn set_minecraft_installations_root(&mut self, path: impl Into<String>) {
+        self.minecraft_installations_root = path.into();
+        normalize_required_path(
+            &mut self.minecraft_installations_root,
+            DEFAULT_MINECRAFT_INSTALLATIONS_ROOT,
+        );
     }
 
     pub fn java_runtime_path(&self, runtime: JavaRuntimeVersion) -> Option<&str> {
@@ -440,6 +471,10 @@ impl Config {
             INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN,
             INSTANCE_DEFAULT_MAX_MEMORY_MIB_MAX,
         );
+        normalize_required_path(
+            &mut self.minecraft_installations_root,
+            DEFAULT_MINECRAFT_INSTALLATIONS_ROOT,
+        );
         normalize_optional_path(&mut self.java_8_jvm_path);
         normalize_optional_path(&mut self.java_16_jvm_path);
         normalize_optional_path(&mut self.java_17_jvm_path);
@@ -460,8 +495,10 @@ impl Config {
             ui_font_family: _,
             ui_font_size: _,
             ui_font_weight: _,
+            include_snapshots_and_betas,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
+            minecraft_installations_root: _,
             java_8_jvm_path: _,
             java_16_jvm_path: _,
             java_17_jvm_path: _,
@@ -480,6 +517,10 @@ impl Config {
             ToggleSettingId::OpenTypeFeaturesEnabled.spec(),
             open_type_features_enabled,
         );
+        visit(
+            ToggleSettingId::SnapshotsAndBetasEnabled.spec(),
+            include_snapshots_and_betas,
+        );
     }
 
     pub fn for_each_dropdown_mut(
@@ -496,8 +537,10 @@ impl Config {
             ui_font_family,
             ui_font_size: _,
             ui_font_weight: _,
+            include_snapshots_and_betas: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
+            minecraft_installations_root: _,
             java_8_jvm_path: _,
             java_16_jvm_path: _,
             java_17_jvm_path: _,
@@ -518,8 +561,10 @@ impl Config {
             ui_font_family: _,
             ui_font_size,
             ui_font_weight: _,
+            include_snapshots_and_betas: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
+            minecraft_installations_root: _,
             java_8_jvm_path: _,
             java_16_jvm_path: _,
             java_17_jvm_path: _,
@@ -540,8 +585,10 @@ impl Config {
             ui_font_family: _,
             ui_font_size: _,
             ui_font_weight,
+            include_snapshots_and_betas: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
+            minecraft_installations_root: _,
             java_8_jvm_path: _,
             java_16_jvm_path: _,
             java_17_jvm_path: _,
@@ -562,8 +609,10 @@ impl Config {
             ui_font_family: _,
             ui_font_size: _,
             ui_font_weight: _,
+            include_snapshots_and_betas: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
+            minecraft_installations_root: _,
             java_8_jvm_path: _,
             java_16_jvm_path: _,
             java_17_jvm_path: _,
@@ -585,6 +634,15 @@ fn normalize_optional_path(path: &mut Option<String>) {
         .map(ToOwned::to_owned);
 }
 
+fn normalize_required_path(path: &mut String, fallback: &str) {
+    let normalized = path.trim();
+    if normalized.is_empty() {
+        *path = fallback.to_owned();
+    } else {
+        *path = normalized.to_owned();
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -596,8 +654,10 @@ impl Default for Config {
             ui_font_family: UiFontFamily::MapleMonoNf,
             ui_font_size: 18.0,
             ui_font_weight: 400,
+            include_snapshots_and_betas: false,
             default_instance_max_memory_mib: 4096,
             default_instance_cli_args: String::new(),
+            minecraft_installations_root: DEFAULT_MINECRAFT_INSTALLATIONS_ROOT.to_owned(),
             java_8_jvm_path: None,
             java_16_jvm_path: None,
             java_17_jvm_path: None,

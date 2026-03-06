@@ -1,7 +1,7 @@
 use egui::Ui;
 use textui::{LabelOptions, TextUi};
 
-pub fn render(ui: &mut Ui, text_ui: &mut TextUi, selected_profile_id: Option<&str>) {
+pub fn render(ui: &mut Ui, text_ui: &mut TextUi, selected_instance_id: Option<&str>) {
     let text_color = ui.visuals().text_color();
     let heading = LabelOptions {
         font_size: 30.0,
@@ -20,12 +20,12 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi, selected_profile_id: Option<&st
     ui.add_space(8.0);
     let _ = text_ui.label(ui, "skins_desc", "Skin management UI goes here.", &body);
 
-    if let Some(profile_id) = selected_profile_id {
+    if let Some(instance_id) = selected_instance_id {
         ui.add_space(8.0);
         let _ = text_ui.label(
             ui,
-            "skins_profile_selected",
-            &format!("Selected profile: {profile_id}"),
+            "skins_instance_selected",
+            &format!("Selected instance: {instance_id}"),
             &body,
         );
     }

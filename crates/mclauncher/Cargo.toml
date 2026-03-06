@@ -13,6 +13,9 @@ fontloader.workspace = true
 config.workspace = true
 textui.workspace = true
 auth.workspace = true
+instances.workspace = true
+modprovider.workspace = true
+installation.workspace = true
 raw-window-handle = "0.6.2"
 toml.workspace = true
 

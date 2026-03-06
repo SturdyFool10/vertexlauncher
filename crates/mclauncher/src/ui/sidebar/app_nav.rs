@@ -42,5 +42,6 @@ fn icon_for_screen(screen: AppScreen) -> (&'static str, &'static [u8]) {
         AppScreen::Skins => ("skin_selector", assets::SKIN_SELECTOR_SVG),
         AppScreen::Settings => ("settings", assets::SETTINGS_SVG),
         AppScreen::Legal => ("legal", assets::LEGAL_SVG),
+        AppScreen::Instance => ("library", assets::LIBRARY_SVG),
     }
 }

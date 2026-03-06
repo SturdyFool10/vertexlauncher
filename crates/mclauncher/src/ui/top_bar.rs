@@ -88,17 +88,6 @@ pub fn render(
             ui.scope_builder(egui::UiBuilder::new().max_rect(drag_rect), |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add_space(10.0);
-                    let text_color = ui.visuals().text_color();
-                    let title_style = LabelOptions {
-                        font_size: 30.0,
-                        line_height: 34.0,
-                        weight: 700,
-                        color: text_color,
-                        wrap: false,
-                        ..LabelOptions::default()
-                    };
-                    //let _ = text_ui.label(ui, "topbar_title", "Minecraft Launcher", &title_style);
-                    //ui.add_space(12.0);
                     let mut section_style = LabelOptions {
                         font_size: 18.0,
                         line_height: 24.0,
