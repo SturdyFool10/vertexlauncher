@@ -102,12 +102,23 @@ fn render_segments(
         ui.add_space(style::SPACE_LG);
         ui.separator();
         ui.add_space(style::SPACE_MD);
-
-        ScrollArea::vertical()
-            .id_salt("profiles_scroll")
-            .max_height(ui.available_height())
-            .show(ui, |ui| {
-                profiles::render(ui, profile_shortcuts, output, layout.max_icon_width)
-            });
+        let profiles_viewport = egui::vec2(
+            ui.available_width().max(1.0),
+            ui.available_height().max(1.0),
+        );
+        ui.allocate_ui_with_layout(
+            profiles_viewport,
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_min_height(profiles_viewport.y);
+                ScrollArea::vertical()
+                    .id_salt("profiles_scroll")
+                    .auto_shrink([false, false])
+                    .max_height(profiles_viewport.y)
+                    .show(ui, |ui| {
+                        profiles::render(ui, profile_shortcuts, output, layout.max_icon_width)
+                    });
+            },
+        );
     });
 }
