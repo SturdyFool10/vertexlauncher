@@ -22,7 +22,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                 egui::vec2(inner_width, ui.available_height().max(1.0)),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    render_tabs_row(ui, text_ui, &snapshot);
+                    render_tabs_row(ui, &snapshot);
                     ui.add_space(style::SPACE_SM);
                     let viewport_height = ui.available_height().max(1.0);
                     ui.set_min_height(viewport_height);
@@ -69,17 +69,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
     );
 }
 
-fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::ConsoleSnapshot) {
-    let tab_style = textui::ButtonOptions {
-        min_size: egui::vec2(80.0, 30.0),
-        text_color: ui.visuals().text_color(),
-        fill: ui.visuals().widgets.inactive.weak_bg_fill,
-        fill_hovered: ui.visuals().widgets.hovered.bg_fill,
-        fill_active: ui.visuals().widgets.active.bg_fill,
-        fill_selected: ui.visuals().selection.bg_fill,
-        stroke: ui.visuals().widgets.inactive.bg_stroke,
-        ..textui::ButtonOptions::default()
-    };
+fn render_tabs_row(ui: &mut Ui, snapshot: &console::ConsoleSnapshot) {
     egui::ScrollArea::horizontal()
         .id_salt("console_tabs")
         .auto_shrink([false, true])
@@ -88,18 +78,45 @@ fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::Consol
                 ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_SM);
                 for tab in &snapshot.tabs {
                     let selected = tab.id == snapshot.active_tab_id;
-                    if text_ui
-                        .selectable_button(
-                            ui,
-                            ("console_tab", tab.id.as_str()),
-                            tab.label.as_str(),
-                            selected,
-                            &tab_style,
-                        )
-                        .clicked()
-                    {
-                        console::set_active_tab(tab.id.as_str());
-                    }
+                    let fill = if selected {
+                        ui.visuals().selection.bg_fill
+                    } else {
+                        ui.visuals().widgets.inactive.weak_bg_fill
+                    };
+                    let stroke = if selected {
+                        ui.visuals().selection.stroke
+                    } else {
+                        ui.visuals().widgets.inactive.bg_stroke
+                    };
+                    egui::Frame::new()
+                        .fill(fill)
+                        .stroke(stroke)
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::symmetric(8, 4))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let label_response = ui.add(
+                                    egui::Label::new(tab.label.as_str())
+                                        .sense(egui::Sense::click()),
+                                );
+                                if label_response.clicked() {
+                                    console::set_active_tab(tab.id.as_str());
+                                }
+
+                                if tab.can_close {
+                                    let close_response = ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new("×").size(18.0).strong(),
+                                        )
+                                        .frame(true)
+                                        .min_size(egui::vec2(24.0, 24.0)),
+                                    );
+                                    if close_response.clicked() {
+                                        let _ = console::close_tab(tab.id.as_str());
+                                    }
+                                }
+                            });
+                        });
                 }
             });
         });

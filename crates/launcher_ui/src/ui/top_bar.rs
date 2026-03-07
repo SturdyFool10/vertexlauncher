@@ -19,6 +19,8 @@ const CONTROL_GAP: f32 = 7.0;
 const CONTROL_GROUP_PADDING: f32 = 12.0;
 const PROFILE_BUTTON_VERTICAL_PADDING: f32 = 5.0;
 const PROFILE_TO_CONTROLS_GAP: f32 = style::SPACE_MD;
+const ACTIVE_USER_TO_PROFILE_GAP: f32 = style::SPACE_SM;
+const ACTIVE_USER_BUTTON_MIN_WIDTH: f32 = 132.0;
 const PROFILE_POPUP_MIN_WIDTH: f32 = 310.0;
 const RESIZE_GRAB_THICKNESS: f32 = 6.0;
 
@@ -27,6 +29,7 @@ pub struct TopBarOutput {
     pub start_sign_in: bool,
     pub select_account_id: Option<String>,
     pub remove_account_id: Option<String>,
+    pub open_active_user_terminal: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +46,7 @@ pub struct ProfileUiModel<'a> {
     pub sign_in_in_progress: bool,
     pub status_message: Option<&'a str>,
     pub accounts: &'a [ProfileAccountOption],
+    pub user_instance_active: bool,
 }
 
 pub fn render(
@@ -71,10 +75,18 @@ pub fn render(
             let full_rect = ui.max_rect();
             let profile_button_size =
                 (TOP_BAR_HEIGHT - (PROFILE_BUTTON_VERTICAL_PADDING * 2.0)).max(1.0);
+            let active_user_button_width = ACTIVE_USER_BUTTON_MIN_WIDTH;
+            let active_user_visible = profile_ui.user_instance_active;
             let control_group_width =
                 (CONTROL_SLOT_WIDTH * 3.0) + (CONTROL_GAP * 2.0) + (CONTROL_GROUP_PADDING * 2.0);
-            let right_side_width =
-                control_group_width + PROFILE_TO_CONTROLS_GAP + profile_button_size;
+            let right_side_width = control_group_width
+                + PROFILE_TO_CONTROLS_GAP
+                + profile_button_size
+                + if active_user_visible {
+                    ACTIVE_USER_TO_PROFILE_GAP + active_user_button_width
+                } else {
+                    0.0
+                };
             let controls_min_x = (full_rect.max.x - right_side_width).max(full_rect.min.x);
             let drag_rect = egui::Rect::from_min_max(
                 full_rect.min,
@@ -143,6 +155,13 @@ pub fn render(
                                     profile_popup_id,
                                 );
                             });
+                    }
+
+                    if active_user_visible {
+                        ui.add_space(ACTIVE_USER_TO_PROFILE_GAP);
+                        if render_active_user_terminal_button(ui, profile_button_size).clicked() {
+                            output.open_active_user_terminal = true;
+                        }
                     }
 
                     ui.add_space(CONTROL_GROUP_PADDING);
@@ -321,6 +340,58 @@ fn render_profile_button(
     }
 }
 
+fn render_active_user_terminal_button(ui: &mut egui::Ui, button_height: f32) -> egui::Response {
+    let text_color = ui.visuals().text_color();
+    let themed_svg = apply_text_color(assets::TERMINAL_2_SVG, text_color);
+    let uri = format!(
+        "bytes://vertex-topbar/user-active-terminal-{:02x}{:02x}{:02x}.svg",
+        text_color.r(),
+        text_color.g(),
+        text_color.b()
+    );
+    let icon_size = (button_height - 14.0).clamp(12.0, 18.0);
+    let desired_size = egui::vec2(ACTIVE_USER_BUTTON_MIN_WIDTH, button_height);
+    let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+
+    let fill = if response.is_pointer_button_down_on() {
+        ui.visuals().widgets.active.weak_bg_fill
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered.weak_bg_fill
+    } else {
+        ui.visuals().widgets.inactive.weak_bg_fill
+    };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(8), fill);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(8),
+        egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color),
+        egui::StrokeKind::Inside,
+    );
+
+    let inner_rect = rect.shrink2(egui::vec2(8.0, 4.0));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
+        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+            let _ = ui.add(
+                egui::Label::new(egui::RichText::new("user active").color(text_color))
+                    .wrap_mode(egui::TextWrapMode::Extend),
+            );
+            ui.add_space(6.0);
+            let icon = egui::Image::from_bytes(uri, themed_svg)
+                .fit_to_exact_size(egui::vec2(icon_size, icon_size));
+            ui.add(icon);
+        });
+    });
+
+    response
+}
+
+fn apply_text_color(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {
+    let color_hex = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
+    let svg = String::from_utf8_lossy(svg_bytes).replace("currentColor", &color_hex);
+    svg.into_bytes()
+}
+
 fn render_profile_popup(
     ui: &mut egui::Ui,
     text_ui: &mut TextUi,
@@ -329,6 +400,7 @@ fn render_profile_popup(
     popup_id: egui::Id,
 ) {
     ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_MD, style::SPACE_MD);
+    let full_action_width = ui.available_width().max(220.0);
 
     let muted_text = ui.visuals().weak_text_color();
     let heading_style = LabelOptions {
@@ -348,7 +420,7 @@ fn render_profile_popup(
     muted_style.color = muted_text;
 
     let button_style = ButtonOptions {
-        min_size: egui::vec2(220.0, style::CONTROL_HEIGHT),
+        min_size: egui::vec2(full_action_width, style::CONTROL_HEIGHT),
         corner_radius: style::CORNER_RADIUS_SM,
         padding: egui::vec2(style::SPACE_MD, style::SPACE_XS),
         text_color: ui.visuals().text_color(),
@@ -356,7 +428,7 @@ fn render_profile_popup(
         fill_hovered: ui.visuals().widgets.hovered.bg_fill,
         fill_active: ui.visuals().widgets.active.bg_fill,
         fill_selected: ui.visuals().widgets.open.bg_fill,
-        stroke: egui::Stroke::new(1.2, ui.visuals().widgets.hovered.bg_stroke.color),
+        stroke: egui::Stroke::new(1.4, ui.visuals().widgets.hovered.bg_stroke.color),
         ..ButtonOptions::default()
     };
 
@@ -450,20 +522,25 @@ fn render_profile_popup(
     ui.add_space(style::SPACE_XS / 2.0);
 
     let mut primary_button_style = button_style.clone();
+    primary_button_style.min_size = egui::vec2(full_action_width, style::CONTROL_HEIGHT);
     primary_button_style.text_color = ui.visuals().text_color();
     primary_button_style.fill = ui.visuals().widgets.hovered.bg_fill;
     primary_button_style.fill_hovered = ui.visuals().widgets.open.bg_fill;
     primary_button_style.fill_active = ui.visuals().widgets.active.bg_fill;
     primary_button_style.fill_selected = ui.visuals().widgets.open.bg_fill;
-    primary_button_style.stroke = egui::Stroke::new(1.5, ui.visuals().widgets.open.bg_stroke.color);
+    primary_button_style.stroke = egui::Stroke::new(1.8, ui.visuals().widgets.open.bg_stroke.color);
 
     if profile_ui.sign_in_in_progress {
+        let mut pending_button_style = button_style.clone();
+        pending_button_style.min_size = egui::vec2(full_action_width, style::CONTROL_HEIGHT);
+        pending_button_style.stroke =
+            egui::Stroke::new(1.4, ui.visuals().widgets.inactive.bg_stroke.color);
         ui.add_enabled_ui(false, |ui| {
             let _ = text_ui.button(
                 ui,
                 "profile_popup_signing_in",
                 "Signing in with Microsoft...",
-                &button_style,
+                &pending_button_style,
             );
         });
     } else if text_ui

@@ -337,29 +337,6 @@ pub fn render(
         &mut output,
     );
 
-    if let Some(status_message) = state.status_message.as_deref() {
-        ui.add_space(10.0);
-        let status_color = if status_message.starts_with("Saved")
-            || status_message.starts_with("Prepared")
-            || status_message.starts_with("Launch")
-            || status_message.starts_with("Stop")
-        {
-            ui.visuals().selection.bg_fill
-        } else {
-            ui.visuals().error_fg_color
-        };
-        let _ = text_ui.label(
-            ui,
-            ("instance_status_message", instance_id),
-            status_message,
-            &LabelOptions {
-                color: status_color,
-                wrap: true,
-                ..LabelOptions::default()
-            },
-        );
-    }
-
     ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
     output
 }
@@ -1695,11 +1672,11 @@ fn render_runtime_row(
             ui,
             ("instance_runtime_state", id),
             if state.runtime_prepare_in_flight || external_install_active {
-                "Runtime state: Installing"
+                "Installing"
             } else if state.running {
-                "Runtime state: Running"
+                "Running"
             } else {
-                "Runtime state: Stopped"
+                "Stopped"
             },
             &muted_style,
         );

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use installation::is_instance_running;
+use installation::{is_instance_running, stop_running_instance};
 
 const MAX_CONSOLE_LINES: usize = 4000;
 const DEFAULT_TAB_ID: &str = "vertexlauncher";
@@ -18,6 +18,7 @@ const MAX_UNTERMINATED_LOG_CHARS: usize = 131_072;
 pub struct ConsoleTabSnapshot {
     pub id: String,
     pub label: String,
+    pub can_close: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -72,12 +73,21 @@ pub fn push_line_to_tab(tab_id: &str, line: impl Into<String>) {
     let Ok(mut lines) = store().lock() else {
         return;
     };
-    let Some(tab) = lines.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+
+    if let Some(tab) = lines.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+        tab.lines.push_back(sanitized);
+        while tab.lines.len() > MAX_CONSOLE_LINES {
+            let _ = tab.lines.pop_front();
+        }
         return;
-    };
-    tab.lines.push_back(sanitized);
-    while tab.lines.len() > MAX_CONSOLE_LINES {
-        let _ = tab.lines.pop_front();
+    }
+
+    // Keep logs visible even if a tab disappears unexpectedly.
+    if let Some(default_tab) = lines.tabs.iter_mut().find(|tab| tab.id == DEFAULT_TAB_ID) {
+        default_tab.lines.push_back(sanitized);
+        while default_tab.lines.len() > MAX_CONSOLE_LINES {
+            let _ = default_tab.lines.pop_front();
+        }
     }
 }
 
@@ -302,12 +312,94 @@ pub fn set_active_tab(tab_id: &str) {
     }
 }
 
+pub fn activate_tab_for_user(user_key: Option<&str>, username: Option<&str>) -> bool {
+    let normalized_user_key = normalize_tab_user_identity(user_key);
+    let normalized_username = normalize_tab_user_identity(username);
+    let Ok(mut state) = store().lock() else {
+        return false;
+    };
+
+    let tab_for_identity = |identity: &str, state: &ConsoleState| -> Option<String> {
+        state
+            .tabs
+            .iter()
+            .rev()
+            .find(|tab| tab.user_identity.as_deref() == Some(identity))
+            .map(|tab| tab.id.clone())
+    };
+
+    let selected_tab_id = normalized_user_key
+        .as_deref()
+        .and_then(|identity| tab_for_identity(identity, &state))
+        .or_else(|| {
+            normalized_username
+                .as_deref()
+                .and_then(|identity| tab_for_identity(identity, &state))
+        });
+
+    if let Some(tab_id) = selected_tab_id {
+        state.active_tab_id = tab_id;
+        return true;
+    }
+
+    false
+}
+
+pub fn is_default_tab(tab_id: &str) -> bool {
+    tab_id == DEFAULT_TAB_ID
+}
+
+pub fn close_tab(tab_id: &str) -> bool {
+    if is_default_tab(tab_id) {
+        return false;
+    }
+
+    let Ok(mut state) = store().lock() else {
+        return false;
+    };
+
+    let Some(index) = state.tabs.iter().position(|tab| tab.id == tab_id) else {
+        return false;
+    };
+
+    let removed = state.tabs.remove(index);
+    let instance_root_to_stop = removed.instance_root;
+
+    if state.tabs.is_empty() {
+        state.tabs.push(ConsoleTab {
+            id: DEFAULT_TAB_ID.to_owned(),
+            label: DEFAULT_TAB_LABEL.to_owned(),
+            instance_root: None,
+            user_identity: None,
+            keep_alive_while_loading: false,
+            missing_since: None,
+            lines: VecDeque::new(),
+        });
+    }
+
+    if state.active_tab_id == tab_id {
+        state.active_tab_id = if state.tabs.iter().any(|tab| tab.id == DEFAULT_TAB_ID) {
+            DEFAULT_TAB_ID.to_owned()
+        } else {
+            state.tabs[0].id.clone()
+        };
+    }
+    drop(state);
+
+    if let Some(instance_root) = instance_root_to_stop.as_deref() {
+        let _ = stop_running_instance(Path::new(instance_root));
+    }
+
+    true
+}
+
 pub fn snapshot() -> ConsoleSnapshot {
     let Ok(state) = store().lock() else {
         return ConsoleSnapshot {
             tabs: vec![ConsoleTabSnapshot {
                 id: DEFAULT_TAB_ID.to_owned(),
                 label: DEFAULT_TAB_LABEL.to_owned(),
+                can_close: false,
             }],
             active_tab_id: DEFAULT_TAB_ID.to_owned(),
             active_lines: Vec::new(),
@@ -326,6 +418,7 @@ pub fn snapshot() -> ConsoleSnapshot {
         .map(|tab| ConsoleTabSnapshot {
             id: tab.id.clone(),
             label: tab.label.clone(),
+            can_close: !is_default_tab(tab.id.as_str()),
         })
         .collect();
 

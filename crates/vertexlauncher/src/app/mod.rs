@@ -6,7 +6,7 @@ use eframe::{self, egui};
 use egui::CentralPanel;
 use installation::{
     DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, ensure_game_files,
-    ensure_openjdk_runtime, running_instance_roots,
+    ensure_openjdk_runtime, running_instance_for_account, running_instance_roots,
 };
 use instances::{
     InstanceRecord, InstanceStore, create_instance, instance_root_path, load_store,
@@ -194,6 +194,20 @@ impl eframe::App for VertexApp {
                 is_active: entry.is_active,
             })
             .collect::<Vec<_>>();
+        let active_launch_auth =
+            self.auth
+                .active_launch_context()
+                .map(|context| screens::LaunchAuthContext {
+                    account_key: context.account_key,
+                    player_name: context.player_name,
+                    player_uuid: context.player_uuid,
+                    access_token: context.access_token,
+                    xuid: context.xuid,
+                    user_type: context.user_type,
+                });
+        let user_instance_active = active_launch_auth.as_ref().is_some_and(|context| {
+            running_instance_for_account(context.account_key.as_str()).is_some()
+        });
 
         let top_bar_section_label = if self.active_screen == screens::AppScreen::Instance {
             self.selected_instance_id
@@ -215,6 +229,7 @@ impl eframe::App for VertexApp {
                 sign_in_in_progress: self.auth.sign_in_in_progress(),
                 status_message: self.auth.status_message(),
                 accounts: &profile_accounts,
+                user_instance_active,
             },
         );
         if self.active_screen != screens::AppScreen::Instance {
@@ -230,6 +245,15 @@ impl eframe::App for VertexApp {
         if let Some(profile_id) = top_bar_output.remove_account_id.as_deref() {
             self.auth.remove_account(profile_id);
         }
+        if top_bar_output.open_active_user_terminal {
+            self.active_screen = screens::AppScreen::Console;
+            let _ = console::activate_tab_for_user(
+                active_launch_auth
+                    .as_ref()
+                    .map(|context| context.account_key.as_str()),
+                self.auth.display_name(),
+            );
+        }
 
         let sidebar_output = ui::sidebar::render(ctx, self.active_screen, &self.instance_shortcuts);
 
@@ -244,18 +268,6 @@ impl eframe::App for VertexApp {
             self.show_create_instance_modal = true;
             self.create_instance_state.error = None;
         }
-
-        let active_launch_auth =
-            self.auth
-                .active_launch_context()
-                .map(|context| screens::LaunchAuthContext {
-                    account_key: context.account_key,
-                    player_name: context.player_name,
-                    player_uuid: context.player_uuid,
-                    access_token: context.access_token,
-                    xuid: context.xuid,
-                    user_type: context.user_type,
-                });
 
         let mut screen_output = screens::ScreenOutput::default();
         CentralPanel::default()
