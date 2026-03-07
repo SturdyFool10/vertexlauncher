@@ -683,7 +683,10 @@ fn render_content_thumbnail(
         let mut hasher = DefaultHasher::new();
         id_source.hash(&mut hasher);
         egui::Image::from_bytes(
-            format!("bytes://instance/default-content-icon/{}", hasher.finish()),
+            format!(
+                "bytes://instance/default-content-icon/{}.svg",
+                hasher.finish()
+            ),
             assets::LIBRARY_SVG,
         )
     };
@@ -1911,14 +1914,15 @@ fn render_stop_runtime_button(
     let icon_size = (icon_lane.height() - 4.0).clamp(12.0, 18.0);
     let stop_icon_rect =
         egui::Rect::from_center_size(icon_lane.center(), egui::vec2(icon_size, icon_size));
+    let stop_icon_color = egui::Color32::WHITE;
     let stop_icon = egui::Image::from_bytes(
         format!(
-            "bytes://instance/runtime-stop/{id}-{:02x}{:02x}{:02x}",
-            error_color.r(),
-            error_color.g(),
-            error_color.b()
+            "bytes://instance/runtime-stop/{id}-{:02x}{:02x}{:02x}.svg",
+            stop_icon_color.r(),
+            stop_icon_color.g(),
+            stop_icon_color.b()
         ),
-        apply_color_to_svg(assets::STOP_SVG, error_color),
+        apply_color_to_svg(assets::STOP_SVG, stop_icon_color),
     )
     .fit_to_exact_size(egui::vec2(icon_size, icon_size));
     let _ = ui.put(stop_icon_rect, stop_icon);
@@ -1947,7 +1951,7 @@ fn render_runtime_avatar(
     }
 
     let fallback = egui::Image::from_bytes(
-        format!("bytes://instance/runtime-avatar-fallback/{id}"),
+        format!("bytes://instance/runtime-avatar-fallback/{id}.svg"),
         apply_color_to_svg(assets::USER_SVG, color),
     )
     .fit_to_exact_size(rect.size());

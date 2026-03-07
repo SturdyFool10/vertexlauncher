@@ -143,10 +143,6 @@ pub fn render(
                         launch_disabled_for_missing_ownership,
                         running_avatar,
                         selected_instance_id == Some(instance.id.as_str()),
-                        state
-                            .status_by_instance
-                            .get(instance.id.as_str())
-                            .map(String::as_str),
                     );
                     if matches!(
                         action,
@@ -208,7 +204,6 @@ fn render_instance_tile(
     launch_disabled_for_missing_ownership: bool,
     running_avatar_png: Option<&[u8]>,
     selected: bool,
-    status_message: Option<&str>,
 ) -> RuntimeAction {
     let tile_fill = if selected {
         ui.visuals().selection.bg_fill.gamma_multiply(0.22)
@@ -345,14 +340,6 @@ fn render_instance_tile(
                     &muted_style,
                 );
             }
-            if let Some(message) = status_message {
-                let _ = text_ui.label(
-                    ui,
-                    ("library_instance_status", instance.id.as_str()),
-                    message,
-                    &muted_style,
-                );
-            }
         });
     });
     action
@@ -460,14 +447,15 @@ fn render_runtime_action_button(
         let icon_size = (label_rect.height() - 4.0).clamp(12.0, 18.0);
         let stop_icon_rect =
             egui::Rect::from_center_size(label_rect.center(), egui::vec2(icon_size, icon_size));
+        let stop_icon_color = egui::Color32::WHITE;
         let stop_icon = egui::Image::from_bytes(
             format!(
-                "bytes://library/stop-icon-v2/{instance_id}-{:02x}{:02x}{:02x}",
-                text_color.r(),
-                text_color.g(),
-                text_color.b()
+                "bytes://library/stop-icon-v3/{instance_id}-{:02x}{:02x}{:02x}.svg",
+                stop_icon_color.r(),
+                stop_icon_color.g(),
+                stop_icon_color.b()
             ),
-            apply_color_to_svg(assets::STOP_SVG, text_color),
+            apply_color_to_svg(assets::STOP_SVG, stop_icon_color),
         )
         .fit_to_exact_size(egui::vec2(icon_size, icon_size));
         let _ = ui.put(stop_icon_rect, stop_icon);
@@ -486,7 +474,7 @@ fn render_runtime_action_button(
         }
         let play_icon = egui::Image::from_bytes(
             format!(
-                "bytes://library/play-icon-v2/{instance_id}-{:02x}{:02x}{:02x}",
+                "bytes://library/play-icon-v3/{instance_id}-{:02x}{:02x}{:02x}.svg",
                 text_color.r(),
                 text_color.g(),
                 text_color.b()
@@ -520,7 +508,7 @@ fn render_running_user_avatar(
     }
 
     let fallback = egui::Image::from_bytes(
-        format!("bytes://library/runtime-avatar-fallback/{instance_id}"),
+        format!("bytes://library/runtime-avatar-fallback/{instance_id}.svg"),
         apply_color_to_svg(assets::USER_SVG, ui.visuals().text_color()),
     )
     .fit_to_exact_size(rect.size());
@@ -822,7 +810,10 @@ fn render_instance_thumbnail(ui: &mut Ui, instance: &InstanceRecord) {
 
         let placeholder_size = egui::vec2(42.0, 42.0);
         let placeholder = egui::Image::from_bytes(
-            format!("bytes://library/instance-thumbnail-default/{}", instance.id),
+            format!(
+                "bytes://library/instance-thumbnail-default/{}.svg",
+                instance.id
+            ),
             assets::LIBRARY_SVG,
         )
         .fit_to_exact_size(placeholder_size);
