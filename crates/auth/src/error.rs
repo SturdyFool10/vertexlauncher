@@ -2,6 +2,7 @@ use std::io::{self, Read};
 
 use thiserror::Error;
 
+/// Error type for authentication and account cache operations.
 #[derive(Debug, Error)]
 pub enum AuthError {
     #[error("I/O error: {0}")]

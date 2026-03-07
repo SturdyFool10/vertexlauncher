@@ -1,5 +1,6 @@
 use eframe::CreationContext;
 
+/// Applies platform-specific window blur/backdrop effects when enabled.
 pub fn apply(cc: &CreationContext<'_>, blur_enabled: bool) {
     if !blur_enabled {
         return;
@@ -49,7 +50,11 @@ mod windows {
         };
 
         if result != 0 {
-            eprintln!("Failed to enable Windows acrylic backdrop: HRESULT {result:#x}");
+            tracing::warn!(
+                target: "vertexlauncher/ui/window_effects",
+                hresult = %format!("{result:#x}"),
+                "failed to enable Windows acrylic backdrop"
+            );
         }
     }
 }

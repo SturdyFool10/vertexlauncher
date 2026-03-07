@@ -10,6 +10,10 @@ pub(crate) fn run_device_code_login(
     client_id: String,
     sender: &Sender<LoginEvent>,
 ) -> Result<(), AuthError> {
+    tracing::info!(
+        target: "vertexlauncher/auth/device_code",
+        "starting device-code login worker"
+    );
     let agent = build_http_agent();
     let tenant = oauth_tenant();
 
@@ -32,6 +36,10 @@ pub(crate) fn run_device_code_login(
 
     let account = complete_minecraft_login(&agent, &microsoft_token.access_token)?;
     let _ = sender.send(LoginEvent::Completed(account));
+    tracing::info!(
+        target: "vertexlauncher/auth/device_code",
+        "device-code login worker completed successfully"
+    );
 
     Ok(())
 }

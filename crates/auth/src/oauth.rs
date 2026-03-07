@@ -3,6 +3,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
+use tracing::{debug, warn};
 use url::Url;
 
 use crate::constants::{
@@ -40,6 +41,10 @@ struct OAuthErrorResponse {
 }
 
 pub(crate) fn login_begin(client_id: String) -> Result<MinecraftLoginFlow, AuthError> {
+    debug!(
+        target: "vertexlauncher/auth/oauth",
+        "building Microsoft OAuth authorization URL"
+    );
     let verifier = generate_pkce_verifier();
     let challenge = pkce_challenge(&verifier);
     let state = generate_random_token(24);
@@ -166,6 +171,12 @@ pub(crate) fn request_device_code(
     client_id: &str,
     tenant: &str,
 ) -> Result<DeviceCodeResponse, AuthError> {
+    debug!(
+        target: "vertexlauncher/auth/oauth",
+        client_id,
+        tenant,
+        "requesting Microsoft device code"
+    );
     let url = device_code_url(tenant);
     let response = agent
         .post(&url)
@@ -176,6 +187,13 @@ pub(crate) fn request_device_code(
         Ok(ok) => Ok(ok.into_json::<DeviceCodeResponse>()?),
         Err(ureq::Error::Status(_, err_response)) => {
             if let Ok(oauth_error) = err_response.into_json::<OAuthErrorResponse>() {
+                warn!(
+                    target: "vertexlauncher/auth/oauth",
+                    client_id,
+                    tenant,
+                    error = oauth_error.error.as_str(),
+                    "device-code request returned OAuth error"
+                );
                 if oauth_error.error == "unauthorized_client" {
                     return Err(AuthError::OAuth(format!(
                         "unauthorized_client for client id '{client_id}' on tenant '{tenant}'. \
@@ -210,6 +228,13 @@ pub(crate) fn poll_for_microsoft_token(
     device_code: &DeviceCodeResponse,
     sender: &Sender<LoginEvent>,
 ) -> Result<MicrosoftTokenResponse, AuthError> {
+    debug!(
+        target: "vertexlauncher/auth/oauth",
+        tenant,
+        expires_in_secs = device_code.expires_in,
+        initial_interval_secs = device_code.interval.max(1),
+        "starting Microsoft device-code token polling"
+    );
     let expires_after = Duration::from_secs(device_code.expires_in);
     let started_at = Instant::now();
     let mut poll_interval_secs = device_code.interval.max(1);
@@ -251,6 +276,11 @@ pub(crate) fn poll_for_microsoft_token(
                     }
                     "slow_down" => {
                         poll_interval_secs = (poll_interval_secs + 5).min(30);
+                        debug!(
+                            target: "vertexlauncher/auth/oauth",
+                            poll_interval_secs,
+                            "device-code polling asked to slow down"
+                        );
                         if !sent_waiting {
                             let _ = sender.send(LoginEvent::WaitingForAuthorization);
                             sent_waiting = true;
@@ -258,6 +288,11 @@ pub(crate) fn poll_for_microsoft_token(
                     }
                     "authorization_declined" => return Err(AuthError::AuthorizationDeclined),
                     "expired_token" | "bad_verification_code" => {
+                        warn!(
+                            target: "vertexlauncher/auth/oauth",
+                            error = oauth_error.error.as_str(),
+                            "device-code polling expired or invalidated"
+                        );
                         return Err(AuthError::DeviceCodeExpired);
                     }
                     other => {

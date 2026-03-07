@@ -93,9 +93,10 @@ impl FontController {
                         desired_font.size,
                     );
                 } else {
-                    eprintln!(
-                        "Configured font '{}' not available; falling back to included default.",
-                        desired_font.family.label(),
+                    tracing::warn!(
+                        target: "vertexlauncher/app/fonts",
+                        configured_font = desired_font.family.label(),
+                        "configured UI font not available; falling back to included default"
                     );
                     install_included_maple_font(ctx, desired_font.size);
                     applied_family = UiFontFamily::MapleMonoNf;

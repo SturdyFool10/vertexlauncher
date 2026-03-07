@@ -18,9 +18,11 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle as SyntectFontStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
+use tracing::warn;
 
 const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "liga, calt";
 
+/// Styling options for plain/rich labels.
 #[derive(Clone, Debug)]
 pub struct LabelOptions {
     pub font_size: f32,
@@ -48,6 +50,7 @@ impl Default for LabelOptions {
     }
 }
 
+/// Styling options for syntax-highlighted code blocks.
 #[derive(Clone, Debug)]
 pub struct CodeBlockOptions {
     pub font_size: f32,
@@ -77,6 +80,7 @@ impl Default for CodeBlockOptions {
     }
 }
 
+/// Markdown rendering options.
 #[derive(Clone, Debug)]
 pub struct MarkdownOptions {
     pub body: LabelOptions,
@@ -96,6 +100,7 @@ impl Default for MarkdownOptions {
     }
 }
 
+/// Styling/behavior options for single/multi-line text inputs.
 #[derive(Clone, Debug)]
 pub struct InputOptions {
     pub font_size: f32,
@@ -133,6 +138,7 @@ impl Default for InputOptions {
     }
 }
 
+/// Styling options for button widgets.
 #[derive(Clone, Debug)]
 pub struct ButtonOptions {
     pub font_size: f32,
@@ -166,6 +172,7 @@ impl Default for ButtonOptions {
     }
 }
 
+/// Styling options for tooltip overlays.
 #[derive(Clone, Debug)]
 pub struct TooltipOptions {
     pub text: LabelOptions,
@@ -284,6 +291,7 @@ enum MarkdownBlock {
     },
 }
 
+/// High-level text rendering helper built on cosmic-text + egui textures.
 pub struct TextUi {
     font_system: FontSystem,
     swash_cache: SwashCache,
@@ -308,6 +316,7 @@ impl Default for TextUi {
 }
 
 impl TextUi {
+    /// Creates a new text renderer and background async raster worker.
     pub fn new() -> Self {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
@@ -317,8 +326,9 @@ impl TextUi {
             .or_else(|| theme_set.themes.values().next())
             .cloned()
             .unwrap_or_else(|| {
-                eprintln!(
-                    "Syntect theme set was unexpectedly empty; falling back to default code theme."
+                warn!(
+                    target: "vertexlauncher/textui",
+                    "syntect theme set was unexpectedly empty; using default code theme"
                 );
                 Theme::default()
             });
@@ -353,6 +363,7 @@ impl TextUi {
         }
     }
 
+    /// Performs per-frame maintenance and processes async raster results.
     pub fn begin_frame(&mut self, ctx: &Context) {
         self.current_frame = ctx.cumulative_frame_nr();
         self.textures
@@ -360,6 +371,9 @@ impl TextUi {
         self.poll_async_raster_results();
     }
 
+    /// Registers additional font bytes for rendering.
+    ///
+    /// This clears cached textures/input states so new faces are picked up.
     pub fn register_font_data(&mut self, bytes: Vec<u8>) {
         let _ = self
             .async_raster
@@ -370,6 +384,7 @@ impl TextUi {
         self.input_states.clear();
     }
 
+    /// Renders an asynchronously rasterized label.
     pub fn label_async(
         &mut self,
         ui: &mut Ui,
@@ -380,6 +395,7 @@ impl TextUi {
         self.label_impl(ui, id_source, text, options, Sense::hover(), true)
     }
 
+    /// Renders an asynchronously rasterized syntax-highlighted code block.
     pub fn code_block_async(
         &mut self,
         ui: &mut Ui,
@@ -477,6 +493,7 @@ impl TextUi {
         response
     }
 
+    /// Applies font family/size/weight preferences for subsequent text renders.
     pub fn apply_typography(&mut self, family_candidates: &[&str], size_points: f32, weight: i32) {
         let family = self.resolve_family_candidate(family_candidates);
         let size_scale = (size_points / 18.0).clamp(0.50, 3.00);
@@ -495,6 +512,7 @@ impl TextUi {
         self.textures.clear();
     }
 
+    /// Enables/disables OpenType features and updates active tag selection.
     pub fn apply_open_type_features(
         &mut self,
         enabled: bool,
@@ -604,6 +622,7 @@ impl TextUi {
         tags.into_iter().collect()
     }
 
+    /// Renders a plain label synchronously.
     pub fn label(
         &mut self,
         ui: &mut Ui,
@@ -614,6 +633,7 @@ impl TextUi {
         self.label_impl(ui, id_source, text, options, Sense::hover(), false)
     }
 
+    /// Renders a clickable label synchronously.
     pub fn clickable_label(
         &mut self,
         ui: &mut Ui,
@@ -624,6 +644,7 @@ impl TextUi {
         self.label_impl(ui, id_source, text, options, Sense::click(), false)
     }
 
+    /// Measures rendered size of text for the provided style options.
     pub fn measure_text_size(&mut self, ui: &Ui, text: &str, options: &LabelOptions) -> Vec2 {
         let scale = ui.ctx().pixels_per_point();
         let metrics = Metrics::new(
@@ -735,6 +756,7 @@ impl TextUi {
         response
     }
 
+    /// Renders a button with text styles from [`ButtonOptions`].
     pub fn button(
         &mut self,
         ui: &mut Ui,
@@ -745,6 +767,7 @@ impl TextUi {
         self.button_impl(ui, id_source, text, false, options)
     }
 
+    /// Renders a selectable button variant.
     pub fn selectable_button(
         &mut self,
         ui: &mut Ui,
@@ -826,6 +849,7 @@ impl TextUi {
         response
     }
 
+    /// Shows a tooltip while the provided response is hovered.
     pub fn tooltip_for_response(
         &mut self,
         ui: &Ui,
@@ -895,6 +919,7 @@ impl TextUi {
         );
     }
 
+    /// Renders a syntax-highlighted code block synchronously.
     pub fn code_block(
         &mut self,
         ui: &mut Ui,
@@ -998,6 +1023,7 @@ impl TextUi {
         response
     }
 
+    /// Renders simple markdown (headings, paragraphs, fenced code).
     pub fn markdown(
         &mut self,
         ui: &mut Ui,
@@ -1048,6 +1074,7 @@ impl TextUi {
         });
     }
 
+    /// Renders a single-line editable text field.
     pub fn singleline_input(
         &mut self,
         ui: &mut Ui,
@@ -1058,6 +1085,7 @@ impl TextUi {
         self.input_widget(ui, id_source, text, options, false)
     }
 
+    /// Renders a multi-line editable text field.
     pub fn multiline_input(
         &mut self,
         ui: &mut Ui,

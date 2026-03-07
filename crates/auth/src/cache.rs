@@ -67,21 +67,36 @@ pub(crate) fn load_cached_accounts() -> Result<CachedAccountsState, AuthError> {
     maybe_migrate_legacy_account_cache(&path)?;
 
     if !path.exists() {
+        tracing::debug!(
+            target: "vertexlauncher/auth/cache",
+            path = %path.display(),
+            "account cache file missing; using empty cache"
+        );
         return Ok(CachedAccountsState::default());
     }
 
-    let contents = fs_read_to_string(path)?;
+    let contents = fs_read_to_string(&path)?;
 
     match serde_json::from_str::<CachedAccountsState>(&contents) {
         Ok(state) => Ok(state.normalize()),
         Err(state_error) => {
             // Backward compatibility with the old single-account cache format.
             if let Ok(single_account) = serde_json::from_str::<CachedAccount>(&contents) {
+                tracing::info!(
+                    target: "vertexlauncher/auth/cache",
+                    "migrated single-account cache format into multi-account state"
+                );
                 let mut state = CachedAccountsState::default();
                 state.upsert_and_activate(single_account);
                 return Ok(state);
             }
 
+            tracing::warn!(
+                target: "vertexlauncher/auth/cache",
+                path = %path.display(),
+                error = %state_error,
+                "failed to parse account cache"
+            );
             Err(AuthError::Json(state_error))
         }
     }
@@ -193,6 +208,12 @@ fn maybe_migrate_legacy_account_cache(target_path: &Path) -> Result<(), AuthErro
     let bytes = fs_read(&legacy_path)?;
     write_secure_file_atomic(target_path, &bytes)?;
     fs_remove_file(&legacy_path)?;
+    tracing::info!(
+        target: "vertexlauncher/auth/cache",
+        legacy_path = %legacy_path.display(),
+        target_path = %target_path.display(),
+        "migrated legacy account cache path"
+    );
     Ok(())
 }
 

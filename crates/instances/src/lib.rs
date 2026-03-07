@@ -13,6 +13,7 @@ const DEFAULT_GAME_VERSION: &str = "latest";
 
 static NEXT_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+/// Wrapper around `fs::read_to_string` with structured IO tracing.
 #[track_caller]
 fn fs_read_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
     let path = path.as_ref();
@@ -20,6 +21,7 @@ fn fs_read_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
     fs::read_to_string(path)
 }
 
+/// Wrapper around `fs::create_dir_all` with structured IO tracing.
 #[track_caller]
 fn fs_create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
     let path = path.as_ref();
@@ -27,6 +29,7 @@ fn fs_create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
     fs::create_dir_all(path)
 }
 
+/// Wrapper around `File::create` with structured IO tracing.
 #[track_caller]
 fn fs_file_create(path: impl AsRef<Path>) -> std::io::Result<fs::File> {
     let path = path.as_ref();
@@ -34,6 +37,7 @@ fn fs_file_create(path: impl AsRef<Path>) -> std::io::Result<fs::File> {
     fs::File::create(path)
 }
 
+/// Wrapper around `fs::copy` with structured IO tracing.
 #[track_caller]
 fn fs_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<u64> {
     let from = from.as_ref();
@@ -47,6 +51,14 @@ fn fs_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<u64>
     fs::copy(from, to)
 }
 
+/// Persisted record describing a launcher instance.
+///
+/// Field expectations:
+/// - `id`: unique, non-empty identifier.
+/// - `name`: human-readable display name.
+/// - `minecraft_root`: relative directory name for this instance under the
+///   launcher installations root.
+/// - `modloader`, `game_version`: non-empty normalized values.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct InstanceRecord {
@@ -77,12 +89,14 @@ impl Default for InstanceRecord {
     }
 }
 
+/// On-disk collection of launcher instances.
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct InstanceStore {
     pub instances: Vec<InstanceRecord>,
 }
 
+/// Inputs required to create a new instance record and directory layout.
 #[derive(Clone, Debug)]
 pub struct NewInstanceSpec {
     pub name: String,
@@ -92,6 +106,7 @@ pub struct NewInstanceSpec {
     pub modloader_version: String,
 }
 
+/// Errors raised by instance store and filesystem operations.
 #[derive(Debug, thiserror::Error)]
 pub enum InstanceError {
     #[error("I/O error: {0}")]
@@ -115,16 +130,22 @@ pub enum InstanceError {
 }
 
 impl InstanceStore {
+    /// Normalizes all records into valid launcher defaults.
+    ///
+    /// This is safe to call repeatedly and is used when loading/saving store
+    /// content from disk.
     pub fn normalize(&mut self) {
         for instance in &mut self.instances {
             normalize_instance(instance);
         }
     }
 
+    /// Returns the first instance matching `id`, if present.
     pub fn find(&self, id: &str) -> Option<&InstanceRecord> {
         self.instances.iter().find(|instance| instance.id == id)
     }
 
+    /// Returns a mutable instance matching `id`, if present.
     pub fn find_mut(&mut self, id: &str) -> Option<&mut InstanceRecord> {
         self.instances
             .iter_mut()
@@ -132,24 +153,62 @@ impl InstanceStore {
     }
 }
 
+/// Loads the instance store from disk.
+///
+/// Missing files are treated as an empty store. Any present records are
+/// normalized to enforce current defaults.
 pub fn load_store() -> Result<InstanceStore, InstanceError> {
     let path = store_path();
-    match fs_read_to_string(path) {
+    tracing::debug!(
+        target: "vertexlauncher/instances",
+        path = %path.display(),
+        "loading instance store"
+    );
+
+    match fs_read_to_string(&path) {
         Ok(raw) => {
             let mut store: InstanceStore = serde_json::from_str(&raw)?;
             store.normalize();
+            tracing::debug!(
+                target: "vertexlauncher/instances",
+                path = %path.display(),
+                count = store.instances.len(),
+                "loaded instance store"
+            );
             Ok(store)
         }
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(InstanceStore::default()),
-        Err(err) => Err(InstanceError::Io(err)),
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            tracing::debug!(
+                target: "vertexlauncher/instances",
+                path = %path.display(),
+                "instance store file missing; using empty store"
+            );
+            Ok(InstanceStore::default())
+        }
+        Err(err) => {
+            tracing::warn!(
+                target: "vertexlauncher/instances",
+                path = %path.display(),
+                error = %err,
+                "failed to read instance store"
+            );
+            Err(InstanceError::Io(err))
+        }
     }
 }
 
+/// Saves the instance store to disk after normalizing records.
 pub fn save_store(store: &InstanceStore) -> Result<(), InstanceError> {
     let mut normalized = store.clone();
     normalized.normalize();
 
     let path = store_path();
+    tracing::debug!(
+        target: "vertexlauncher/instances",
+        path = %path.display(),
+        count = normalized.instances.len(),
+        "saving instance store"
+    );
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -158,9 +217,17 @@ pub fn save_store(store: &InstanceStore) -> Result<(), InstanceError> {
 
     let file = fs_file_create(path)?;
     serde_json::to_writer_pretty(file, &normalized)?;
+    tracing::debug!(
+        target: "vertexlauncher/instances",
+        count = normalized.instances.len(),
+        "instance store saved"
+    );
     Ok(())
 }
 
+/// Creates a new instance, allocating a unique root directory and `mods/` folder.
+///
+/// Fails when required values are blank or filesystem operations fail.
 pub fn create_instance(
     store: &mut InstanceStore,
     installations_root: &Path,
@@ -191,9 +258,22 @@ pub fn create_instance(
     };
 
     store.instances.push(instance.clone());
+    tracing::info!(
+        target: "vertexlauncher/instances",
+        id = instance.id.as_str(),
+        name = instance.name.as_str(),
+        minecraft_root = instance.minecraft_root.as_str(),
+        modloader = instance.modloader.as_str(),
+        game_version = instance.game_version.as_str(),
+        has_modloader_version = !instance.modloader_version.is_empty(),
+        "created instance"
+    );
     Ok(instance)
 }
 
+/// Updates modloader and version settings for an existing instance.
+///
+/// All string inputs except `modloader_version` must be non-empty after trim.
 pub fn set_instance_versions(
     store: &mut InstanceStore,
     id: &str,
@@ -211,9 +291,21 @@ pub fn set_instance_versions(
     instance.modloader = modloader;
     instance.game_version = game_version;
     instance.modloader_version = modloader_version;
+    tracing::info!(
+        target: "vertexlauncher/instances",
+        id,
+        modloader = instance.modloader.as_str(),
+        game_version = instance.game_version.as_str(),
+        has_modloader_version = !instance.modloader_version.is_empty(),
+        "updated instance versions"
+    );
     Ok(())
 }
 
+/// Updates runtime settings for an existing instance.
+///
+/// `max_memory_mib` accepts `None` (launcher default) or a positive integer in
+/// MiB. `cli_args` is trimmed and stored only when non-empty.
 pub fn set_instance_settings(
     store: &mut InstanceStore,
     id: &str,
@@ -225,9 +317,19 @@ pub fn set_instance_settings(
         .ok_or_else(|| InstanceError::MissingInstance(id.to_owned()))?;
     instance.max_memory_mib = max_memory_mib;
     instance.cli_args = normalize_optional_string(cli_args.as_deref());
+    tracing::debug!(
+        target: "vertexlauncher/instances",
+        id,
+        max_memory_mib = ?instance.max_memory_mib,
+        has_cli_args = instance.cli_args.is_some(),
+        "updated instance runtime settings"
+    );
     Ok(())
 }
 
+/// Copies a local mod file into the selected instance's `mods` directory.
+///
+/// `source_mod_path` must reference an existing file path with a file name.
 pub fn add_mod_file_to_instance(
     store: &InstanceStore,
     id: &str,
@@ -241,6 +343,12 @@ pub fn add_mod_file_to_instance(
 
     let source = PathBuf::from(source_mod_path);
     if !source.exists() {
+        tracing::warn!(
+            target: "vertexlauncher/instances",
+            id,
+            path = source_mod_path,
+            "mod file path does not exist"
+        );
         return Err(InstanceError::MissingModFile(source_mod_path.to_owned()));
     }
 
@@ -257,13 +365,26 @@ pub fn add_mod_file_to_instance(
 
     let destination = mods_dir.join(file_name);
     fs_copy(source, &destination)?;
+    tracing::info!(
+        target: "vertexlauncher/instances",
+        id,
+        destination = %destination.display(),
+        "copied mod file into instance"
+    );
     Ok(destination)
 }
 
+/// Resolves the absolute filesystem path to the given instance root directory.
+#[must_use]
 pub fn instance_root_path(installations_root: &Path, instance: &InstanceRecord) -> PathBuf {
     installations_root.join(&instance.minecraft_root)
 }
 
+/// Returns the path used for persistent instance metadata (`instances.json`).
+///
+/// Uses `VERTEX_CONFIG_LOCATION/instances.json` when set, otherwise
+/// `./instances.json` relative to the current process directory.
+#[must_use]
 pub fn store_path() -> PathBuf {
     match std::env::var("VERTEX_CONFIG_LOCATION") {
         Ok(dir) => PathBuf::from(dir).join(INSTANCES_FILENAME),
@@ -271,6 +392,7 @@ pub fn store_path() -> PathBuf {
     }
 }
 
+/// Normalizes a record into launcher defaults and sanitized persisted values.
 fn normalize_instance(instance: &mut InstanceRecord) {
     instance.name = required(std::mem::take(&mut instance.name), InstanceError::EmptyName)
         .unwrap_or_else(|_| DEFAULT_INSTANCE_NAME.to_owned());
@@ -302,6 +424,7 @@ fn normalize_instance(instance: &mut InstanceRecord) {
     }
 }
 
+/// Generates a unique, filesystem-safe root name for a new instance.
 fn unique_minecraft_root(
     store: &InstanceStore,
     installations_root: &Path,
@@ -328,6 +451,9 @@ fn unique_minecraft_root(
     }
 }
 
+/// Converts a display name into a lowercase ASCII slug.
+///
+/// Empty or non-alphanumeric-only values normalize to `"instance"`.
 fn slugify_name(value: &str) -> String {
     let mut out = String::new();
     let mut last_was_dash = false;
@@ -350,10 +476,12 @@ fn slugify_name(value: &str) -> String {
     }
 }
 
+/// Sanitizes persisted root names into a safe directory slug.
 fn sanitize_root_name(value: &str) -> String {
     slugify_name(value)
 }
 
+/// Trims optional user input and drops it when empty.
 fn normalize_optional_string(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -361,6 +489,7 @@ fn normalize_optional_string(value: Option<&str>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// Validates a required string input by trimming and rejecting empties.
 fn required(value: String, err: InstanceError) -> Result<String, InstanceError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -370,6 +499,7 @@ fn required(value: String, err: InstanceError) -> Result<String, InstanceError> 
     }
 }
 
+/// Generates a mostly monotonic instance id composed of epoch millis + counter.
 fn next_instance_id() -> String {
     let epoch_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)

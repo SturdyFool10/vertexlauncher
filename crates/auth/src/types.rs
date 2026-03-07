@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::util::decode_base64;
 
+/// Browser/device-code OAuth session values required to complete login.
 #[derive(Debug, Clone)]
 pub struct MinecraftLoginFlow {
     pub verifier: String,
@@ -14,6 +15,7 @@ pub struct MinecraftLoginFlow {
     pub(crate) client_id: String,
 }
 
+/// One Minecraft skin entry from profile API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftSkinState {
     pub id: String,
@@ -28,6 +30,7 @@ pub struct MinecraftSkinState {
     pub texture_png_base64: Option<String>,
 }
 
+/// One Minecraft cape entry from profile API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftCapeState {
     pub id: String,
@@ -40,6 +43,7 @@ pub struct MinecraftCapeState {
     pub texture_png_base64: Option<String>,
 }
 
+/// Minecraft profile data persisted in account cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftProfileState {
     pub id: String,
@@ -50,6 +54,7 @@ pub struct MinecraftProfileState {
     pub capes: Vec<MinecraftCapeState>,
 }
 
+/// Cached account record used by launcher UI/auth state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedAccount {
     pub minecraft_profile: MinecraftProfileState,
@@ -66,6 +71,7 @@ pub struct CachedAccount {
 }
 
 impl CachedAccount {
+    /// Decodes avatar PNG bytes from base64, if present and valid.
     pub fn avatar_png_bytes(&self) -> Option<Vec<u8>> {
         self.avatar_png_base64
             .as_deref()
@@ -73,6 +79,7 @@ impl CachedAccount {
     }
 }
 
+/// Multi-account cache model with one active profile selection.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CachedAccountsState {
     #[serde(default)]
@@ -82,6 +89,7 @@ pub struct CachedAccountsState {
 }
 
 impl CachedAccountsState {
+    /// Normalizes account set by deduplicating profile ids and fixing active id.
     pub fn normalize(mut self) -> Self {
         let mut unique_accounts = Vec::with_capacity(self.accounts.len());
 
@@ -120,6 +128,7 @@ impl CachedAccountsState {
         self
     }
 
+    /// Returns the currently active account, falling back to first account.
     pub fn active_account(&self) -> Option<&CachedAccount> {
         let active_id = self.active_profile_id.as_deref()?;
         self.accounts
@@ -128,6 +137,7 @@ impl CachedAccountsState {
             .or_else(|| self.accounts.first())
     }
 
+    /// Inserts/replaces an account by profile id and marks it active.
     pub fn upsert_and_activate(&mut self, account: CachedAccount) {
         if let Some(existing_index) = self
             .accounts
@@ -143,6 +153,9 @@ impl CachedAccountsState {
         *self = std::mem::take(self).normalize();
     }
 
+    /// Sets active profile id if it exists in `accounts`.
+    ///
+    /// Returns `false` when `profile_id` is unknown.
     pub fn set_active_profile_id(&mut self, profile_id: &str) -> bool {
         if !self
             .accounts
@@ -156,6 +169,9 @@ impl CachedAccountsState {
         true
     }
 
+    /// Removes an account by profile id and updates active selection.
+    ///
+    /// Returns `false` when no account matched.
     pub fn remove_by_profile_id(&mut self, profile_id: &str) -> bool {
         let before_len = self.accounts.len();
         self.accounts
@@ -175,6 +191,7 @@ impl CachedAccountsState {
     }
 }
 
+/// Instructions shown to user during device-code sign-in.
 #[derive(Debug, Clone)]
 pub struct DeviceCodePrompt {
     pub user_code: String,
@@ -185,6 +202,7 @@ pub struct DeviceCodePrompt {
     pub message: String,
 }
 
+/// Events produced by async device-code login polling.
 #[derive(Debug, Clone)]
 pub enum LoginEvent {
     DeviceCode(DeviceCodePrompt),
@@ -193,6 +211,7 @@ pub enum LoginEvent {
     Failed(String),
 }
 
+/// Handle for polling device-code login events from background runtime tasks.
 #[derive(Debug)]
 pub struct DeviceCodeLoginFlow {
     pub(crate) receiver: Receiver<LoginEvent>,
@@ -200,6 +219,7 @@ pub struct DeviceCodeLoginFlow {
 }
 
 impl DeviceCodeLoginFlow {
+    /// Drains currently available login events without blocking.
     pub fn poll_events(&mut self) -> Vec<LoginEvent> {
         let mut out = Vec::new();
         loop {
@@ -220,6 +240,7 @@ impl DeviceCodeLoginFlow {
         out
     }
 
+    /// Returns `true` once the flow has completed or failed.
     pub fn is_finished(&self) -> bool {
         self.finished
     }

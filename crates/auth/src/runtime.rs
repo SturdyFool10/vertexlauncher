@@ -4,6 +4,18 @@ use tokio::runtime::{Builder, Handle, Runtime};
 
 static AUTH_TOKIO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
+fn log_auth_runtime_warning(message: &str, multithread_error: &impl std::fmt::Display) {
+    if tracing::dispatcher::has_been_set() {
+        tracing::warn!(
+            target: "vertexlauncher/auth/runtime",
+            error = %multithread_error,
+            "{message}"
+        );
+    } else {
+        eprintln!("{message}: {multithread_error}");
+    }
+}
+
 pub(crate) fn auth_runtime() -> &'static Runtime {
     AUTH_TOKIO_RUNTIME.get_or_init(build_auth_runtime)
 }
@@ -20,8 +32,9 @@ fn build_auth_runtime() -> Runtime {
     {
         Ok(runtime) => runtime,
         Err(multithread_error) => {
-            eprintln!(
-                "Failed to build multi-thread auth runtime: {multithread_error}. Falling back to single-thread runtime."
+            log_auth_runtime_warning(
+                "Failed to build multi-thread auth runtime; falling back to single-thread runtime",
+                &multithread_error,
             );
 
             Builder::new_current_thread()

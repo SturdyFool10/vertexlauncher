@@ -10,3 +10,4 @@ glyphon = "0.10.0"
 pulldown-cmark = "0.13.1"
 syntect = "5.3.0"
 skrifa = "0.40.0"
+tracing.workspace = true

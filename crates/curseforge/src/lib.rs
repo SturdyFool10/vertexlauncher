@@ -1,11 +1,13 @@
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use tracing::{debug, warn};
 
 const DEFAULT_CURSEFORGE_API_BASE_URL: &str = "https://api.curseforge.com";
 const DEFAULT_USER_AGENT: &str =
     "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
 pub const MINECRAFT_GAME_ID: u32 = 432;
 
+/// Errors returned by CurseForge API requests.
 #[derive(Debug, thiserror::Error)]
 pub enum CurseForgeError {
     #[error("CurseForge API key is missing (set VERTEX_CURSEFORGE_API_KEY or CURSEFORGE_API_KEY)")]
@@ -20,6 +22,9 @@ pub enum CurseForgeError {
     Json(#[from] serde_json::Error),
 }
 
+/// CurseForge API client.
+///
+/// Requires an API key from CurseForge for all requests.
 #[derive(Clone, Debug)]
 pub struct Client {
     agent: ureq::Agent,
@@ -28,6 +33,7 @@ pub struct Client {
     api_key: String,
 }
 
+/// A top-level CurseForge content class, such as Mods or Resource Packs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContentClass {
     pub id: u32,
@@ -35,6 +41,7 @@ pub struct ContentClass {
     pub slug: Option<String>,
 }
 
+/// A normalized CurseForge project entry from search results.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchProject {
     pub id: u64,
@@ -48,16 +55,34 @@ pub struct SearchProject {
 }
 
 impl Client {
+    /// Builds a client from process environment variables.
+    ///
+    /// The first available key is used:
+    /// - `VERTEX_CURSEFORGE_API_KEY`
+    /// - `CURSEFORGE_API_KEY`
+    ///
+    /// Returns `None` if no key exists or if the key is blank/invalid.
     pub fn from_env() -> Option<Self> {
         let key = std::env::var("VERTEX_CURSEFORGE_API_KEY")
             .ok()
             .or_else(|| std::env::var("CURSEFORGE_API_KEY").ok())?;
+        debug!(
+            target: "vertexlauncher/curseforge",
+            "loaded CurseForge API key from environment"
+        );
         Self::from_api_key(key).ok()
     }
 
+    /// Builds a client from a raw API key string.
+    ///
+    /// The key must be non-empty after trimming whitespace.
     pub fn from_api_key(api_key: impl Into<String>) -> Result<Self, CurseForgeError> {
         let api_key = api_key.into().trim().to_owned();
         if api_key.is_empty() {
+            warn!(
+                target: "vertexlauncher/curseforge",
+                "attempted to construct CurseForge client with empty API key"
+            );
             return Err(CurseForgeError::MissingApiKey);
         }
 
@@ -69,12 +94,23 @@ impl Client {
         })
     }
 
+    /// Overrides the base API URL.
+    ///
+    /// `base_url` should point to a CurseForge-compatible API root.
+    #[must_use]
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
     }
 
+    /// Lists available top-level content classes for the given game.
     pub fn list_content_classes(&self, game_id: u32) -> Result<Vec<ContentClass>, CurseForgeError> {
+        debug!(
+            target: "vertexlauncher/curseforge",
+            game_id,
+            endpoint = "/v1/categories",
+            "listing CurseForge content classes"
+        );
         let response: DataResponse<Vec<CategoryRecord>> = self.get_json(
             "/v1/categories",
             &[
@@ -83,7 +119,7 @@ impl Client {
             ],
         )?;
 
-        Ok(response
+        let classes: Vec<ContentClass> = response
             .data
             .into_iter()
             .map(|category| ContentClass {
@@ -91,9 +127,22 @@ impl Client {
                 name: category.name,
                 slug: category.slug,
             })
-            .collect())
+            .collect();
+        debug!(
+            target: "vertexlauncher/curseforge",
+            game_id,
+            count = classes.len(),
+            "received CurseForge content classes"
+        );
+        Ok(classes)
     }
 
+    /// Searches CurseForge projects.
+    ///
+    /// Valid values:
+    /// - `query`: non-empty once trimmed.
+    /// - `page_size`: clamped to `1..=50`.
+    /// - `index`: passed directly as the starting offset.
     pub fn search_projects(
         &self,
         game_id: u32,
@@ -103,10 +152,22 @@ impl Client {
     ) -> Result<Vec<SearchProject>, CurseForgeError> {
         let trimmed = query.trim();
         if trimmed.is_empty() {
+            debug!(
+                target: "vertexlauncher/curseforge",
+                "skipping CurseForge search because query is empty"
+            );
             return Ok(Vec::new());
         }
 
         let page_size = page_size.clamp(1, 50);
+        debug!(
+            target: "vertexlauncher/curseforge",
+            game_id,
+            query = trimmed,
+            index,
+            page_size,
+            "searching CurseForge projects"
+        );
         let response: DataResponse<Vec<ModRecord>> = self.get_json(
             "/v1/mods/search",
             &[
@@ -117,7 +178,7 @@ impl Client {
             ],
         )?;
 
-        Ok(response
+        let projects: Vec<SearchProject> = response
             .data
             .into_iter()
             .map(|record| SearchProject {
@@ -130,14 +191,32 @@ impl Client {
                 website_url: record.links.and_then(|links| links.website_url),
                 icon_url: record.logo.and_then(|logo| logo.thumbnail_url.or(logo.url)),
             })
-            .collect())
+            .collect();
+        debug!(
+            target: "vertexlauncher/curseforge",
+            game_id,
+            query = trimmed,
+            returned = projects.len(),
+            "CurseForge search complete"
+        );
+        Ok(projects)
     }
 
+    /// Executes a GET request and deserializes the JSON body.
+    ///
+    /// `path` is appended to the configured `base_url`.
     fn get_json<T: DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, CurseForgeError> {
+        debug!(
+            target: "vertexlauncher/curseforge",
+            path,
+            query_count = query.len(),
+            "sending CurseForge request"
+        );
+
         let mut request = self
             .agent
             .get(&format!("{}{}", self.base_url, path))
@@ -152,15 +231,45 @@ impl Client {
             Ok(ok) => ok,
             Err(ureq::Error::Status(status, response)) => {
                 let body = response.into_string().unwrap_or_default();
+                warn!(
+                    target: "vertexlauncher/curseforge",
+                    path,
+                    status,
+                    body_len = body.len(),
+                    "CurseForge returned non-success status"
+                );
                 return Err(CurseForgeError::HttpStatus { status, body });
             }
             Err(ureq::Error::Transport(transport)) => {
+                warn!(
+                    target: "vertexlauncher/curseforge",
+                    path,
+                    error = %transport,
+                    "CurseForge transport error"
+                );
                 return Err(CurseForgeError::Transport(transport.to_string()));
             }
         };
 
-        let raw = response.into_string()?;
-        Ok(serde_json::from_str(&raw)?)
+        let raw = response.into_string().map_err(|err| {
+            warn!(
+                target: "vertexlauncher/curseforge",
+                path,
+                error = %err,
+                "failed to read CurseForge response body"
+            );
+            CurseForgeError::Read(err)
+        })?;
+
+        serde_json::from_str(&raw).map_err(|err| {
+            warn!(
+                target: "vertexlauncher/curseforge",
+                path,
+                error = %err,
+                "failed to parse CurseForge response body"
+            );
+            CurseForgeError::Json(err)
+        })
     }
 }
 

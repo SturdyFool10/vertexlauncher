@@ -3,6 +3,7 @@ use std::io::{self, Cursor, Read};
 use image::{DynamicImage, ImageFormat, RgbaImage, imageops};
 use serde::Deserialize;
 use serde_json::json;
+use tracing::{debug, warn};
 use zeroize::Zeroizing;
 
 use crate::constants::{
@@ -17,6 +18,10 @@ pub(crate) fn complete_minecraft_login(
     agent: &ureq::Agent,
     microsoft_access_token: &str,
 ) -> Result<CachedAccount, AuthError> {
+    debug!(
+        target: "vertexlauncher/auth/minecraft",
+        "starting Minecraft account completion flow"
+    );
     let xbox_user = authenticate_with_xbox_live(agent, microsoft_access_token)
         .map_err(|err| prefix_auth_error("XboxUserAuth", err))?;
 
@@ -58,6 +63,10 @@ fn authenticate_with_xbox_live(
                 return Err(first_err);
             }
 
+            debug!(
+                target: "vertexlauncher/auth/minecraft",
+                "retrying Xbox auth with alternate RPS ticket format"
+            );
             match authenticate_with_xbox_live_rps(agent, microsoft_access_token, "t=") {
                 Ok(result) => Ok(result),
                 Err(second_err) => Err(AuthError::Http(format!(
@@ -149,6 +158,11 @@ fn authenticate_with_minecraft(
             Ok(parsed.access_token)
         }
         Err(ureq::Error::Status(code, response)) if matches!(code, 400 | 401 | 403 | 404) => {
+            warn!(
+                target: "vertexlauncher/auth/minecraft",
+                status = code,
+                "primary Minecraft token endpoint failed; trying legacy endpoint"
+            );
             let launcher_error = map_http_error(ureq::Error::Status(code, response)).to_string();
 
             let legacy_response = agent

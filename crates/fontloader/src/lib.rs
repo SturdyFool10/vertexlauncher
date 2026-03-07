@@ -68,6 +68,7 @@ pub struct FontSpec<'a> {
 }
 
 impl<'a> FontSpec<'a> {
+    /// Creates a query with default style parameters and ordered family fallbacks.
     pub fn new(families: &'a [&'a str]) -> Self {
         Self {
             families,
@@ -77,16 +78,19 @@ impl<'a> FontSpec<'a> {
         }
     }
 
+    /// Sets desired font weight.
     pub fn weight(mut self, w: Weight) -> Self {
         self.weight = w;
         self
     }
 
+    /// Sets desired slant/style.
     pub fn slant(mut self, s: Slant) -> Self {
         self.slant = s;
         self
     }
 
+    /// Sets desired stretch/width.
     pub fn stretch(mut self, s: Stretch) -> Self {
         self.stretch = s;
         self
@@ -199,6 +203,7 @@ impl FontCatalog {
         &self.db
     }
 
+    /// Mutable access to the underlying database for advanced loading/querying.
     pub fn db_mut(&mut self) -> &mut fontdb::Database {
         &mut self.db
     }
@@ -209,6 +214,8 @@ pub mod egui_integration {
 
     /// Install a font face into egui at runtime and make it top priority for both
     /// Proportional and Monospace families.
+    ///
+    /// `font_key` should be stable between calls so egui can reuse font entries.
     pub fn install_font_as_primary(
         ctx: &egui::Context,
         font_key: &str,

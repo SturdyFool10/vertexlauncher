@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Error as IOError, Write};
+use std::path::Path;
 
 pub const UI_FONT_SIZE_MIN: f32 = 10.0;
 pub const UI_FONT_SIZE_MAX: f32 = 42.0;
@@ -82,6 +83,7 @@ pub enum ConfigFormat {
 }
 
 impl ConfigFormat {
+    /// Human-readable label for config format selection UI.
     pub fn label(self) -> &'static str {
         match self {
             ConfigFormat::Json => "JSON (.json)",
@@ -89,6 +91,7 @@ impl ConfigFormat {
         }
     }
 
+    /// Filename extension associated with this config format.
     pub fn extension(self) -> &'static str {
         match self {
             ConfigFormat::Json => "json",
@@ -108,10 +111,12 @@ pub enum UiFontFamily {
 }
 
 impl UiFontFamily {
+    /// Returns whether this font family is shipped with the launcher.
     pub fn is_included_default(self) -> bool {
         matches!(self, UiFontFamily::MapleMonoNf)
     }
 
+    /// Short display label.
     pub fn label(self) -> &'static str {
         match self {
             UiFontFamily::MapleMonoNf => "Maple Mono NF",
@@ -122,6 +127,7 @@ impl UiFontFamily {
         }
     }
 
+    /// Settings-facing label including default marker when applicable.
     pub fn settings_label(self) -> &'static str {
         match self {
             UiFontFamily::MapleMonoNf => "Maple Mono NF (Included default)",
@@ -129,6 +135,7 @@ impl UiFontFamily {
         }
     }
 
+    /// Family aliases used when probing system fonts.
     pub fn query_families(self) -> &'static [&'static str] {
         match self {
             UiFontFamily::MapleMonoNf => MAPLE_FONT_FAMILIES,
@@ -139,6 +146,7 @@ impl UiFontFamily {
         }
     }
 
+    /// System-installed options excluding bundled defaults.
     pub fn system_options() -> &'static [UiFontFamily] {
         UI_FONT_SYSTEM_OPTIONS
     }
@@ -160,6 +168,7 @@ impl JavaRuntimeVersion {
         JavaRuntimeVersion::Java21,
     ];
 
+    /// Java major version number.
     pub const fn major(self) -> u8 {
         match self {
             JavaRuntimeVersion::Java8 => 8,
@@ -169,6 +178,7 @@ impl JavaRuntimeVersion {
         }
     }
 
+    /// Settings label for Java runtime path input.
     pub const fn label(self) -> &'static str {
         match self {
             JavaRuntimeVersion::Java8 => "Java 8 JVM Path",
@@ -178,6 +188,7 @@ impl JavaRuntimeVersion {
         }
     }
 
+    /// Tooltip explaining Minecraft version compatibility for this runtime.
     pub const fn info_tooltip(self) -> &'static str {
         match self {
             JavaRuntimeVersion::Java8 => "Used for Minecraft 1.16.5 and older release versions.",
@@ -206,6 +217,7 @@ pub struct ToggleSettingSpec {
 }
 
 impl ToggleSettingId {
+    /// Returns static metadata used to render this toggle setting.
     pub const fn spec(self) -> ToggleSettingSpec {
         match self {
             ToggleSettingId::LowPowerGpuPreferred => ToggleSettingSpec {
@@ -255,6 +267,7 @@ pub struct DropdownSettingSpec {
 }
 
 impl DropdownSettingId {
+    /// Returns static metadata used to render this dropdown setting.
     pub const fn spec(self) -> DropdownSettingSpec {
         match self {
             DropdownSettingId::UiFontFamily => DropdownSettingSpec {
@@ -284,6 +297,7 @@ pub struct FloatSettingSpec {
 }
 
 impl FloatSettingId {
+    /// Returns static metadata used to render this float setting.
     pub const fn spec(self) -> FloatSettingSpec {
         match self {
             FloatSettingId::UiFontSize => FloatSettingSpec {
@@ -314,6 +328,7 @@ pub struct IntSettingSpec {
 }
 
 impl IntSettingId {
+    /// Returns static metadata used to render this integer setting.
     pub const fn spec(self) -> IntSettingSpec {
         match self {
             IntSettingId::UiFontWeight => IntSettingSpec {
@@ -341,6 +356,7 @@ pub struct TextSettingSpec {
 }
 
 impl TextSettingId {
+    /// Returns static metadata used to render this text setting.
     pub const fn spec(self) -> TextSettingSpec {
         match self {
             TextSettingId::OpenTypeFeaturesToEnable => TextSettingSpec {
@@ -354,6 +370,9 @@ impl TextSettingId {
     }
 }
 
+/// Launcher configuration persisted as JSON/TOML.
+///
+/// Values are normalized on load/save via [`Config::normalize`].
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Config {
@@ -380,50 +399,62 @@ pub struct Config {
 }
 
 impl Config {
+    /// Returns whether integrated GPU preference is enabled.
     pub fn low_power_gpu_preferred(&self) -> bool {
         self.low_power_gpu_preferred
     }
 
+    /// Returns currently selected UI font family.
     pub fn ui_font_family(&self) -> UiFontFamily {
         self.ui_font_family
     }
 
+    /// Returns whether platform blur effects are enabled.
     pub fn window_blur_enabled(&self) -> bool {
         self.window_blur_enabled
     }
 
+    /// Returns active theme id.
     pub fn theme_id(&self) -> &str {
         &self.theme_id
     }
 
+    /// Sets active theme id.
     pub fn set_theme_id(&mut self, theme_id: impl Into<String>) {
         self.theme_id = theme_id.into();
     }
 
+    /// Returns whether OpenType feature toggling is enabled.
     pub fn open_type_features_enabled(&self) -> bool {
         self.open_type_features_enabled
     }
 
+    /// Returns comma-separated OpenType feature tags configured by user.
     pub fn open_type_features_to_enable(&self) -> &str {
         &self.open_type_features_to_enable
     }
 
+    /// Returns configured UI font size in points.
     pub fn ui_font_size(&self) -> f32 {
         self.ui_font_size
     }
 
+    /// Returns configured UI font weight (CSS-like 100..900).
     pub fn ui_font_weight(&self) -> i32 {
         self.ui_font_weight
     }
 
+    /// Returns whether snapshots/betas are included in version pickers.
     pub fn include_snapshots_and_betas(&self) -> bool {
         self.include_snapshots_and_betas
     }
 
+    /// Returns default per-instance max memory (MiB).
     pub fn default_instance_max_memory_mib(&self) -> u128 {
         self.default_instance_max_memory_mib
     }
 
+    /// Sets default per-instance max memory (MiB), clamped to supported range.
     pub fn set_default_instance_max_memory_mib(&mut self, memory_mib: u128) {
         self.default_instance_max_memory_mib = memory_mib.clamp(
             INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN,
@@ -431,18 +462,22 @@ impl Config {
         );
     }
 
+    /// Mutable access to default per-instance CLI args string.
     pub fn default_instance_cli_args_mut(&mut self) -> &mut String {
         &mut self.default_instance_cli_args
     }
 
+    /// Returns default per-instance CLI args.
     pub fn default_instance_cli_args(&self) -> &str {
         &self.default_instance_cli_args
     }
 
+    /// Returns root directory for instance installations.
     pub fn minecraft_installations_root(&self) -> &str {
         &self.minecraft_installations_root
     }
 
+    /// Sets root directory for instance installations and normalizes empties.
     pub fn set_minecraft_installations_root(&mut self, path: impl Into<String>) {
         self.minecraft_installations_root = path.into();
         normalize_required_path(
@@ -451,31 +486,38 @@ impl Config {
         );
     }
 
+    /// Returns max concurrent downloads.
     pub fn download_max_concurrent(&self) -> u32 {
         self.download_max_concurrent
     }
 
+    /// Sets max concurrent downloads, clamped to supported range.
     pub fn set_download_max_concurrent(&mut self, max_concurrent: u32) {
         self.download_max_concurrent =
             max_concurrent.clamp(DOWNLOAD_CONCURRENCY_MIN, DOWNLOAD_CONCURRENCY_MAX);
     }
 
+    /// Returns whether bandwidth limiting is enabled.
     pub fn download_speed_limit_enabled(&self) -> bool {
         self.download_speed_limit_enabled
     }
 
+    /// Enables/disables download bandwidth limiting.
     pub fn set_download_speed_limit_enabled(&mut self, enabled: bool) {
         self.download_speed_limit_enabled = enabled;
     }
 
+    /// Returns configured bandwidth limit text (for example `10mbps`).
     pub fn download_speed_limit(&self) -> &str {
         &self.download_speed_limit
     }
 
+    /// Mutable access to configured bandwidth limit text.
     pub fn download_speed_limit_mut(&mut self) -> &mut String {
         &mut self.download_speed_limit
     }
 
+    /// Parses configured bandwidth limit into bits per second when enabled.
     pub fn parsed_download_speed_limit_bps(&self) -> Option<u64> {
         if !self.download_speed_limit_enabled {
             return None;
@@ -483,6 +525,7 @@ impl Config {
         parse_bitrate_to_bps(self.download_speed_limit())
     }
 
+    /// Returns user-provided Java runtime path for the requested runtime major.
     pub fn java_runtime_path(&self, runtime: JavaRuntimeVersion) -> Option<&str> {
         match runtime {
             JavaRuntimeVersion::Java8 => self.java_8_jvm_path.as_deref(),
@@ -492,6 +535,7 @@ impl Config {
         }
     }
 
+    /// Sets Java runtime path for the requested runtime major.
     pub fn set_java_runtime_path(&mut self, runtime: JavaRuntimeVersion, path: Option<String>) {
         match runtime {
             JavaRuntimeVersion::Java8 => self.java_8_jvm_path = path,
@@ -501,6 +545,7 @@ impl Config {
         }
     }
 
+    /// Normalizes all config values into launcher-supported ranges/defaults.
     pub fn normalize(&mut self) {
         self.ui_font_size = self.ui_font_size.clamp(UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX);
         self.ui_font_weight = self
@@ -527,6 +572,7 @@ impl Config {
         }
     }
 
+    /// Visits each toggle setting with mutable access to its backing value.
     pub fn for_each_toggle_mut(&mut self, mut visit: impl FnMut(ToggleSettingSpec, &mut bool)) {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
@@ -569,6 +615,7 @@ impl Config {
         );
     }
 
+    /// Visits each dropdown setting with mutable access to its backing value.
     pub fn for_each_dropdown_mut(
         &mut self,
         mut visit: impl FnMut(DropdownSettingSpec, &mut UiFontFamily),
@@ -599,6 +646,7 @@ impl Config {
         visit(DropdownSettingId::UiFontFamily.spec(), ui_font_family);
     }
 
+    /// Visits each float setting with mutable access to its backing value.
     pub fn for_each_float_mut(&mut self, mut visit: impl FnMut(FloatSettingSpec, &mut f32)) {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
@@ -626,6 +674,7 @@ impl Config {
         visit(FloatSettingId::UiFontSize.spec(), ui_font_size);
     }
 
+    /// Visits each integer setting with mutable access to its backing value.
     pub fn for_each_int_mut(&mut self, mut visit: impl FnMut(IntSettingSpec, &mut i32)) {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
@@ -653,6 +702,7 @@ impl Config {
         visit(IntSettingId::UiFontWeight.spec(), ui_font_weight);
     }
 
+    /// Visits each text setting with mutable access to its backing value.
     pub fn for_each_text_mut(&mut self, mut visit: impl FnMut(TextSettingSpec, &mut String)) {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
@@ -727,6 +777,9 @@ impl Default for Config {
     }
 }
 
+/// Parses human input like `10mbps` into bits-per-second.
+///
+/// Supported suffixes: `kbps`, `mbps`, `gbps`, `tbps` (case-insensitive).
 pub fn parse_bitrate_to_bps(value: &str) -> Option<u64> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -759,6 +812,7 @@ pub fn parse_bitrate_to_bps(value: &str) -> Option<u64> {
     Some(bps.round() as u64)
 }
 
+/// Result of loading configuration from disk.
 #[derive(Clone, Debug)]
 pub enum LoadConfigResult {
     Loaded(Config),
@@ -783,7 +837,49 @@ fn find_existing_config_path(base: &str) -> Option<String> {
     }
 }
 
+fn parse_config_contents(path: &str, contents: &str) -> Option<Config> {
+    if path.ends_with(".json") {
+        match serde_json::from_str::<Config>(contents) {
+            Ok(config) => Some(config),
+            Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/config",
+                    path,
+                    error = %err,
+                    "failed to parse JSON config; using defaults"
+                );
+                None
+            }
+        }
+    } else {
+        match toml::from_str::<Config>(contents) {
+            Ok(config) => Some(config),
+            Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/config",
+                    path,
+                    error = %err,
+                    "failed to parse TOML config; using defaults"
+                );
+                None
+            }
+        }
+    }
+}
+
 fn construct_new_config(path: &str, conf: &Config) -> Result<(), IOError> {
+    if let Some(parent) = Path::new(path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        tracing::debug!(
+            target: "vertexlauncher/io",
+            op = "create_dir_all",
+            path = %parent.display(),
+            context = "ensure config directory"
+        );
+        std::fs::create_dir_all(parent)?;
+    }
+
     let format = if path.ends_with(".toml") {
         ConfigFormat::Toml
     } else {
@@ -807,41 +903,76 @@ fn construct_new_config(path: &str, conf: &Config) -> Result<(), IOError> {
     Ok(())
 }
 
+/// Creates and persists a default config file in the selected format.
 pub fn create_default_config(format: ConfigFormat) -> Result<Config, IOError> {
     let config_path = format!("{}.{}", config_base_path(), format.extension());
     let mut config = Config::default();
     config.normalize();
     construct_new_config(&config_path, &config)?;
+    tracing::info!(
+        target: "vertexlauncher/config",
+        path = %config_path,
+        format = format.extension(),
+        "created default config"
+    );
     Ok(config)
 }
 
+/// Saves the given config to the existing config file path (or JSON by default).
 pub fn save_config(config: &Config) -> Result<(), IOError> {
     let mut normalized = config.clone();
     normalized.normalize();
 
     let base = config_base_path();
     let path = find_existing_config_path(&base).unwrap_or_else(|| format!("{base}.json"));
-    construct_new_config(&path, &normalized)
+    construct_new_config(&path, &normalized)?;
+    tracing::debug!(
+        target: "vertexlauncher/config",
+        path = %path,
+        "saved launcher config"
+    );
+    Ok(())
 }
 
+/// Loads config from disk if present, otherwise reports the default format choice.
+///
+/// Parse/read failures fall back to normalized defaults and emit warnings.
 pub fn load_config() -> LoadConfigResult {
     let base = config_base_path();
 
     match find_existing_config_path(&base) {
         Some(path) => {
             tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path, context = "load config");
-            let contents = std::fs::read_to_string(&path).unwrap_or_default();
-            let mut parsed: Config = if path.ends_with(".json") {
-                serde_json::from_str(&contents).unwrap_or_default()
-            } else {
-                toml::from_str(&contents).unwrap_or_default()
+            let contents = match std::fs::read_to_string(&path) {
+                Ok(contents) => contents,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "vertexlauncher/config",
+                        path = %path,
+                        error = %err,
+                        "failed to read config file; using defaults"
+                    );
+                    String::new()
+                }
             };
+            let mut parsed = parse_config_contents(&path, &contents).unwrap_or_default();
 
             parsed.normalize();
+            tracing::debug!(
+                target: "vertexlauncher/config",
+                path = %path,
+                "loaded launcher config"
+            );
             LoadConfigResult::Loaded(parsed)
         }
-        None => LoadConfigResult::Missing {
-            default_format: ConfigFormat::Json,
-        },
+        None => {
+            tracing::debug!(
+                target: "vertexlauncher/config",
+                "config file not found; prompting for default format selection"
+            );
+            LoadConfigResult::Missing {
+                default_format: ConfigFormat::Json,
+            }
+        }
     }
 }
