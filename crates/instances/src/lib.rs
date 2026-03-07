@@ -13,6 +13,40 @@ const DEFAULT_GAME_VERSION: &str = "latest";
 
 static NEXT_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+#[track_caller]
+fn fs_read_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
+    let path = path.as_ref();
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
+    fs::read_to_string(path)
+}
+
+#[track_caller]
+fn fs_create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
+    let path = path.as_ref();
+    tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display());
+    fs::create_dir_all(path)
+}
+
+#[track_caller]
+fn fs_file_create(path: impl AsRef<Path>) -> std::io::Result<fs::File> {
+    let path = path.as_ref();
+    tracing::debug!(target: "vertexlauncher/io", op = "file_create", path = %path.display());
+    fs::File::create(path)
+}
+
+#[track_caller]
+fn fs_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<u64> {
+    let from = from.as_ref();
+    let to = to.as_ref();
+    tracing::debug!(
+        target: "vertexlauncher/io",
+        op = "copy",
+        from = %from.display(),
+        to = %to.display()
+    );
+    fs::copy(from, to)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct InstanceRecord {
@@ -100,7 +134,7 @@ impl InstanceStore {
 
 pub fn load_store() -> Result<InstanceStore, InstanceError> {
     let path = store_path();
-    match fs::read_to_string(path) {
+    match fs_read_to_string(path) {
         Ok(raw) => {
             let mut store: InstanceStore = serde_json::from_str(&raw)?;
             store.normalize();
@@ -119,10 +153,10 @@ pub fn save_store(store: &InstanceStore) -> Result<(), InstanceError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
-        fs::create_dir_all(parent)?;
+        fs_create_dir_all(parent)?;
     }
 
-    let file = fs::File::create(path)?;
+    let file = fs_file_create(path)?;
     serde_json::to_writer_pretty(file, &normalized)?;
     Ok(())
 }
@@ -138,11 +172,11 @@ pub fn create_instance(
     let modloader_version = spec.modloader_version.trim().to_owned();
     let thumbnail_path = normalize_optional_string(spec.thumbnail_path.as_deref());
 
-    fs::create_dir_all(installations_root)?;
+    fs_create_dir_all(installations_root)?;
     let minecraft_root = unique_minecraft_root(store, installations_root, &name);
     let instance_root_path = installations_root.join(&minecraft_root);
-    fs::create_dir_all(&instance_root_path)?;
-    fs::create_dir_all(instance_root_path.join("mods"))?;
+    fs_create_dir_all(&instance_root_path)?;
+    fs_create_dir_all(instance_root_path.join("mods"))?;
 
     let instance = InstanceRecord {
         id: next_instance_id(),
@@ -219,10 +253,10 @@ pub fn add_mod_file_to_instance(
         .find(id)
         .ok_or_else(|| InstanceError::MissingInstance(id.to_owned()))?;
     let mods_dir = instance_root_path(installations_root, instance).join("mods");
-    fs::create_dir_all(&mods_dir)?;
+    fs_create_dir_all(&mods_dir)?;
 
     let destination = mods_dir.join(file_name);
-    fs::copy(source, &destination)?;
+    fs_copy(source, &destination)?;
     Ok(destination)
 }
 

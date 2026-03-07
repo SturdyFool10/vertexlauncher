@@ -5,7 +5,7 @@ use config::{
 use eframe::{self, egui};
 use egui::CentralPanel;
 use installation::{
-    DownloadPolicy, InstallProgress, InstallProgressCallback, ensure_game_files,
+    DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, ensure_game_files,
     ensure_openjdk_runtime,
 };
 use instances::{
@@ -201,7 +201,9 @@ impl eframe::App for VertexApp {
                 accounts: &profile_accounts,
             },
         );
-        notification::render_popups(ctx, &mut self.text_ui);
+        if self.active_screen != screens::AppScreen::Instance {
+            notification::render_popups(ctx, &mut self.text_ui);
+        }
 
         if top_bar_output.start_sign_in {
             self.auth.start_sign_in();
@@ -227,6 +229,18 @@ impl eframe::App for VertexApp {
             self.create_instance_state.error = None;
         }
 
+        let active_launch_auth =
+            self.auth
+                .active_launch_context()
+                .map(|context| screens::LaunchAuthContext {
+                    account_key: context.account_key,
+                    player_name: context.player_name,
+                    player_uuid: context.player_uuid,
+                    access_token: context.access_token,
+                    xuid: context.xuid,
+                    user_type: context.user_type,
+                });
+
         let mut screen_output = screens::ScreenOutput::default();
         CentralPanel::default()
             .frame(
@@ -244,6 +258,9 @@ impl eframe::App for VertexApp {
                     ui,
                     self.active_screen,
                     self.selected_instance_id.as_deref(),
+                    self.auth.display_name(),
+                    active_launch_auth.as_ref(),
+                    self.auth.active_account_owns_minecraft(),
                     &mut self.config,
                     &mut self.instance_store,
                     self.fonts.available_ui_fonts(),
@@ -384,6 +401,7 @@ fn start_initial_instance_install(
     config: &Config,
 ) {
     let instance_name = instance.name.clone();
+    let activity_instance = instance_name.clone();
     let game_version = instance.game_version.trim().to_owned();
     let modloader = instance.modloader.trim().to_owned();
     let modloader_version = {
@@ -400,7 +418,7 @@ fn start_initial_instance_install(
 
     let instance_root = instance_root_path(installations_root, instance);
     let download_policy = DownloadPolicy {
-        starts_per_second: config.download_starts_per_second().max(1),
+        max_concurrent_downloads: config.download_max_concurrent().max(1),
         max_download_bps: config.parsed_download_speed_limit_bps(),
     };
     let java_8 = config
@@ -417,6 +435,22 @@ fn start_initial_instance_install(
         .map(str::to_owned);
 
     let notification_source = format!("installation/{instance_name}");
+    install_activity::set_progress(
+        activity_instance.as_str(),
+        &InstallProgress {
+            stage: InstallStage::PreparingFolders,
+            message: format!(
+                "Starting installation for Minecraft {} ({})...",
+                game_version, modloader
+            ),
+            downloaded_files: 0,
+            total_files: 0,
+            downloaded_bytes: 0,
+            total_bytes: None,
+            bytes_per_second: 0.0,
+            eta_seconds: None,
+        },
+    );
     notification::progress!(
         notification::Severity::Info,
         notification_source.clone(),
@@ -431,10 +465,15 @@ fn start_initial_instance_install(
             std::time::Instant::now() - std::time::Duration::from_secs(1),
         ));
         let notification_source_for_progress = notification_source.clone();
+        let activity_instance_for_progress = activity_instance.clone();
         let result = tokio_runtime::spawn_blocking(move || {
             let progress_callback: InstallProgressCallback = {
                 let last_emit = Arc::clone(&last_emit);
                 Arc::new(move |progress: InstallProgress| {
+                    install_activity::set_progress(
+                        activity_instance_for_progress.as_str(),
+                        &progress,
+                    );
                     let should_emit = if let Ok(mut last) = last_emit.lock() {
                         if last.elapsed() >= std::time::Duration::from_millis(250) {
                             *last = std::time::Instant::now();
@@ -484,6 +523,7 @@ fn start_initial_instance_install(
             let java_path = configured_java
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
+                .filter(|value| Path::new(value).exists())
                 .map(str::to_owned)
                 .or_else(|| {
                     runtime.and_then(|runtime| {
@@ -511,6 +551,7 @@ fn start_initial_instance_install(
 
         match result {
             Ok(setup) => {
+                install_activity::clear_instance(activity_instance.as_str());
                 notification::progress!(
                     notification::Severity::Info,
                     notification_source,
@@ -521,6 +562,7 @@ fn start_initial_instance_install(
                 );
             }
             Err(err) => {
+                install_activity::clear_instance(activity_instance.as_str());
                 notification::error!(
                     notification_source,
                     "{}: initial install failed: {}",
@@ -641,10 +683,28 @@ fn init_tracing() -> PathBuf {
         .unwrap_or_default()
         .as_secs();
     let log_dir = PathBuf::from("logs");
+    tracing::debug!(
+        target: "vertexlauncher/io",
+        op = "create_dir_all",
+        path = %log_dir.display(),
+        context = "initialize logging directory"
+    );
     let _ = std::fs::create_dir_all(&log_dir);
     let log_path = log_dir.join(format!("vertex_{started_epoch}.log"));
+    tracing::debug!(
+        target: "vertexlauncher/io",
+        op = "file_create",
+        path = %log_path.display(),
+        context = "initialize main log file"
+    );
     let file = File::create(&log_path).unwrap_or_else(|_| {
         let fallback = log_dir.join("vertex_fallback.log");
+        tracing::debug!(
+            target: "vertexlauncher/io",
+            op = "file_create",
+            path = %fallback.display(),
+            context = "initialize fallback log file"
+        );
         File::create(fallback).expect("unable to create fallback log file")
     });
     let file = Arc::new(Mutex::new(file));

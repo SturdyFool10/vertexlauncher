@@ -1,5 +1,5 @@
 use config::{
-    Config, DOWNLOAD_STARTS_PER_SECOND_MAX, DOWNLOAD_STARTS_PER_SECOND_MIN, DropdownSettingId,
+    Config, DOWNLOAD_CONCURRENCY_MAX, DOWNLOAD_CONCURRENCY_MIN, DropdownSettingId,
     INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP, JavaRuntimeVersion,
     UiFontFamily, parse_bitrate_to_bps,
 };
@@ -243,20 +243,20 @@ fn render_instance_defaults_section(ui: &mut Ui, text_ui: &mut TextUi, config: &
     }
     ui.add_space(style::SPACE_MD);
 
-    let mut starts_per_second = config.download_starts_per_second() as i32;
+    let mut max_concurrent_downloads = config.download_max_concurrent() as i32;
     let starts_response = settings_widgets::int_stepper_row(
         text_ui,
         ui,
-        "download_starts_per_second",
-        "Download starts per second",
-        Some("Global rate limit for starting download jobs. Default: 4."),
-        &mut starts_per_second,
-        DOWNLOAD_STARTS_PER_SECOND_MIN as i32,
-        DOWNLOAD_STARTS_PER_SECOND_MAX as i32,
+        "download_max_concurrent",
+        "Max concurrent downloads",
+        Some("Global cap on simultaneous download jobs. Default: 8."),
+        &mut max_concurrent_downloads,
+        DOWNLOAD_CONCURRENCY_MIN as i32,
+        DOWNLOAD_CONCURRENCY_MAX as i32,
         1,
     );
     if starts_response.changed() {
-        config.set_download_starts_per_second(starts_per_second.max(1) as u32);
+        config.set_download_max_concurrent(max_concurrent_downloads.max(1) as u32);
     }
     ui.add_space(style::SPACE_MD);
 
@@ -413,6 +413,7 @@ fn memory_slider_max_mib() -> u128 {
 
 #[cfg(target_os = "linux")]
 fn detect_total_memory_mib() -> Option<u128> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = "/proc/meminfo", context = "detect total memory");
     let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
     let line = meminfo.lines().find(|line| line.starts_with("MemTotal:"))?;
     let kib = line.split_whitespace().nth(1)?.parse::<u128>().ok()?;

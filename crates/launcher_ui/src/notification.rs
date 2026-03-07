@@ -261,18 +261,20 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi) {
                     message_style.wrap = true;
                     message_style.font_size = 14.0;
                     message_style.line_height = 18.0;
-                    let _ = text_ui.label(
-                        ui,
-                        ("notif-message", index),
-                        entry.message.as_str(),
-                        &message_style,
-                    );
                     if let Some(progress) = entry.progress {
                         ui.add_space(6.0);
+                        let overlay = format!("{}  {:.0}%", entry.message, progress * 100.0);
                         ui.add(
                             egui::ProgressBar::new(progress)
-                                .show_percentage()
+                                .text(overlay)
                                 .desired_width(ui.available_width()),
+                        );
+                    } else {
+                        let _ = text_ui.label(
+                            ui,
+                            ("notif-message", index),
+                            entry.message.as_str(),
+                            &message_style,
                         );
                     }
                 });

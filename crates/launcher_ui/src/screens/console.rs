@@ -4,7 +4,8 @@ use textui::{LabelOptions, TextUi};
 use crate::{console, ui::style};
 
 pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
-    let lines = console::snapshot();
+    let snapshot = console::snapshot();
+    let lines = &snapshot.active_lines;
     let viewport_size = egui::vec2(
         ui.available_width().max(1.0),
         ui.available_height().max(1.0),
@@ -19,6 +20,8 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                 egui::vec2(inner_width, ui.available_height().max(1.0)),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
+                    render_tabs_row(ui, text_ui, &snapshot);
+                    ui.add_space(style::SPACE_SM);
                     let viewport_height = ui.available_height().max(1.0);
                     ui.set_min_height(viewport_height);
                     egui::ScrollArea::both()
@@ -70,6 +73,42 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
             ui.add_space(style::SPACE_LG);
         },
     );
+}
+
+fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::ConsoleSnapshot) {
+    let tab_style = textui::ButtonOptions {
+        min_size: egui::vec2(80.0, 30.0),
+        text_color: ui.visuals().text_color(),
+        fill: ui.visuals().widgets.inactive.weak_bg_fill,
+        fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+        fill_active: ui.visuals().widgets.active.bg_fill,
+        fill_selected: ui.visuals().selection.bg_fill,
+        stroke: ui.visuals().widgets.inactive.bg_stroke,
+        ..textui::ButtonOptions::default()
+    };
+    egui::ScrollArea::horizontal()
+        .id_salt("console_tabs")
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_SM);
+                for tab in &snapshot.tabs {
+                    let selected = tab.id == snapshot.active_tab_id;
+                    if text_ui
+                        .selectable_button(
+                            ui,
+                            ("console_tab", tab.id.as_str()),
+                            tab.label.as_str(),
+                            selected,
+                            &tab_style,
+                        )
+                        .clicked()
+                    {
+                        console::set_active_tab(tab.id.as_str());
+                    }
+                }
+            });
+        });
 }
 
 fn color_for_line(ui: &Ui, line: &str) -> egui::Color32 {

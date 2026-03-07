@@ -6,6 +6,62 @@ use crate::constants::{ACCOUNT_CACHE_APP_DIR, ACCOUNT_CACHE_FILENAME, LEGACY_ACC
 use crate::error::AuthError;
 use crate::types::{CachedAccount, CachedAccountsState};
 
+#[track_caller]
+fn fs_read_to_string(path: impl AsRef<Path>) -> Result<String, AuthError> {
+    let path = path.as_ref();
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
+    Ok(fs::read_to_string(path)?)
+}
+
+#[track_caller]
+fn fs_read(path: impl AsRef<Path>) -> Result<Vec<u8>, AuthError> {
+    let path = path.as_ref();
+    tracing::debug!(target: "vertexlauncher/io", op = "read", path = %path.display());
+    Ok(fs::read(path)?)
+}
+
+#[track_caller]
+fn fs_remove_file(path: impl AsRef<Path>) -> Result<(), AuthError> {
+    let path = path.as_ref();
+    tracing::debug!(target: "vertexlauncher/io", op = "remove_file", path = %path.display());
+    Ok(fs::remove_file(path)?)
+}
+
+#[track_caller]
+fn fs_create_dir_all(path: impl AsRef<Path>) -> Result<(), AuthError> {
+    let path = path.as_ref();
+    tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display());
+    Ok(fs::create_dir_all(path)?)
+}
+
+#[track_caller]
+fn fs_open_options_create_truncate_write(path: impl AsRef<Path>) -> Result<fs::File, AuthError> {
+    let path = path.as_ref();
+    tracing::debug!(
+        target: "vertexlauncher/io",
+        op = "open_options(create,truncate,write)",
+        path = %path.display()
+    );
+    Ok(fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)?)
+}
+
+#[track_caller]
+fn fs_rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<(), AuthError> {
+    let from = from.as_ref();
+    let to = to.as_ref();
+    tracing::debug!(
+        target: "vertexlauncher/io",
+        op = "rename",
+        from = %from.display(),
+        to = %to.display()
+    );
+    Ok(fs::rename(from, to)?)
+}
+
 pub(crate) fn load_cached_accounts() -> Result<CachedAccountsState, AuthError> {
     let path = account_cache_path();
     maybe_migrate_legacy_account_cache(&path)?;
@@ -14,7 +70,7 @@ pub(crate) fn load_cached_accounts() -> Result<CachedAccountsState, AuthError> {
         return Ok(CachedAccountsState::default());
     }
 
-    let contents = fs::read_to_string(path)?;
+    let contents = fs_read_to_string(path)?;
 
     match serde_json::from_str::<CachedAccountsState>(&contents) {
         Ok(state) => Ok(state.normalize()),
@@ -43,7 +99,7 @@ pub(crate) fn clear_cached_accounts() -> Result<(), AuthError> {
     maybe_migrate_legacy_account_cache(&path)?;
 
     if path.exists() {
-        fs::remove_file(path)?;
+        fs_remove_file(path)?;
     }
 
     Ok(())
@@ -134,27 +190,23 @@ fn maybe_migrate_legacy_account_cache(target_path: &Path) -> Result<(), AuthErro
         return Ok(());
     }
 
-    let bytes = fs::read(&legacy_path)?;
+    let bytes = fs_read(&legacy_path)?;
     write_secure_file_atomic(target_path, &bytes)?;
-    fs::remove_file(&legacy_path)?;
+    fs_remove_file(&legacy_path)?;
     Ok(())
 }
 
 fn write_secure_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), AuthError> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
+            fs_create_dir_all(parent)?;
         }
     }
 
     let temp_path = path.with_extension("tmp");
 
     {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temp_path)?;
+        let mut file = fs_open_options_create_truncate_write(&temp_path)?;
 
         #[cfg(unix)]
         {
@@ -172,10 +224,10 @@ fn write_secure_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), AuthError> 
         // Atomic rename over an existing file is not always available on Windows,
         // so best-effort remove first before rename.
         if path.exists() {
-            let _ = fs::remove_file(path);
+            let _ = fs_remove_file(path);
         }
     }
 
-    fs::rename(temp_path, path)?;
+    fs_rename(temp_path, path)?;
     Ok(())
 }

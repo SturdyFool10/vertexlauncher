@@ -5,8 +5,9 @@ use config::{
 use egui::Ui;
 use installation::{
     DownloadPolicy, GameSetupResult, InstallProgress, InstallProgressCallback, InstallStage,
-    LoaderSupportIndex, MinecraftVersionEntry, VersionCatalog, ensure_game_files,
-    ensure_openjdk_runtime, fetch_version_catalog_with_refresh,
+    LaunchRequest, LaunchResult, LoaderSupportIndex, MinecraftVersionEntry, VersionCatalog,
+    ensure_game_files, ensure_openjdk_runtime, fetch_version_catalog_with_refresh,
+    is_instance_running, launch_instance, running_instance_for_account, stop_running_instance,
 };
 use instances::{InstanceStore, set_instance_settings, set_instance_versions};
 use modprovider::{UnifiedContentEntry, UnifiedSearchResult, search_minecraft_content};
@@ -16,8 +17,9 @@ use std::time::{Duration, Instant};
 use textui::{ButtonOptions, LabelOptions, TextUi, TooltipOptions};
 
 use crate::app::tokio_runtime;
+use crate::screens::LaunchAuthContext;
 use crate::ui::components::settings_widgets;
-use crate::{install_activity, notification};
+use crate::{console, install_activity, notification};
 
 const RESERVED_SYSTEM_MEMORY_MIB: u128 = 4 * 1024;
 const FALLBACK_TOTAL_MEMORY_MIB: u128 = 20 * 1024;
@@ -65,12 +67,14 @@ struct InstanceScreenState {
     runtime_progress_rx: Option<Arc<Mutex<mpsc::Receiver<InstallProgress>>>>,
     runtime_latest_progress: Option<InstallProgress>,
     runtime_last_notification_at: Option<Instant>,
+    launch_username: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 struct RuntimePrepareOutcome {
     setup: GameSetupResult,
     configured_java: Option<(JavaRuntimeVersion, String)>,
+    launch: LaunchResult,
 }
 
 impl InstanceScreenState {
@@ -117,6 +121,7 @@ impl InstanceScreenState {
             runtime_progress_rx: None,
             runtime_latest_progress: None,
             runtime_last_notification_at: None,
+            launch_username: None,
         }
     }
 }
@@ -125,6 +130,9 @@ pub fn render(
     ui: &mut Ui,
     text_ui: &mut TextUi,
     selected_instance_id: Option<&str>,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+    active_account_owns_minecraft: bool,
     instances: &mut InstanceStore,
     config: &mut Config,
 ) -> bool {
@@ -216,6 +224,11 @@ pub fn render(
     ui.add_space(12.0);
 
     let selected_game_version_for_runtime = selected_game_version(&state).to_owned();
+    let external_activity =
+        install_activity::snapshot().filter(|activity| activity.instance_id == state.name_input);
+    let external_install_active = external_activity
+        .as_ref()
+        .is_some_and(|activity| !matches!(activity.stage, InstallStage::Complete));
     render_runtime_row(
         ui,
         text_ui,
@@ -224,6 +237,18 @@ pub fn render(
         instance_root_path.as_path(),
         selected_game_version_for_runtime.as_str(),
         config,
+        external_install_active,
+        active_username,
+        active_launch_auth,
+        active_account_owns_minecraft,
+    );
+    render_install_feedback(
+        ui,
+        text_ui,
+        instance_id,
+        state.runtime_latest_progress.as_ref(),
+        external_activity.as_ref(),
+        state.runtime_prepare_in_flight,
     );
     ui.add_space(12.0);
     ui.separator();
@@ -700,7 +725,19 @@ pub fn render(
         );
     }
 
-    if let Some(progress) = state.runtime_latest_progress.as_ref() {
+    ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
+    instances_changed
+}
+
+fn render_install_feedback(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    instance_id: &str,
+    local_progress: Option<&InstallProgress>,
+    external_activity: Option<&install_activity::InstallActivitySnapshot>,
+    runtime_prepare_in_flight: bool,
+) {
+    if let Some(progress) = local_progress {
         ui.add_space(8.0);
         let fraction = progress_fraction(progress);
         let progress_label = if let Some(eta) = progress.eta_seconds {
@@ -722,7 +759,16 @@ pub fn render(
                 .show_percentage()
                 .text(progress_label),
         );
-
+        let _ = text_ui.label(
+            ui,
+            ("instance_runtime_progress_message", instance_id),
+            progress.message.as_str(),
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
+        );
         let bytes_line = if let Some(total) = progress.total_bytes {
             format!(
                 "{} / {}",
@@ -745,7 +791,10 @@ pub fn render(
                 ..LabelOptions::default()
             },
         );
-    } else if state.runtime_prepare_in_flight {
+        return;
+    }
+
+    if runtime_prepare_in_flight {
         ui.add_space(8.0);
         ui.add(
             egui::ProgressBar::new(0.0)
@@ -753,10 +802,64 @@ pub fn render(
                 .show_percentage()
                 .text("Starting installation..."),
         );
+        return;
     }
 
-    ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
-    instances_changed
+    if let Some(activity) = external_activity {
+        ui.add_space(8.0);
+        let fraction = progress_fraction_from_activity(activity);
+        let progress_label = if let Some(eta) = activity.eta_seconds {
+            format!(
+                "{} · {:.1} MiB/s · ETA {}s",
+                stage_label(activity.stage),
+                activity.bytes_per_second / (1024.0 * 1024.0),
+                eta
+            )
+        } else {
+            format!(
+                "{} · {:.1} MiB/s",
+                stage_label(activity.stage),
+                activity.bytes_per_second / (1024.0 * 1024.0)
+            )
+        };
+        ui.add(
+            egui::ProgressBar::new(fraction)
+                .show_percentage()
+                .text(progress_label),
+        );
+        let _ = text_ui.label(
+            ui,
+            ("instance_runtime_progress_message_external", instance_id),
+            activity.message.as_str(),
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
+        );
+        let bytes_line = if let Some(total) = activity.total_bytes {
+            format!(
+                "{} / {}",
+                format_bytes(activity.downloaded_bytes),
+                format_bytes(total)
+            )
+        } else {
+            format!("{} downloaded", format_bytes(activity.downloaded_bytes))
+        };
+        let _ = text_ui.label(
+            ui,
+            ("instance_runtime_bytes_external", instance_id),
+            &format!(
+                "Files: {}/{} · {}",
+                activity.downloaded_files, activity.total_files, bytes_line
+            ),
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
+        );
+    }
 }
 
 fn render_runtime_row(
@@ -767,6 +870,10 @@ fn render_runtime_row(
     instance_root: &Path,
     game_version: &str,
     config: &Config,
+    external_install_active: bool,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+    active_account_owns_minecraft: bool,
 ) {
     let button_style = ButtonOptions {
         min_size: egui::vec2(120.0, 34.0),
@@ -781,26 +888,70 @@ fn render_runtime_row(
     let mut muted_style = LabelOptions::default();
     muted_style.color = ui.visuals().weak_text_color();
     muted_style.wrap = false;
+    let instance_root_display = instance_root.display().to_string();
+    let launch_account = active_launch_auth
+        .map(|auth| auth.account_key.clone())
+        .or_else(|| {
+            active_username
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        });
+    let launch_display_name = active_launch_auth
+        .map(|auth| auth.player_name.clone())
+        .or_else(|| {
+            active_username
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        });
+    let launch_player_uuid = active_launch_auth.map(|auth| auth.player_uuid.clone());
+    let launch_access_token = active_launch_auth.map(|auth| auth.access_token.clone());
+    let launch_xuid = active_launch_auth.and_then(|auth| auth.xuid.clone());
+    let launch_user_type = active_launch_auth.map(|auth| auth.user_type.clone());
+    let account_running_root = launch_account
+        .as_deref()
+        .and_then(running_instance_for_account);
+    let launch_disabled_for_account = !state.running
+        && account_running_root
+            .as_deref()
+            .is_some_and(|running_root| running_root != instance_root_display.as_str());
+    let launch_disabled_for_missing_ownership = !state.running && !active_account_owns_minecraft;
+    let launch_disabled = launch_disabled_for_account || launch_disabled_for_missing_ownership;
 
     ui.horizontal(|ui| {
-        if !state.runtime_prepare_in_flight {
+        if !state.runtime_prepare_in_flight && !external_install_active {
             let action_label = if state.running { "Stop" } else { "Launch" };
-            if text_ui
-                .button(
-                    ui,
-                    ("instance_runtime_toggle", id),
-                    action_label,
-                    &button_style,
-                )
-                .clicked()
-            {
+            let response = ui
+                .add_enabled_ui(!launch_disabled, |ui| {
+                    text_ui.button(
+                        ui,
+                        ("instance_runtime_toggle", id),
+                        action_label,
+                        &button_style,
+                    )
+                })
+                .inner;
+            if response.clicked() {
                 if state.running {
-                    state.running = false;
-                    state.status_message = Some("Stop requested for this instance.".to_owned());
+                    if stop_running_instance(instance_root) {
+                        state.running = false;
+                        state.status_message = Some("Stopped instance runtime.".to_owned());
+                    } else {
+                        state.running = false;
+                        state.status_message = Some("Instance runtime was not running.".to_owned());
+                    }
                 } else if game_version.trim().is_empty() {
                     state.status_message =
                         Some("Cannot launch: choose a Minecraft game version first.".to_owned());
                 } else {
+                    let max_memory_mib = if state.memory_override_enabled {
+                        state.memory_override_mib
+                    } else {
+                        config.default_instance_max_memory_mib()
+                    };
+                    let extra_jvm_args = normalize_optional(state.cli_args_input.as_str());
+                    state.launch_username = launch_account.clone();
                     request_runtime_prepare(
                         state,
                         instance_root.to_path_buf(),
@@ -809,8 +960,16 @@ fn render_runtime_row(
                         normalize_optional(state.modloader_version_input.as_str()),
                         recommended_java_runtime(game_version),
                         choose_java_executable(config, game_version),
-                        config.download_starts_per_second(),
+                        config.download_max_concurrent(),
                         config.parsed_download_speed_limit_bps(),
+                        max_memory_mib,
+                        extra_jvm_args,
+                        launch_display_name.clone(),
+                        launch_player_uuid.clone(),
+                        launch_access_token.clone(),
+                        launch_xuid.clone(),
+                        launch_user_type.clone(),
+                        launch_account.clone(),
                     );
                 }
             }
@@ -819,7 +978,7 @@ fn render_runtime_row(
         let _ = text_ui.label(
             ui,
             ("instance_runtime_state", id),
-            if state.runtime_prepare_in_flight {
+            if state.runtime_prepare_in_flight || external_install_active {
                 "Runtime state: Installing"
             } else if state.running {
                 "Runtime state: Running"
@@ -828,11 +987,32 @@ fn render_runtime_row(
             },
             &muted_style,
         );
-        if state.runtime_prepare_in_flight {
+        if state.runtime_prepare_in_flight || external_install_active {
             ui.add_space(8.0);
             ui.spinner();
         }
+        if launch_disabled_for_account {
+            let blocked_account = launch_account.as_deref().unwrap_or("this account");
+            let _ = text_ui.label(
+                ui,
+                ("instance_runtime_account_locked", id),
+                &format!("{blocked_account} is already running another instance."),
+                &muted_style,
+            );
+        }
+        if launch_disabled_for_missing_ownership {
+            let _ = text_ui.label(
+                ui,
+                ("instance_runtime_account_ownership", id),
+                "Sign in with a Minecraft account that owns Minecraft to launch.",
+                &muted_style,
+            );
+        }
     });
+    if state.running && !is_instance_running(instance_root) {
+        state.running = false;
+        state.status_message = Some("Minecraft process exited.".to_owned());
+    }
 }
 
 fn render_modloader_selector(
@@ -1171,8 +1351,16 @@ fn request_runtime_prepare(
     modloader_version: Option<String>,
     required_java_runtime: Option<JavaRuntimeVersion>,
     java_executable: Option<String>,
-    download_starts_per_second: u32,
+    download_max_concurrent: u32,
     download_speed_limit_bps: Option<u64>,
+    max_memory_mib: u128,
+    extra_jvm_args: Option<String>,
+    player_name: Option<String>,
+    player_uuid: Option<String>,
+    access_token: Option<String>,
+    xuid: Option<String>,
+    user_type: Option<String>,
+    launch_account_name: Option<String>,
 ) {
     let game_version = game_version.trim().to_owned();
     if game_version.is_empty() || state.runtime_prepare_in_flight {
@@ -1201,10 +1389,51 @@ fn request_runtime_prepare(
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     let java_executable_for_task = java_executable;
+    let extra_jvm_args_for_task = extra_jvm_args;
+    let player_name_for_task = player_name;
+    let player_uuid_for_task = player_uuid;
+    let access_token_for_task = access_token;
+    let xuid_for_task = xuid;
+    let user_type_for_task = user_type;
+    let launch_account_name_for_task = launch_account_name;
     let download_policy = DownloadPolicy {
-        starts_per_second: download_starts_per_second.max(1),
+        max_concurrent_downloads: download_max_concurrent.max(1),
         max_download_bps: download_speed_limit_bps,
     };
+    let modloader_version_display = modloader_version_for_task
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(|value| format!(" {value}"))
+        .unwrap_or_default();
+    let java_launch_mode = if let Some(path) = java_executable_for_task
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        format!("configured Java at {path}")
+    } else if let Some(runtime) = required_java_runtime {
+        format!("auto-provisioned OpenJDK {}", runtime.major())
+    } else {
+        "java from PATH".to_owned()
+    };
+    let username = launch_account_name_for_task
+        .as_deref()
+        .or(player_name_for_task.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("Player");
+    let tab_id = console::ensure_instance_tab(state.name_input.as_str(), username);
+    console::push_line_to_tab(
+        tab_id.as_str(),
+        format!(
+            "Launch request: root={} | Minecraft {} | {}{} | max memory={} MiB | {}",
+            instance_root_display,
+            game_version_for_task,
+            modloader_for_task,
+            modloader_version_display,
+            max_memory_mib.max(512),
+            java_launch_mode
+        ),
+    );
     let instance_id_for_notifications = state.name_input.clone();
     let _ = tokio_runtime::spawn(async move {
         let progress_tx_done = progress_tx.clone();
@@ -1217,6 +1446,7 @@ fn request_runtime_prepare(
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
+                .filter(|value| Path::new(value).exists())
                 .map(str::to_owned)
             {
                 path
@@ -1239,9 +1469,29 @@ fn request_runtime_prepare(
                 &download_policy,
                 Some(progress_callback),
             )
-            .map(|setup| RuntimePrepareOutcome {
-                setup,
-                configured_java,
+            .and_then(|setup| {
+                let launch_request = LaunchRequest {
+                    instance_root: instance_root.clone(),
+                    game_version: game_version_for_task.clone(),
+                    modloader: modloader_for_task.clone(),
+                    modloader_version: modloader_version_for_task.clone(),
+                    account_key: launch_account_name_for_task.clone(),
+                    java_executable: Some(java_path.clone()),
+                    max_memory_mib,
+                    extra_jvm_args: extra_jvm_args_for_task.clone(),
+                    player_name: player_name_for_task
+                        .clone()
+                        .or(launch_account_name_for_task.clone()),
+                    player_uuid: player_uuid_for_task.clone(),
+                    auth_access_token: access_token_for_task.clone(),
+                    auth_xuid: xuid_for_task.clone(),
+                    auth_user_type: user_type_for_task.clone(),
+                };
+                launch_instance(&launch_request).map(|launch| RuntimePrepareOutcome {
+                    setup,
+                    configured_java,
+                    launch,
+                })
             })
             .map_err(|err| err.to_string())
         })
@@ -1344,12 +1594,28 @@ fn poll_runtime_prepare(state: &mut InstanceScreenState, config: &mut Config) {
                     config.set_java_runtime_path(runtime, Some(path));
                 }
                 let setup = outcome.setup;
-                state.running = false;
+                let launch = outcome.launch;
+                let username = state
+                    .launch_username
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or("Player");
+                let tab_id = console::ensure_instance_tab(state.name_input.as_str(), username);
+                console::push_line_to_tab(
+                    tab_id.as_str(),
+                    format!(
+                        "Launched Minecraft {} (pid {}, profile {}).",
+                        game_version, launch.pid, launch.profile_id
+                    ),
+                );
+                state.running = true;
                 install_activity::clear_instance(state.name_input.as_str());
                 state.status_message = Some(format!(
-                    "Installed Minecraft {} in {} ({} file(s) downloaded, loader: {}). Launch execution is not wired yet.",
+                    "Launched Minecraft {} in {} (pid {}, profile {}, {} file(s) downloaded, loader: {}).",
                     game_version,
                     instance_root_display,
+                    launch.pid,
+                    launch.profile_id,
                     setup.downloaded_files,
                     setup.resolved_modloader_version.as_deref().unwrap_or("n/a")
                 ));
@@ -1357,8 +1623,9 @@ fn poll_runtime_prepare(state: &mut InstanceScreenState, config: &mut Config) {
                     notification::Severity::Info,
                     format!("installation/{}", state.name_input),
                     1.0f32,
-                    "Installed Minecraft {} ({} files).",
+                    "Launched Minecraft {} (pid {}, {} files).",
                     game_version,
+                    launch.pid,
                     setup.downloaded_files
                 );
             }
@@ -1388,6 +1655,22 @@ fn should_emit_progress_notification(
 }
 
 fn progress_fraction(progress: &InstallProgress) -> f32 {
+    if progress.total_files > 0 {
+        return (progress.downloaded_files as f32 / progress.total_files as f32).clamp(0.0, 1.0);
+    }
+    if let Some(total_bytes) = progress.total_bytes
+        && total_bytes > 0
+    {
+        return (progress.downloaded_bytes as f32 / total_bytes as f32).clamp(0.0, 1.0);
+    }
+    if matches!(progress.stage, InstallStage::Complete) {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+fn progress_fraction_from_activity(progress: &install_activity::InstallActivitySnapshot) -> f32 {
     if progress.total_files > 0 {
         return (progress.downloaded_files as f32 / progress.total_files as f32).clamp(0.0, 1.0);
     }
@@ -1442,7 +1725,7 @@ fn choose_java_executable(config: &Config, game_version: &str) -> Option<String>
         && let Some(path) = config.java_runtime_path(runtime)
     {
         let trimmed = path.trim();
-        if !trimmed.is_empty() {
+        if !trimmed.is_empty() && Path::new(trimmed).exists() {
             return Some(trimmed.to_owned());
         }
     }
@@ -1610,6 +1893,7 @@ fn memory_slider_max_mib() -> u128 {
 
 #[cfg(target_os = "linux")]
 fn detect_total_memory_mib() -> Option<u128> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = "/proc/meminfo", context = "detect total memory");
     let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
     let line = meminfo.lines().find(|line| line.starts_with("MemTotal:"))?;
     let kib = line.split_whitespace().nth(1)?.parse::<u128>().ok()?;

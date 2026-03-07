@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 pub struct InstallActivitySnapshot {
     pub instance_id: String,
     pub stage: InstallStage,
+    pub message: String,
     pub downloaded_files: u32,
     pub total_files: u32,
     pub downloaded_bytes: u64,
@@ -34,6 +35,7 @@ pub fn set_progress(instance_id: &str, progress: &InstallProgress) {
     guard.active = Some(InstallActivitySnapshot {
         instance_id: instance_id.to_owned(),
         stage: progress.stage,
+        message: progress.message.clone(),
         downloaded_files: progress.downloaded_files,
         total_files: progress.total_files,
         downloaded_bytes: progress.downloaded_bytes,

@@ -535,6 +535,7 @@ impl Oklch {
 }
 
 fn ensure_themes_dir_and_defaults(dir: &Path) {
+    tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %dir.display(), context = "ensure themes dir");
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
@@ -551,12 +552,14 @@ fn ensure_themes_dir_and_defaults(dir: &Path) {
         }
 
         if let Ok(contents) = toml::to_string_pretty(&theme) {
+            tracing::debug!(target: "vertexlauncher/io", op = "write", path = %path.display(), context = "write default theme");
             let _ = std::fs::write(path, contents);
         }
     }
 }
 
 fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_dir", path = %dir.display(), context = "load themes");
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -575,6 +578,7 @@ fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
             continue;
         }
 
+        tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), context = "load theme file");
         let Ok(contents) = std::fs::read_to_string(&path) else {
             continue;
         };

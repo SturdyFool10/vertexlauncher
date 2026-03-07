@@ -19,18 +19,14 @@ pub fn render(
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = style::SPACE_SM;
         for profile in profile_shortcuts {
-            let response = ui
-                .horizontal_centered(|ui| {
-                    icon_button::svg(
-                        ui,
-                        "user_profile",
-                        assets::USER_SVG,
-                        profile.name.as_str(),
-                        false,
-                        max_icon_width,
-                    )
-                })
-                .inner;
+            let response = icon_button::svg(
+                ui,
+                "user_profile",
+                assets::USER_SVG,
+                profile.name.as_str(),
+                false,
+                max_icon_width,
+            );
             if response.clicked() {
                 output.selected_profile_id = Some(profile.id.clone());
             }

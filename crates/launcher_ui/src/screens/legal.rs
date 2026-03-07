@@ -92,8 +92,10 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                             for (index, notice) in LEGAL_NOTICES.iter().enumerate() {
                                 section_frame(ui).show(ui, |ui| {
                                     ui.set_width(ui.available_width());
-                                    let open_id =
-                                        ui.make_persistent_id(("legal_notice_open", notice.source_path));
+                                    let open_id = ui.make_persistent_id((
+                                        "legal_notice_open",
+                                        notice.source_path,
+                                    ));
                                     let mut is_open = ui
                                         .ctx()
                                         .data_mut(|d| d.get_persisted::<bool>(open_id))
@@ -171,7 +173,8 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                                         },
                                     );
 
-                                    let openness = motion::progress(ui.ctx(), open_id.with("anim"), is_open);
+                                    let openness =
+                                        motion::progress(ui.ctx(), open_id.with("anim"), is_open);
                                     if motion::is_animating(openness) {
                                         ui.ctx().request_repaint();
                                     }
@@ -200,7 +203,11 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                                             let code_options = CodeBlockOptions {
                                                 text_color: ui.visuals().text_color(),
                                                 background_color: ui.visuals().code_bg_color,
-                                                stroke: ui.visuals().widgets.noninteractive.bg_stroke,
+                                                stroke: ui
+                                                    .visuals()
+                                                    .widgets
+                                                    .noninteractive
+                                                    .bg_stroke,
                                                 language: Some("text".to_owned()),
                                                 wrap: true,
                                                 ..CodeBlockOptions::default()
@@ -220,13 +227,18 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                                                     });
                                             } else {
                                                 let (placeholder_rect, _) = ui.allocate_exact_size(
-                                                    egui::vec2(ui.available_width(), text_height.max(0.0)),
+                                                    egui::vec2(
+                                                        ui.available_width(),
+                                                        text_height.max(0.0),
+                                                    ),
                                                     egui::Sense::hover(),
                                                 );
                                                 if text_height > 1.0 {
                                                     ui.painter().rect_filled(
                                                         placeholder_rect,
-                                                        egui::CornerRadius::same(style::CORNER_RADIUS_SM),
+                                                        egui::CornerRadius::same(
+                                                            style::CORNER_RADIUS_SM,
+                                                        ),
                                                         ui.visuals().faint_bg_color,
                                                     );
                                                 }

@@ -38,7 +38,11 @@ pub(crate) fn complete_minecraft_login(
     let profile = fetch_minecraft_profile(agent, &minecraft_token)
         .map_err(|err| prefix_auth_error("MinecraftProfile", err))?;
 
-    Ok(build_cached_account(agent, profile))
+    Ok(build_cached_account(
+        agent,
+        profile,
+        minecraft_token.as_str(),
+    ))
 }
 
 fn authenticate_with_xbox_live(
@@ -205,7 +209,11 @@ fn fetch_minecraft_profile(
     }
 }
 
-fn build_cached_account(agent: &ureq::Agent, profile: MinecraftProfileResponse) -> CachedAccount {
+fn build_cached_account(
+    agent: &ureq::Agent,
+    profile: MinecraftProfileResponse,
+    minecraft_access_token: &str,
+) -> CachedAccount {
     let mut minecraft_profile = MinecraftProfileState {
         id: profile.id,
         name: profile.name,
@@ -240,6 +248,9 @@ fn build_cached_account(agent: &ureq::Agent, profile: MinecraftProfileResponse) 
 
     CachedAccount {
         minecraft_profile,
+        minecraft_access_token: Some(minecraft_access_token.to_owned()),
+        xuid: None,
+        user_type: Some("msa".to_owned()),
         avatar_png_base64,
         cached_at_unix_secs: unix_now_secs(),
     }

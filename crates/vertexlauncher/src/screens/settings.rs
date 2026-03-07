@@ -347,6 +347,7 @@ fn memory_slider_max_mib() -> u128 {
 
 #[cfg(target_os = "linux")]
 fn detect_total_memory_mib() -> Option<u128> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = "/proc/meminfo", context = "detect total memory");
     let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
     let line = meminfo.lines().find(|line| line.starts_with("MemTotal:"))?;
     let kib = line.split_whitespace().nth(1)?.parse::<u128>().ok()?;

@@ -4,14 +4,15 @@ use config::{
 };
 use egui::Ui;
 use installation::{
-    DownloadPolicy, GameSetupResult, LoaderSupportIndex, MinecraftVersionEntry, VersionCatalog,
-    ensure_game_files, ensure_openjdk_runtime, fetch_version_catalog_with_refresh,
+    DownloadPolicy, GameSetupResult, InstallProgress, InstallProgressCallback, InstallStage,
+    LoaderSupportIndex, MinecraftVersionEntry, VersionCatalog, ensure_game_files,
+    ensure_openjdk_runtime, fetch_version_catalog_with_refresh,
 };
 use instances::{InstanceStore, set_instance_settings, set_instance_versions};
 use modprovider::{UnifiedContentEntry, UnifiedSearchResult, search_minecraft_content};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use textui::{ButtonOptions, LabelOptions, TextUi, TooltipOptions};
 
 use crate::app::tokio_runtime;
@@ -59,6 +60,10 @@ struct InstanceScreenState {
         Option<mpsc::Sender<(String, String, Result<RuntimePrepareOutcome, String>)>>,
     runtime_prepare_results_rx:
         Option<Arc<Mutex<mpsc::Receiver<(String, String, Result<RuntimePrepareOutcome, String>)>>>>,
+    runtime_progress_tx: Option<mpsc::Sender<InstallProgress>>,
+    runtime_progress_rx: Option<Arc<Mutex<mpsc::Receiver<InstallProgress>>>>,
+    runtime_latest_progress: Option<InstallProgress>,
+    runtime_last_progress_message: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -107,6 +112,10 @@ impl InstanceScreenState {
             runtime_prepare_in_flight: false,
             runtime_prepare_results_tx: None,
             runtime_prepare_results_rx: None,
+            runtime_progress_tx: None,
+            runtime_progress_rx: None,
+            runtime_latest_progress: None,
+            runtime_last_progress_message: None,
         }
     }
 }
@@ -213,6 +222,7 @@ pub fn render(
         instance_id,
         instance_root_path.as_path(),
         selected_game_version_for_runtime.as_str(),
+        config,
     );
     ui.add_space(12.0);
     ui.separator();
@@ -689,6 +699,74 @@ pub fn render(
         );
     }
 
+    if let Some(progress) = state.runtime_latest_progress.as_ref() {
+        ui.add_space(8.0);
+        let fraction = progress_fraction(progress);
+        let progress_label = if let Some(eta) = progress.eta_seconds {
+            format!(
+                "{} · {:.1} MiB/s · ETA {}s",
+                stage_label(progress.stage),
+                progress.bytes_per_second / (1024.0 * 1024.0),
+                eta
+            )
+        } else {
+            format!(
+                "{} · {:.1} MiB/s",
+                stage_label(progress.stage),
+                progress.bytes_per_second / (1024.0 * 1024.0)
+            )
+        };
+        ui.add(
+            egui::ProgressBar::new(fraction)
+                .show_percentage()
+                .text(progress_label),
+        );
+
+        if let Some(message) = state.runtime_last_progress_message.as_deref() {
+            let _ = text_ui.label(
+                ui,
+                ("instance_runtime_progress_message", instance_id),
+                message,
+                &LabelOptions {
+                    color: ui.visuals().weak_text_color(),
+                    wrap: true,
+                    ..LabelOptions::default()
+                },
+            );
+        }
+
+        let bytes_line = if let Some(total) = progress.total_bytes {
+            format!(
+                "{} / {}",
+                format_bytes(progress.downloaded_bytes),
+                format_bytes(total)
+            )
+        } else {
+            format!("{} downloaded", format_bytes(progress.downloaded_bytes))
+        };
+        let _ = text_ui.label(
+            ui,
+            ("instance_runtime_bytes", instance_id),
+            &format!(
+                "Files: {}/{} · {}",
+                progress.downloaded_files, progress.total_files, bytes_line
+            ),
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
+        );
+    } else if state.runtime_prepare_in_flight {
+        ui.add_space(8.0);
+        ui.add(
+            egui::ProgressBar::new(0.0)
+                .animate(true)
+                .show_percentage()
+                .text("Starting installation..."),
+        );
+    }
+
     ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
     instances_changed
 }
@@ -700,6 +778,7 @@ fn render_runtime_row(
     id: &str,
     instance_root: &Path,
     game_version: &str,
+    config: &Config,
 ) {
     let button_style = ButtonOptions {
         min_size: egui::vec2(120.0, 34.0),
@@ -716,41 +795,43 @@ fn render_runtime_row(
     muted_style.wrap = false;
 
     ui.horizontal(|ui| {
-        let action_label = if state.running { "Stop" } else { "Launch" };
-        if text_ui
-            .button(
-                ui,
-                ("instance_runtime_toggle", id),
-                action_label,
-                &button_style,
-            )
-            .clicked()
-        {
-            if state.running {
-                state.running = false;
-                state.status_message = Some("Stop requested for this instance.".to_owned());
-            } else if game_version.trim().is_empty() {
-                state.status_message =
-                    Some("Cannot launch: choose a Minecraft game version first.".to_owned());
-            } else if state.runtime_prepare_in_flight {
-                state.status_message = Some("Already preparing game files...".to_owned());
-            } else {
-                request_runtime_prepare(
-                    state,
-                    instance_root.to_path_buf(),
-                    game_version.trim().to_owned(),
-                    selected_modloader_value(state),
-                    normalize_optional(state.modloader_version_input.as_str()),
-                    recommended_java_runtime(game_version),
-                    choose_java_executable(config, game_version),
-                );
+        if !state.runtime_prepare_in_flight {
+            let action_label = if state.running { "Stop" } else { "Launch" };
+            if text_ui
+                .button(
+                    ui,
+                    ("instance_runtime_toggle", id),
+                    action_label,
+                    &button_style,
+                )
+                .clicked()
+            {
+                if state.running {
+                    state.running = false;
+                    state.status_message = Some("Stop requested for this instance.".to_owned());
+                } else if game_version.trim().is_empty() {
+                    state.status_message =
+                        Some("Cannot launch: choose a Minecraft game version first.".to_owned());
+                } else {
+                    request_runtime_prepare(
+                        state,
+                        instance_root.to_path_buf(),
+                        game_version.trim().to_owned(),
+                        selected_modloader_value(state),
+                        normalize_optional(state.modloader_version_input.as_str()),
+                        recommended_java_runtime(game_version),
+                        choose_java_executable(config, game_version),
+                    );
+                }
             }
+            ui.add_space(10.0);
         }
-        ui.add_space(10.0);
         let _ = text_ui.label(
             ui,
             ("instance_runtime_state", id),
-            if state.running {
+            if state.runtime_prepare_in_flight {
+                "Runtime state: Installing"
+            } else if state.running {
                 "Runtime state: Running"
             } else {
                 "Runtime state: Stopped"
@@ -1121,6 +1202,7 @@ fn request_runtime_prepare(
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
+                .filter(|value| Path::new(value).exists())
                 .map(str::to_owned)
             {
                 path
@@ -1216,7 +1298,7 @@ fn choose_java_executable(config: &Config, game_version: &str) -> Option<String>
         && let Some(path) = config.java_runtime_path(runtime)
     {
         let trimmed = path.trim();
-        if !trimmed.is_empty() {
+        if !trimmed.is_empty() && Path::new(trimmed).exists() {
             return Some(trimmed.to_owned());
         }
     }
@@ -1384,6 +1466,7 @@ fn memory_slider_max_mib() -> u128 {
 
 #[cfg(target_os = "linux")]
 fn detect_total_memory_mib() -> Option<u128> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = "/proc/meminfo", context = "detect total memory");
     let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
     let line = meminfo.lines().find(|line| line.starts_with("MemTotal:"))?;
     let kib = line.split_whitespace().nth(1)?.parse::<u128>().ok()?;

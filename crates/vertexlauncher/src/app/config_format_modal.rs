@@ -16,10 +16,13 @@ pub fn render(
     config_creation_error: Option<&str>,
 ) -> ModalAction {
     let mut action = ModalAction::None;
+    let viewport_rect = ctx.input(|i| i.content_rect());
+    let modal_width = (viewport_rect.width() * 0.42).clamp(420.0, 560.0);
 
     egui::Window::new("Config format")
         .id(egui::Id::new("config_format_modal_window"))
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .default_width(modal_width)
         .collapsible(false)
         .resizable(false)
         .movable(false)
@@ -35,7 +38,8 @@ pub fn render(
                 .inner_margin(egui::Margin::same(14)),
         )
         .show(ctx, |ui| {
-            ui.set_min_width(420.0);
+            ui.set_min_width(modal_width);
+            ui.set_max_width(modal_width);
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
             let text_color = ui.visuals().text_color();
             let heading = LabelOptions {

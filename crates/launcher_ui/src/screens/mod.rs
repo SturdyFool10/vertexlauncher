@@ -48,10 +48,23 @@ pub struct ScreenOutput {
     pub instances_changed: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct LaunchAuthContext {
+    pub account_key: String,
+    pub player_name: String,
+    pub player_uuid: String,
+    pub access_token: String,
+    pub xuid: Option<String>,
+    pub user_type: String,
+}
+
 pub fn render(
     ui: &mut Ui,
     screen: AppScreen,
     selected_instance_id: Option<&str>,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+    active_account_owns_minecraft: bool,
     config: &mut Config,
     instances: &mut InstanceStore,
     available_ui_fonts: &[UiFontFamily],
@@ -84,6 +97,9 @@ pub fn render(
                 ui,
                 text_ui,
                 selected_instance_id,
+                active_username,
+                active_launch_auth,
+                active_account_owns_minecraft,
                 instances,
                 config,
             ),

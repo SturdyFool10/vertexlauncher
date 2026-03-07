@@ -53,6 +53,12 @@ pub struct MinecraftProfileState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedAccount {
     pub minecraft_profile: MinecraftProfileState,
+    #[serde(default)]
+    pub minecraft_access_token: Option<String>,
+    #[serde(default)]
+    pub xuid: Option<String>,
+    #[serde(default)]
+    pub user_type: Option<String>,
     /// Base64-encoded PNG bytes for the generated profile avatar.
     #[serde(default)]
     pub avatar_png_base64: Option<String>,

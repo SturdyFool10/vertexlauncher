@@ -11,9 +11,9 @@ pub const INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN: u128 = 512;
 pub const INSTANCE_DEFAULT_MAX_MEMORY_MIB_MAX: u128 = 1_048_576;
 pub const INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP: u128 = 256;
 pub const DEFAULT_MINECRAFT_INSTALLATIONS_ROOT: &str = "instances";
-pub const DOWNLOAD_STARTS_PER_SECOND_MIN: u32 = 1;
-pub const DOWNLOAD_STARTS_PER_SECOND_MAX: u32 = 128;
-pub const DEFAULT_DOWNLOAD_STARTS_PER_SECOND: u32 = 4;
+pub const DOWNLOAD_CONCURRENCY_MIN: u32 = 1;
+pub const DOWNLOAD_CONCURRENCY_MAX: u32 = 128;
+pub const DEFAULT_DOWNLOAD_CONCURRENCY: u32 = 8;
 
 const MAPLE_FONT_FAMILIES: &[&str] = &["Maple Mono NF", "Maple Mono", "Maple Mono Normal"];
 const JETBRAINS_FONT_FAMILIES: &[&str] = &[
@@ -369,7 +369,8 @@ pub struct Config {
     default_instance_max_memory_mib: u128,
     default_instance_cli_args: String,
     minecraft_installations_root: String,
-    download_starts_per_second: u32,
+    #[serde(alias = "download_starts_per_second")]
+    download_max_concurrent: u32,
     download_speed_limit_enabled: bool,
     download_speed_limit: String,
     java_8_jvm_path: Option<String>,
@@ -450,15 +451,13 @@ impl Config {
         );
     }
 
-    pub fn download_starts_per_second(&self) -> u32 {
-        self.download_starts_per_second
+    pub fn download_max_concurrent(&self) -> u32 {
+        self.download_max_concurrent
     }
 
-    pub fn set_download_starts_per_second(&mut self, starts_per_second: u32) {
-        self.download_starts_per_second = starts_per_second.clamp(
-            DOWNLOAD_STARTS_PER_SECOND_MIN,
-            DOWNLOAD_STARTS_PER_SECOND_MAX,
-        );
+    pub fn set_download_max_concurrent(&mut self, max_concurrent: u32) {
+        self.download_max_concurrent =
+            max_concurrent.clamp(DOWNLOAD_CONCURRENCY_MIN, DOWNLOAD_CONCURRENCY_MAX);
     }
 
     pub fn download_speed_limit_enabled(&self) -> bool {
@@ -511,10 +510,9 @@ impl Config {
             INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN,
             INSTANCE_DEFAULT_MAX_MEMORY_MIB_MAX,
         );
-        self.download_starts_per_second = self.download_starts_per_second.clamp(
-            DOWNLOAD_STARTS_PER_SECOND_MIN,
-            DOWNLOAD_STARTS_PER_SECOND_MAX,
-        );
+        self.download_max_concurrent = self
+            .download_max_concurrent
+            .clamp(DOWNLOAD_CONCURRENCY_MIN, DOWNLOAD_CONCURRENCY_MAX);
         self.download_speed_limit = self.download_speed_limit.trim().to_owned();
         normalize_required_path(
             &mut self.minecraft_installations_root,
@@ -544,7 +542,7 @@ impl Config {
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
-            download_starts_per_second: _,
+            download_max_concurrent: _,
             download_speed_limit_enabled: _,
             download_speed_limit: _,
             java_8_jvm_path: _,
@@ -589,7 +587,7 @@ impl Config {
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
-            download_starts_per_second: _,
+            download_max_concurrent: _,
             download_speed_limit_enabled: _,
             download_speed_limit: _,
             java_8_jvm_path: _,
@@ -616,7 +614,7 @@ impl Config {
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
-            download_starts_per_second: _,
+            download_max_concurrent: _,
             download_speed_limit_enabled: _,
             download_speed_limit: _,
             java_8_jvm_path: _,
@@ -643,7 +641,7 @@ impl Config {
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
-            download_starts_per_second: _,
+            download_max_concurrent: _,
             download_speed_limit_enabled: _,
             download_speed_limit: _,
             java_8_jvm_path: _,
@@ -670,7 +668,7 @@ impl Config {
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
-            download_starts_per_second: _,
+            download_max_concurrent: _,
             download_speed_limit_enabled: _,
             download_speed_limit: _,
             java_8_jvm_path: _,
@@ -718,7 +716,7 @@ impl Default for Config {
             default_instance_max_memory_mib: 4096,
             default_instance_cli_args: String::new(),
             minecraft_installations_root: DEFAULT_MINECRAFT_INSTALLATIONS_ROOT.to_owned(),
-            download_starts_per_second: DEFAULT_DOWNLOAD_STARTS_PER_SECOND,
+            download_max_concurrent: DEFAULT_DOWNLOAD_CONCURRENCY,
             download_speed_limit_enabled: false,
             download_speed_limit: String::new(),
             java_8_jvm_path: None,
@@ -794,11 +792,13 @@ fn construct_new_config(path: &str, conf: &Config) -> Result<(), IOError> {
 
     match format {
         ConfigFormat::Json => {
+            tracing::debug!(target: "vertexlauncher/io", op = "file_create", path = %path, context = "save config json");
             serde_json::to_writer(std::fs::File::create(path)?, conf)
                 .map_err(|e| IOError::other(e.to_string()))?;
         }
         ConfigFormat::Toml => {
             let value = toml::to_string_pretty(conf).map_err(|e| IOError::other(e.to_string()))?;
+            tracing::debug!(target: "vertexlauncher/io", op = "file_create", path = %path, context = "save config toml");
             let mut file = std::fs::File::create(path)?;
             file.write_all(value.as_bytes())?;
         }
@@ -829,6 +829,7 @@ pub fn load_config() -> LoadConfigResult {
 
     match find_existing_config_path(&base) {
         Some(path) => {
+            tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path, context = "load config");
             let contents = std::fs::read_to_string(&path).unwrap_or_default();
             let mut parsed: Config = if path.ends_with(".json") {
                 serde_json::from_str(&contents).unwrap_or_default()

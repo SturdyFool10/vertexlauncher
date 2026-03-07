@@ -43,6 +43,16 @@ pub struct AccountUiEntry {
     pub is_active: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct LaunchAuthContext {
+    pub account_key: String,
+    pub player_name: String,
+    pub player_uuid: String,
+    pub access_token: String,
+    pub xuid: Option<String>,
+    pub user_type: String,
+}
+
 pub struct AuthState {
     accounts_state: CachedAccountsState,
     active_avatar_png: Option<Vec<u8>>,
@@ -196,6 +206,46 @@ impl AuthState {
         self.accounts_state
             .active_account()
             .map(|account| account.minecraft_profile.name.as_str())
+    }
+
+    pub fn active_account_owns_minecraft(&self) -> bool {
+        self.active_launch_context().is_some()
+    }
+
+    pub fn active_launch_context(&self) -> Option<LaunchAuthContext> {
+        let account = self.accounts_state.active_account()?;
+        let access_token = account
+            .minecraft_access_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?
+            .to_owned();
+        let player_name = account.minecraft_profile.name.trim();
+        let player_uuid = account.minecraft_profile.id.trim();
+        if player_name.is_empty() || player_uuid.is_empty() {
+            return None;
+        }
+        let user_type = account
+            .user_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("msa")
+            .to_owned();
+        let xuid = account
+            .xuid
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        Some(LaunchAuthContext {
+            account_key: player_uuid.to_ascii_lowercase(),
+            player_name: player_name.to_owned(),
+            player_uuid: player_uuid.to_owned(),
+            access_token,
+            xuid,
+            user_type,
+        })
     }
 
     pub fn avatar_png(&self) -> Option<&[u8]> {

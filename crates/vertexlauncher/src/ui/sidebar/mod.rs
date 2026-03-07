@@ -9,7 +9,7 @@ mod profiles;
 
 #[derive(Debug, Clone, Copy)]
 struct SidebarLayout {
-    max_icon_width: f32,
+    nav_icon_width: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -32,13 +32,11 @@ pub fn render(
 ) -> SidebarOutput {
     let mut output = SidebarOutput::default();
     let viewport_width = ctx.input(|i| i.content_rect().width());
-    let icon_max_width = (viewport_width * 0.025).clamp(16.0, 40.0);
+    let nav_icon_width = (viewport_width * 0.025).clamp(16.0, 40.0);
     let horizontal_padding = (viewport_width * 0.005).clamp(4.0, 12.0);
-    let sidebar_width = icon_max_width + (horizontal_padding * 2.0);
+    let sidebar_width = nav_icon_width + (horizontal_padding * 2.0);
     let content_width = (sidebar_width - (horizontal_padding * 2.0)).max(1.0);
-    let layout = SidebarLayout {
-        max_icon_width: icon_max_width,
-    };
+    let layout = SidebarLayout { nav_icon_width };
 
     SidePanel::left("task_bar_left")
         .resizable(false)
@@ -77,35 +75,46 @@ fn render_segments(
     output: &mut SidebarOutput,
     layout: SidebarLayout,
 ) {
-    ui.vertical(|ui| {
-        app_nav::render(ui, active_screen, output, layout.max_icon_width);
+    let full_height = ui.available_height().max(1.0);
+    let full_width = ui.available_width().max(1.0);
+    ui.allocate_ui_with_layout(
+        egui::vec2(full_width, full_height),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.set_min_height(full_height);
 
-        ui.add_space(8.0);
-        let create_response = ui
-            .horizontal_centered(|ui| {
-                icon_button::svg(
-                    ui,
-                    "create_instance",
-                    assets::PLUS_SVG,
-                    "Create instance",
-                    false,
-                    layout.max_icon_width,
-                )
-            })
-            .inner;
-        if create_response.clicked() {
-            output.create_instance_clicked = true;
-        }
+            app_nav::render(ui, active_screen, output, layout.nav_icon_width);
 
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(8.0);
+            ui.add_space(8.0);
+            let create_response = ui
+                .horizontal_centered(|ui| {
+                    icon_button::svg(
+                        ui,
+                        "create_instance",
+                        assets::PLUS_SVG,
+                        "Create instance",
+                        false,
+                        layout.nav_icon_width,
+                    )
+                })
+                .inner;
+            if create_response.clicked() {
+                output.create_instance_clicked = true;
+            }
 
-        ScrollArea::vertical()
-            .id_salt("profiles_scroll")
-            .max_height(ui.available_height())
-            .show(ui, |ui| {
-                profiles::render(ui, profile_shortcuts, output, layout.max_icon_width)
-            });
-    });
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            let profiles_height = ui.available_height().max(1.0);
+            ScrollArea::vertical()
+                .id_salt("profiles_scroll")
+                .auto_shrink([false, false])
+                .max_height(profiles_height)
+                .show(ui, |ui| {
+                    ui.set_min_height(profiles_height);
+                    profiles::render(ui, profile_shortcuts, output, layout.nav_icon_width)
+                });
+        },
+    );
 }
