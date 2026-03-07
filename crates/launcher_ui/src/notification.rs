@@ -203,10 +203,7 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi) {
             for (index, entry) in entries.iter().enumerate() {
                 let frame = Frame::new()
                     .fill(ui.visuals().window_fill)
-                    .stroke(Stroke::new(
-                        1.0,
-                        ui.visuals().window_stroke.color,
-                    ))
+                    .stroke(Stroke::new(1.0, ui.visuals().window_stroke.color))
                     .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::same(10));
 
@@ -265,9 +262,13 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi) {
                         ui.add_space(6.0);
                         let overlay = format!("{}  {:.0}%", entry.message, progress * 100.0);
                         ui.add(
-                            egui::ProgressBar::new(progress)
-                                .text(overlay)
-                                .desired_width(ui.available_width()),
+                            egui::ProgressBar::new(progress).desired_width(ui.available_width()),
+                        );
+                        let _ = text_ui.label(
+                            ui,
+                            ("notif-progress-message", index),
+                            overlay.as_str(),
+                            &message_style,
                         );
                     } else {
                         let _ = text_ui.label(

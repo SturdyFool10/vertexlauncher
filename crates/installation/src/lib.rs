@@ -224,6 +224,7 @@ pub struct LaunchRequest {
 pub struct LaunchResult {
     pub pid: u32,
     pub profile_id: String,
+    pub launch_log_path: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -899,7 +900,11 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
             },
         );
     }
-    Ok(LaunchResult { pid, profile_id })
+    Ok(LaunchResult {
+        pid,
+        profile_id,
+        launch_log_path,
+    })
 }
 
 pub fn stop_running_instance(instance_root: &Path) -> bool {

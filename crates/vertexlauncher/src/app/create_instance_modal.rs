@@ -192,7 +192,7 @@ pub fn render(
                 "Choose name, thumbnail, modloader, and versions.",
                 &body_style,
             );
-            render_thumbnail_picker(ui, state);
+            render_thumbnail_picker(text_ui, ui, state);
 
             let _ = settings_widgets::full_width_text_input_row(
                 text_ui,
@@ -704,7 +704,11 @@ fn poll_version_catalog(state: &mut CreateInstanceState) {
     }
 }
 
-fn render_thumbnail_picker(ui: &mut egui::Ui, state: &mut CreateInstanceState) {
+fn render_thumbnail_picker(
+    text_ui: &mut TextUi,
+    ui: &mut egui::Ui,
+    state: &mut CreateInstanceState,
+) {
     const THUMBNAIL_PREVIEW_SIZE: f32 = 150.0;
     const PREVIEW_FRAME_PADDING: f32 = 0.0;
     let preview_inner_width = ui.available_width().clamp(64.0, THUMBNAIL_PREVIEW_SIZE);
@@ -725,18 +729,30 @@ fn render_thumbnail_picker(ui: &mut egui::Ui, state: &mut CreateInstanceState) {
                     |ui| {
                         let trimmed = state.thumbnail_path.trim();
                         if trimmed.is_empty() {
-                            ui.label(
-                                egui::RichText::new("No thumbnail selected")
-                                    .color(ui.visuals().weak_text_color()),
+                            let _ = text_ui.label(
+                                ui,
+                                "instance_create_thumbnail_empty",
+                                "No thumbnail selected",
+                                &LabelOptions {
+                                    color: ui.visuals().weak_text_color(),
+                                    wrap: false,
+                                    ..LabelOptions::default()
+                                },
                             );
                             return;
                         }
 
                         let path = Path::new(trimmed);
                         if !path.is_file() {
-                            ui.label(
-                                egui::RichText::new("Thumbnail file was not found")
-                                    .color(ui.visuals().weak_text_color()),
+                            let _ = text_ui.label(
+                                ui,
+                                "instance_create_thumbnail_missing",
+                                "Thumbnail file was not found",
+                                &LabelOptions {
+                                    color: ui.visuals().weak_text_color(),
+                                    wrap: false,
+                                    ..LabelOptions::default()
+                                },
                             );
                             return;
                         }

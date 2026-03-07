@@ -121,7 +121,7 @@ pub fn render(
                     ui.add_space(PROFILE_TO_CONTROLS_GAP);
 
                     let profile_response =
-                        render_profile_button(ui, profile_ui, profile_button_size);
+                        render_profile_button(ui, text_ui, profile_ui, profile_button_size);
                     let direct_sign_in = profile_ui.display_name.is_none()
                         && profile_ui.accounts.is_empty()
                         && !profile_ui.sign_in_in_progress;
@@ -266,6 +266,7 @@ fn render_control_button(
 
 fn render_profile_button(
     ui: &mut egui::Ui,
+    text_ui: &mut TextUi,
     profile_ui: ProfileUiModel<'_>,
     button_size: f32,
 ) -> egui::Response {
@@ -291,17 +292,17 @@ fn render_profile_button(
 
         ui.add_sized([button_size, button_size], button)
     } else if profile_ui.display_name.is_none() && !profile_ui.sign_in_in_progress {
-        let sign_in_button = Button::new("Sign in")
-            .frame(true)
-            .stroke(egui::Stroke::new(
-                1.0,
-                ui.visuals().widgets.inactive.bg_stroke.color,
-            ))
-            .fill(ui.visuals().widgets.inactive.weak_bg_fill);
-        ui.add_sized(
-            [(button_size * 3.2).clamp(68.0, 110.0), button_size],
-            sign_in_button,
-        )
+        let sign_in_style = ButtonOptions {
+            min_size: egui::vec2((button_size * 3.2).clamp(68.0, 110.0), button_size),
+            text_color: ui.visuals().text_color(),
+            fill: ui.visuals().widgets.inactive.weak_bg_fill,
+            fill_hovered: ui.visuals().widgets.hovered.weak_bg_fill,
+            fill_active: ui.visuals().widgets.active.weak_bg_fill,
+            fill_selected: ui.visuals().widgets.open.weak_bg_fill,
+            stroke: egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color),
+            ..ButtonOptions::default()
+        };
+        text_ui.button(ui, "profile_button_sign_in", "Sign in", &sign_in_style)
     } else {
         ui.allocate_ui_with_layout(
             egui::vec2(button_size, button_size),

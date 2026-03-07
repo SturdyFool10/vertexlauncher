@@ -68,8 +68,10 @@ struct InstanceScreenState {
     runtime_latest_progress: Option<InstallProgress>,
     runtime_last_notification_at: Option<Instant>,
     runtime_prepare_instance_root: Option<String>,
+    runtime_prepare_user_key: Option<String>,
     show_settings_modal: bool,
     launch_username: Option<String>,
+    launch_user_key: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -124,8 +126,10 @@ impl InstanceScreenState {
             runtime_latest_progress: None,
             runtime_last_notification_at: None,
             runtime_prepare_instance_root: None,
+            runtime_prepare_user_key: None,
             show_settings_modal: false,
             launch_username: None,
+            launch_user_key: None,
         }
     }
 }
@@ -494,6 +498,7 @@ fn render_instance_settings_modal(
         .id(egui::Id::new(("instance_settings_modal", instance_id)))
         .open(&mut open)
         .collapsible(false)
+        .title_bar(false)
         .resizable(true)
         .default_size(egui::vec2(modal_width, modal_height))
         .min_size(egui::vec2(500.0, 380.0))
@@ -540,6 +545,14 @@ fn render_instance_settings_modal(
                 .id_salt(("instance_settings_modal_scroll", instance_id))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_settings_modal_heading", instance_id),
+                        "Instance Settings",
+                        &section_style,
+                    );
+                    ui.add_space(8.0);
+
                     let _ = text_ui.label(
                         ui,
                         ("instance_versions_heading", instance_id),
@@ -915,10 +928,16 @@ fn render_install_feedback(
                 progress.bytes_per_second / (1024.0 * 1024.0)
             )
         };
-        ui.add(
-            egui::ProgressBar::new(fraction)
-                .show_percentage()
-                .text(progress_label),
+        ui.add(egui::ProgressBar::new(fraction));
+        let _ = text_ui.label(
+            ui,
+            ("instance_runtime_progress_label", instance_id),
+            &format!("{progress_label} · {:.0}%", fraction * 100.0),
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
         );
         let _ = text_ui.label(
             ui,
@@ -957,11 +976,16 @@ fn render_install_feedback(
 
     if runtime_prepare_in_flight {
         ui.add_space(8.0);
-        ui.add(
-            egui::ProgressBar::new(0.0)
-                .animate(true)
-                .show_percentage()
-                .text("Starting installation..."),
+        ui.add(egui::ProgressBar::new(0.0).animate(true));
+        let _ = text_ui.label(
+            ui,
+            ("instance_runtime_progress_starting", instance_id),
+            "Starting installation...",
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
         );
         return;
     }
@@ -986,10 +1010,16 @@ fn render_install_feedback(
                 activity.bytes_per_second / (1024.0 * 1024.0)
             )
         };
-        ui.add(
-            egui::ProgressBar::new(fraction)
-                .show_percentage()
-                .text(progress_label),
+        ui.add(egui::ProgressBar::new(fraction));
+        let _ = text_ui.label(
+            ui,
+            ("instance_runtime_progress_label_external", instance_id),
+            &format!("{progress_label} · {:.0}%", fraction * 100.0),
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
         );
         let _ = text_ui.label(
             ui,
@@ -1121,6 +1151,18 @@ fn render_runtime_row(
                     state.launch_username = launch_display_name
                         .clone()
                         .or_else(|| launch_account.clone());
+                    state.launch_user_key = launch_player_uuid
+                        .clone()
+                        .or_else(|| launch_account.clone())
+                        .or_else(|| launch_display_name.clone())
+                        .and_then(|value| {
+                            let trimmed = value.trim();
+                            if trimmed.is_empty() {
+                                None
+                            } else {
+                                Some(trimmed.to_owned())
+                            }
+                        });
                     request_runtime_prepare(
                         state,
                         instance_root.to_path_buf(),
@@ -1566,6 +1608,19 @@ fn request_runtime_prepare(
     let xuid_for_task = xuid;
     let user_type_for_task = user_type;
     let launch_account_name_for_task = launch_account_name;
+    let tab_user_key = player_uuid_for_task
+        .as_deref()
+        .or(launch_account_name_for_task.as_deref())
+        .or(player_name_for_task.as_deref())
+        .and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_owned())
+            }
+        });
+    state.runtime_prepare_user_key = tab_user_key.clone();
     let download_policy = DownloadPolicy {
         max_concurrent_downloads: download_max_concurrent.max(1),
         max_download_bps: download_speed_limit_bps,
@@ -1586,17 +1641,22 @@ fn request_runtime_prepare(
     } else {
         "java from PATH".to_owned()
     };
-    let username = launch_account_name_for_task
+    let username = player_name_for_task
         .as_deref()
-        .or(player_name_for_task.as_deref())
+        .or(launch_account_name_for_task.as_deref())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("Player");
     let tab_id = console::ensure_instance_tab(
         state.name_input.as_str(),
         username,
         instance_root_display.as_str(),
+        tab_user_key.as_deref(),
     );
-    console::set_instance_tab_loading(instance_root_display.as_str(), true);
+    console::set_instance_tab_loading(
+        instance_root_display.as_str(),
+        tab_user_key.as_deref(),
+        true,
+    );
     console::push_line_to_tab(
         tab_id.as_str(),
         format!(
@@ -1754,8 +1814,9 @@ fn poll_runtime_prepare(state: &mut InstanceScreenState, config: &mut Config) {
     }
 
     if should_reset_channel {
+        let prepare_user_key = state.runtime_prepare_user_key.take();
         if let Some(root) = state.runtime_prepare_instance_root.take() {
-            console::set_instance_tab_loading(root.as_str(), false);
+            console::set_instance_tab_loading(root.as_str(), prepare_user_key.as_deref(), false);
         }
         state.runtime_prepare_results_tx = None;
         state.runtime_prepare_results_rx = None;
@@ -1765,8 +1826,13 @@ fn poll_runtime_prepare(state: &mut InstanceScreenState, config: &mut Config) {
     }
 
     for (game_version, instance_root_display, result) in updates {
+        let prepare_user_key = state.runtime_prepare_user_key.take();
         state.runtime_prepare_instance_root = None;
-        console::set_instance_tab_loading(instance_root_display.as_str(), false);
+        console::set_instance_tab_loading(
+            instance_root_display.as_str(),
+            prepare_user_key.as_deref(),
+            false,
+        );
         state.runtime_prepare_in_flight = false;
         match result {
             Ok(outcome) => {
@@ -1784,6 +1850,12 @@ fn poll_runtime_prepare(state: &mut InstanceScreenState, config: &mut Config) {
                     state.name_input.as_str(),
                     username,
                     instance_root_display.as_str(),
+                    state.launch_user_key.as_deref(),
+                );
+                console::attach_launch_log(
+                    tab_id.as_str(),
+                    instance_root_display.as_str(),
+                    launch.launch_log_path.as_path(),
                 );
                 console::push_line_to_tab(
                     tab_id.as_str(),
