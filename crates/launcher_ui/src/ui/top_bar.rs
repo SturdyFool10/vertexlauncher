@@ -20,7 +20,7 @@ const CONTROL_GROUP_PADDING: f32 = 12.0;
 const PROFILE_BUTTON_VERTICAL_PADDING: f32 = 5.0;
 const PROFILE_TO_CONTROLS_GAP: f32 = style::SPACE_MD;
 const ACTIVE_USER_TO_PROFILE_GAP: f32 = style::SPACE_SM;
-const ACTIVE_USER_BUTTON_MIN_WIDTH: f32 = 132.0;
+const ACTIVE_USER_BUTTON_MIN_WIDTH: f32 = 148.0;
 const PROFILE_POPUP_MIN_WIDTH: f32 = 310.0;
 const RESIZE_GRAB_THICKNESS: f32 = 6.0;
 
@@ -377,39 +377,33 @@ fn render_active_user_terminal_button(
     );
 
     let inner_rect = rect.shrink2(egui::vec2(8.0, 4.0));
-    let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(
-            inner_rect.right() - (icon_size * 0.5),
-            inner_rect.center().y,
-        ),
-        egui::vec2(icon_size, icon_size),
-    );
-    let text_rect = egui::Rect::from_min_max(
-        inner_rect.min,
-        egui::pos2(
-            (icon_rect.min.x - 6.0).max(inner_rect.min.x),
-            inner_rect.max.y,
-        ),
-    );
+    ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let icon = egui::Image::from_bytes(uri, themed_svg)
+                .fit_to_exact_size(egui::vec2(icon_size, icon_size));
+            let _ = ui.add_sized(egui::vec2(icon_size, icon_size), icon);
+            ui.add_space(6.0);
 
-    if text_rect.width() > 1.0 {
-        ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                let label_style = LabelOptions {
-                    color: text_color,
-                    weight: 700,
-                    wrap: false,
-                    ..LabelOptions::default()
-                };
-                let _ = text_ui.label(ui, "topbar_user_active_label", "user active", &label_style);
-            });
+            let text_lane_width = ui.available_width().max(1.0);
+            let text_lane_height = inner_rect.height().max(1.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(text_lane_width, text_lane_height),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_clip_rect(ui.max_rect());
+                    let label_style = LabelOptions {
+                        font_size: 16.0,
+                        line_height: 20.0,
+                        color: text_color,
+                        weight: 700,
+                        wrap: false,
+                        ..LabelOptions::default()
+                    };
+                    let _ =
+                        text_ui.label(ui, "topbar_user_active_label", "user active", &label_style);
+                },
+            );
         });
-    }
-
-    ui.scope_builder(egui::UiBuilder::new().max_rect(icon_rect), |ui| {
-        let icon = egui::Image::from_bytes(uri, themed_svg)
-            .fit_to_exact_size(egui::vec2(icon_size, icon_size));
-        let _ = ui.put(icon_rect, icon);
     });
 
     response
