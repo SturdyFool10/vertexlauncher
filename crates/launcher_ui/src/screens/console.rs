@@ -1,5 +1,5 @@
 use egui::Ui;
-use textui::{LabelOptions, TextUi};
+use textui::{ButtonOptions, LabelOptions, TextUi};
 
 use crate::{console, ui::style};
 
@@ -22,7 +22,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                 egui::vec2(inner_width, ui.available_height().max(1.0)),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    render_tabs_row(ui, &snapshot);
+                    render_tabs_row(ui, text_ui, &snapshot);
                     ui.add_space(style::SPACE_SM);
                     let viewport_height = ui.available_height().max(1.0);
                     ui.set_min_height(viewport_height);
@@ -69,7 +69,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
     );
 }
 
-fn render_tabs_row(ui: &mut Ui, snapshot: &console::ConsoleSnapshot) {
+fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::ConsoleSnapshot) {
     egui::ScrollArea::horizontal()
         .id_salt("console_tabs")
         .auto_shrink([false, true])
@@ -95,21 +95,39 @@ fn render_tabs_row(ui: &mut Ui, snapshot: &console::ConsoleSnapshot) {
                         .inner_margin(egui::Margin::symmetric(8, 4))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                let label_response = ui.add(
-                                    egui::Label::new(tab.label.as_str())
-                                        .sense(egui::Sense::click()),
+                                ui.spacing_mut().item_spacing.x = style::SPACE_XS;
+                                let mut label_style = style::body(ui);
+                                label_style.wrap = false;
+                                label_style.weight = if selected { 700 } else { 500 };
+                                let label_response = text_ui.clickable_label(
+                                    ui,
+                                    ("console_tab_label", tab.id.as_str()),
+                                    tab.label.as_str(),
+                                    &label_style,
                                 );
                                 if label_response.clicked() {
                                     console::set_active_tab(tab.id.as_str());
                                 }
 
                                 if tab.can_close {
-                                    let close_response = ui.add(
-                                        egui::Button::new(
-                                            egui::RichText::new("×").size(18.0).strong(),
-                                        )
-                                        .frame(true)
-                                        .min_size(egui::vec2(24.0, 24.0)),
+                                    let close_style = ButtonOptions {
+                                        min_size: egui::vec2(26.0, 26.0),
+                                        corner_radius: style::CORNER_RADIUS_SM,
+                                        padding: egui::vec2(0.0, 0.0),
+                                        text_color: ui.visuals().text_color(),
+                                        fill: ui.visuals().widgets.inactive.weak_bg_fill,
+                                        fill_hovered: ui.visuals().widgets.hovered.weak_bg_fill,
+                                        fill_active: ui.visuals().widgets.active.weak_bg_fill,
+                                        fill_selected: ui.visuals().widgets.open.weak_bg_fill,
+                                        stroke: ui.visuals().widgets.inactive.bg_stroke,
+                                        font_size: 20.0,
+                                        line_height: 20.0,
+                                    };
+                                    let close_response = text_ui.button(
+                                        ui,
+                                        ("console_tab_close", tab.id.as_str()),
+                                        "×",
+                                        &close_style,
                                     );
                                     if close_response.clicked() {
                                         let _ = console::close_tab(tab.id.as_str());

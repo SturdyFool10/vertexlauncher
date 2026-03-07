@@ -27,6 +27,7 @@ const SECONDARY_ACTION_WIDTH: f32 = 100.0;
 #[derive(Debug)]
 pub struct CreateInstanceState {
     pub name: String,
+    pub description: String,
     pub thumbnail_path: String,
     pub game_version: String,
     pub modloader_version: String,
@@ -54,6 +55,7 @@ impl Default for CreateInstanceState {
     fn default() -> Self {
         Self {
             name: "New Instance".to_owned(),
+            description: String::new(),
             thumbnail_path: String::new(),
             game_version: String::new(),
             modloader_version: String::new(),
@@ -88,6 +90,7 @@ impl CreateInstanceState {
 #[derive(Clone, Debug)]
 pub struct CreateInstanceDraft {
     pub name: String,
+    pub description: Option<String>,
     pub thumbnail_path: Option<String>,
     pub modloader: String,
     pub game_version: String,
@@ -98,6 +101,7 @@ impl CreateInstanceDraft {
     pub fn into_new_instance_spec(self) -> instances::NewInstanceSpec {
         instances::NewInstanceSpec {
             name: self.name,
+            description: self.description,
             thumbnail_path: self.thumbnail_path,
             modloader: self.modloader,
             game_version: self.game_version,
@@ -201,6 +205,15 @@ pub fn render(
                 "Instance name",
                 Some("Display name shown in the sidebar."),
                 &mut state.name,
+            );
+            ui.add_space(MODAL_GAP_SM);
+            let _ = settings_widgets::full_width_text_input_row(
+                text_ui,
+                ui,
+                "instance_create_description",
+                "Description (optional)",
+                Some("Optional note shown in the library tile."),
+                &mut state.description,
             );
             ui.add_space(MODAL_GAP_SM);
 
@@ -1053,9 +1066,18 @@ fn build_draft(state: &CreateInstanceState) -> Result<CreateInstanceDraft, Strin
             Some(trimmed.to_owned())
         }
     };
+    let description = {
+        let trimmed = state.description.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    };
 
     Ok(CreateInstanceDraft {
         name: name.to_owned(),
+        description,
         thumbnail_path,
         modloader,
         game_version: game_version.to_owned(),

@@ -58,12 +58,14 @@ fn fs_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<u64>
 /// - `name`: human-readable display name.
 /// - `minecraft_root`: relative directory name for this instance under the
 ///   launcher installations root.
+/// - `description`: optional short user description shown in library views.
 /// - `modloader`, `game_version`: non-empty normalized values.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct InstanceRecord {
     pub id: String,
     pub name: String,
+    pub description: Option<String>,
     pub minecraft_root: String,
     pub thumbnail_path: Option<String>,
     pub modloader: String,
@@ -78,6 +80,7 @@ impl Default for InstanceRecord {
         Self {
             id: String::new(),
             name: DEFAULT_INSTANCE_NAME.to_owned(),
+            description: None,
             minecraft_root: "instance".to_owned(),
             thumbnail_path: None,
             modloader: DEFAULT_MODLOADER.to_owned(),
@@ -100,6 +103,7 @@ pub struct InstanceStore {
 #[derive(Clone, Debug)]
 pub struct NewInstanceSpec {
     pub name: String,
+    pub description: Option<String>,
     pub thumbnail_path: Option<String>,
     pub modloader: String,
     pub game_version: String,
@@ -237,6 +241,7 @@ pub fn create_instance(
     let modloader = required(spec.modloader, InstanceError::EmptyModloader)?;
     let game_version = required(spec.game_version, InstanceError::EmptyGameVersion)?;
     let modloader_version = spec.modloader_version.trim().to_owned();
+    let description = normalize_optional_string(spec.description.as_deref());
     let thumbnail_path = normalize_optional_string(spec.thumbnail_path.as_deref());
 
     fs_create_dir_all(installations_root)?;
@@ -248,6 +253,7 @@ pub fn create_instance(
     let instance = InstanceRecord {
         id: next_instance_id(),
         name,
+        description,
         minecraft_root,
         thumbnail_path,
         modloader,
@@ -265,6 +271,7 @@ pub fn create_instance(
         minecraft_root = instance.minecraft_root.as_str(),
         modloader = instance.modloader.as_str(),
         game_version = instance.game_version.as_str(),
+        has_description = instance.description.is_some(),
         has_modloader_version = !instance.modloader_version.is_empty(),
         "created instance"
     );
@@ -404,6 +411,7 @@ fn normalize_instance(instance: &mut InstanceRecord) {
     }
 
     instance.thumbnail_path = normalize_optional_string(instance.thumbnail_path.as_deref());
+    instance.description = normalize_optional_string(instance.description.as_deref());
     instance.modloader = required(
         std::mem::take(&mut instance.modloader),
         InstanceError::EmptyModloader,

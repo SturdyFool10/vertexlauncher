@@ -74,7 +74,7 @@ pub fn render(
 ) -> ScreenOutput {
     match screen {
         AppScreen::Library => {
-            library::render(ui, text_ui, selected_instance_id);
+            library::render(ui, text_ui, selected_instance_id, instances);
             ScreenOutput::default()
         }
         AppScreen::Skins => {

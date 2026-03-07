@@ -159,7 +159,9 @@ pub fn render(
 
                     if active_user_visible {
                         ui.add_space(ACTIVE_USER_TO_PROFILE_GAP);
-                        if render_active_user_terminal_button(ui, profile_button_size).clicked() {
+                        if render_active_user_terminal_button(ui, text_ui, profile_button_size)
+                            .clicked()
+                        {
                             output.open_active_user_terminal = true;
                         }
                     }
@@ -340,7 +342,11 @@ fn render_profile_button(
     }
 }
 
-fn render_active_user_terminal_button(ui: &mut egui::Ui, button_height: f32) -> egui::Response {
+fn render_active_user_terminal_button(
+    ui: &mut egui::Ui,
+    text_ui: &mut TextUi,
+    button_height: f32,
+) -> egui::Response {
     let text_color = ui.visuals().text_color();
     let themed_svg = apply_text_color(assets::TERMINAL_2_SVG, text_color);
     let uri = format!(
@@ -350,9 +356,10 @@ fn render_active_user_terminal_button(ui: &mut egui::Ui, button_height: f32) -> 
         text_color.b()
     );
     let icon_size = (button_height - 14.0).clamp(12.0, 18.0);
-    let desired_size = egui::vec2(ACTIVE_USER_BUTTON_MIN_WIDTH, button_height);
-    let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
-
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ACTIVE_USER_BUTTON_MIN_WIDTH, button_height),
+        egui::Sense::click(),
+    );
     let fill = if response.is_pointer_button_down_on() {
         ui.visuals().widgets.active.weak_bg_fill
     } else if response.hovered() {
@@ -370,17 +377,39 @@ fn render_active_user_terminal_button(ui: &mut egui::Ui, button_height: f32) -> 
     );
 
     let inner_rect = rect.shrink2(egui::vec2(8.0, 4.0));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            let _ = ui.add(
-                egui::Label::new(egui::RichText::new("user active").color(text_color))
-                    .wrap_mode(egui::TextWrapMode::Extend),
-            );
-            ui.add_space(6.0);
-            let icon = egui::Image::from_bytes(uri, themed_svg)
-                .fit_to_exact_size(egui::vec2(icon_size, icon_size));
-            ui.add(icon);
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            inner_rect.right() - (icon_size * 0.5),
+            inner_rect.center().y,
+        ),
+        egui::vec2(icon_size, icon_size),
+    );
+    let text_rect = egui::Rect::from_min_max(
+        inner_rect.min,
+        egui::pos2(
+            (icon_rect.min.x - 6.0).max(inner_rect.min.x),
+            inner_rect.max.y,
+        ),
+    );
+
+    if text_rect.width() > 1.0 {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                let label_style = LabelOptions {
+                    color: text_color,
+                    weight: 700,
+                    wrap: false,
+                    ..LabelOptions::default()
+                };
+                let _ = text_ui.label(ui, "topbar_user_active_label", "user active", &label_style);
+            });
         });
+    }
+
+    ui.scope_builder(egui::UiBuilder::new().max_rect(icon_rect), |ui| {
+        let icon = egui::Image::from_bytes(uri, themed_svg)
+            .fit_to_exact_size(egui::vec2(icon_size, icon_size));
+        let _ = ui.put(icon_rect, icon);
     });
 
     response

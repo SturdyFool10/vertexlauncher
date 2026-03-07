@@ -22,7 +22,10 @@ use textui::{ButtonOptions, LabelOptions, TextUi, TooltipOptions};
 
 use crate::app::tokio_runtime;
 use crate::screens::{AppScreen, LaunchAuthContext};
-use crate::ui::components::{icon_button, settings_widgets};
+use crate::ui::{
+    components::{icon_button, settings_widgets},
+    style,
+};
 use crate::{assets, console, install_activity, notification};
 
 const RESERVED_SYSTEM_MEMORY_MIB: u128 = 4 * 1024;
@@ -84,6 +87,7 @@ struct InstanceScreenState {
     running: bool,
     status_message: Option<String>,
     name_input: String,
+    description_input: String,
     thumbnail_input: String,
     selected_modloader: usize,
     custom_modloader: String,
@@ -152,6 +156,7 @@ impl InstanceScreenState {
             running: false,
             status_message: None,
             name_input: instance.name.clone(),
+            description_input: instance.description.clone().unwrap_or_default(),
             thumbnail_input: instance.thumbnail_path.clone().unwrap_or_default(),
             selected_modloader,
             custom_modloader,
@@ -393,12 +398,38 @@ fn render_installed_content_section(
             .width(220.0)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
             .show(|ui| {
-                if ui.button("Browse local content").clicked() {
+                let popup_button_style = ButtonOptions {
+                    min_size: egui::vec2(ui.available_width().max(120.0), style::CONTROL_HEIGHT),
+                    text_color: ui.visuals().text_color(),
+                    fill: ui.visuals().widgets.inactive.bg_fill,
+                    fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+                    fill_active: ui.visuals().widgets.active.bg_fill,
+                    fill_selected: ui.visuals().selection.bg_fill,
+                    stroke: ui.visuals().widgets.inactive.bg_stroke,
+                    ..ButtonOptions::default()
+                };
+                if text_ui
+                    .button(
+                        ui,
+                        ("instance_content_popup_local", instance_id),
+                        "Browse local content",
+                        &popup_button_style,
+                    )
+                    .clicked()
+                {
                     state.status_message = Some(
                         "Local content picker will be added with the content browser.".to_owned(),
                     );
                 }
-                if ui.button("Browse mods").clicked() {
+                if text_ui
+                    .button(
+                        ui,
+                        ("instance_content_popup_mods", instance_id),
+                        "Browse mods",
+                        &popup_button_style,
+                    )
+                    .clicked()
+                {
                     output.requested_screen = Some(AppScreen::Library);
                 }
             });
@@ -861,6 +892,15 @@ fn render_instance_settings_modal(
                         "Name",
                         Some("Display name shown in the sidebar."),
                         &mut state.name_input,
+                    );
+                    ui.add_space(6.0);
+                    let _ = settings_widgets::full_width_text_input_row(
+                        text_ui,
+                        ui,
+                        ("instance_description_input", instance_id),
+                        "Description (optional)",
+                        Some("Optional note shown in library instance tiles."),
+                        &mut state.description_input,
                     );
                     ui.add_space(6.0);
 
@@ -1857,6 +1897,7 @@ fn save_instance_metadata_and_versions(
 
     if let Some(instance) = instances.find_mut(instance_id) {
         instance.name = trimmed_name.to_owned();
+        instance.description = normalize_optional(state.description_input.as_str());
         instance.thumbnail_path = normalize_optional(state.thumbnail_input.as_str());
     } else {
         return Err("Instance was removed before save.".to_owned());
