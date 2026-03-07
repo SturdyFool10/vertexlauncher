@@ -73,6 +73,8 @@ pub struct InstanceRecord {
     pub modloader_version: String,
     pub max_memory_mib: Option<u128>,
     pub cli_args: Option<String>,
+    pub java_override_enabled: bool,
+    pub java_override_runtime_major: Option<u8>,
 }
 
 impl Default for InstanceRecord {
@@ -88,6 +90,8 @@ impl Default for InstanceRecord {
             modloader_version: String::new(),
             max_memory_mib: None,
             cli_args: None,
+            java_override_enabled: false,
+            java_override_runtime_major: None,
         }
     }
 }
@@ -261,6 +265,8 @@ pub fn create_instance(
         modloader_version,
         max_memory_mib: None,
         cli_args: None,
+        java_override_enabled: false,
+        java_override_runtime_major: None,
     };
 
     store.instances.push(instance.clone());
@@ -318,17 +324,24 @@ pub fn set_instance_settings(
     id: &str,
     max_memory_mib: Option<u128>,
     cli_args: Option<String>,
+    java_override_enabled: bool,
+    java_override_runtime_major: Option<u8>,
 ) -> Result<(), InstanceError> {
     let instance = store
         .find_mut(id)
         .ok_or_else(|| InstanceError::MissingInstance(id.to_owned()))?;
     instance.max_memory_mib = max_memory_mib;
     instance.cli_args = normalize_optional_string(cli_args.as_deref());
+    instance.java_override_enabled = java_override_enabled;
+    instance.java_override_runtime_major =
+        normalize_java_override(java_override_enabled, java_override_runtime_major);
     tracing::debug!(
         target: "vertexlauncher/instances",
         id,
         max_memory_mib = ?instance.max_memory_mib,
         has_cli_args = instance.cli_args.is_some(),
+        java_override_enabled = instance.java_override_enabled,
+        java_override_runtime_major = ?instance.java_override_runtime_major,
         "updated instance runtime settings"
     );
     Ok(())
@@ -424,6 +437,10 @@ fn normalize_instance(instance: &mut InstanceRecord) {
     .unwrap_or_else(|_| DEFAULT_GAME_VERSION.to_owned());
     instance.modloader_version = instance.modloader_version.trim().to_owned();
     instance.cli_args = normalize_optional_string(instance.cli_args.as_deref());
+    instance.java_override_runtime_major = normalize_java_override(
+        instance.java_override_enabled,
+        instance.java_override_runtime_major,
+    );
 
     if instance.id.trim().is_empty() {
         instance.id = next_instance_id();
@@ -495,6 +512,13 @@ fn normalize_optional_string(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn normalize_java_override(enabled: bool, runtime_major: Option<u8>) -> Option<u8> {
+    if !enabled {
+        return None;
+    }
+    runtime_major.filter(|major| matches!(major, 8 | 16 | 17 | 21))
 }
 
 /// Validates a required string input by trimming and rejecting empties.

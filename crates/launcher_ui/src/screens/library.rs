@@ -547,7 +547,7 @@ struct RuntimeLaunchOutcome {
     launch: LaunchResult,
     downloaded_files: u32,
     resolved_modloader_version: Option<String>,
-    configured_java: Option<(JavaRuntimeVersion, String)>,
+    configured_java: Option<(u8, String)>,
 }
 
 fn ensure_result_channel(state: &mut LibraryRuntimeState) {
@@ -598,8 +598,8 @@ fn request_runtime_launch(
 
     let modloader = instance.modloader.trim().to_owned();
     let modloader_version = normalize_optional(instance.modloader_version.as_str());
-    let required_java_runtime = recommended_java_runtime(game_version.as_str());
-    let java_executable = choose_java_executable(config, game_version.as_str());
+    let required_java_major = effective_required_java_major(config, game_version.as_str());
+    let java_executable = choose_java_executable(config, instance, required_java_major);
     let download_policy = DownloadPolicy {
         max_concurrent_downloads: config.download_max_concurrent().max(1),
         max_download_bps: config.parsed_download_speed_limit_bps(),
@@ -624,12 +624,12 @@ fn request_runtime_launch(
                 .map(str::to_owned)
             {
                 path
-            } else if let Some(runtime) = required_java_runtime {
-                let installed = ensure_openjdk_runtime(runtime.major()).map_err(|err| {
-                    format!("failed to auto-install OpenJDK {}: {err}", runtime.major())
+            } else if let Some(runtime_major) = required_java_major {
+                let installed = ensure_openjdk_runtime(runtime_major).map_err(|err| {
+                    format!("failed to auto-install OpenJDK {runtime_major}: {err}")
                 })?;
                 let installed = installed.display().to_string();
-                configured_java = Some((runtime, installed.clone()));
+                configured_java = Some((runtime_major, installed.clone()));
                 installed
             } else {
                 "java".to_owned()
@@ -709,7 +709,9 @@ fn poll_runtime_actions(state: &mut LibraryRuntimeState, config: &mut Config) {
         state.pending_launches.remove(update.instance_id.as_str());
         match update.result {
             Ok(outcome) => {
-                if let Some((runtime, path)) = outcome.configured_java {
+                if let Some((runtime_major, path)) = outcome.configured_java
+                    && let Some(runtime) = java_runtime_from_major(runtime_major)
+                {
                     config.set_java_runtime_path(runtime, Some(path));
                 }
                 state.status_by_instance.insert(
@@ -744,8 +746,24 @@ fn normalize_optional(value: &str) -> Option<String> {
     }
 }
 
-fn choose_java_executable(config: &Config, game_version: &str) -> Option<String> {
-    if let Some(runtime) = recommended_java_runtime(game_version)
+fn choose_java_executable(
+    config: &Config,
+    instance: &InstanceRecord,
+    required_java_major: Option<u8>,
+) -> Option<String> {
+    if instance.java_override_enabled
+        && let Some(override_major) = instance.java_override_runtime_major
+        && let Some(runtime) = java_runtime_from_major(override_major)
+        && let Some(path) = config.java_runtime_path(runtime)
+    {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() && Path::new(trimmed).exists() {
+            return Some(trimmed.to_owned());
+        }
+    }
+
+    if let Some(runtime_major) = required_java_major
+        && let Some(runtime) = java_runtime_from_major(runtime_major)
         && let Some(path) = config.java_runtime_path(runtime)
     {
         let trimmed = path.trim();
@@ -756,7 +774,7 @@ fn choose_java_executable(config: &Config, game_version: &str) -> Option<String>
     None
 }
 
-fn recommended_java_runtime(game_version: &str) -> Option<JavaRuntimeVersion> {
+fn required_java_major(game_version: &str) -> Option<u8> {
     let mut parts = game_version
         .split('.')
         .filter_map(|part| part.parse::<u32>().ok());
@@ -765,18 +783,40 @@ fn recommended_java_runtime(game_version: &str) -> Option<JavaRuntimeVersion> {
     let patch = parts.next().unwrap_or(0);
 
     if major != 1 {
-        return Some(JavaRuntimeVersion::Java21);
+        return Some(21);
     }
     if minor <= 16 {
-        return Some(JavaRuntimeVersion::Java8);
+        return Some(8);
     }
     if minor == 17 {
-        return Some(JavaRuntimeVersion::Java16);
+        return Some(16);
+    }
+    if minor >= 21 {
+        return u8::try_from(minor).ok();
     }
     if minor > 20 || (minor == 20 && patch >= 5) {
-        return Some(JavaRuntimeVersion::Java21);
+        return Some(21);
     }
-    Some(JavaRuntimeVersion::Java17)
+    Some(17)
+}
+
+fn effective_required_java_major(config: &Config, game_version: &str) -> Option<u8> {
+    let required = required_java_major(game_version)?;
+    if config.force_java_21_minimum() && required < 21 {
+        Some(21)
+    } else {
+        Some(required)
+    }
+}
+
+fn java_runtime_from_major(major: u8) -> Option<JavaRuntimeVersion> {
+    match major {
+        8 => Some(JavaRuntimeVersion::Java8),
+        16 => Some(JavaRuntimeVersion::Java16),
+        17 => Some(JavaRuntimeVersion::Java17),
+        21 => Some(JavaRuntimeVersion::Java21),
+        _ => None,
+    }
 }
 
 fn render_instance_thumbnail(ui: &mut Ui, instance: &InstanceRecord) {

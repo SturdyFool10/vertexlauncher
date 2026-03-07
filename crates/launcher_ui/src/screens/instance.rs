@@ -96,6 +96,8 @@ struct InstanceScreenState {
     memory_override_enabled: bool,
     memory_override_mib: u128,
     cli_args_input: String,
+    java_override_enabled: bool,
+    java_override_runtime_major: Option<u8>,
     selected_content_tab: InstalledContentTab,
     content_metadata_cache: HashMap<String, Option<UnifiedContentEntry>>,
     content_lookup_in_flight: HashSet<String>,
@@ -139,7 +141,7 @@ struct InstanceScreenState {
 struct RuntimePrepareOutcome {
     operation: RuntimePrepareOperation,
     setup: GameSetupResult,
-    configured_java: Option<(JavaRuntimeVersion, String)>,
+    configured_java: Option<(u8, String)>,
     launch: Option<LaunchResult>,
 }
 
@@ -170,6 +172,8 @@ impl InstanceScreenState {
                 .cli_args
                 .clone()
                 .unwrap_or_else(|| config.default_instance_cli_args().to_owned()),
+            java_override_enabled: instance.java_override_enabled,
+            java_override_runtime_major: instance.java_override_runtime_major,
             selected_content_tab: InstalledContentTab::Mods,
             content_metadata_cache: HashMap::new(),
             content_lookup_in_flight: HashSet::new(),
@@ -1286,8 +1290,19 @@ fn render_instance_settings_modal(
                                         game_version.clone(),
                                         modloader.clone(),
                                         modloader_version,
-                                        recommended_java_runtime(game_version.as_str()),
-                                        choose_java_executable(config, game_version.as_str()),
+                                        effective_required_java_major(
+                                            config,
+                                            game_version.as_str(),
+                                        ),
+                                        choose_java_executable(
+                                            config,
+                                            state.java_override_enabled,
+                                            state.java_override_runtime_major,
+                                            effective_required_java_major(
+                                                config,
+                                                game_version.as_str(),
+                                            ),
+                                        ),
                                         config.download_max_concurrent(),
                                         config.parsed_download_speed_limit_bps(),
                                         config.default_instance_max_memory_mib(),
@@ -1363,6 +1378,59 @@ fn render_instance_settings_modal(
                     );
                     ui.add_space(8.0);
 
+                    let _ = settings_widgets::toggle_row(
+                        text_ui,
+                        ui,
+                        "Override Java runtime for this instance",
+                        Some("When enabled, this instance will use the selected configured global Java path."),
+                        &mut state.java_override_enabled,
+                    );
+                    ui.add_space(6.0);
+
+                    let java_options = configured_java_path_options(config);
+                    if state.java_override_enabled {
+                        if java_options.is_empty() {
+                            let _ = text_ui.label(
+                                ui,
+                                ("instance_java_override_no_options", instance_id),
+                                "No configured global Java paths found. Add at least one Java path in Settings first.",
+                                &LabelOptions {
+                                    color: ui.visuals().error_fg_color,
+                                    wrap: true,
+                                    ..LabelOptions::default()
+                                },
+                            );
+                        } else {
+                            if state
+                                .java_override_runtime_major
+                                .is_none_or(|major| !java_options.iter().any(|(m, _)| *m == major))
+                            {
+                                state.java_override_runtime_major = java_options.first().map(|(major, _)| *major);
+                            }
+                            let option_labels: Vec<&str> =
+                                java_options.iter().map(|(_, label)| label.as_str()).collect();
+                            let mut selected_index = java_options
+                                .iter()
+                                .position(|(major, _)| Some(*major) == state.java_override_runtime_major)
+                                .unwrap_or(0);
+                            if settings_widgets::full_width_dropdown_row(
+                                text_ui,
+                                ui,
+                                ("instance_java_override_runtime", instance_id),
+                                "Java path override",
+                                Some("Select which configured Java path this instance should use."),
+                                &mut selected_index,
+                                &option_labels,
+                            )
+                            .changed()
+                            {
+                                state.java_override_runtime_major =
+                                    java_options.get(selected_index).map(|(major, _)| *major);
+                            }
+                        }
+                    }
+                    ui.add_space(8.0);
+
                     if text_ui
                         .button(
                             ui,
@@ -1372,27 +1440,49 @@ fn render_instance_settings_modal(
                         )
                         .clicked()
                     {
-                        let memory_override = if state.memory_override_enabled {
-                            Some(
-                                state
-                                    .memory_override_mib
-                                    .clamp(INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, memory_slider_max),
-                            )
+                        let java_override_runtime_major = if state.java_override_enabled {
+                            if java_options.is_empty() {
+                                state.status_message = Some(
+                                    "Cannot save Java override: configure at least one global Java path in Settings."
+                                        .to_owned(),
+                                );
+                                None
+                            } else {
+                                let selected = state.java_override_runtime_major.and_then(|major| {
+                                    java_options
+                                        .iter()
+                                        .find_map(|(candidate, _)| (*candidate == major).then_some(major))
+                                });
+                                selected.or_else(|| java_options.first().map(|(major, _)| *major))
+                            }
                         } else {
                             None
                         };
-                        let cli_override = normalize_optional(state.cli_args_input.as_str());
-                        match set_instance_settings(
-                            instances,
-                            instance_id,
-                            memory_override,
-                            cli_override,
-                        ) {
-                            Ok(()) => {
-                                instances_changed = true;
-                                state.status_message = Some("Saved instance settings.".to_owned());
+                        if !state.java_override_enabled || java_override_runtime_major.is_some() {
+                            let memory_override = if state.memory_override_enabled {
+                                Some(
+                                    state
+                                        .memory_override_mib
+                                        .clamp(INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, memory_slider_max),
+                                )
+                            } else {
+                                None
+                            };
+                            let cli_override = normalize_optional(state.cli_args_input.as_str());
+                            match set_instance_settings(
+                                instances,
+                                instance_id,
+                                memory_override,
+                                cli_override,
+                                state.java_override_enabled,
+                                java_override_runtime_major,
+                            ) {
+                                Ok(()) => {
+                                    instances_changed = true;
+                                    state.status_message = Some("Saved instance settings.".to_owned());
+                                }
+                                Err(err) => state.status_message = Some(err.to_string()),
                             }
-                            Err(err) => state.status_message = Some(err.to_string()),
                         }
                     }
 
@@ -1718,8 +1808,13 @@ fn render_runtime_row(
                         game_version.trim().to_owned(),
                         selected_modloader_value(state),
                         normalize_optional(state.modloader_version_input.as_str()),
-                        recommended_java_runtime(game_version),
-                        choose_java_executable(config, game_version),
+                        effective_required_java_major(config, game_version),
+                        choose_java_executable(
+                            config,
+                            state.java_override_enabled,
+                            state.java_override_runtime_major,
+                            effective_required_java_major(config, game_version),
+                        ),
                         config.download_max_concurrent(),
                         config.parsed_download_speed_limit_bps(),
                         max_memory_mib,
@@ -2595,7 +2690,7 @@ fn request_runtime_prepare(
     game_version: String,
     modloader: String,
     modloader_version: Option<String>,
-    required_java_runtime: Option<JavaRuntimeVersion>,
+    required_java_major: Option<u8>,
     java_executable: Option<String>,
     download_max_concurrent: u32,
     download_speed_limit_bps: Option<u64>,
@@ -2680,8 +2775,8 @@ fn request_runtime_prepare(
         .filter(|value| !value.is_empty())
     {
         format!("configured Java at {path}")
-    } else if let Some(runtime) = required_java_runtime {
-        format!("auto-provisioned OpenJDK {}", runtime.major())
+    } else if let Some(runtime_major) = required_java_major {
+        format!("auto-provisioned OpenJDK {runtime_major}")
     } else {
         "java from PATH".to_owned()
     };
@@ -2739,12 +2834,12 @@ fn request_runtime_prepare(
                 .map(str::to_owned)
             {
                 path
-            } else if let Some(runtime) = required_java_runtime {
-                let installed = ensure_openjdk_runtime(runtime.major()).map_err(|err| {
-                    format!("failed to auto-install OpenJDK {}: {err}", runtime.major())
+            } else if let Some(runtime_major) = required_java_major {
+                let installed = ensure_openjdk_runtime(runtime_major).map_err(|err| {
+                    format!("failed to auto-install OpenJDK {runtime_major}: {err}")
                 })?;
                 let installed = installed.display().to_string();
-                configured_java = Some((runtime, installed.clone()));
+                configured_java = Some((runtime_major, installed.clone()));
                 installed
             } else {
                 "java".to_owned()
@@ -2900,7 +2995,9 @@ fn poll_runtime_prepare(state: &mut InstanceScreenState, config: &mut Config) {
         match result {
             Ok(outcome) => {
                 let operation = outcome.operation;
-                if let Some((runtime, path)) = outcome.configured_java {
+                if let Some((runtime_major, path)) = outcome.configured_java
+                    && let Some(runtime) = java_runtime_from_major(runtime_major)
+                {
                     config.set_java_runtime_path(runtime, Some(path));
                 }
                 let setup = outcome.setup;
@@ -3078,8 +3175,25 @@ fn selected_game_version(state: &InstanceScreenState) -> &str {
         .unwrap_or_else(|| state.game_version_input.as_str())
 }
 
-fn choose_java_executable(config: &Config, game_version: &str) -> Option<String> {
-    if let Some(runtime) = recommended_java_runtime(game_version)
+fn choose_java_executable(
+    config: &Config,
+    java_override_enabled: bool,
+    java_override_runtime_major: Option<u8>,
+    required_java_major: Option<u8>,
+) -> Option<String> {
+    if java_override_enabled
+        && let Some(override_major) = java_override_runtime_major
+        && let Some(runtime) = java_runtime_from_major(override_major)
+        && let Some(path) = config.java_runtime_path(runtime)
+    {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() && Path::new(trimmed).exists() {
+            return Some(trimmed.to_owned());
+        }
+    }
+
+    if let Some(runtime_major) = required_java_major
+        && let Some(runtime) = java_runtime_from_major(runtime_major)
         && let Some(path) = config.java_runtime_path(runtime)
     {
         let trimmed = path.trim();
@@ -3090,7 +3204,7 @@ fn choose_java_executable(config: &Config, game_version: &str) -> Option<String>
     None
 }
 
-fn recommended_java_runtime(game_version: &str) -> Option<JavaRuntimeVersion> {
+fn required_java_major(game_version: &str) -> Option<u8> {
     let mut parts = game_version
         .split('.')
         .filter_map(|part| part.parse::<u32>().ok());
@@ -3099,18 +3213,58 @@ fn recommended_java_runtime(game_version: &str) -> Option<JavaRuntimeVersion> {
     let patch = parts.next().unwrap_or(0);
 
     if major != 1 {
-        return Some(JavaRuntimeVersion::Java21);
+        return Some(21);
     }
     if minor <= 16 {
-        return Some(JavaRuntimeVersion::Java8);
+        return Some(8);
     }
     if minor == 17 {
-        return Some(JavaRuntimeVersion::Java16);
+        return Some(16);
+    }
+    if minor >= 21 {
+        return u8::try_from(minor).ok();
     }
     if minor > 20 || (minor == 20 && patch >= 5) {
-        return Some(JavaRuntimeVersion::Java21);
+        return Some(21);
     }
-    Some(JavaRuntimeVersion::Java17)
+    Some(17)
+}
+
+fn effective_required_java_major(config: &Config, game_version: &str) -> Option<u8> {
+    let required = required_java_major(game_version)?;
+    if config.force_java_21_minimum() && required < 21 {
+        Some(21)
+    } else {
+        Some(required)
+    }
+}
+
+fn java_runtime_from_major(major: u8) -> Option<JavaRuntimeVersion> {
+    match major {
+        8 => Some(JavaRuntimeVersion::Java8),
+        16 => Some(JavaRuntimeVersion::Java16),
+        17 => Some(JavaRuntimeVersion::Java17),
+        21 => Some(JavaRuntimeVersion::Java21),
+        _ => None,
+    }
+}
+
+fn configured_java_path_options(config: &Config) -> Vec<(u8, String)> {
+    let mut options = Vec::new();
+    for runtime in JavaRuntimeVersion::ALL {
+        let Some(path) = config.java_runtime_path(runtime) else {
+            continue;
+        };
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        options.push((
+            runtime.major(),
+            format!("Java {} ({trimmed})", runtime.major()),
+        ));
+    }
+    options
 }
 
 fn ensure_selected_modloader_is_supported(state: &mut InstanceScreenState, game_version: &str) {

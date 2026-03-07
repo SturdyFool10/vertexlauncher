@@ -207,6 +207,7 @@ pub enum ToggleSettingId {
     WindowBlurEnabled,
     OpenTypeFeaturesEnabled,
     SnapshotsAndBetasEnabled,
+    ForceJava21Minimum,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -246,6 +247,13 @@ impl ToggleSettingId {
                 label: "Include Snapshots and Betas",
                 info_tooltip: Some(
                     "Allows selecting snapshot and beta/alpha Minecraft versions in instance version dropdowns.",
+                ),
+            },
+            ToggleSettingId::ForceJava21Minimum => ToggleSettingSpec {
+                id: ToggleSettingId::ForceJava21Minimum,
+                label: "Force Java 21 Minimum",
+                info_tooltip: Some(
+                    "When enabled, versions requiring Java 8/16/17 use Java 21 instead. Higher Java requirements are unchanged.",
                 ),
             },
         }
@@ -385,6 +393,7 @@ pub struct Config {
     ui_font_size: f32,
     ui_font_weight: i32,
     include_snapshots_and_betas: bool,
+    force_java_21_minimum: bool,
     default_instance_max_memory_mib: u128,
     default_instance_cli_args: String,
     minecraft_installations_root: String,
@@ -447,6 +456,11 @@ impl Config {
     /// Returns whether snapshots/betas are included in version pickers.
     pub fn include_snapshots_and_betas(&self) -> bool {
         self.include_snapshots_and_betas
+    }
+
+    /// Returns whether Java requirements below 21 should be upgraded to 21.
+    pub fn force_java_21_minimum(&self) -> bool {
+        self.force_java_21_minimum
     }
 
     /// Returns default per-instance max memory (MiB).
@@ -585,6 +599,7 @@ impl Config {
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas,
+            force_java_21_minimum,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
@@ -613,6 +628,10 @@ impl Config {
             ToggleSettingId::SnapshotsAndBetasEnabled.spec(),
             include_snapshots_and_betas,
         );
+        visit(
+            ToggleSettingId::ForceJava21Minimum.spec(),
+            force_java_21_minimum,
+        );
     }
 
     /// Visits each dropdown setting with mutable access to its backing value.
@@ -631,6 +650,7 @@ impl Config {
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
+            force_java_21_minimum: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
@@ -659,6 +679,7 @@ impl Config {
             ui_font_size,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
+            force_java_21_minimum: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
@@ -687,6 +708,7 @@ impl Config {
             ui_font_size: _,
             ui_font_weight,
             include_snapshots_and_betas: _,
+            force_java_21_minimum: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
@@ -715,6 +737,7 @@ impl Config {
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
+            force_java_21_minimum: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
@@ -763,6 +786,7 @@ impl Default for Config {
             ui_font_size: 18.0,
             ui_font_weight: 400,
             include_snapshots_and_betas: false,
+            force_java_21_minimum: true,
             default_instance_max_memory_mib: 4096,
             default_instance_cli_args: String::new(),
             minecraft_installations_root: DEFAULT_MINECRAFT_INSTALLATIONS_ROOT.to_owned(),
