@@ -72,12 +72,8 @@ pub fn render(
 }
 
 fn render_contents(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerState) {
-    let heading = style::page_heading(ui);
     let body = style::body(ui);
     let muted = style::muted(ui);
-
-    let _ = text_ui.label(ui, "skins_heading", "Skin Manager", &heading);
-    ui.add_space(style::SPACE_SM);
 
     if let Some(name) = state.active_player_name.as_deref() {
         let _ = text_ui.label(

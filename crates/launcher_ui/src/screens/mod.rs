@@ -37,7 +37,7 @@ impl AppScreen {
     pub fn label(self) -> &'static str {
         match self {
             AppScreen::Library => "Library",
-            AppScreen::Skins => "Skins",
+            AppScreen::Skins => "Skin Manager",
             AppScreen::Settings => "Settings",
             AppScreen::Legal => "Legal",
             AppScreen::Console => "Console",
