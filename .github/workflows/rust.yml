@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  BIN_NAME: mclauncher
+  BIN_NAME: vertexlauncher
 
 jobs:
   build-release:
@@ -21,6 +21,31 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          base_pkgs=(
+            pkg-config
+            libglib2.0-dev
+            libgtk-3-dev
+            libgdk-pixbuf-2.0-dev
+            libpango1.0-dev
+            libatk1.0-dev
+            libcairo2-dev
+            libsoup-3.0-dev
+          )
+
+          if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
+            webkit_pkgs=(libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev)
+          else
+            webkit_pkgs=(libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.0-dev)
+          fi
+
+          sudo apt-get install -y --no-install-recommends "${base_pkgs[@]}" "${webkit_pkgs[@]}"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

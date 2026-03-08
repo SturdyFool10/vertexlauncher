@@ -6,7 +6,9 @@ pub fn set_install_progress(frame: &eframe::Frame, progress_0_to_1: Option<f32>)
 mod platform {
     use eframe::Frame;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use std::sync::OnceLock;
+    use std::cell::RefCell;
+    use std::ffi::c_void;
+    use std::thread_local;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{
         CLSCTX_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -14,36 +16,44 @@ mod platform {
     use windows::Win32::UI::Shell::{ITaskbarList4, TBPF_NOPROGRESS, TBPF_NORMAL, TaskbarList};
 
     pub fn set_install_progress(frame: &Frame, progress_0_to_1: Option<f32>) {
-        let Some(taskbar) = taskbar() else {
-            return;
-        };
         let Ok(window_handle) = frame.window_handle() else {
             return;
         };
         let RawWindowHandle::Win32(handle) = window_handle.as_raw() else {
             return;
         };
-        let hwnd = HWND(handle.hwnd.get());
+        let hwnd = HWND(handle.hwnd.get() as *mut c_void);
 
-        unsafe {
-            if let Some(progress) = progress_0_to_1 {
-                let value = (progress.clamp(0.0, 1.0) * 100.0).round() as u64;
-                let _ = taskbar.SetProgressState(hwnd, TBPF_NORMAL);
-                let _ = taskbar.SetProgressValue(hwnd, value, 100);
-            } else {
-                let _ = taskbar.SetProgressState(hwnd, TBPF_NOPROGRESS);
+        TASKBAR.with(|cell| {
+            let mut cached = cell.borrow_mut();
+            if cached.is_none() {
+                *cached = init_taskbar();
             }
-        }
+            let Some(taskbar) = cached.as_ref() else {
+                return;
+            };
+
+            unsafe {
+                if let Some(progress) = progress_0_to_1 {
+                    let value = (progress.clamp(0.0, 1.0) * 100.0).round() as u64;
+                    let _ = taskbar.SetProgressState(hwnd, TBPF_NORMAL);
+                    let _ = taskbar.SetProgressValue(hwnd, value, 100);
+                } else {
+                    let _ = taskbar.SetProgressState(hwnd, TBPF_NOPROGRESS);
+                }
+            }
+        });
     }
 
-    fn taskbar() -> Option<&'static ITaskbarList4> {
-        static TASKBAR: OnceLock<Option<ITaskbarList4>> = OnceLock::new();
-        TASKBAR
-            .get_or_init(|| unsafe {
-                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-                CoCreateInstance(&TaskbarList, None, CLSCTX_SERVER).ok()
-            })
-            .as_ref()
+    thread_local! {
+        static TASKBAR: RefCell<Option<ITaskbarList4>> = const { RefCell::new(None) };
+    }
+
+    fn init_taskbar() -> Option<ITaskbarList4> {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            CoCreateInstance(&TaskbarList, None, CLSCTX_SERVER).ok()
+        }
     }
 }
 
