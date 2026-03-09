@@ -682,7 +682,7 @@ fn render_installed_content_entry(
                                     |ui| {
                                         egui::Frame::new()
                                             .fill(ui.visuals().extreme_bg_color)
-                                            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                                            .stroke(egui::Stroke::NONE)
                                             .corner_radius(egui::CornerRadius::same(
                                                 style::CORNER_RADIUS_SM,
                                             ))
@@ -752,6 +752,20 @@ fn render_installed_content_entry(
                                             ))
                                             .show(ui, |ui| {
                                                 ui.set_width(ui.available_width().max(1.0));
+                                                let description_style = LabelOptions {
+                                                    line_height: INSTALLED_DESCRIPTION_LINE_HEIGHT,
+                                                    color: ui.visuals().text_color(),
+                                                    wrap: false,
+                                                    ..LabelOptions::default()
+                                                };
+                                                let truncated_description =
+                                                    truncate_single_line_text_with_ellipsis(
+                                                        text_ui,
+                                                        ui,
+                                                        description.as_str(),
+                                                        ui.available_width().max(1.0),
+                                                        &description_style,
+                                                    );
                                                 ui.allocate_ui_with_layout(
                                                     egui::vec2(
                                                         ui.available_width().max(1.0),
@@ -765,33 +779,13 @@ fn render_installed_content_entry(
                                                         ui.set_max_height(
                                                             INSTALLED_DESCRIPTION_LINE_HEIGHT,
                                                         );
-                                                        egui::ScrollArea::vertical()
-                                                            .id_salt((
-                                                                id_source,
-                                                                "installed_description_scroll",
-                                                            ))
-                                                            .max_height(
-                                                                INSTALLED_DESCRIPTION_LINE_HEIGHT,
-                                                            )
-                                                            .auto_shrink([false, false])
-                                                            .show(ui, |ui| {
-                                                                ui.set_width(
-                                                                    ui.available_width().max(1.0),
-                                                                );
-                                                                let _ = text_ui.label(
-                                                                    ui,
-                                                                    (id_source, "description"),
-                                                                    description.as_str(),
-                                                                    &LabelOptions {
-                                                                        line_height:
-                                                                            INSTALLED_DESCRIPTION_LINE_HEIGHT,
-                                                                        color: ui.visuals()
-                                                                            .text_color(),
-                                                                        wrap: true,
-                                                                        ..LabelOptions::default()
-                                                                    },
-                                                                );
-                                                            });
+                                                        ui.set_width(ui.available_width().max(1.0));
+                                                        let _ = text_ui.label(
+                                                            ui,
+                                                            (id_source, "description"),
+                                                            truncated_description.as_str(),
+                                                            &description_style,
+                                                        );
                                                     },
                                                 );
                                             });
@@ -815,6 +809,55 @@ fn render_installed_content_entry(
     InstalledEntryRenderResult {
         open_clicked: open_clicked && !delete_clicked,
         delete_clicked,
+    }
+}
+
+fn truncate_single_line_text_with_ellipsis(
+    text_ui: &mut TextUi,
+    ui: &Ui,
+    text: &str,
+    max_width: f32,
+    label_options: &LabelOptions,
+) -> String {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return String::new();
+    }
+
+    if max_width <= 0.0 {
+        return "...".to_owned();
+    }
+
+    let mut measure_width =
+        |candidate: &str| -> f32 { text_ui.measure_text_size(ui, candidate, label_options).x };
+
+    if measure_width(normalized.as_str()) <= max_width {
+        return normalized;
+    }
+
+    let ellipsis = "...";
+    if measure_width(ellipsis) > max_width {
+        return String::new();
+    }
+
+    let mut cutoff = 0usize;
+    for (index, _) in normalized
+        .char_indices()
+        .skip(1)
+        .chain(std::iter::once((normalized.len(), '\0')))
+    {
+        let candidate = format!("{}{}", &normalized[..index], ellipsis);
+        if measure_width(candidate.as_str()) <= max_width {
+            cutoff = index;
+        } else {
+            break;
+        }
+    }
+
+    if cutoff == 0 {
+        ellipsis.to_owned()
+    } else {
+        format!("{}{}", &normalized[..cutoff], ellipsis)
     }
 }
 
