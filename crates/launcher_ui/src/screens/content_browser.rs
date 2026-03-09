@@ -3,14 +3,14 @@ use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
 use installation::{MinecraftVersionEntry, fetch_version_catalog};
 use instances::{InstanceStore, instance_root_path};
-use modprovider::ContentSource;
+use modprovider::{ContentSource, UnifiedContentEntry};
 use modrinth::Client as ModrinthClient;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use textui::{LabelOptions, TextUi};
 
 use crate::app::tokio_runtime;
@@ -50,6 +50,15 @@ enum ContentDetailTab {
 #[derive(Debug, Clone, Default)]
 pub struct ContentBrowserOutput {
     pub requested_screen: Option<AppScreen>,
+}
+
+static PENDING_EXTERNAL_DETAIL_OPEN: OnceLock<Mutex<Option<UnifiedContentEntry>>> = OnceLock::new();
+
+pub(crate) fn request_open_detail_for_content(entry: UnifiedContentEntry) {
+    let store = PENDING_EXTERNAL_DETAIL_OPEN.get_or_init(|| Mutex::new(None));
+    if let Ok(mut pending) = store.lock() {
+        *pending = Some(entry);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -321,6 +330,39 @@ struct InstalledContentProject {
     direct_dependencies: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct InstalledContentIdentity {
+    pub name: String,
+    pub source: ContentSource,
+    pub modrinth_project_id: Option<String>,
+    pub curseforge_project_id: Option<u64>,
+}
+
+impl InstalledContentIdentity {
+    pub(crate) fn placeholder_entry(&self, content_type: &str) -> UnifiedContentEntry {
+        let id = match self.source {
+            ContentSource::Modrinth => self
+                .modrinth_project_id
+                .as_deref()
+                .map(|value| format!("modrinth:{value}"))
+                .unwrap_or_default(),
+            ContentSource::CurseForge => self
+                .curseforge_project_id
+                .map(|value| format!("curseforge:{value}"))
+                .unwrap_or_default(),
+        };
+        UnifiedContentEntry {
+            id,
+            name: self.name.clone(),
+            summary: String::new(),
+            content_type: content_type.to_owned(),
+            source: self.source,
+            project_url: None,
+            icon_url: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum ManagedContentSource {
     Modrinth,
@@ -341,6 +383,15 @@ impl From<ContentSource> for ManagedContentSource {
         match value {
             ContentSource::Modrinth => ManagedContentSource::Modrinth,
             ContentSource::CurseForge => ManagedContentSource::CurseForge,
+        }
+    }
+}
+
+impl From<ManagedContentSource> for ContentSource {
+    fn from(value: ManagedContentSource) -> Self {
+        match value {
+            ManagedContentSource::Modrinth => ContentSource::Modrinth,
+            ManagedContentSource::CurseForge => ContentSource::CurseForge,
         }
     }
 }
@@ -518,6 +569,7 @@ pub fn render(
     let game_version = instance.game_version.trim().to_owned();
 
     request_version_catalog(&mut state);
+    apply_pending_external_detail_open(&mut state);
 
     let _ = text_ui.label(
         ui,
@@ -1665,22 +1717,40 @@ fn render_rounded_icon_button(
         text_color.g(),
         text_color.b()
     );
-    let image = egui::Image::from_bytes(uri, themed_svg).fit_to_exact_size(egui::vec2(
-        (height - 10.0).max(12.0),
-        (height - 10.0).max(12.0),
-    ));
-    let button = egui::Button::image(image)
-        .fill(if enabled {
-            fill
+    let button_size = egui::vec2(width, height);
+    let icon_size = (height - 10.0).max(12.0);
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(button_size, sense);
+    let button_fill = if enabled {
+        if response.is_pointer_button_down_on() {
+            fill.gamma_multiply(0.9)
+        } else if response.hovered() {
+            fill.gamma_multiply(1.08)
         } else {
-            ui.visuals().widgets.inactive.weak_bg_fill
-        })
-        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-        .corner_radius(egui::CornerRadius::same(8));
-    let response = ui
-        .add_enabled(enabled, button.min_size(egui::vec2(width, height)))
-        .on_hover_text(tooltip);
-    response.clicked()
+            fill
+        }
+    } else {
+        ui.visuals().widgets.inactive.weak_bg_fill
+    };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(8), button_fill);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(8),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+
+    let image = egui::Image::from_bytes(uri, themed_svg)
+        .fit_to_exact_size(egui::vec2(icon_size, icon_size));
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_size, icon_size));
+    let _ = ui.put(icon_rect, image);
+
+    response.on_hover_text(tooltip).clicked()
 }
 
 fn themed_svg_bytes(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {
@@ -1885,6 +1955,59 @@ fn request_version_catalog(state: &mut ContentBrowserState) {
         .and_then(|inner| inner);
         let _ = tx.send(result);
     });
+}
+
+fn apply_pending_external_detail_open(state: &mut ContentBrowserState) {
+    let Some(store) = PENDING_EXTERNAL_DETAIL_OPEN.get() else {
+        return;
+    };
+    let Ok(mut pending) = store.lock() else {
+        return;
+    };
+    let Some(entry) = pending.take() else {
+        return;
+    };
+
+    let Some(content_type) = parse_content_type(entry.content_type.as_str()) else {
+        return;
+    };
+
+    let mut browser_entry = BrowserProjectEntry {
+        dedupe_key: format!(
+            "{}::{}",
+            content_type.label().to_ascii_lowercase(),
+            normalize_lookup_key(entry.name.as_str())
+        ),
+        name: entry.name,
+        summary: entry.summary,
+        content_type,
+        icon_url: entry.icon_url,
+        modrinth_project_id: None,
+        curseforge_project_id: None,
+        sources: vec![entry.source],
+        popularity_score: None,
+        updated_at: None,
+        relevance_rank: 0,
+    };
+
+    match entry.source {
+        ContentSource::Modrinth => {
+            browser_entry.modrinth_project_id = entry
+                .id
+                .strip_prefix("modrinth:")
+                .map(str::to_owned)
+                .or_else(|| (!entry.id.trim().is_empty()).then(|| entry.id.clone()));
+        }
+        ContentSource::CurseForge => {
+            browser_entry.curseforge_project_id = entry
+                .id
+                .strip_prefix("curseforge:")
+                .or_else(|| (!entry.id.trim().is_empty()).then_some(entry.id.as_str()))
+                .and_then(|value| value.parse::<u64>().ok());
+        }
+    }
+
+    open_detail_page(state, &browser_entry);
 }
 
 fn ensure_version_catalog_channel(state: &mut ContentBrowserState) {
@@ -3185,6 +3308,27 @@ fn load_content_manifest(instance_root: &Path) -> ContentInstallManifest {
     manifest
 }
 
+pub(crate) fn load_managed_content_identities(
+    instance_root: &Path,
+) -> HashMap<String, InstalledContentIdentity> {
+    let manifest = load_content_manifest(instance_root);
+    manifest
+        .projects
+        .into_values()
+        .map(|project| {
+            (
+                normalize_content_path_key(project.file_path.as_str()),
+                InstalledContentIdentity {
+                    name: project.name,
+                    source: project.selected_source.into(),
+                    modrinth_project_id: project.modrinth_project_id,
+                    curseforge_project_id: project.curseforge_project_id,
+                },
+            )
+        })
+        .collect()
+}
+
 fn save_content_manifest(
     instance_root: &Path,
     manifest: &ContentInstallManifest,
@@ -3230,6 +3374,15 @@ fn normalize_content_manifest(instance_root: &Path, manifest: &mut ContentInstal
         value.direct_dependencies.sort();
         value.direct_dependencies.dedup();
     }
+}
+
+fn normalize_content_path_key(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches("./")
+        .trim_start_matches(".\\")
+        .replace('\\', "/")
+        .to_ascii_lowercase()
 }
 
 fn normalize_optional(value: &str) -> Option<String> {

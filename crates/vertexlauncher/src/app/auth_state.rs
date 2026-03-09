@@ -1,4 +1,5 @@
-use auth::{CachedAccount, CachedAccountsState};
+use auth::{CachedAccount, CachedAccountRenewalEvent, CachedAccountsState};
+use launcher_ui::notification;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
@@ -79,7 +80,10 @@ impl AuthState {
                 Ok(client_id) => {
                     let (tx, rx) = mpsc::channel::<Result<CachedAccountsState, String>>();
                     std::thread::spawn(move || {
-                        let result = auth::renew_cached_accounts_tokens(&client_id)
+                        let result =
+                            auth::renew_cached_accounts_tokens_with_callback(&client_id, |event| {
+                                emit_cached_account_renewal_notification(event);
+                            })
                             .map_err(|err| err.to_string());
                         let _ = tx.send(result);
                     });
@@ -273,7 +277,9 @@ impl AuthState {
             }
         };
 
-        match auth::renew_cached_accounts_tokens(&client_id) {
+        match auth::renew_cached_accounts_tokens_with_callback(&client_id, |event| {
+            emit_cached_account_renewal_notification(event);
+        }) {
             Ok(renewed) => {
                 let previous_active = self.accounts_state.active_profile_id.clone();
                 self.accounts_state = renewed;
@@ -387,6 +393,52 @@ impl AuthState {
         }
 
         entries
+    }
+}
+
+fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent) {
+    match event {
+        CachedAccountRenewalEvent::Started {
+            profile_id,
+            display_name,
+        } => {
+            notification::emit_spinner(
+                notification::Severity::Info,
+                "Login Renewal",
+                format!("Renewing Login Token for {display_name}"),
+                format!("login-renewal:{profile_id}"),
+            );
+        }
+        CachedAccountRenewalEvent::Succeeded {
+            profile_id,
+            display_name,
+        } => {
+            notification::emit_replace(
+                notification::Severity::Info,
+                "Login Renewal",
+                format!("login token for {display_name} successful, you are ready to play!"),
+                format!("login-renewal:{profile_id}"),
+            );
+        }
+        CachedAccountRenewalEvent::Failed {
+            profile_id,
+            display_name,
+            error,
+        } => {
+            tracing::warn!(
+                target: "vertexlauncher/auth/renew",
+                profile_id,
+                display_name,
+                error,
+                "Auto-renew login notification reported an error."
+            );
+            notification::emit_replace(
+                notification::Severity::Error,
+                "Login Renewal",
+                format!("Error in attepting to renew login for {display_name}"),
+                format!("login-renewal:{profile_id}"),
+            );
+        }
     }
 }
 

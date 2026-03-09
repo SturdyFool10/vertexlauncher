@@ -2,6 +2,7 @@ use config::{
     Config, INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP,
     JavaRuntimeVersion,
 };
+use curseforge::Client as CurseForgeClient;
 use egui::Ui;
 use installation::{
     DownloadPolicy, GameSetupResult, InstallProgress, InstallProgressCallback, InstallStage,
@@ -12,6 +13,7 @@ use installation::{
 };
 use instances::{InstanceStore, set_instance_settings, set_instance_versions};
 use modprovider::{ContentSource, UnifiedContentEntry, search_minecraft_content};
+use modrinth::Client as ModrinthClient;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -21,6 +23,7 @@ use std::time::{Duration, Instant};
 use textui::{ButtonOptions, LabelOptions, TextUi, TooltipOptions};
 
 use crate::app::tokio_runtime;
+use crate::screens::content_browser::InstalledContentIdentity;
 use crate::screens::{AppScreen, LaunchAuthContext};
 use crate::ui::{
     components::{icon_button, remote_tiled_image, settings_widgets},
@@ -32,6 +35,7 @@ const RESERVED_SYSTEM_MEMORY_MIB: u128 = 4 * 1024;
 const FALLBACK_TOTAL_MEMORY_MIB: u128 = 20 * 1024;
 const MODLOADER_OPTIONS: [&str; 6] = ["Vanilla", "Fabric", "Forge", "NeoForge", "Quilt", "Custom"];
 const CUSTOM_MODLOADER_INDEX: usize = MODLOADER_OPTIONS.len() - 1;
+const INSTALLED_CONTENT_SCROLLBAR_RESERVE: f32 = 18.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InstalledContentTab {
@@ -66,6 +70,15 @@ impl InstalledContentTab {
             InstalledContentTab::DataPacks => "datapacks",
         }
     }
+
+    fn content_type_key(self) -> &'static str {
+        match self {
+            InstalledContentTab::Mods => "mod",
+            InstalledContentTab::ResourcePacks => "resource pack",
+            InstalledContentTab::ShaderPacks => "shader",
+            InstalledContentTab::DataPacks => "data pack",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +87,7 @@ struct InstalledContentFile {
     file_path: PathBuf,
     lookup_query: String,
     lookup_key: String,
+    managed_identity: Option<InstalledContentIdentity>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -503,34 +517,62 @@ fn render_installed_content_section(
             instance_id,
             state.selected_content_tab.label(),
         ))
+        .auto_shrink([false, false])
         .max_height(scroll_height)
         .show(ui, |ui| {
+            let row_width = (ui.max_rect().width() - INSTALLED_CONTENT_SCROLLBAR_RESERVE).max(1.0);
+            ui.set_min_width(row_width);
+            ui.set_max_width(row_width);
             for (entry_index, entry) in installed_files.iter().enumerate() {
                 if !state.content_metadata_cache.contains_key(&entry.lookup_key) {
                     request_content_metadata_lookup(
                         state,
                         entry.lookup_key.as_str(),
                         entry.lookup_query.as_str(),
+                        entry.managed_identity.as_ref(),
                         state.selected_content_tab,
                     );
                 }
+                let placeholder_metadata = entry.managed_identity.as_ref().map(|identity| {
+                    identity.placeholder_entry(state.selected_content_tab.content_type_key())
+                });
                 let metadata = state
                     .content_metadata_cache
                     .get(&entry.lookup_key)
-                    .and_then(|meta| meta.as_ref());
+                    .and_then(|meta| meta.as_ref())
+                    .or(placeholder_metadata.as_ref());
 
-                let rendered = render_installed_content_entry(
-                    ui,
-                    text_ui,
-                    (instance_id, entry_index),
-                    entry,
-                    metadata,
-                );
+                let rendered = ui
+                    .scope_builder(
+                        egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
+                            ui.cursor().min,
+                            egui::vec2(row_width, f32::INFINITY),
+                        )),
+                        |ui| {
+                            ui.set_min_width(row_width);
+                            ui.set_max_width(row_width);
+                            render_installed_content_entry(
+                                ui,
+                                text_ui,
+                                (instance_id, entry_index),
+                                entry,
+                                metadata,
+                            )
+                        },
+                    )
+                    .inner;
 
                 if rendered.delete_clicked {
                     pending_delete = Some(entry.file_path.clone());
                 } else if rendered.open_clicked {
-                    output.requested_screen = Some(AppScreen::ContentBrowser);
+                    if let Some(metadata) = metadata.cloned() {
+                        super::content_browser::request_open_detail_for_content(metadata);
+                        output.requested_screen = Some(AppScreen::ContentBrowser);
+                    } else {
+                        state.status_message = Some(
+                            "Still loading content metadata. Try again in a moment.".to_owned(),
+                        );
+                    }
                 }
                 ui.add_space(8.0);
             }
@@ -566,6 +608,11 @@ fn render_installed_content_entry(
     entry: &InstalledContentFile,
     metadata: Option<&UnifiedContentEntry>,
 ) -> InstalledEntryRenderResult {
+    const INSTALLED_TILE_GAP: f32 = 8.0;
+    const INSTALLED_TILE_THUMBNAIL_FRAME_PADDING: f32 = 8.0;
+    const INSTALLED_DESCRIPTION_LINE_HEIGHT: f32 = 20.0;
+    const INSTALLED_DESCRIPTION_FRAME_Y_PADDING: i8 = 3;
+
     let display_name = metadata
         .map(|value| value.name.clone())
         .unwrap_or_else(|| entry.file_name.clone());
@@ -581,91 +628,193 @@ fn render_installed_content_entry(
     let platform_label = metadata
         .map(|value| value.source.label())
         .unwrap_or("Unknown");
+    let available_width = ui.available_width().max(1.0);
+    let tile_width = (available_width - (style::SPACE_XS * 2.0)).max(1.0);
+    let side_padding = ((available_width - tile_width) * 0.5).max(0.0);
 
-    let frame = egui::Frame::new()
-        .fill(ui.visuals().widgets.noninteractive.bg_fill)
-        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-        .corner_radius(egui::CornerRadius::same(10))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
-            let mut delete_clicked = false;
-            ui.horizontal_top(|ui| {
-                let delete_response = icon_button::svg(
-                    ui,
-                    format!("instance_content_delete_{}", entry.lookup_key).as_str(),
-                    assets::TRASH_X_SVG,
-                    "Delete this content",
-                    false,
-                    20.0,
-                );
-                if delete_response.clicked() {
-                    delete_clicked = true;
-                }
+    let (delete_clicked, open_clicked) = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            if side_padding > 0.0 {
+                ui.add_space(side_padding);
+            }
 
-                ui.add_space(8.0);
-                render_content_thumbnail(ui, id_source, metadata);
-                ui.add_space(8.0);
+            let frame_response = egui::Frame::new()
+                .fill(ui.visuals().faint_bg_color)
+                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
+                .inner_margin(egui::Margin::same(style::SPACE_MD as i8))
+                .show(ui, |ui| {
+                    ui.set_min_width(tile_width);
+                    ui.set_max_width(tile_width);
 
-                ui.vertical(|ui| {
-                    let _ = text_ui.label(
-                        ui,
-                        (id_source, "name"),
-                        display_name.as_str(),
-                        &LabelOptions {
-                            font_size: 19.0,
-                            line_height: 24.0,
-                            weight: 700,
-                            color: ui.visuals().text_color(),
-                            wrap: true,
-                            ..LabelOptions::default()
-                        },
-                    );
+                    let mut delete_clicked = false;
+                    let action_button_width = 28.0;
+                    let content_width = ui.available_width().max(1.0);
+                    let thumbnail_size = ((content_width - 52.0) * 0.14).clamp(32.0, 48.0);
+                    let thumbnail_frame_size =
+                        thumbnail_size + INSTALLED_TILE_THUMBNAIL_FRAME_PADDING;
+                    let thumbnail_lane_height = 92.0_f32.max(thumbnail_frame_size);
 
-                    egui::Frame::new()
-                        .fill(egui::Color32::TRANSPARENT)
-                        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(6, 3))
-                        .show(ui, |ui| {
-                            let _ = text_ui.label(
-                                ui,
-                                (id_source, "platform_badge"),
-                                platform_label,
-                                &LabelOptions {
-                                    font_size: 13.0,
-                                    line_height: 16.0,
-                                    color: ui.visuals().text_color(),
-                                    wrap: false,
-                                    ..LabelOptions::default()
-                                },
-                            );
-                        });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                        let delete_button_id =
+                            format!("instance-content-delete-{}", entry.lookup_key);
+                        if render_installed_content_action_button(
+                            ui,
+                            delete_button_id.as_str(),
+                            assets::TRASH_X_SVG,
+                            "Delete this content",
+                            action_button_width,
+                            action_button_width,
+                        ) {
+                            delete_clicked = true;
+                        }
 
-                    ui.add_space(4.0);
-                    let _ = text_ui.label(
-                        ui,
-                        (id_source, "description"),
-                        description.as_str(),
-                        &LabelOptions {
-                            color: ui.visuals().weak_text_color(),
-                            wrap: true,
-                            ..LabelOptions::default()
-                        },
-                    );
+                        ui.add_space(INSTALLED_TILE_GAP);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width().max(1.0), 0.0),
+                            egui::Layout::left_to_right(egui::Align::TOP),
+                            |ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(thumbnail_frame_size, thumbnail_lane_height),
+                                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                                    |ui| {
+                                        egui::Frame::new()
+                                            .fill(ui.visuals().extreme_bg_color)
+                                            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                                            .corner_radius(egui::CornerRadius::same(
+                                                style::CORNER_RADIUS_SM,
+                                            ))
+                                            .inner_margin(egui::Margin::same(4))
+                                            .show(ui, |ui| {
+                                                render_content_thumbnail(
+                                                    ui,
+                                                    id_source,
+                                                    metadata,
+                                                    thumbnail_size,
+                                                );
+                                            });
+                                    },
+                                );
+
+                                ui.add_space(INSTALLED_TILE_GAP);
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(ui.available_width().max(1.0), 0.0),
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        ui.set_width(ui.available_width().max(1.0));
+                                        let _ = text_ui.label(
+                                            ui,
+                                            (id_source, "name"),
+                                            display_name.as_str(),
+                                            &LabelOptions {
+                                                font_size: 19.0,
+                                                line_height: 24.0,
+                                                weight: 700,
+                                                color: ui.visuals().text_color(),
+                                                wrap: true,
+                                                ..LabelOptions::default()
+                                            },
+                                        );
+
+                                        ui.add_space(4.0);
+                                        egui::Frame::new()
+                                            .fill(ui.visuals().selection.bg_fill)
+                                            .stroke(egui::Stroke::NONE)
+                                            .corner_radius(egui::CornerRadius::same(6))
+                                            .inner_margin(egui::Margin::symmetric(6, 3))
+                                            .show(ui, |ui| {
+                                                let _ = text_ui.label(
+                                                    ui,
+                                                    (id_source, "platform_badge"),
+                                                    platform_label,
+                                                    &LabelOptions {
+                                                        font_size: 13.0,
+                                                        line_height: 16.0,
+                                                        color: ui.visuals().selection.stroke.color,
+                                                        wrap: false,
+                                                        ..LabelOptions::default()
+                                                    },
+                                                );
+                                            });
+
+                                        ui.add_space(4.0);
+                                        egui::Frame::new()
+                                            .fill(ui.visuals().extreme_bg_color)
+                                            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                                            .corner_radius(egui::CornerRadius::same(
+                                                style::CORNER_RADIUS_SM,
+                                            ))
+                                            .inner_margin(egui::Margin::symmetric(
+                                                6,
+                                                INSTALLED_DESCRIPTION_FRAME_Y_PADDING,
+                                            ))
+                                            .show(ui, |ui| {
+                                                ui.set_width(ui.available_width().max(1.0));
+                                                ui.allocate_ui_with_layout(
+                                                    egui::vec2(
+                                                        ui.available_width().max(1.0),
+                                                        INSTALLED_DESCRIPTION_LINE_HEIGHT,
+                                                    ),
+                                                    egui::Layout::top_down(egui::Align::Min),
+                                                    |ui| {
+                                                        ui.set_min_height(
+                                                            INSTALLED_DESCRIPTION_LINE_HEIGHT,
+                                                        );
+                                                        ui.set_max_height(
+                                                            INSTALLED_DESCRIPTION_LINE_HEIGHT,
+                                                        );
+                                                        egui::ScrollArea::vertical()
+                                                            .id_salt((
+                                                                id_source,
+                                                                "installed_description_scroll",
+                                                            ))
+                                                            .max_height(
+                                                                INSTALLED_DESCRIPTION_LINE_HEIGHT,
+                                                            )
+                                                            .auto_shrink([false, false])
+                                                            .show(ui, |ui| {
+                                                                ui.set_width(
+                                                                    ui.available_width().max(1.0),
+                                                                );
+                                                                let _ = text_ui.label(
+                                                                    ui,
+                                                                    (id_source, "description"),
+                                                                    description.as_str(),
+                                                                    &LabelOptions {
+                                                                        line_height:
+                                                                            INSTALLED_DESCRIPTION_LINE_HEIGHT,
+                                                                        color: ui.visuals()
+                                                                            .text_color(),
+                                                                        wrap: true,
+                                                                        ..LabelOptions::default()
+                                                                    },
+                                                                );
+                                                            });
+                                                    },
+                                                );
+                                            });
+                                    },
+                                );
+                            },
+                        );
+                    });
+
+                    delete_clicked
                 });
-            });
-            delete_clicked
-        });
 
-    let entry_response = ui.interact(
-        frame.response.rect,
-        ui.make_persistent_id((id_source, "entry_click")),
-        egui::Sense::click(),
-    );
+            if side_padding > 0.0 {
+                ui.add_space(side_padding);
+            }
+
+            (frame_response.inner, frame_response.response.clicked())
+        })
+        .inner;
 
     InstalledEntryRenderResult {
-        open_clicked: entry_response.clicked(),
-        delete_clicked: frame.inner,
+        open_clicked: open_clicked && !delete_clicked,
+        delete_clicked,
     }
 }
 
@@ -673,8 +822,9 @@ fn render_content_thumbnail(
     ui: &mut Ui,
     id_source: impl Hash,
     metadata: Option<&UnifiedContentEntry>,
+    size: f32,
 ) {
-    let size = egui::vec2(48.0, 48.0);
+    let size = egui::vec2(size, size);
     if let Some(icon_url) = metadata.and_then(|value| value.icon_url.as_deref()) {
         remote_tiled_image::show(
             ui,
@@ -699,12 +849,57 @@ fn render_content_thumbnail(
     }
 }
 
+fn render_installed_content_action_button(
+    ui: &mut Ui,
+    icon_id: &str,
+    svg_bytes: &'static [u8],
+    tooltip: &str,
+    width: f32,
+    height: f32,
+) -> bool {
+    let icon_color = ui.visuals().error_fg_color;
+    let themed_svg = apply_color_to_svg(svg_bytes, icon_color);
+    let uri = format!(
+        "bytes://instance-installed-content-action/{icon_id}-{:02x}{:02x}{:02x}.svg",
+        icon_color.r(),
+        icon_color.g(),
+        icon_color.b()
+    );
+    let button_size = egui::vec2(width, height);
+    let icon_size = (height - 10.0).max(12.0);
+    let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+    let visuals = ui.visuals();
+    let button_fill = if response.is_pointer_button_down_on() {
+        visuals.widgets.active.bg_fill
+    } else if response.hovered() {
+        visuals.widgets.hovered.bg_fill
+    } else {
+        visuals.extreme_bg_color
+    };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(8), button_fill);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(8),
+        visuals.widgets.inactive.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+
+    let image = egui::Image::from_bytes(uri, themed_svg)
+        .fit_to_exact_size(egui::vec2(icon_size, icon_size));
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_size, icon_size));
+    let _ = ui.put(icon_rect, image);
+
+    response.on_hover_text(tooltip).clicked()
+}
+
 fn list_installed_content_files(
     instance_root: &Path,
     tab: InstalledContentTab,
 ) -> Vec<InstalledContentFile> {
     let dir = instance_root.join(tab.folder_name());
     let mut files = Vec::new();
+    let managed_identities = super::content_browser::load_managed_content_identities(instance_root);
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return files;
     };
@@ -735,21 +930,28 @@ fn list_installed_content_files(
             continue;
         }
 
-        let lookup_query = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or(file_name.as_str())
-            .to_owned();
+        let relative_path_key = normalize_installed_content_path_key(
+            path.strip_prefix(instance_root)
+                .unwrap_or(path.as_path())
+                .to_string_lossy()
+                .as_ref(),
+        );
+        let managed_identity = managed_identities.get(relative_path_key.as_str()).cloned();
+        let lookup_query = managed_identity
+            .as_ref()
+            .map(|identity| identity.name.clone())
+            .unwrap_or_else(|| derive_installed_lookup_query(path.as_path(), file_name.as_str()));
         let lookup_key = format!(
             "{}::{}",
             tab.folder_name(),
-            normalize_lookup_key(lookup_query.as_str())
+            managed_lookup_key_suffix(managed_identity.as_ref(), lookup_query.as_str())
         );
         files.push(InstalledContentFile {
             file_name,
             file_path: path,
             lookup_query,
             lookup_key,
+            managed_identity,
         });
     }
 
@@ -773,6 +975,97 @@ fn normalize_lookup_key(value: &str) -> String {
         })
         .collect::<String>();
     normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalize_installed_content_path_key(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches("./")
+        .trim_start_matches(".\\")
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
+fn derive_installed_lookup_query(path: &Path, fallback_file_name: &str) -> String {
+    let raw = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(fallback_file_name)
+        .trim();
+    if raw.is_empty() {
+        return fallback_file_name.to_owned();
+    }
+
+    let pieces: Vec<&str> = raw
+        .split(['-', '_'])
+        .map(str::trim)
+        .filter(|piece| !piece.is_empty())
+        .collect();
+    if pieces.is_empty() {
+        return raw.to_owned();
+    }
+
+    let mut kept = Vec::new();
+    for piece in pieces {
+        if looks_like_version_segment(piece) {
+            break;
+        }
+        kept.push(piece);
+    }
+
+    if kept.is_empty() {
+        raw.to_owned()
+    } else {
+        kept.join(" ")
+    }
+}
+
+fn looks_like_version_segment(value: &str) -> bool {
+    let normalized = value
+        .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '.' && ch != '+')
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    if normalized.chars().all(|ch| ch.is_ascii_digit()) {
+        return true;
+    }
+    if normalized.starts_with('v')
+        && normalized
+            .chars()
+            .skip(1)
+            .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == '+')
+    {
+        return true;
+    }
+    if normalized.starts_with("mc")
+        && normalized
+            .chars()
+            .skip(2)
+            .all(|ch| ch.is_ascii_digit() || ch == '.' || ch == '+')
+    {
+        return true;
+    }
+    if normalized.len() >= 8 && normalized.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return true;
+    }
+    normalized.chars().any(|ch| ch.is_ascii_digit())
+        && normalized.chars().any(|ch| ch == '.' || ch == '+')
+}
+
+fn managed_lookup_key_suffix(
+    managed_identity: Option<&InstalledContentIdentity>,
+    lookup_query: &str,
+) -> String {
+    if let Some(identity) = managed_identity {
+        if let Some(project_id) = identity.modrinth_project_id.as_deref() {
+            return format!("modrinth:{project_id}");
+        }
+        if let Some(project_id) = identity.curseforge_project_id {
+            return format!("curseforge:{project_id}");
+        }
+    }
+    normalize_lookup_key(lookup_query)
 }
 
 fn render_instance_settings_modal(
@@ -1337,6 +1630,39 @@ fn render_instance_settings_modal(
                         "Instance Settings",
                         &section_style,
                     );
+                    ui.add_space(8.0);
+
+                    if text_ui
+                        .button(
+                            ui,
+                            ("instance_open_folder", instance_id),
+                            "Open Instance Folder",
+                            &refresh_style,
+                        )
+                        .clicked()
+                    {
+                        if let Some(instance) = instances.find(instance_id) {
+                            let installations_root =
+                                PathBuf::from(config.minecraft_installations_root());
+                            let instance_root =
+                                instances::instance_root_path(&installations_root, instance);
+                            match open_instance_folder(instance_root.as_path()) {
+                                Ok(()) => {
+                                    state.status_message = Some(format!(
+                                        "Opened instance folder: {}",
+                                        instance_root.display()
+                                    ));
+                                }
+                                Err(err) => {
+                                    state.status_message =
+                                        Some(format!("Failed to open instance folder: {err}"));
+                                }
+                            }
+                        } else {
+                            state.status_message =
+                                Some("Instance was removed before opening its folder.".to_owned());
+                        }
+                    }
                     ui.add_space(8.0);
 
                     let _ = settings_widgets::toggle_row(
@@ -2494,6 +2820,7 @@ fn request_content_metadata_lookup(
     state: &mut InstanceScreenState,
     lookup_key: &str,
     lookup_query: &str,
+    managed_identity: Option<&InstalledContentIdentity>,
     tab: InstalledContentTab,
 ) {
     let normalized_key = lookup_key.trim();
@@ -2516,9 +2843,15 @@ fn request_content_metadata_lookup(
     state.content_lookup_in_flight.insert(key_for_state.clone());
     let key_for_result = key_for_state.clone();
     let query_for_search = query.to_owned();
+    let managed_identity = managed_identity.cloned();
 
     let _ = tokio_runtime::spawn(async move {
         let result = tokio_runtime::spawn_blocking(move || {
+            if let Some(identity) = managed_identity.as_ref()
+                && let Some(entry) = fetch_exact_managed_content_metadata(identity, tab)
+            {
+                return Some(entry);
+            }
             search_minecraft_content(query_for_search.as_str(), 25)
                 .ok()
                 .and_then(|search| {
@@ -2563,6 +2896,41 @@ fn poll_content_lookup_results(state: &mut InstanceScreenState) {
     }
 }
 
+fn fetch_exact_managed_content_metadata(
+    identity: &InstalledContentIdentity,
+    tab: InstalledContentTab,
+) -> Option<UnifiedContentEntry> {
+    match identity.source {
+        ContentSource::Modrinth => {
+            let project_id = identity.modrinth_project_id.as_deref()?;
+            let project = ModrinthClient::default().get_project(project_id).ok()?;
+            Some(UnifiedContentEntry {
+                id: format!("modrinth:{}", project.project_id),
+                name: project.title,
+                summary: project.description.trim().to_owned(),
+                content_type: project.project_type,
+                source: ContentSource::Modrinth,
+                project_url: Some(project.project_url),
+                icon_url: project.icon_url,
+            })
+        }
+        ContentSource::CurseForge => {
+            let project_id = identity.curseforge_project_id?;
+            let curseforge = CurseForgeClient::from_env()?;
+            let project = curseforge.get_mod(project_id).ok()?;
+            Some(UnifiedContentEntry {
+                id: format!("curseforge:{}", project.id),
+                name: project.name,
+                summary: project.summary.trim().to_owned(),
+                content_type: tab.content_type_key().to_owned(),
+                source: ContentSource::CurseForge,
+                project_url: project.website_url,
+                icon_url: project.icon_url,
+            })
+        }
+    }
+}
+
 fn choose_preferred_content_entry(
     entries: Vec<UnifiedContentEntry>,
     lookup_key: &str,
@@ -2582,28 +2950,36 @@ fn choose_preferred_content_entry(
     for entry in entries {
         let mut score = 0i32;
         if tab_accepts_content_type(tab, entry.content_type.as_str()) {
-            score += 300;
+            score += 80;
+        } else {
+            continue;
         }
 
         let normalized_name = normalize_lookup_key(entry.name.as_str());
+        let entry_tokens: Vec<&str> = normalized_name.split_whitespace().collect();
+        let mut overlap = 0i32;
+        for token in &lookup_tokens {
+            if token.len() < 2 {
+                continue;
+            }
+            if entry_tokens.iter().any(|entry_token| entry_token == token) {
+                overlap += 1;
+            }
+        }
+        let strong_name_match = normalized_name == target_key
+            || normalized_name.contains(target_key)
+            || target_key.contains(normalized_name.as_str())
+            || overlap >= lookup_tokens.len().min(2) as i32;
+        if !strong_name_match {
+            continue;
+        }
+
         if normalized_name == target_key {
             score += 600;
         } else {
             if normalized_name.contains(target_key) || target_key.contains(normalized_name.as_str())
             {
                 score += 220;
-            }
-            let mut overlap = 0i32;
-            for token in &lookup_tokens {
-                if token.len() < 2 {
-                    continue;
-                }
-                if normalized_name
-                    .split_whitespace()
-                    .any(|entry_token| entry_token == *token)
-                {
-                    overlap += 1;
-                }
             }
             score += overlap * 60;
         }
@@ -3321,6 +3697,35 @@ fn memory_slider_max_mib() -> u128 {
             .saturating_sub(RESERVED_SYSTEM_MEMORY_MIB)
             .max(INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN)
     })
+}
+
+fn open_instance_folder(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!("folder does not exist: {}", path.display()));
+    }
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("explorer");
+        command.arg(path);
+        command
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(path);
+        command
+    };
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+
+    command.spawn().map(|_| ()).map_err(|err| err.to_string())
 }
 
 #[cfg(target_os = "linux")]

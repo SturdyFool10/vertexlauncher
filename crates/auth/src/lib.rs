@@ -22,6 +22,23 @@ pub use types::{
     MinecraftSkinVariant,
 };
 
+#[derive(Debug, Clone)]
+pub enum CachedAccountRenewalEvent {
+    Started {
+        profile_id: String,
+        display_name: String,
+    },
+    Succeeded {
+        profile_id: String,
+        display_name: String,
+    },
+    Failed {
+        profile_id: String,
+        display_name: String,
+        error: String,
+    },
+}
+
 /// Returns the built-in Microsoft OAuth client id if configured.
 ///
 /// Empty compile-time values are treated as missing and return `None`.
@@ -104,6 +121,18 @@ pub fn login_finish(code: &str, flow: MinecraftLoginFlow) -> Result<CachedAccoun
 ///
 /// Accounts without refresh tokens are left unchanged.
 pub fn renew_cached_accounts_tokens(client_id: &str) -> Result<CachedAccountsState, AuthError> {
+    renew_cached_accounts_tokens_with_callback(client_id, |_| {})
+}
+
+/// Renews cached account sessions using stored Microsoft refresh tokens and
+/// emits per-account lifecycle events through the provided callback.
+pub fn renew_cached_accounts_tokens_with_callback<F>(
+    client_id: &str,
+    mut on_event: F,
+) -> Result<CachedAccountsState, AuthError>
+where
+    F: FnMut(CachedAccountRenewalEvent),
+{
     let mut state = cache::load_cached_accounts()?;
     if state.accounts.is_empty() {
         return Ok(state);
@@ -127,6 +156,11 @@ pub fn renew_cached_accounts_tokens(client_id: &str) -> Result<CachedAccountsSta
             continue;
         };
 
+        on_event(CachedAccountRenewalEvent::Started {
+            profile_id: account.minecraft_profile.id.clone(),
+            display_name: account.minecraft_profile.name.clone(),
+        });
+
         match oauth::refresh_microsoft_token(&agent, client_id, refresh_token).and_then(
             |microsoft_token| {
                 minecraft::complete_minecraft_login(
@@ -137,6 +171,10 @@ pub fn renew_cached_accounts_tokens(client_id: &str) -> Result<CachedAccountsSta
             },
         ) {
             Ok(renewed) => {
+                on_event(CachedAccountRenewalEvent::Succeeded {
+                    profile_id: renewed.minecraft_profile.id.clone(),
+                    display_name: renewed.minecraft_profile.name.clone(),
+                });
                 tracing::info!(
                     target: "vertexlauncher/auth/renew",
                     display_name = %renewed.minecraft_profile.name,
@@ -146,6 +184,11 @@ pub fn renew_cached_accounts_tokens(client_id: &str) -> Result<CachedAccountsSta
                 any_updated = true;
             }
             Err(err) => {
+                on_event(CachedAccountRenewalEvent::Failed {
+                    profile_id: account.minecraft_profile.id.clone(),
+                    display_name: account.minecraft_profile.name.clone(),
+                    error: err.to_string(),
+                });
                 tracing::warn!(
                     target: "vertexlauncher/auth/renew",
                     display_name = %account.minecraft_profile.name,

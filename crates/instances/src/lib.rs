@@ -51,6 +51,18 @@ fn fs_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<u64>
     fs::copy(from, to)
 }
 
+/// Wrapper around `fs::remove_dir_all` with structured IO tracing.
+#[track_caller]
+fn fs_remove_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
+    let path = path.as_ref();
+    tracing::debug!(
+        target: "vertexlauncher/io",
+        op = "remove_dir_all",
+        path = %path.display()
+    );
+    fs::remove_dir_all(path)
+}
+
 /// Persisted record describing a launcher instance.
 ///
 /// Field expectations:
@@ -392,6 +404,52 @@ pub fn add_mod_file_to_instance(
         "copied mod file into instance"
     );
     Ok(destination)
+}
+
+/// Deletes an instance record and its root directory.
+///
+/// Missing instance roots on disk are tolerated so stale metadata can still be
+/// cleaned up. The instance record is removed only after filesystem deletion
+/// succeeds or the directory is already absent.
+pub fn delete_instance(
+    store: &mut InstanceStore,
+    id: &str,
+    installations_root: &Path,
+) -> Result<InstanceRecord, InstanceError> {
+    let Some(index) = store
+        .instances
+        .iter()
+        .position(|instance| instance.id == id)
+    else {
+        return Err(InstanceError::MissingInstance(id.to_owned()));
+    };
+
+    let instance = store.instances[index].clone();
+    let instance_root = instance_root_path(installations_root, &instance);
+    match fs_remove_dir_all(&instance_root) {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => {
+            tracing::warn!(
+                target: "vertexlauncher/instances",
+                id,
+                path = %instance_root.display(),
+                error = %err,
+                "failed to delete instance root"
+            );
+            return Err(InstanceError::Io(err));
+        }
+    }
+
+    let removed = store.instances.remove(index);
+    tracing::info!(
+        target: "vertexlauncher/instances",
+        id = removed.id.as_str(),
+        name = removed.name.as_str(),
+        root = %instance_root.display(),
+        "deleted instance"
+    );
+    Ok(removed)
 }
 
 /// Resolves the absolute filesystem path to the given instance root directory.

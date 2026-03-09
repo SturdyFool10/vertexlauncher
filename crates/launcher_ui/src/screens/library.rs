@@ -9,14 +9,14 @@ use config::{Config, JavaRuntimeVersion};
 use egui::Ui;
 use installation::{
     DownloadPolicy, LaunchRequest, LaunchResult, ensure_game_files, ensure_openjdk_runtime,
-    is_instance_running_for_account, launch_instance, running_instance_for_account,
-    stop_running_instance_for_account,
+    is_instance_running, is_instance_running_for_account, launch_instance,
+    running_instance_for_account, stop_running_instance_for_account,
 };
-use instances::{InstanceRecord, InstanceStore, instance_root_path};
+use instances::{InstanceRecord, InstanceStore, delete_instance, instance_root_path};
 use textui::{LabelOptions, TextUi};
 
 use crate::app::tokio_runtime;
-use crate::{assets, ui::style};
+use crate::{assets, notification, ui::style};
 
 use super::{AppScreen, LaunchAuthContext};
 
@@ -25,6 +25,7 @@ const TILE_HEIGHT: f32 = 430.0;
 const TILE_THUMBNAIL_HEIGHT: f32 = 150.0;
 const TILE_NAME_SCROLL_HEIGHT: f32 = 58.0;
 const TILE_DESCRIPTION_SCROLL_HEIGHT: f32 = 96.0;
+const TILE_DELETE_BUTTON_HEIGHT: f32 = style::CONTROL_HEIGHT;
 
 #[derive(Debug, Default, Clone)]
 pub struct LibraryOutput {
@@ -77,6 +78,7 @@ pub fn render(
                 ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_MD, style::SPACE_MD);
                 for instance in &instances.instances {
                     let instance_root = instance_root_path(installations_root, instance);
+                    let instance_running = is_instance_running(instance_root.as_path());
                     let launch_account = active_launch_auth
                         .map(|auth| auth.account_key.clone())
                         .or_else(|| {
@@ -131,6 +133,7 @@ pub fn render(
                     let launch_disabled =
                         launch_disabled_for_account || launch_disabled_for_missing_ownership;
                     let launch_in_flight = state.pending_launches.contains(instance.id.as_str());
+                    let delete_disabled = instance_running || launch_in_flight;
 
                     let action = render_instance_tile(
                         ui,
@@ -142,6 +145,7 @@ pub fn render(
                         launch_disabled_for_account,
                         launch_disabled_for_missing_ownership,
                         running_avatar,
+                        delete_disabled,
                         selected_instance_id == Some(instance.id.as_str()),
                     );
                     if matches!(
@@ -185,10 +189,15 @@ pub fn render(
                                 );
                             }
                         }
+                        RuntimeAction::DeleteRequested => {
+                            state.delete_target_instance_id = Some(instance.id.clone());
+                            state.delete_error = None;
+                        }
                     }
                 }
             });
         });
+    render_delete_instance_modal(ui.ctx(), text_ui, &mut state, instances, installations_root);
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
     output
 }
@@ -203,6 +212,7 @@ fn render_instance_tile(
     launch_disabled_for_account: bool,
     launch_disabled_for_missing_ownership: bool,
     running_avatar_png: Option<&[u8]>,
+    delete_disabled: bool,
     selected: bool,
 ) -> RuntimeAction {
     let tile_fill = if selected {
@@ -298,7 +308,11 @@ fn render_instance_tile(
             );
 
             let play_button_height = style::CONTROL_HEIGHT_LG;
-            let remaining_height = (ui.available_height() - play_button_height).max(0.0);
+            let remaining_height = (ui.available_height()
+                - play_button_height
+                - style::SPACE_SM
+                - TILE_DELETE_BUTTON_HEIGHT)
+                .max(0.0);
             if remaining_height > 0.0 {
                 ui.add_space(remaining_height);
             }
@@ -319,6 +333,20 @@ fn render_instance_tile(
                 } else {
                     action = RuntimeAction::LaunchRequested;
                 }
+            }
+            ui.add_space(style::SPACE_SM);
+            let delete_response =
+                render_delete_instance_button(ui, instance.id.as_str(), delete_disabled);
+            if delete_response.clicked() && !delete_disabled {
+                action = RuntimeAction::DeleteRequested;
+            }
+            if delete_disabled {
+                let reason = if launch_in_flight {
+                    "Wait for launch preparation to finish before deleting this instance."
+                } else {
+                    "Stop the running instance before deleting its folder."
+                };
+                let _ = delete_response.on_hover_text(reason);
             }
 
             let mut muted_style = LabelOptions::default();
@@ -488,6 +516,52 @@ fn render_runtime_action_button(
     response
 }
 
+fn render_delete_instance_button(ui: &mut Ui, instance_id: &str, disabled: bool) -> egui::Response {
+    let desired_size = egui::vec2(ui.available_width().max(1.0), TILE_DELETE_BUTTON_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    let danger = ui.visuals().error_fg_color;
+    let stroke_color = if disabled {
+        ui.visuals().widgets.noninteractive.bg_stroke.color
+    } else {
+        danger
+    };
+    let fill = if disabled {
+        ui.visuals().widgets.noninteractive.bg_fill
+    } else if response.is_pointer_button_down_on() {
+        danger.gamma_multiply(0.88)
+    } else if response.hovered() {
+        danger
+    } else {
+        ui.visuals().widgets.inactive.bg_fill.gamma_multiply(0.18)
+    };
+    let text_color = if disabled {
+        ui.visuals().weak_text_color()
+    } else if response.hovered() || response.is_pointer_button_down_on() {
+        egui::Color32::WHITE
+    } else {
+        danger
+    };
+
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(8), fill);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(8),
+        egui::Stroke::new(1.0, stroke_color),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "Delete Instance",
+        egui::FontId::proportional(15.0),
+        text_color,
+    );
+
+    let _ = instance_id;
+    response
+}
+
 fn render_running_user_avatar(
     ui: &mut Ui,
     instance_id: &str,
@@ -515,6 +589,202 @@ fn render_running_user_avatar(
     let _ = ui.put(rect, fallback);
 }
 
+fn render_delete_instance_modal(
+    ctx: &egui::Context,
+    text_ui: &mut TextUi,
+    state: &mut LibraryRuntimeState,
+    instances: &mut InstanceStore,
+    installations_root: &Path,
+) {
+    let Some(instance_id) = state.delete_target_instance_id.clone() else {
+        return;
+    };
+    let Some(instance) = instances.find(instance_id.as_str()).cloned() else {
+        state.delete_target_instance_id = None;
+        state.delete_error = None;
+        return;
+    };
+
+    let viewport_rect = ctx.input(|input| input.content_rect());
+    let modal_size = egui::vec2(viewport_rect.width().min(520.0), 280.0);
+    let modal_pos = egui::pos2(
+        (viewport_rect.center().x - modal_size.x * 0.5)
+            .clamp(viewport_rect.left(), viewport_rect.right() - modal_size.x),
+        (viewport_rect.center().y - modal_size.y * 0.5)
+            .clamp(viewport_rect.top(), viewport_rect.bottom() - modal_size.y),
+    );
+    let instance_root = instance_root_path(installations_root, &instance);
+    let instance_running = is_instance_running(instance_root.as_path());
+    let danger = ctx.style().visuals.error_fg_color;
+    let window_fill = {
+        let base = ctx.style().visuals.window_fill;
+        egui::Color32::from_rgba_premultiplied(base.r(), base.g(), base.b(), 255)
+    };
+
+    egui::Area::new(egui::Id::new("library_delete_instance_modal_scrim"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(viewport_rect.min)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(
+                viewport_rect,
+                egui::CornerRadius::ZERO,
+                egui::Color32::from_rgba_premultiplied(0, 0, 0, 160),
+            );
+        });
+
+    egui::Window::new("Delete Instance")
+        .id(egui::Id::new("library_delete_instance_modal"))
+        .fixed_pos(modal_pos)
+        .fixed_size(modal_size)
+        .title_bar(false)
+        .collapsible(false)
+        .resizable(false)
+        .movable(false)
+        .constrain(true)
+        .constrain_to(viewport_rect)
+        .frame(
+            egui::Frame::new()
+                .fill(window_fill)
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    ctx.style().visuals.widgets.hovered.bg_stroke.color,
+                ))
+                .corner_radius(egui::CornerRadius::same(14))
+                .inner_margin(egui::Margin::same(14)),
+        )
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_MD, style::SPACE_MD);
+
+            let heading_style = LabelOptions {
+                font_size: 28.0,
+                line_height: 32.0,
+                weight: 700,
+                color: danger,
+                wrap: false,
+                ..LabelOptions::default()
+            };
+            let body_style = LabelOptions {
+                color: ui.visuals().text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            };
+            let muted_style = LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            };
+
+            let _ = text_ui.label(
+                ui,
+                ("library_delete_heading", instance.id.as_str()),
+                "Delete Instance Folder?",
+                &heading_style,
+            );
+            let _ = text_ui.label(
+                ui,
+                ("library_delete_body", instance.id.as_str()),
+                &format!(
+                    "Delete the whole folder for \"{}\". This permanently removes installed content and personal files, including worlds.",
+                    instance.name
+                ),
+                &body_style,
+            );
+            let _ = text_ui.label(
+                ui,
+                ("library_delete_path", instance.id.as_str()),
+                &format!("Folder: {}", instance_root.display()),
+                &muted_style,
+            );
+
+            if instance_running {
+                let _ = text_ui.label(
+                    ui,
+                    ("library_delete_running", instance.id.as_str()),
+                    "Stop the running instance before deleting its folder.",
+                    &LabelOptions {
+                        color: danger,
+                        wrap: true,
+                        ..LabelOptions::default()
+                    },
+                );
+            }
+
+            if let Some(error) = state.delete_error.as_deref() {
+                let _ = text_ui.label(
+                    ui,
+                    ("library_delete_error", instance.id.as_str()),
+                    error,
+                    &LabelOptions {
+                        color: danger,
+                        wrap: true,
+                        ..LabelOptions::default()
+                    },
+                );
+            }
+
+            ui.add_space(style::SPACE_MD);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let delete_button_style = textui::ButtonOptions {
+                    text_color: egui::Color32::WHITE,
+                    fill: danger.gamma_multiply(0.84),
+                    fill_hovered: danger,
+                    fill_active: danger.gamma_multiply(0.9),
+                    fill_selected: danger,
+                    stroke: egui::Stroke::new(1.0, danger),
+                    min_size: egui::vec2(140.0, style::CONTROL_HEIGHT),
+                    ..textui::ButtonOptions::default()
+                };
+                let delete_clicked = ui
+                    .add_enabled_ui(!instance_running, |ui| {
+                        text_ui.button(
+                            ui,
+                            ("library_delete_confirm", instance.id.as_str()),
+                            "Delete Folder",
+                            &delete_button_style,
+                        )
+                    })
+                    .inner
+                    .clicked();
+                let cancel_clicked = text_ui
+                    .button(
+                        ui,
+                        ("library_delete_cancel", instance.id.as_str()),
+                        "Cancel",
+                        &textui::ButtonOptions {
+                            min_size: egui::vec2(96.0, style::CONTROL_HEIGHT),
+                            ..textui::ButtonOptions::default()
+                        },
+                    )
+                    .clicked();
+
+                if cancel_clicked {
+                    state.delete_target_instance_id = None;
+                    state.delete_error = None;
+                }
+
+                if delete_clicked {
+                    match delete_instance(instances, instance.id.as_str(), installations_root) {
+                        Ok(deleted) => {
+                            state.pending_launches.remove(deleted.id.as_str());
+                            state.status_by_instance.remove(deleted.id.as_str());
+                            state.delete_target_instance_id = None;
+                            state.delete_error = None;
+                            notification::warn!(
+                                "instance_store",
+                                "Deleted instance '{}' and its folder.",
+                                deleted.name
+                            );
+                        }
+                        Err(err) => {
+                            state.delete_error =
+                                Some(format!("Failed to delete instance: {err}"));
+                        }
+                    }
+                }
+            });
+        });
+}
+
 fn apply_color_to_svg(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {
     let color_hex = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
     let svg = String::from_utf8_lossy(svg_bytes).replace("currentColor", &color_hex);
@@ -526,6 +796,7 @@ enum RuntimeAction {
     None,
     LaunchRequested,
     StopRequested,
+    DeleteRequested,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -534,6 +805,8 @@ struct LibraryRuntimeState {
     results_rx: Option<Arc<Mutex<mpsc::Receiver<RuntimeLaunchResult>>>>,
     pending_launches: HashSet<String>,
     status_by_instance: HashMap<String, String>,
+    delete_target_instance_id: Option<String>,
+    delete_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]

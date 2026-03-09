@@ -3,13 +3,15 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
-use egui::{self, Color32, CornerRadius, Frame, Margin, Stroke};
+use egui::{self, Color32, CornerRadius, Frame, Layout, Margin, Stroke};
 use textui::{LabelOptions, TextUi};
 
 use crate::assets;
 
 const NOTIFICATION_TTL: Duration = Duration::from_secs(7);
+const PROGRESS_NOTIFICATION_STALE_TTL: Duration = Duration::from_secs(14);
 const NOTIFICATION_MAX_STACK: usize = 8;
+const NOTIFICATION_EXPIRY_BAR_HEIGHT: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
@@ -25,16 +27,20 @@ pub struct Notification {
     pub source: String,
     pub message: String,
     pub progress: Option<f32>,
-    pub replace_by_source: bool,
+    pub spinner: bool,
+    pub replace_key: Option<String>,
     pub when: Instant,
 }
 
 #[derive(Debug, Clone)]
 struct NotificationEntry {
+    id: u64,
     severity: Severity,
     source: String,
     message: String,
     progress: Option<f32>,
+    spinner: bool,
+    replace_key: Option<String>,
     count: u32,
     last_seen: Instant,
 }
@@ -42,6 +48,7 @@ struct NotificationEntry {
 #[derive(Default)]
 struct NotificationStore {
     entries: Vec<NotificationEntry>,
+    next_id: u64,
 }
 
 struct NotificationCenter {
@@ -103,7 +110,8 @@ pub fn emit(severity: Severity, source: impl Into<String>, message: impl Into<St
         source,
         message,
         progress: None,
-        replace_by_source: false,
+        spinner: false,
+        replace_key: None,
         when: Instant::now(),
     });
 }
@@ -119,10 +127,49 @@ pub fn emit_progress(
     let progress = progress.clamp(0.0, 1.0);
     let _ = center().tx.send(Notification {
         severity,
-        source,
+        source: source.clone(),
         message,
         progress: Some(progress),
-        replace_by_source: true,
+        spinner: false,
+        replace_key: Some(source.clone()),
+        when: Instant::now(),
+    });
+}
+
+pub fn emit_spinner(
+    severity: Severity,
+    source: impl Into<String>,
+    message: impl Into<String>,
+    replace_key: impl Into<String>,
+) {
+    let source = source.into();
+    let message = message.into();
+    let _ = center().tx.send(Notification {
+        severity,
+        source,
+        message,
+        progress: None,
+        spinner: true,
+        replace_key: Some(replace_key.into()),
+        when: Instant::now(),
+    });
+}
+
+pub fn emit_replace(
+    severity: Severity,
+    source: impl Into<String>,
+    message: impl Into<String>,
+    replace_key: impl Into<String>,
+) {
+    let source = source.into();
+    let message = message.into();
+    let _ = center().tx.send(Notification {
+        severity,
+        source,
+        message,
+        progress: None,
+        spinner: false,
+        replace_key: Some(replace_key.into()),
         when: Instant::now(),
     });
 }
@@ -137,15 +184,19 @@ fn drain_notifications() {
     };
 
     while let Ok(notif) = rx.try_recv() {
-        if notif.replace_by_source {
+        if let Some(replace_key) = notif.replace_key.as_deref() {
             if let Some(existing) = store
                 .entries
                 .iter_mut()
-                .find(|entry| entry.severity == notif.severity && entry.source == notif.source)
+                .find(|entry| entry.replace_key.as_deref() == Some(replace_key))
             {
+                existing.severity = notif.severity;
+                existing.source = notif.source;
                 existing.message = notif.message;
                 existing.progress = notif.progress;
+                existing.spinner = notif.spinner;
                 existing.count = 1;
+                existing.replace_key = notif.replace_key;
                 existing.last_seen = notif.when;
                 continue;
             }
@@ -159,20 +210,30 @@ fn drain_notifications() {
             continue;
         }
 
+        let entry_id = store.next_id;
         store.entries.push(NotificationEntry {
+            id: entry_id,
             severity: notif.severity,
             source: notif.source,
             message: notif.message,
             progress: notif.progress,
+            spinner: notif.spinner,
+            replace_key: notif.replace_key,
             count: 1,
             last_seen: notif.when,
         });
+        store.next_id = entry_id.saturating_add(1);
     }
 
     let now = Instant::now();
-    store
-        .entries
-        .retain(|entry| now.saturating_duration_since(entry.last_seen) < NOTIFICATION_TTL);
+    store.entries.retain(|entry| {
+        let ttl = if entry.progress.is_some() || entry.spinner {
+            PROGRESS_NOTIFICATION_STALE_TTL
+        } else {
+            NOTIFICATION_TTL
+        };
+        now.saturating_duration_since(entry.last_seen) < ttl
+    });
     store.entries.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
     if store.entries.len() > NOTIFICATION_MAX_STACK {
         store.entries.truncate(NOTIFICATION_MAX_STACK);
@@ -199,6 +260,8 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi) {
         .show(ctx, |ui| {
             ui.set_width(360.0);
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 8.0);
+            let now = Instant::now();
+            let mut dismissed_ids = Vec::new();
 
             for (index, entry) in entries.iter().enumerate() {
                 let frame = Frame::new()
@@ -208,47 +271,105 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi) {
                     .inner_margin(Margin::same(10));
 
                 frame.show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let icon_size = 16.0;
-                        let icon = themed_svg_image(
-                            &format!("notif-icon-{}-{}", index, severity_name(entry.severity)),
-                            icon_for_severity(entry.severity),
-                            ui.visuals().text_color(),
-                            icon_size,
+                    if entry.progress.is_none() && !entry.spinner {
+                        let elapsed = now.saturating_duration_since(entry.last_seen);
+                        let remaining = NOTIFICATION_TTL.saturating_sub(elapsed);
+                        let expiry_progress = (remaining.as_secs_f32()
+                            / NOTIFICATION_TTL.as_secs_f32())
+                        .clamp(0.0, 1.0);
+                        let expiry_fill = severity_accent_fill(ui, entry.severity);
+                        let bar_width = ui.available_width().max(1.0);
+                        let (bar_rect, _) = ui.allocate_exact_size(
+                            egui::vec2(bar_width, NOTIFICATION_EXPIRY_BAR_HEIGHT),
+                            egui::Sense::hover(),
                         );
-                        let icon_rect = egui::Rect::from_min_size(
-                            ui.cursor().min + egui::vec2(0.0, 2.0),
-                            egui::vec2(icon_size, icon_size),
+                        ui.painter().rect_filled(
+                            bar_rect,
+                            CornerRadius::same(2),
+                            ui.visuals().widgets.inactive.bg_fill,
                         );
-                        ui.put(icon_rect, icon);
-                        ui.add_space(icon_size + 6.0);
-
-                        if entry.count > 1 {
-                            let mut count_style = LabelOptions::default();
-                            count_style.color = ui.visuals().weak_text_color();
-                            count_style.wrap = false;
-                            count_style.font_size = 14.0;
-                            count_style.line_height = 18.0;
-                            let _ = text_ui.label(
-                                ui,
-                                ("notif-count", index),
-                                &format!("x{}", entry.count),
-                                &count_style,
+                        if expiry_progress > 0.0 {
+                            let filled_rect = egui::Rect::from_min_max(
+                                bar_rect.min,
+                                egui::pos2(
+                                    bar_rect.min.x + bar_rect.width() * expiry_progress,
+                                    bar_rect.max.y,
+                                ),
                             );
-                            ui.add_space(6.0);
+                            ui.painter().rect_filled(
+                                filled_rect,
+                                CornerRadius::same(2),
+                                expiry_fill,
+                            );
                         }
+                        ui.add_space(8.0);
+                    }
 
-                        let mut source_style = LabelOptions::default();
-                        source_style.color = ui.visuals().text_color();
-                        source_style.wrap = false;
-                        source_style.weight = 700;
-                        source_style.font_size = 15.0;
-                        source_style.line_height = 20.0;
-                        let _ = text_ui.label(
+                    ui.with_layout(Layout::right_to_left(egui::Align::TOP), |ui| {
+                        let close_button = notification_icon_button(
                             ui,
-                            ("notif-source", index),
-                            &format!("{} · {}", severity_name(entry.severity), entry.source),
-                            &source_style,
+                            &format!("notif-close-{}", entry.id),
+                            assets::X_SVG,
+                            "Dismiss notification",
+                        );
+                        if close_button.clicked() {
+                            dismissed_ids.push(entry.id);
+                        }
+                        ui.add_space(6.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width().max(0.0), 0.0),
+                            Layout::left_to_right(egui::Align::TOP),
+                            |ui| {
+                                let icon_size = 16.0;
+                                let icon = themed_svg_image(
+                                    &format!(
+                                        "notif-icon-{}-{}",
+                                        index,
+                                        severity_name(entry.severity)
+                                    ),
+                                    icon_for_severity(entry.severity),
+                                    ui.visuals().text_color(),
+                                    icon_size,
+                                );
+                                let icon_rect = egui::Rect::from_min_size(
+                                    ui.cursor().min + egui::vec2(0.0, 2.0),
+                                    egui::vec2(icon_size, icon_size),
+                                );
+                                ui.put(icon_rect, icon);
+                                ui.add_space(icon_size + 6.0);
+
+                                if entry.count > 1 {
+                                    let mut count_style = LabelOptions::default();
+                                    count_style.color = ui.visuals().weak_text_color();
+                                    count_style.wrap = false;
+                                    count_style.font_size = 14.0;
+                                    count_style.line_height = 18.0;
+                                    let _ = text_ui.label(
+                                        ui,
+                                        ("notif-count", index),
+                                        &format!("x{}", entry.count),
+                                        &count_style,
+                                    );
+                                    ui.add_space(6.0);
+                                }
+
+                                let mut source_style = LabelOptions::default();
+                                source_style.color = ui.visuals().text_color();
+                                source_style.wrap = false;
+                                source_style.weight = 700;
+                                source_style.font_size = 15.0;
+                                source_style.line_height = 20.0;
+                                let _ = text_ui.label(
+                                    ui,
+                                    ("notif-source", index),
+                                    &format!(
+                                        "{} · {}",
+                                        severity_name(entry.severity),
+                                        entry.source
+                                    ),
+                                    &source_style,
+                                );
+                            },
                         );
                     });
 
@@ -270,6 +391,17 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi) {
                             overlay.as_str(),
                             &message_style,
                         );
+                    } else if entry.spinner {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spinner();
+                            ui.add_space(6.0);
+                            let _ = text_ui.label(
+                                ui,
+                                ("notif-spinner-message", index),
+                                entry.message.as_str(),
+                                &message_style,
+                            );
+                        });
                     } else {
                         let _ = text_ui.label(
                             ui,
@@ -279,6 +411,14 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi) {
                         );
                     }
                 });
+            }
+
+            if !dismissed_ids.is_empty()
+                && let Ok(mut store) = center().store.lock()
+            {
+                store
+                    .entries
+                    .retain(|entry| !dismissed_ids.contains(&entry.id));
             }
         });
 
@@ -307,6 +447,45 @@ fn apply_svg_color(svg_bytes: &[u8], color: Color32) -> Vec<u8> {
     String::from_utf8_lossy(svg_bytes)
         .replace("currentColor", &color_hex)
         .into_bytes()
+}
+
+fn severity_accent_fill(ui: &egui::Ui, severity: Severity) -> Color32 {
+    match severity {
+        Severity::Log | Severity::Info => ui.visuals().selection.bg_fill,
+        Severity::Warn => ui.visuals().warn_fg_color,
+        Severity::Error => ui.visuals().error_fg_color,
+    }
+}
+
+fn notification_icon_button(
+    ui: &mut egui::Ui,
+    icon_id: &str,
+    svg_bytes: &[u8],
+    tooltip: &str,
+) -> egui::Response {
+    let button_size = egui::vec2(22.0, 22.0);
+    let icon_size = 12.0;
+    let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+    let fill = if response.is_pointer_button_down_on() {
+        ui.visuals().widgets.active.bg_fill
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered.bg_fill
+    } else {
+        ui.visuals().widgets.inactive.weak_bg_fill
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(7), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(7),
+        ui.visuals().widgets.noninteractive.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+
+    let image = themed_svg_image(icon_id, svg_bytes, ui.visuals().text_color(), icon_size);
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_size, icon_size));
+    let _ = ui.put(icon_rect, image);
+
+    response.on_hover_text(tooltip)
 }
 
 #[macro_export]
