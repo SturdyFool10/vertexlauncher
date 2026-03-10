@@ -860,7 +860,7 @@ fn render_favorite_star_button(
     } else {
         ui.visuals().extreme_bg_color
     };
-    let star_outline = ui.visuals().widgets.hovered.bg_stroke.color;
+    let star_outline = ui.visuals().widgets.active.bg_stroke.color;
     let themed_svg = apply_star_fill_and_stroke_svg(assets::STAR_SVG, star_fill, star_outline);
     let uri = format!(
         "bytes://home/favorite-star/{:?}-{:02x}{:02x}{:02x}-{:02x}{:02x}{:02x}.svg",
@@ -944,7 +944,7 @@ fn apply_star_fill_and_stroke_svg(svg_bytes: &[u8], fill: Color32, stroke: Color
     svg = svg.replace(
         "<path d=\"M8.243",
         format!(
-            "<path fill=\"{}\" stroke=\"{}\" stroke-width=\"1.0\" stroke-linejoin=\"round\" paint-order=\"stroke\" d=\"M8.243",
+            "<path fill=\"{}\" stroke=\"{}\" stroke-width=\"2.0\" stroke-linejoin=\"round\" paint-order=\"stroke\" d=\"M8.243",
             fill_hex, stroke_hex
         )
         .as_str(),
