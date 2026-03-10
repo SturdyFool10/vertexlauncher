@@ -1,6 +1,7 @@
 use auth::{CachedAccount, CachedAccountRenewalEvent, CachedAccountsState};
-use launcher_ui::notification;
-use std::sync::mpsc::{self, Receiver};
+use launcher_ui::{notification, privacy};
+use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use super::webview_sign_in;
@@ -11,6 +12,7 @@ pub const REPAINT_INTERVAL: Duration = Duration::from_millis(200);
 pub enum AuthUiStatus {
     Idle,
     RefreshingCachedSession,
+    RefreshingActiveSession,
     Starting,
     AwaitingBrowser,
     WaitingForAuthorization,
@@ -22,6 +24,7 @@ impl AuthUiStatus {
         match self {
             AuthUiStatus::Idle => None,
             AuthUiStatus::RefreshingCachedSession => Some("Refreshing cached account session..."),
+            AuthUiStatus::RefreshingActiveSession => Some("Refreshing account token..."),
             AuthUiStatus::Starting => Some("Preparing Microsoft sign-in..."),
             AuthUiStatus::AwaitingBrowser => {
                 Some("Complete sign-in in the Microsoft webview window...")
@@ -37,6 +40,12 @@ enum AuthFlowEvent {
     WaitingForAuthorization,
     Completed(CachedAccount),
     Failed(String),
+}
+
+struct AvatarLoadResult {
+    profile_id: String,
+    avatar_png: Option<Vec<u8>>,
+    error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -59,79 +68,95 @@ pub struct LaunchAuthContext {
 
 pub struct AuthState {
     accounts_state: CachedAccountsState,
+    account_avatars: HashMap<String, Vec<u8>>,
+    avatar_result_tx: Sender<AvatarLoadResult>,
+    avatar_result_rx: Receiver<AvatarLoadResult>,
+    avatar_loads_in_flight: HashSet<String>,
     active_avatar_png: Option<Vec<u8>>,
     flow: Option<Receiver<AuthFlowEvent>>,
-    startup_renewal: Option<Receiver<Result<CachedAccountsState, String>>>,
+    renewal: Option<Receiver<Result<CachedAccountsState, String>>>,
+    streamer_mode: bool,
     status: AuthUiStatus,
 }
 
 impl AuthState {
     pub fn load() -> Self {
-        let (accounts_state, mut status) = match auth::load_cached_accounts() {
+        let (avatar_result_tx, avatar_result_rx) = mpsc::channel();
+        let (accounts_state, status) = match auth::load_cached_accounts() {
             Ok(state) => (state, AuthUiStatus::Idle),
             Err(err) => (
                 CachedAccountsState::default(),
                 AuthUiStatus::Error(format!("Failed to load cached account state: {err}")),
             ),
         };
-        let mut startup_renewal = None;
-        if !accounts_state.accounts.is_empty() {
+        let account_avatars = decoded_cached_avatars(&accounts_state);
+        let active_avatar_png = active_avatar_from_map(&accounts_state, &account_avatars);
+
+        let mut auth_state = Self {
+            accounts_state,
+            account_avatars,
+            avatar_result_tx,
+            avatar_result_rx,
+            avatar_loads_in_flight: HashSet::new(),
+            active_avatar_png,
+            flow: None,
+            renewal: None,
+            streamer_mode: false,
+            status,
+        };
+
+        if !auth_state.accounts_state.accounts.is_empty() {
             match microsoft_client_id() {
                 Ok(client_id) => {
-                    let (tx, rx) = mpsc::channel::<Result<CachedAccountsState, String>>();
-                    std::thread::spawn(move || {
-                        let result =
-                            auth::renew_cached_accounts_tokens_with_callback(&client_id, |event| {
-                                emit_cached_account_renewal_notification(event);
-                            })
-                            .map_err(|err| err.to_string());
-                        let _ = tx.send(result);
-                    });
-                    startup_renewal = Some(rx);
-                    status = AuthUiStatus::RefreshingCachedSession;
+                    auth_state
+                        .spawn_renewal_worker(client_id, AuthUiStatus::RefreshingCachedSession);
                 }
                 Err(err) => {
-                    status = AuthUiStatus::Error(format!(
+                    auth_state.status = AuthUiStatus::Error(format!(
                         "Loaded cached accounts, but token renewal was skipped: {err}"
                     ));
                 }
             }
         }
 
-        let active_avatar_png = accounts_state
-            .active_account()
-            .and_then(CachedAccount::avatar_png_bytes);
-
-        Self {
-            accounts_state,
-            active_avatar_png,
-            flow: None,
-            startup_renewal,
-            status,
-        }
+        auth_state.schedule_missing_avatars();
+        auth_state
     }
 
     pub fn poll(&mut self) {
-        if let Some(startup_renewal) = self.startup_renewal.as_mut() {
-            match startup_renewal.try_recv() {
+        self.poll_avatar_loads();
+
+        if let Some(renewal) = self.renewal.as_mut() {
+            match renewal.try_recv() {
                 Ok(Ok(renewed)) => {
-                    let previous_active = self.accounts_state.active_profile_id.clone();
-                    self.accounts_state = renewed;
-                    if let Some(active_id) = previous_active.as_deref() {
-                        let _ = self.accounts_state.set_active_profile_id(active_id);
-                    }
-                    self.active_avatar_png = self
+                    let active_refresh =
+                        matches!(self.status, AuthUiStatus::RefreshingActiveSession);
+                    self.apply_accounts_state(renewed, true);
+                    let refreshed_has_token = self
                         .accounts_state
                         .active_account()
-                        .and_then(CachedAccount::avatar_png_bytes);
-                    self.status = AuthUiStatus::Idle;
-                    self.startup_renewal = None;
+                        .and_then(|account| account.minecraft_access_token.as_deref())
+                        .map(str::trim)
+                        .is_some_and(|token| !token.is_empty());
+                    self.status = if active_refresh && !refreshed_has_token {
+                        AuthUiStatus::Error(
+                            "Active account does not have a renewable session. Sign in again."
+                                .to_owned(),
+                        )
+                    } else {
+                        AuthUiStatus::Idle
+                    };
+                    self.renewal = None;
+                    self.schedule_missing_avatars();
                 }
                 Ok(Err(err)) => {
-                    self.status = AuthUiStatus::Error(format!(
-                        "Loaded cached accounts, but token renewal failed: {err}"
-                    ));
-                    self.startup_renewal = None;
+                    let prefix = if matches!(self.status, AuthUiStatus::RefreshingActiveSession) {
+                        "Failed to renew active account token"
+                    } else {
+                        "Loaded cached accounts, but token renewal failed"
+                    };
+                    self.status = AuthUiStatus::Error(format!("{prefix}: {err}"));
+                    self.renewal = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -139,54 +164,55 @@ impl AuthState {
                         "Loaded cached accounts, but token renewal worker stopped unexpectedly."
                             .to_owned(),
                     );
-                    self.startup_renewal = None;
+                    self.renewal = None;
                 }
             }
         }
 
         let mut flow_finished = false;
 
-        if let Some(flow) = self.flow.as_mut() {
-            loop {
-                match flow.try_recv() {
-                    Ok(event) => match event {
-                        AuthFlowEvent::AwaitingBrowser => {
-                            self.status = AuthUiStatus::AwaitingBrowser;
-                        }
-                        AuthFlowEvent::WaitingForAuthorization => {
-                            self.status = AuthUiStatus::WaitingForAuthorization;
-                        }
-                        AuthFlowEvent::Completed(account) => {
-                            self.accounts_state.upsert_and_activate(account);
-                            self.active_avatar_png = self
-                                .accounts_state
-                                .active_account()
-                                .and_then(CachedAccount::avatar_png_bytes);
-                            self.status = AuthUiStatus::Idle;
-
-                            if let Err(err) = auth::save_cached_accounts(&self.accounts_state) {
-                                self.status = AuthUiStatus::Error(format!(
-                                    "Sign-in succeeded, but failed to cache account state: {err}",
-                                ));
-                            }
-
-                            flow_finished = true;
-                        }
-                        AuthFlowEvent::Failed(err) => {
-                            self.status = AuthUiStatus::Error(err);
-                            flow_finished = true;
-                        }
-                    },
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        if !flow_finished {
-                            self.status = AuthUiStatus::Error(
-                                "Sign-in stopped unexpectedly before completion".to_owned(),
-                            );
-                        }
-                        flow_finished = true;
-                        break;
+        while self.flow.is_some() {
+            let next_event = {
+                let flow = self.flow.as_mut().expect("flow existence already checked");
+                flow.try_recv()
+            };
+            match next_event {
+                Ok(event) => match event {
+                    AuthFlowEvent::AwaitingBrowser => {
+                        self.status = AuthUiStatus::AwaitingBrowser;
                     }
+                    AuthFlowEvent::WaitingForAuthorization => {
+                        self.status = AuthUiStatus::WaitingForAuthorization;
+                    }
+                    AuthFlowEvent::Completed(account) => {
+                        self.accounts_state.upsert_and_activate(account);
+                        self.sync_account_avatar_cache();
+                        self.rebuild_active_avatar_png();
+                        self.status = AuthUiStatus::Idle;
+
+                        if let Err(err) = auth::save_cached_accounts(&self.accounts_state) {
+                            self.status = AuthUiStatus::Error(format!(
+                                "Sign-in succeeded, but failed to cache account state: {err}",
+                            ));
+                        }
+
+                        flow_finished = true;
+                        self.schedule_missing_avatars();
+                    }
+                    AuthFlowEvent::Failed(err) => {
+                        self.status = AuthUiStatus::Error(err);
+                        flow_finished = true;
+                    }
+                },
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    if !flow_finished {
+                        self.status = AuthUiStatus::Error(
+                            "Sign-in stopped unexpectedly before completion".to_owned(),
+                        );
+                    }
+                    flow_finished = true;
+                    break;
                 }
             }
         }
@@ -197,7 +223,7 @@ impl AuthState {
     }
 
     pub fn start_sign_in(&mut self) {
-        if self.flow.is_some() {
+        if self.flow.is_some() || self.renewal.is_some() {
             return;
         }
 
@@ -225,11 +251,10 @@ impl AuthState {
         }
 
         self.ensure_active_account_token_ready();
-        self.active_avatar_png = self
-            .accounts_state
-            .active_account()
-            .and_then(CachedAccount::avatar_png_bytes);
-        self.status = AuthUiStatus::Idle;
+        self.rebuild_active_avatar_png();
+        if !self.auth_busy() && !matches!(self.status, AuthUiStatus::Error(_)) {
+            self.status = AuthUiStatus::Idle;
+        }
 
         if let Err(err) = auth::save_cached_accounts(&self.accounts_state) {
             self.status = AuthUiStatus::Error(format!(
@@ -243,10 +268,8 @@ impl AuthState {
             return;
         }
 
-        self.active_avatar_png = self
-            .accounts_state
-            .active_account()
-            .and_then(CachedAccount::avatar_png_bytes);
+        self.sync_account_avatar_cache();
+        self.rebuild_active_avatar_png();
         self.status = AuthUiStatus::Idle;
 
         if let Err(err) = auth::save_cached_accounts(&self.accounts_state) {
@@ -277,41 +300,27 @@ impl AuthState {
             }
         };
 
-        match auth::renew_cached_accounts_tokens_with_callback(&client_id, |event| {
-            emit_cached_account_renewal_notification(event);
-        }) {
-            Ok(renewed) => {
-                let previous_active = self.accounts_state.active_profile_id.clone();
-                self.accounts_state = renewed;
-                if let Some(active_id) = previous_active.as_deref() {
-                    let _ = self.accounts_state.set_active_profile_id(active_id);
-                }
-                let refreshed_has_token = self
-                    .accounts_state
-                    .active_account()
-                    .and_then(|account| account.minecraft_access_token.as_deref())
-                    .map(str::trim)
-                    .is_some_and(|token| !token.is_empty());
-                if !refreshed_has_token {
-                    self.status = AuthUiStatus::Error(
-                        "Active account does not have a renewable session. Sign in again."
-                            .to_owned(),
-                    );
-                }
-            }
-            Err(err) => {
-                self.status =
-                    AuthUiStatus::Error(format!("Failed to renew active account token: {err}",));
-            }
-        }
+        self.spawn_renewal_worker(client_id, AuthUiStatus::RefreshingActiveSession);
     }
 
     pub fn should_request_repaint(&self) -> bool {
-        self.flow.is_some() || self.startup_renewal.is_some()
+        self.flow.is_some() || self.renewal.is_some() || !self.avatar_loads_in_flight.is_empty()
     }
 
     pub fn sign_in_in_progress(&self) -> bool {
         self.flow.is_some()
+    }
+
+    pub fn set_streamer_mode(&mut self, enabled: bool) {
+        self.streamer_mode = enabled;
+    }
+
+    pub fn auth_busy(&self) -> bool {
+        self.flow.is_some() || self.renewal.is_some()
+    }
+
+    pub fn token_refresh_in_progress(&self) -> bool {
+        self.renewal.is_some()
     }
 
     pub fn display_name(&self) -> Option<&str> {
@@ -381,7 +390,10 @@ impl AuthState {
                 is_active: active_id
                     .map(|id| id == account.minecraft_profile.id)
                     .unwrap_or(false),
-                avatar_png: account.avatar_png_bytes(),
+                avatar_png: self
+                    .account_avatars
+                    .get(&account.minecraft_profile.id)
+                    .cloned(),
             })
             .collect::<Vec<_>>();
 
@@ -394,14 +406,170 @@ impl AuthState {
 
         entries
     }
+
+    fn spawn_renewal_worker(&mut self, client_id: String, status: AuthUiStatus) {
+        if self.renewal.is_some() {
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel::<Result<CachedAccountsState, String>>();
+        let streamer_mode = self.streamer_mode;
+        std::thread::spawn(move || {
+            let result = auth::renew_cached_accounts_tokens_with_callback(&client_id, |event| {
+                emit_cached_account_renewal_notification(event, streamer_mode);
+            })
+            .map_err(|err| err.to_string());
+            let _ = tx.send(result);
+        });
+        self.renewal = Some(rx);
+        self.status = status;
+    }
+
+    fn apply_accounts_state(&mut self, state: CachedAccountsState, preserve_active: bool) {
+        let previous_active = if preserve_active {
+            self.accounts_state.active_profile_id.clone()
+        } else {
+            None
+        };
+        self.accounts_state = state;
+        if let Some(active_id) = previous_active.as_deref() {
+            let _ = self.accounts_state.set_active_profile_id(active_id);
+        }
+        self.sync_account_avatar_cache();
+        self.rebuild_active_avatar_png();
+    }
+
+    fn sync_account_avatar_cache(&mut self) {
+        let known_profile_ids = self
+            .accounts_state
+            .accounts
+            .iter()
+            .map(|account| account.minecraft_profile.id.as_str())
+            .collect::<HashSet<_>>();
+        self.account_avatars
+            .retain(|profile_id, _| known_profile_ids.contains(profile_id.as_str()));
+
+        for account in &self.accounts_state.accounts {
+            if let Some(bytes) = account.avatar_png_bytes() {
+                self.account_avatars
+                    .insert(account.minecraft_profile.id.clone(), bytes);
+            }
+        }
+    }
+
+    fn rebuild_active_avatar_png(&mut self) {
+        self.active_avatar_png =
+            active_avatar_from_map(&self.accounts_state, &self.account_avatars);
+    }
+
+    fn schedule_missing_avatars(&mut self) {
+        for account in &self.accounts_state.accounts {
+            let profile_id = account.minecraft_profile.id.clone();
+            if profile_id.trim().is_empty()
+                || self.account_avatars.contains_key(&profile_id)
+                || self.avatar_loads_in_flight.contains(&profile_id)
+                || account
+                    .avatar_source_skin_url
+                    .as_deref()
+                    .map(str::trim)
+                    .is_none_or(|value| value.is_empty())
+            {
+                continue;
+            }
+
+            self.avatar_loads_in_flight.insert(profile_id.clone());
+            let tx = self.avatar_result_tx.clone();
+            let account = account.clone();
+            std::thread::spawn(move || {
+                let result = match auth::resolve_cached_account_avatar(&account) {
+                    Ok(avatar_png) => AvatarLoadResult {
+                        profile_id,
+                        avatar_png,
+                        error: None,
+                    },
+                    Err(err) => AvatarLoadResult {
+                        profile_id,
+                        avatar_png: None,
+                        error: Some(err.to_string()),
+                    },
+                };
+                let _ = tx.send(result);
+            });
+        }
+    }
+
+    fn poll_avatar_loads(&mut self) {
+        loop {
+            match self.avatar_result_rx.try_recv() {
+                Ok(result) => {
+                    self.avatar_loads_in_flight.remove(&result.profile_id);
+                    if let Some(error) = result.error {
+                        tracing::warn!(
+                            target: "vertexlauncher/auth/avatar",
+                            profile_id = result.profile_id,
+                            error,
+                            "Failed to resolve account avatar in background worker."
+                        );
+                        continue;
+                    }
+
+                    if let Some(account) = self
+                        .accounts_state
+                        .accounts
+                        .iter_mut()
+                        .find(|account| account.minecraft_profile.id == result.profile_id)
+                    {
+                        account.set_avatar_png_bytes(result.avatar_png.as_deref());
+                    }
+
+                    if let Some(avatar_png) = result.avatar_png {
+                        self.account_avatars
+                            .insert(result.profile_id.clone(), avatar_png);
+                    }
+
+                    self.rebuild_active_avatar_png();
+                    if let Err(err) = auth::save_cached_accounts(&self.accounts_state) {
+                        tracing::warn!(
+                            target: "vertexlauncher/auth/avatar",
+                            error = %err,
+                            "Failed to persist background-loaded avatar."
+                        );
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+    }
 }
 
-fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent) {
+fn decoded_cached_avatars(state: &CachedAccountsState) -> HashMap<String, Vec<u8>> {
+    state
+        .accounts
+        .iter()
+        .filter_map(|account| {
+            account
+                .avatar_png_bytes()
+                .map(|bytes| (account.minecraft_profile.id.clone(), bytes))
+        })
+        .collect()
+}
+
+fn active_avatar_from_map(
+    state: &CachedAccountsState,
+    avatars: &HashMap<String, Vec<u8>>,
+) -> Option<Vec<u8>> {
+    let profile_id = state.active_account()?.minecraft_profile.id.as_str();
+    avatars.get(profile_id).cloned()
+}
+
+fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent, streamer_mode: bool) {
     match event {
         CachedAccountRenewalEvent::Started {
             profile_id,
             display_name,
         } => {
+            let display_name = privacy::redact_account_label(streamer_mode, &display_name);
             notification::emit_spinner(
                 notification::Severity::Info,
                 "Login Renewal",
@@ -413,6 +581,7 @@ fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent) {
             profile_id,
             display_name,
         } => {
+            let display_name = privacy::redact_account_label(streamer_mode, &display_name);
             notification::emit_replace(
                 notification::Severity::Info,
                 "Login Renewal",
@@ -425,6 +594,8 @@ fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent) {
             display_name,
             error,
         } => {
+            let display_name_for_notification =
+                privacy::redact_account_label(streamer_mode, &display_name);
             tracing::warn!(
                 target: "vertexlauncher/auth/renew",
                 profile_id,
@@ -435,7 +606,7 @@ fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent) {
             notification::emit_replace(
                 notification::Severity::Error,
                 "Login Renewal",
-                format!("Error in attepting to renew login for {display_name}"),
+                format!("Error in attepting to renew login for {display_name_for_notification}"),
                 format!("login-renewal:{profile_id}"),
             );
         }
@@ -456,8 +627,9 @@ fn run_sign_in_flow(client_id: String, sender: mpsc::Sender<AuthFlowEvent>) {
     let callback_url = match webview_sign_in::open_microsoft_sign_in(
         &flow.auth_request_uri,
         auth::oauth_redirect_uri(),
+        flow.expected_state(),
     ) {
-        Ok(callback_url) => callback_url,
+        Ok(auth_code) => auth_code,
         Err(err) => {
             let _ = sender.send(AuthFlowEvent::Failed(err));
             return;
@@ -466,7 +638,7 @@ fn run_sign_in_flow(client_id: String, sender: mpsc::Sender<AuthFlowEvent>) {
 
     let _ = sender.send(AuthFlowEvent::WaitingForAuthorization);
 
-    match auth::login_finish_from_redirect(&callback_url, flow) {
+    match auth::login_finish(&callback_url, flow) {
         Ok(account) => {
             let _ = sender.send(AuthFlowEvent::Completed(account));
         }

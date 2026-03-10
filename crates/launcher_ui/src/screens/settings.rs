@@ -35,103 +35,153 @@ fn render_settings_contents(
     available_ui_fonts: &[UiFontFamily],
     available_themes: &[Theme],
 ) {
+    render_settings_section(
+        ui,
+        text_ui,
+        "Appearance & Privacy",
+        "Theme, typography, and on-stream safety settings.",
+        |ui, text_ui| {
+            render_theme_setting(ui, text_ui, config, available_themes);
+            render_ui_font_settings(ui, text_ui, config, available_ui_fonts);
+            render_skin_preview_setting(ui, text_ui, config);
+            render_selected_toggles(
+                ui,
+                text_ui,
+                config,
+                &[
+                    config::ToggleSettingId::StreamerModeEnabled,
+                    config::ToggleSettingId::WindowBlurEnabled,
+                    config::ToggleSettingId::OpenTypeFeaturesEnabled,
+                ],
+            );
+            render_selected_text_settings(
+                ui,
+                text_ui,
+                config,
+                &[config::TextSettingId::OpenTypeFeaturesToEnable],
+            );
+        },
+    );
+
+    render_settings_section(
+        ui,
+        text_ui,
+        "Performance",
+        "GPU, frame pacing, and download throughput behavior.",
+        |ui, text_ui| {
+            render_selected_toggles(
+                ui,
+                text_ui,
+                config,
+                &[
+                    config::ToggleSettingId::LowPowerGpuPreferred,
+                    config::ToggleSettingId::FrameLimiterEnabled,
+                ],
+            );
+            render_selected_int_settings(ui, text_ui, config, &[IntSettingId::FrameLimitFps]);
+            render_download_settings(ui, text_ui, config);
+        },
+    );
+
+    render_settings_section(
+        ui,
+        text_ui,
+        "Minecraft & Java",
+        "Version catalog behavior and shared runtime configuration.",
+        |ui, text_ui| {
+            render_selected_toggles(
+                ui,
+                text_ui,
+                config,
+                &[
+                    config::ToggleSettingId::SnapshotsAndBetasEnabled,
+                    config::ToggleSettingId::ForceJava21Minimum,
+                ],
+            );
+            render_java_runtime_settings(ui, text_ui, config);
+        },
+    );
+
+    render_instance_defaults_section(ui, text_ui, config);
+}
+
+fn render_settings_section(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    heading: &str,
+    description: &str,
+    render_body: impl FnOnce(&mut Ui, &mut TextUi),
+) {
+    let heading_style = style::section_heading(ui);
+    let mut body_style = style::muted(ui);
+    body_style.wrap = true;
+
     ui.add_space(style::SPACE_LG);
     ui.separator();
     ui.add_space(style::SPACE_LG);
+    let _ = text_ui.label(ui, ("settings_heading", heading), heading, &heading_style);
+    let _ = text_ui.label(
+        ui,
+        ("settings_description", heading),
+        description,
+        &body_style,
+    );
+    ui.add_space(style::SPACE_MD);
+    render_body(ui, text_ui);
+}
 
-    let mut frame_limit_fps = config.frame_limit_fps();
-    config.for_each_toggle_mut(|setting, value| {
-        ui.push_id(setting.id, |ui| {
-            settings_widgets::toggle_row(text_ui, ui, setting.label, setting.info_tooltip, value);
-        });
-        if setting.id == config::ToggleSettingId::FrameLimiterEnabled && *value {
-            let spec = IntSettingId::FrameLimitFps.spec();
-            ui.push_id(spec.id, |ui| {
-                let response = settings_widgets::int_stepper_row(
-                    text_ui,
-                    ui,
-                    spec.id,
-                    spec.label,
-                    spec.info_tooltip,
-                    &mut frame_limit_fps,
-                    spec.min,
-                    spec.max,
-                    spec.step,
-                );
-                let _ = response.changed();
-            });
-        }
-        ui.add_space(style::SPACE_MD);
-    });
-    config.set_frame_limit_fps(frame_limit_fps);
-
-    if !available_themes.is_empty() {
-        let mut selected_theme_index = available_themes
-            .iter()
-            .position(|theme| theme.id == config.theme_id())
-            .unwrap_or(0);
-        let theme_labels: Vec<&str> = available_themes
-            .iter()
-            .map(|theme| theme.name.as_str())
-            .collect();
-        let response = settings_widgets::dropdown_row(
-            text_ui,
-            ui,
-            "theme_selector",
-            "Theme",
-            Some("Themes are loaded from the themes/ folder at startup."),
-            &mut selected_theme_index,
-            &theme_labels,
-        );
-        if response.changed() {
-            if let Some(theme) = available_themes.get(selected_theme_index) {
-                config.set_theme_id(theme.id.clone());
-            }
-        }
-        ui.add_space(style::SPACE_MD);
+fn render_theme_setting(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    config: &mut Config,
+    available_themes: &[Theme],
+) {
+    if available_themes.is_empty() {
+        return;
     }
-
-    {
-        let mut selected = SkinPreviewAaMode::ALL
-            .iter()
-            .position(|mode| *mode == config.skin_preview_aa_mode())
-            .unwrap_or(0);
-        let labels: Vec<&str> = SkinPreviewAaMode::ALL
-            .iter()
-            .map(|mode| mode.label())
-            .collect();
-        let response = settings_widgets::dropdown_row(
-            text_ui,
-            ui,
-            "skins_preview_aa_mode",
-            "Skin Preview Anti-Aliasing",
-            Some(
-                "MSAA uses GPU hardware; FXAA and TAA are post-process modes. Changes apply immediately.",
-            ),
-            &mut selected,
-            &labels,
-        );
-        if response.changed() {
-            if let Some(next) = SkinPreviewAaMode::ALL.get(selected).copied() {
-                config.set_skin_preview_aa_mode(next);
-            }
+    let mut selected_theme_index = available_themes
+        .iter()
+        .position(|theme| theme.id == config.theme_id())
+        .unwrap_or(0);
+    let theme_labels: Vec<&str> = available_themes
+        .iter()
+        .map(|theme| theme.name.as_str())
+        .collect();
+    let response = settings_widgets::dropdown_row(
+        text_ui,
+        ui,
+        "theme_selector",
+        "Theme",
+        Some("Themes are loaded from the themes/ folder at startup."),
+        &mut selected_theme_index,
+        &theme_labels,
+    );
+    if response.changed() {
+        if let Some(theme) = available_themes.get(selected_theme_index) {
+            config.set_theme_id(theme.id.clone());
         }
-        ui.add_space(style::SPACE_MD);
     }
+    ui.add_space(style::SPACE_MD);
+}
 
+fn render_ui_font_settings(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    config: &mut Config,
+    available_ui_fonts: &[UiFontFamily],
+) {
     config.for_each_dropdown_mut(|setting, value| {
+        if setting.id != DropdownSettingId::UiFontFamily {
+            return;
+        }
         ui.push_id(setting.id, |ui| {
-            let options: &[UiFontFamily] = match setting.id {
-                DropdownSettingId::UiFontFamily => available_ui_fonts,
-            };
+            let options: &[UiFontFamily] = available_ui_fonts;
             if options.is_empty() {
                 return;
             }
-
             if !options.contains(value) {
                 *value = options[0];
             }
-
             let option_labels: Vec<&str> = options
                 .iter()
                 .map(|option| option.settings_label())
@@ -140,7 +190,6 @@ fn render_settings_contents(
                 .iter()
                 .position(|option| *option == *value)
                 .unwrap_or(0);
-
             let response = settings_widgets::dropdown_row(
                 text_ui,
                 ui,
@@ -150,7 +199,6 @@ fn render_settings_contents(
                 &mut selected_index,
                 &option_labels,
             );
-
             if response.changed() {
                 if let Some(next_value) = options.get(selected_index).copied() {
                     *value = next_value;
@@ -177,8 +225,80 @@ fn render_settings_contents(
         ui.add_space(style::SPACE_MD);
     });
 
+    render_selected_int_settings(ui, text_ui, config, &[IntSettingId::UiFontWeight]);
+}
+
+fn render_skin_preview_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let mut selected = SkinPreviewAaMode::ALL
+        .iter()
+        .position(|mode| *mode == config.skin_preview_aa_mode())
+        .unwrap_or(0);
+    let labels: Vec<&str> = SkinPreviewAaMode::ALL
+        .iter()
+        .map(|mode| mode.label())
+        .collect();
+    let response = settings_widgets::dropdown_row(
+        text_ui,
+        ui,
+        "skins_preview_aa_mode",
+        "Skin Preview Anti-Aliasing",
+        Some(
+            "MSAA uses GPU hardware; FXAA and TAA are post-process modes. Changes apply immediately.",
+        ),
+        &mut selected,
+        &labels,
+    );
+    if response.changed() {
+        if let Some(next) = SkinPreviewAaMode::ALL.get(selected).copied() {
+            config.set_skin_preview_aa_mode(next);
+        }
+    }
+    ui.add_space(style::SPACE_MD);
+}
+
+fn render_selected_toggles(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    config: &mut Config,
+    selected_ids: &[config::ToggleSettingId],
+) {
+    let mut frame_limit_fps = config.frame_limit_fps();
+    config.for_each_toggle_mut(|setting, value| {
+        if !selected_ids.contains(&setting.id) {
+            return;
+        }
+        ui.push_id(setting.id, |ui| {
+            settings_widgets::toggle_row(text_ui, ui, setting.label, setting.info_tooltip, value);
+        });
+        if setting.id == config::ToggleSettingId::FrameLimiterEnabled && *value {
+            let spec = IntSettingId::FrameLimitFps.spec();
+            ui.push_id(spec.id, |ui| {
+                let _ = settings_widgets::int_stepper_row(
+                    text_ui,
+                    ui,
+                    spec.id,
+                    spec.label,
+                    spec.info_tooltip,
+                    &mut frame_limit_fps,
+                    spec.min,
+                    spec.max,
+                    spec.step,
+                );
+            });
+        }
+        ui.add_space(style::SPACE_MD);
+    });
+    config.set_frame_limit_fps(frame_limit_fps);
+}
+
+fn render_selected_int_settings(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    config: &mut Config,
+    selected_ids: &[IntSettingId],
+) {
     config.for_each_int_mut(|setting, value| {
-        if setting.id == IntSettingId::FrameLimitFps {
+        if !selected_ids.contains(&setting.id) {
             return;
         }
         ui.push_id(setting.id, |ui| {
@@ -196,8 +316,18 @@ fn render_settings_contents(
         });
         ui.add_space(style::SPACE_MD);
     });
+}
 
+fn render_selected_text_settings(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    config: &mut Config,
+    selected_ids: &[config::TextSettingId],
+) {
     config.for_each_text_mut(|setting, value| {
+        if !selected_ids.contains(&setting.id) {
+            return;
+        }
         ui.push_id(setting.id, |ui| {
             settings_widgets::text_input_row(
                 text_ui,
@@ -210,8 +340,78 @@ fn render_settings_contents(
         });
         ui.add_space(style::SPACE_MD);
     });
+}
 
-    render_instance_defaults_section(ui, text_ui, config);
+fn render_download_settings(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let concurrency_spec = IntSettingId::FrameLimitFps; // placeholder to satisfy formatting block removal
+    let _ = concurrency_spec;
+
+    let mut max_concurrent = config.download_max_concurrent() as i32;
+    let response = settings_widgets::int_stepper_row(
+        text_ui,
+        ui,
+        "download_max_concurrent",
+        "Max Concurrent Downloads",
+        Some("Maximum number of parallel downloads used by the launcher."),
+        &mut max_concurrent,
+        DOWNLOAD_CONCURRENCY_MIN as i32,
+        DOWNLOAD_CONCURRENCY_MAX as i32,
+        1,
+    );
+    if response.changed() {
+        config.set_download_max_concurrent(max_concurrent.max(1) as u32);
+    }
+    ui.add_space(style::SPACE_MD);
+
+    let mut speed_limit_enabled = config.download_speed_limit_enabled();
+    settings_widgets::toggle_row(
+        text_ui,
+        ui,
+        "Enable Download Speed Limit",
+        Some("Caps launcher download bandwidth using the value below."),
+        &mut speed_limit_enabled,
+    );
+    config.set_download_speed_limit_enabled(speed_limit_enabled);
+    ui.add_space(style::SPACE_MD);
+
+    let _ = settings_widgets::text_input_row(
+        text_ui,
+        ui,
+        "download_speed_limit",
+        "Download Speed Limit",
+        Some("Examples: 10mbps, 500kbps, 1gbps."),
+        config.download_speed_limit_mut(),
+    );
+    ui.add_space(style::SPACE_MD);
+}
+
+fn render_java_runtime_settings(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    for runtime in JavaRuntimeVersion::ALL {
+        let mut value = config
+            .java_runtime_path(runtime)
+            .unwrap_or_default()
+            .to_owned();
+        let response = settings_widgets::text_input_row(
+            text_ui,
+            ui,
+            ("java_runtime_path", runtime.major()),
+            runtime.label(),
+            Some(runtime.info_tooltip()),
+            &mut value,
+        );
+        if response.changed() {
+            let trimmed = value.trim();
+            config.set_java_runtime_path(
+                runtime,
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_owned())
+                },
+            );
+        }
+        ui.add_space(style::SPACE_MD);
+    }
 }
 
 fn render_instance_defaults_section(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {

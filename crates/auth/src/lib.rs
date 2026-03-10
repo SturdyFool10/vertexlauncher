@@ -7,6 +7,7 @@ mod error;
 mod minecraft;
 mod oauth;
 mod runtime;
+mod secret_store;
 mod types;
 mod util;
 
@@ -50,6 +51,14 @@ pub fn builtin_client_id() -> Option<&'static str> {
 /// Returns the redirect URI expected for browser/device OAuth callbacks.
 pub fn oauth_redirect_uri() -> &'static str {
     constants::LIVE_REDIRECT_URI
+}
+
+/// Extracts and validates an OAuth auth code from the Microsoft callback URL.
+pub fn validate_oauth_callback_code(
+    callback_url: &str,
+    expected_state: &str,
+) -> Result<String, AuthError> {
+    oauth::extract_authorization_code(callback_url, expected_state)
 }
 
 /// Starts the device-code login flow on the current Tokio runtime if available.
@@ -219,6 +228,13 @@ pub fn login_finish_from_redirect(
 pub fn fetch_minecraft_profile(access_token: &str) -> Result<MinecraftProfileState, AuthError> {
     let agent = util::build_http_agent();
     minecraft::fetch_profile_state_with_textures(&agent, access_token)
+}
+
+/// Resolves a cached account avatar using stored bytes or the saved source skin URL.
+pub fn resolve_cached_account_avatar(
+    account: &CachedAccount,
+) -> Result<Option<Vec<u8>>, AuthError> {
+    minecraft::resolve_cached_account_avatar(account)
 }
 
 /// Uploads and activates a new skin texture for the active profile.

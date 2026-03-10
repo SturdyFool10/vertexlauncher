@@ -10,7 +10,7 @@ use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 use textui::{ButtonOptions, LabelOptions, TextUi};
 
 use crate::{
-    assets,
+    assets, privacy,
     ui::{components::icon_button, style},
 };
 
@@ -47,6 +47,9 @@ pub struct ProfileUiModel<'a> {
     pub display_name: Option<&'a str>,
     pub avatar_png: Option<&'a [u8]>,
     pub sign_in_in_progress: bool,
+    pub auth_busy: bool,
+    pub token_refresh_in_progress: bool,
+    pub streamer_mode: bool,
     pub status_message: Option<&'a str>,
     pub accounts: &'a [ProfileAccountOption],
     pub user_instance_active: bool,
@@ -136,9 +139,7 @@ pub fn render(
 
                     let profile_response =
                         render_profile_button(ui, text_ui, profile_ui, profile_button_size);
-                    let direct_sign_in = profile_ui.display_name.is_none()
-                        && profile_ui.accounts.is_empty()
-                        && !profile_ui.sign_in_in_progress;
+                    let direct_sign_in = profile_ui.display_name.is_none() && !profile_ui.auth_busy;
                     if direct_sign_in {
                         if profile_response.clicked() {
                             output.start_sign_in = true;
@@ -306,7 +307,7 @@ fn render_profile_button(
 
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(button_size, button_size), egui::Sense::click());
-        let fill = if profile_ui.sign_in_in_progress {
+        let fill = if profile_ui.auth_busy {
             ui.visuals().widgets.active.weak_bg_fill
         } else if response.is_pointer_button_down_on() {
             ui.visuals().widgets.active.weak_bg_fill
@@ -328,7 +329,9 @@ fn render_profile_button(
         );
         let _ = ui.put(rect, icon);
         response
-    } else if profile_ui.display_name.is_none() && !profile_ui.sign_in_in_progress {
+    } else if profile_ui.display_name.is_none() && profile_ui.auth_busy {
+        render_profile_pending_button(ui, button_size)
+    } else if profile_ui.display_name.is_none() {
         let sign_in_style = ButtonOptions {
             min_size: egui::vec2((button_size * 3.2).clamp(68.0, 110.0), button_size),
             text_color: ui.visuals().text_color(),
@@ -350,13 +353,36 @@ fn render_profile_button(
                     "profile_selector_default",
                     assets::USER_SVG,
                     "Profile selector",
-                    profile_ui.sign_in_in_progress,
+                    profile_ui.auth_busy,
                     button_size,
                 )
             },
         )
         .inner
     }
+}
+
+fn render_profile_pending_button(ui: &mut egui::Ui, button_size: f32) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(button_size, button_size), egui::Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(PROFILE_BUTTON_CORNER_RADIUS),
+        ui.visuals().widgets.active.weak_bg_fill,
+    );
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(PROFILE_BUTTON_CORNER_RADIUS),
+        egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color),
+        egui::StrokeKind::Inside,
+    );
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.with_layout(Layout::top_down(Align::Center), |ui| {
+            ui.add_space((button_size * 0.2).max(2.0));
+            ui.spinner();
+        });
+    });
+    response
 }
 
 fn rounded_profile_avatar_png(cache_key: u64, avatar_png: &[u8], radius: u8) -> Vec<u8> {
@@ -541,10 +567,11 @@ fn render_profile_popup(
         .inner_margin(egui::Margin::same(style::SPACE_LG as i8))
         .show(ui, |ui| {
             if let Some(name) = profile_ui.display_name {
+                let redacted_name = privacy::redact_account_label(profile_ui.streamer_mode, name);
                 let _ = text_ui.label(
                     ui,
                     "profile_popup_signed_in",
-                    &format!("Signed in as {name}"),
+                    &format!("Signed in as {redacted_name}"),
                     &heading_style,
                 );
             } else {
@@ -585,9 +612,19 @@ fn render_profile_popup(
                 for account in profile_ui.accounts {
                     ui.horizontal(|ui| {
                         let label = if account.is_active {
-                            format!("{} (active)", account.display_name)
+                            format!(
+                                "{} (active)",
+                                privacy::redact_account_label(
+                                    profile_ui.streamer_mode,
+                                    account.display_name.as_str()
+                                )
+                            )
                         } else {
-                            account.display_name.clone()
+                            privacy::redact_account_label(
+                                profile_ui.streamer_mode,
+                                account.display_name.as_str(),
+                            )
+                            .into_owned()
                         };
 
                         if text_ui
@@ -632,17 +669,19 @@ fn render_profile_popup(
     primary_button_style.fill_selected = ui.visuals().widgets.open.bg_fill;
     primary_button_style.stroke = egui::Stroke::new(1.8, ui.visuals().widgets.open.bg_stroke.color);
 
-    if profile_ui.sign_in_in_progress {
+    if profile_ui.auth_busy {
         let mut pending_button_style = button_style.clone();
         pending_button_style.min_size = egui::vec2(full_action_width, style::CONTROL_HEIGHT);
         pending_button_style.stroke =
             egui::Stroke::new(1.4, ui.visuals().widgets.inactive.bg_stroke.color);
         ui.add_enabled_ui(false, |ui| {
-            let _ = text_ui.button(
+            let _ = render_pending_text_button(
                 ui,
+                text_ui,
                 "profile_popup_signing_in",
-                "Signing in with Microsoft...",
+                pending_auth_label(profile_ui),
                 &pending_button_style,
+                true,
             );
         });
     } else if text_ui
@@ -657,4 +696,56 @@ fn render_profile_popup(
         output.start_sign_in = true;
         egui::Popup::open_id(ui.ctx(), popup_id);
     }
+}
+
+fn pending_auth_label(profile_ui: ProfileUiModel<'_>) -> &'static str {
+    if profile_ui.token_refresh_in_progress {
+        "Refreshing session..."
+    } else if profile_ui.sign_in_in_progress {
+        "Signing in with Microsoft..."
+    } else {
+        "Authenticating..."
+    }
+}
+
+fn render_pending_text_button(
+    ui: &mut egui::Ui,
+    text_ui: &mut TextUi,
+    id_source: impl std::hash::Hash,
+    label: &str,
+    options: &ButtonOptions,
+    show_spinner: bool,
+) -> egui::Response {
+    if !show_spinner {
+        return text_ui.button(ui, id_source, label, options);
+    }
+
+    let desired_size = options.min_size;
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+    let label_id = ui.id().with("pending_auth_label").with(&id_source);
+    ui.painter().rect(
+        rect,
+        egui::CornerRadius::same(options.corner_radius),
+        options.fill,
+        options.stroke,
+        egui::StrokeKind::Inside,
+    );
+
+    let inner_rect = rect.shrink2(options.padding);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
+        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+            ui.spinner();
+            ui.add_space(crate::ui::style::SPACE_XS);
+            let mut label_style = LabelOptions {
+                color: options.text_color,
+                wrap: false,
+                ..LabelOptions::default()
+            };
+            label_style.font_size = 14.0;
+            label_style.line_height = 18.0;
+            let _ = text_ui.label(ui, label_id, label, &label_style);
+        });
+    });
+
+    response
 }

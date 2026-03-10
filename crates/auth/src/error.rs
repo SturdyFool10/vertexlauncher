@@ -7,6 +7,8 @@ use thiserror::Error;
 pub enum AuthError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+    #[error("Secure storage error: {0}")]
+    SecureStorage(String),
     #[error("Failed to parse JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("Failed to decode image data: {0}")]
@@ -50,6 +52,7 @@ pub(crate) fn prefix_auth_error(step: &str, error: AuthError) -> AuthError {
     match error {
         AuthError::Http(message) => AuthError::Http(format!("{step}: {message}")),
         AuthError::OAuth(message) => AuthError::OAuth(format!("{step}: {message}")),
+        AuthError::SecureStorage(message) => AuthError::SecureStorage(format!("{step}: {message}")),
         other => AuthError::OAuth(format!("{step}: {other}")),
     }
 }

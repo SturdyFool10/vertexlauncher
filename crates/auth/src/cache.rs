@@ -1,9 +1,11 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use zeroize::Zeroizing;
 
 use crate::constants::{ACCOUNT_CACHE_APP_DIR, ACCOUNT_CACHE_FILENAME, LEGACY_ACCOUNT_CACHE_PATH};
 use crate::error::AuthError;
+use crate::secret_store;
 use crate::types::{CachedAccount, CachedAccountsState};
 
 #[track_caller]
@@ -78,7 +80,7 @@ pub(crate) fn load_cached_accounts() -> Result<CachedAccountsState, AuthError> {
     let contents = fs_read_to_string(&path)?;
 
     match serde_json::from_str::<CachedAccountsState>(&contents) {
-        Ok(state) => Ok(state.normalize()),
+        Ok(state) => finalize_loaded_accounts(state.normalize()),
         Err(state_error) => {
             // Backward compatibility with the old single-account cache format.
             if let Ok(single_account) = serde_json::from_str::<CachedAccount>(&contents) {
@@ -88,7 +90,7 @@ pub(crate) fn load_cached_accounts() -> Result<CachedAccountsState, AuthError> {
                 );
                 let mut state = CachedAccountsState::default();
                 state.upsert_and_activate(single_account);
-                return Ok(state);
+                return finalize_loaded_accounts(state);
             }
 
             tracing::warn!(
@@ -105,20 +107,44 @@ pub(crate) fn load_cached_accounts() -> Result<CachedAccountsState, AuthError> {
 pub(crate) fn save_cached_accounts(state: &CachedAccountsState) -> Result<(), AuthError> {
     let path = account_cache_path();
     maybe_migrate_legacy_account_cache(&path)?;
+    let previous_profile_ids = load_cached_profile_ids_from_disk(&path)?;
     let mut normalized = state.clone().normalize();
+    let current_profile_ids = normalized
+        .accounts
+        .iter()
+        .map(|account| account.minecraft_profile.id.clone())
+        .collect::<Vec<_>>();
+
     for account in &mut normalized.accounts {
+        persist_refresh_token(account)?;
         sanitize_cached_profile(account);
     }
     let json = serde_json::to_string_pretty(&normalized)?;
-    write_secure_file_atomic(&path, json.as_bytes())
+    write_secure_file_atomic(&path, json.as_bytes())?;
+
+    for profile_id in previous_profile_ids {
+        if !current_profile_ids
+            .iter()
+            .any(|current| current == &profile_id)
+        {
+            secret_store::delete_refresh_token(&profile_id)?;
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn clear_cached_accounts() -> Result<(), AuthError> {
     let path = account_cache_path();
     maybe_migrate_legacy_account_cache(&path)?;
+    let previous_profile_ids = load_cached_profile_ids_from_disk(&path)?;
 
     if path.exists() {
         fs_remove_file(path)?;
+    }
+
+    for profile_id in previous_profile_ids {
+        secret_store::delete_refresh_token(&profile_id)?;
     }
 
     Ok(())
@@ -258,14 +284,95 @@ fn write_secure_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), AuthError> 
 }
 
 fn sanitize_cached_profile(account: &mut CachedAccount) {
-    // Persist only long-lived renewal credentials and static profile assets.
-    // Runtime access tokens are session-scoped and must not be written to disk.
+    // Runtime access tokens stay in memory only, and refresh tokens are
+    // persisted separately in OS-backed secure storage.
     account.minecraft_access_token = None;
+    account.microsoft_refresh_token = None;
 
-    // Keep identity and owned cape textures, but do not persist skin data
-    // or any equipped-state flags that can go stale between sessions.
+    // Keep lightweight identity/profile metadata only; avoid stale or heavy
+    // texture payloads in the on-disk cache.
     account.minecraft_profile.skins.clear();
     for cape in &mut account.minecraft_profile.capes {
         cape.state.clear();
+        cape.texture_png_base64 = None;
     }
+}
+
+fn finalize_loaded_accounts(
+    mut state: CachedAccountsState,
+) -> Result<CachedAccountsState, AuthError> {
+    let mut migrated_plaintext_token = false;
+
+    for account in &mut state.accounts {
+        let profile_id = account.minecraft_profile.id.trim();
+        if profile_id.is_empty() {
+            account.microsoft_refresh_token = None;
+            continue;
+        }
+
+        if let Some(token) = account
+            .microsoft_refresh_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+        {
+            secret_store::store_refresh_token(profile_id, token)?;
+            migrated_plaintext_token = true;
+        }
+
+        account.microsoft_refresh_token = secret_store::load_refresh_token(profile_id)?
+            .map(Zeroizing::new)
+            .map(|token| token.to_string());
+    }
+
+    if migrated_plaintext_token {
+        save_cached_accounts(&state)?;
+    }
+
+    Ok(state)
+}
+
+fn persist_refresh_token(account: &mut CachedAccount) -> Result<(), AuthError> {
+    let profile_id = account.minecraft_profile.id.trim();
+    if profile_id.is_empty() {
+        account.microsoft_refresh_token = None;
+        return Ok(());
+    }
+
+    match account
+        .microsoft_refresh_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        Some(token) => secret_store::store_refresh_token(profile_id, token)?,
+        None => secret_store::delete_refresh_token(profile_id)?,
+    }
+
+    Ok(())
+}
+
+fn load_cached_profile_ids_from_disk(path: &Path) -> Result<Vec<String>, AuthError> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let contents = fs_read_to_string(path)?;
+    if let Ok(state) = serde_json::from_str::<CachedAccountsState>(&contents) {
+        return Ok(state
+            .accounts
+            .into_iter()
+            .map(|account| account.minecraft_profile.id)
+            .filter(|profile_id| !profile_id.trim().is_empty())
+            .collect());
+    }
+
+    if let Ok(account) = serde_json::from_str::<CachedAccount>(&contents) {
+        if account.minecraft_profile.id.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        return Ok(vec![account.minecraft_profile.id]);
+    }
+
+    Ok(Vec::new())
 }

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use tracing::{debug, warn};
 use url::Url;
+use zeroize::Zeroizing;
 
 use crate::constants::{
     BUILTIN_MICROSOFT_TENANT, DEVICE_CODE_SCOPE, LIVE_AUTHORIZE_URL, LIVE_REDIRECT_URI, LIVE_SCOPE,
@@ -47,10 +48,9 @@ pub(crate) fn login_begin(client_id: String) -> Result<MinecraftLoginFlow, AuthE
         target: "vertexlauncher/auth/oauth",
         "building Microsoft OAuth authorization URL"
     );
-    let verifier = generate_pkce_verifier();
+    let verifier = Zeroizing::new(generate_pkce_verifier());
     let challenge = pkce_challenge(&verifier);
     let state = generate_random_token(24);
-    let session_id = generate_random_token(16);
 
     let mut auth_url = Url::parse(LIVE_AUTHORIZE_URL)
         .map_err(|err| AuthError::OAuth(format!("Failed to build authorize URL: {err}")))?;
@@ -68,9 +68,7 @@ pub(crate) fn login_begin(client_id: String) -> Result<MinecraftLoginFlow, AuthE
     }
 
     Ok(MinecraftLoginFlow {
-        verifier,
-        challenge,
-        session_id,
+        verifier: verifier.to_string(),
         auth_request_uri: auth_url.to_string(),
         state,
         client_id,

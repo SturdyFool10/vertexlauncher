@@ -9,6 +9,7 @@ pub mod console;
 pub mod desktop;
 pub mod install_activity;
 pub mod notification;
+pub mod privacy;
 pub mod screens;
 pub mod ui;
 pub mod window_effects;

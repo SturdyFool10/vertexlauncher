@@ -44,6 +44,7 @@ pub fn render(
     active_username: Option<&str>,
     active_launch_auth: Option<&LaunchAuthContext>,
     active_account_owns_minecraft: bool,
+    streamer_mode: bool,
     instances: &mut InstanceStore,
     installations_root: &Path,
     config: &mut Config,
@@ -119,6 +120,7 @@ pub fn render(
                     };
                     let running_avatar = running_account_key
                         .as_deref()
+                        .filter(|_| !streamer_mode)
                         .and_then(|key| account_avatars_by_key.get(key))
                         .map(Vec::as_slice);
                     let instance_root_key = std::fs::canonicalize(instance_root.as_path())

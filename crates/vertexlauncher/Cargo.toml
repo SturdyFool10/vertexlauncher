@@ -19,6 +19,7 @@ launcher_ui.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 humantime.workspace = true
+url.workspace = true
 rfd = "0.15.4"
 image.workspace = true
 

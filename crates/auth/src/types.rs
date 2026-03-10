@@ -1,5 +1,7 @@
 use std::sync::mpsc::{self, Receiver};
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::{Deserialize, Serialize};
 
 use crate::util::decode_base64;
@@ -8,11 +10,15 @@ use crate::util::decode_base64;
 #[derive(Debug, Clone)]
 pub struct MinecraftLoginFlow {
     pub verifier: String,
-    pub challenge: String,
-    pub session_id: String,
     pub auth_request_uri: String,
     pub(crate) state: String,
     pub(crate) client_id: String,
+}
+
+impl MinecraftLoginFlow {
+    pub fn expected_state(&self) -> &str {
+        &self.state
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +91,8 @@ pub struct CachedAccount {
     /// Base64-encoded PNG bytes for the generated profile avatar.
     #[serde(default)]
     pub avatar_png_base64: Option<String>,
+    #[serde(default)]
+    pub avatar_source_skin_url: Option<String>,
     pub cached_at_unix_secs: u64,
 }
 
@@ -94,6 +102,10 @@ impl CachedAccount {
         self.avatar_png_base64
             .as_deref()
             .and_then(|raw| decode_base64(raw).ok())
+    }
+
+    pub fn set_avatar_png_bytes(&mut self, bytes: Option<&[u8]>) {
+        self.avatar_png_base64 = bytes.map(|raw| BASE64_STANDARD.encode(raw));
     }
 }
 

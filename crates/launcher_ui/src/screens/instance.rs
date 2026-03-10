@@ -31,7 +31,7 @@ use crate::ui::{
     components::{icon_button, remote_tiled_image, settings_widgets, text_helpers},
     modal, style,
 };
-use crate::{assets, console, install_activity, notification};
+use crate::{assets, console, install_activity, notification, privacy};
 
 const RESERVED_SYSTEM_MEMORY_MIB: u128 = 4 * 1024;
 const FALLBACK_TOTAL_MEMORY_MIB: u128 = 20 * 1024;
@@ -233,6 +233,7 @@ pub fn render(
     active_username: Option<&str>,
     active_launch_auth: Option<&LaunchAuthContext>,
     active_account_owns_minecraft: bool,
+    streamer_mode: bool,
     instances: &mut InstanceStore,
     config: &mut Config,
     account_avatars_by_key: &HashMap<String, Vec<u8>>,
@@ -335,6 +336,7 @@ pub fn render(
         active_username,
         active_launch_auth,
         active_account_owns_minecraft,
+        streamer_mode,
         account_avatars_by_key,
     );
     render_install_feedback(
@@ -1168,13 +1170,25 @@ fn render_instance_settings_modal(
                         "Instance Settings",
                         &section_style,
                     );
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_settings_modal_description", instance_id),
+                        "Manage this profile's metadata, version stack, runtime overrides, and maintenance actions.",
+                        &muted_style,
+                    );
                     ui.add_space(8.0);
 
                     let _ = text_ui.label(
                         ui,
                         ("instance_versions_heading", instance_id),
-                        "Instance Metadata & Versions",
+                        "Metadata & Versions",
                         &section_style,
+                    );
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_versions_description", instance_id),
+                        "Display info, Minecraft version, and modloader selection for this instance.",
+                        &muted_style,
                     );
                     ui.add_space(8.0);
 
@@ -1616,42 +1630,15 @@ fn render_instance_settings_modal(
                     let _ = text_ui.label(
                         ui,
                         ("instance_settings_heading", instance_id),
-                        "Instance Settings",
+                        "Runtime Overrides",
                         &section_style,
                     );
-                    ui.add_space(8.0);
-
-                    if text_ui
-                        .button(
-                            ui,
-                            ("instance_open_folder", instance_id),
-                            "Open Instance Folder",
-                            &refresh_style,
-                        )
-                        .clicked()
-                    {
-                        if let Some(instance) = instances.find(instance_id) {
-                            let installations_root =
-                                PathBuf::from(config.minecraft_installations_root());
-                            let instance_root =
-                                instances::instance_root_path(&installations_root, instance);
-                            match desktop::open_in_file_manager(instance_root.as_path()) {
-                                Ok(()) => {
-                                    state.status_message = Some(format!(
-                                        "Opened instance folder: {}",
-                                        instance_root.display()
-                                    ));
-                                }
-                                Err(err) => {
-                                    state.status_message =
-                                        Some(format!("Failed to open instance folder: {err}"));
-                                }
-                            }
-                        } else {
-                            state.status_message =
-                                Some("Instance was removed before opening its folder.".to_owned());
-                        }
-                    }
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_runtime_overrides_description", instance_id),
+                        "Per-instance overrides for memory, JVM arguments, and Java runtime selection.",
+                        &muted_style,
+                    );
                     ui.add_space(8.0);
 
                     let _ = settings_widgets::toggle_row(
@@ -1804,6 +1791,56 @@ fn render_instance_settings_modal(
                     }
 
                     ui.add_space(12.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_actions_heading", instance_id),
+                        "Maintenance & Actions",
+                        &section_style,
+                    );
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_actions_description", instance_id),
+                        "Open the instance folder and commit any metadata or runtime changes.",
+                        &muted_style,
+                    );
+                    ui.add_space(8.0);
+
+                    if text_ui
+                        .button(
+                            ui,
+                            ("instance_open_folder", instance_id),
+                            "Open Instance Folder",
+                            &refresh_style,
+                        )
+                        .clicked()
+                    {
+                        if let Some(instance) = instances.find(instance_id) {
+                            let installations_root =
+                                PathBuf::from(config.minecraft_installations_root());
+                            let instance_root =
+                                instances::instance_root_path(&installations_root, instance);
+                            match desktop::open_in_file_manager(instance_root.as_path()) {
+                                Ok(()) => {
+                                    state.status_message = Some(format!(
+                                        "Opened instance folder: {}",
+                                        instance_root.display()
+                                    ));
+                                }
+                                Err(err) => {
+                                    state.status_message =
+                                        Some(format!("Failed to open instance folder: {err}"));
+                                }
+                            }
+                        } else {
+                            state.status_message =
+                                Some("Instance was removed before opening its folder.".to_owned());
+                        }
+                    }
+                    ui.add_space(8.0);
+
                     ui.horizontal(|ui| {
                         if text_ui
                             .button(
@@ -2000,6 +2037,7 @@ fn render_runtime_row(
     active_username: Option<&str>,
     active_launch_auth: Option<&LaunchAuthContext>,
     active_account_owns_minecraft: bool,
+    streamer_mode: bool,
     account_avatars_by_key: &HashMap<String, Vec<u8>>,
 ) {
     let button_style = ButtonOptions {
@@ -2064,6 +2102,7 @@ fn render_runtime_row(
     };
     let running_avatar_png = running_account_key
         .as_deref()
+        .filter(|_| !streamer_mode)
         .and_then(|key| account_avatars_by_key.get(key))
         .map(Vec::as_slice);
     let runtime_running = runtime_running_for_active_account;
@@ -2188,7 +2227,10 @@ fn render_runtime_row(
     });
 
     if launch_disabled_for_account {
-        let blocked_account = launch_display_name.as_deref().unwrap_or("this account");
+        let blocked_account = launch_display_name
+            .as_deref()
+            .map(|value| privacy::redact_account_label(streamer_mode, value))
+            .unwrap_or_else(|| "this account".into());
         let _ = text_ui.label(
             ui,
             ("instance_runtime_account_locked", id),

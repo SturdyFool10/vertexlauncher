@@ -233,6 +233,7 @@ impl JavaRuntimeVersion {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToggleSettingId {
     LowPowerGpuPreferred,
+    StreamerModeEnabled,
     WindowBlurEnabled,
     OpenTypeFeaturesEnabled,
     SnapshotsAndBetasEnabled,
@@ -256,6 +257,13 @@ impl ToggleSettingId {
                 label: "Prefer Integrated Graphics",
                 info_tooltip: Some(
                     "Uses integrated graphics when both integrated and discrete GPUs are available. Requires restart.",
+                ),
+            },
+            ToggleSettingId::StreamerModeEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::StreamerModeEnabled,
+                label: "Enable Streamer Mode",
+                info_tooltip: Some(
+                    "Hides account names, avatars, and account-identifying details across the launcher UI.",
                 ),
             },
             ToggleSettingId::WindowBlurEnabled => ToggleSettingSpec {
@@ -431,6 +439,7 @@ impl TextSettingId {
 #[serde(default)]
 pub struct Config {
     low_power_gpu_preferred: bool,
+    streamer_mode_enabled: bool,
     window_blur_enabled: bool,
     theme_id: String,
     open_type_features_enabled: bool,
@@ -460,6 +469,10 @@ impl Config {
     /// Returns whether integrated GPU preference is enabled.
     pub fn low_power_gpu_preferred(&self) -> bool {
         self.low_power_gpu_preferred
+    }
+
+    pub fn streamer_mode_enabled(&self) -> bool {
+        self.streamer_mode_enabled
     }
 
     /// Returns currently selected UI font family.
@@ -673,6 +686,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred,
+            streamer_mode_enabled,
             window_blur_enabled,
             theme_id: _,
             open_type_features_enabled,
@@ -700,6 +714,10 @@ impl Config {
         visit(
             ToggleSettingId::LowPowerGpuPreferred.spec(),
             low_power_gpu_preferred,
+        );
+        visit(
+            ToggleSettingId::StreamerModeEnabled.spec(),
+            streamer_mode_enabled,
         );
         visit(
             ToggleSettingId::WindowBlurEnabled.spec(),
@@ -731,6 +749,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            streamer_mode_enabled: _,
             window_blur_enabled: _,
             theme_id: _,
             open_type_features_enabled: _,
@@ -763,6 +782,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            streamer_mode_enabled: _,
             window_blur_enabled: _,
             theme_id: _,
             open_type_features_enabled: _,
@@ -795,6 +815,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            streamer_mode_enabled: _,
             window_blur_enabled: _,
             theme_id: _,
             open_type_features_enabled: _,
@@ -828,6 +849,7 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            streamer_mode_enabled: _,
             window_blur_enabled: _,
             theme_id: _,
             open_type_features_enabled: _,
@@ -880,6 +902,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             low_power_gpu_preferred: true,
+            streamer_mode_enabled: false,
             window_blur_enabled: true,
             theme_id: "matrix_oled".to_owned(),
             open_type_features_enabled: true,

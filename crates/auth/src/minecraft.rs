@@ -16,7 +16,7 @@ use crate::types::{
     CachedAccount, MinecraftCapeState, MinecraftProfileState, MinecraftSkinState,
     MinecraftSkinVariant,
 };
-use crate::util::{decode_base64, encode_base64, unix_now_secs};
+use crate::util::{encode_base64, unix_now_secs};
 
 pub(crate) fn complete_minecraft_login(
     agent: &ureq::Agent,
@@ -49,7 +49,6 @@ pub(crate) fn complete_minecraft_login(
         .map_err(|err| prefix_auth_error("MinecraftProfile", err))?;
 
     Ok(build_cached_account(
-        agent,
         profile,
         minecraft_token.as_str(),
         microsoft_refresh_token,
@@ -370,14 +369,12 @@ fn parse_mutation_profile_response(
 }
 
 fn build_cached_account(
-    agent: &ureq::Agent,
     profile: MinecraftProfileResponse,
     minecraft_access_token: &str,
     microsoft_refresh_token: Option<&str>,
 ) -> CachedAccount {
-    let minecraft_profile = build_profile_state_from_response(agent, profile);
-
-    let avatar_png_base64 = generate_avatar_from_profile(&minecraft_profile);
+    let avatar_source_skin_url = active_skin_url_from_profile(&profile);
+    let minecraft_profile = build_profile_state_without_textures(profile);
 
     CachedAccount {
         minecraft_profile,
@@ -385,9 +382,44 @@ fn build_cached_account(
         microsoft_refresh_token: microsoft_refresh_token.map(str::to_owned),
         xuid: None,
         user_type: Some("msa".to_owned()),
-        avatar_png_base64,
+        avatar_png_base64: None,
+        avatar_source_skin_url,
         cached_at_unix_secs: unix_now_secs(),
     }
+}
+
+fn build_profile_state_without_textures(
+    profile: MinecraftProfileResponse,
+) -> MinecraftProfileState {
+    let mut out = MinecraftProfileState {
+        id: profile.id,
+        name: profile.name,
+        skins: Vec::new(),
+        capes: Vec::new(),
+    };
+
+    for raw_skin in profile.skins {
+        out.skins.push(MinecraftSkinState {
+            id: raw_skin.id,
+            state: raw_skin.state,
+            url: raw_skin.url,
+            variant: raw_skin.variant,
+            alias: raw_skin.alias,
+            texture_png_base64: None,
+        });
+    }
+
+    for raw_cape in profile.capes {
+        out.capes.push(MinecraftCapeState {
+            id: raw_cape.id,
+            state: raw_cape.state,
+            url: raw_cape.url,
+            alias: raw_cape.alias,
+            texture_png_base64: None,
+        });
+    }
+
+    out
 }
 
 fn build_profile_state_from_response(
@@ -443,17 +475,45 @@ fn fetch_texture_base64(agent: &ureq::Agent, url: &str) -> Option<String> {
     Some(encode_base64(&bytes))
 }
 
-fn generate_avatar_from_profile(profile: &MinecraftProfileState) -> Option<String> {
-    let active_skin = profile
+pub(crate) fn resolve_cached_account_avatar(
+    account: &CachedAccount,
+) -> Result<Option<Vec<u8>>, AuthError> {
+    if let Some(bytes) = account.avatar_png_bytes() {
+        return Ok(Some(bytes));
+    }
+
+    let Some(url) = account
+        .avatar_source_skin_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let agent = crate::util::build_http_agent();
+    let response = agent
+        .get(url)
+        .set("Accept", "image/png,image/*")
+        .call()
+        .map_err(map_http_error)?;
+    let mut bytes = Vec::new();
+    let mut reader = response.into_reader();
+    reader.read_to_end(&mut bytes)?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(generate_avatar_png_from_skin(&bytes)?))
+}
+
+fn active_skin_url_from_profile(profile: &MinecraftProfileResponse) -> Option<String> {
+    profile
         .skins
         .iter()
         .find(|skin| skin.state.eq_ignore_ascii_case("active"))
-        .or_else(|| profile.skins.first())?;
-
-    let skin_base64 = active_skin.texture_png_base64.as_deref()?;
-    let skin_bytes = decode_base64(skin_base64).ok()?;
-    let avatar_png = generate_avatar_png_from_skin(&skin_bytes).ok()?;
-    Some(encode_base64(&avatar_png))
+        .or_else(|| profile.skins.first())
+        .map(|skin| skin.url.clone())
 }
 
 fn generate_avatar_png_from_skin(skin_png_bytes: &[u8]) -> Result<Vec<u8>, AuthError> {

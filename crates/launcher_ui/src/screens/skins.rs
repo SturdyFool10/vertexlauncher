@@ -14,7 +14,7 @@ use image::RgbaImage;
 use textui::{ButtonOptions, TextUi};
 
 use super::LaunchAuthContext;
-use crate::{notification, ui::style};
+use crate::{notification, privacy, ui::style};
 
 const PREVIEW_ORBIT_SECONDS: f64 = 45.0;
 const PREVIEW_TARGET_FPS: f32 = 60.0;
@@ -36,6 +36,7 @@ pub fn render(
     active_launch_auth: Option<&LaunchAuthContext>,
     skin_manager_opened: bool,
     skin_manager_account_switched: bool,
+    streamer_mode: bool,
     wgpu_target_format: Option<wgpu::TextureFormat>,
     skin_preview_msaa_samples: u32,
     preview_aa_mode: SkinPreviewAaMode,
@@ -81,13 +82,18 @@ pub fn render(
         .id_salt("skins_screen_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            render_contents(ui, text_ui, &mut state);
+            render_contents(ui, text_ui, &mut state, streamer_mode);
         });
 
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
 }
 
-fn render_contents(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerState) {
+fn render_contents(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    state: &mut SkinManagerState,
+    streamer_mode: bool,
+) {
     let body = style::body(ui);
     let muted = style::muted(ui);
 
@@ -95,7 +101,10 @@ fn render_contents(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerSta
         let _ = text_ui.label(
             ui,
             "skins_active_user",
-            &format!("Active account: {name}"),
+            &format!(
+                "Active account: {}",
+                privacy::redact_account_label(streamer_mode, name)
+            ),
             &body,
         );
     } else {

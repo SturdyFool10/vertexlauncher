@@ -239,6 +239,8 @@ impl eframe::App for VertexApp {
         let previous_instance_store = self.instance_store.clone();
         self.sync_theme_from_config();
         self.theme.apply(ctx, self.config.window_blur_enabled());
+        self.auth
+            .set_streamer_mode(self.config.streamer_mode_enabled());
         self.fonts
             .ensure_selected_font_is_available(&mut self.config);
         self.fonts
@@ -261,6 +263,12 @@ impl eframe::App for VertexApp {
                     .map(|avatar| (entry.profile_id.to_ascii_lowercase(), avatar))
             })
             .collect::<HashMap<_, _>>();
+        let streamer_mode = self.config.streamer_mode_enabled();
+        let account_avatars_by_key = if streamer_mode {
+            HashMap::new()
+        } else {
+            account_avatars_by_key
+        };
         let active_launch_auth =
             self.auth
                 .active_launch_context()
@@ -292,8 +300,15 @@ impl eframe::App for VertexApp {
             &mut self.text_ui,
             ui::top_bar::ProfileUiModel {
                 display_name: self.auth.display_name(),
-                avatar_png: self.auth.avatar_png(),
+                avatar_png: if streamer_mode {
+                    None
+                } else {
+                    self.auth.avatar_png()
+                },
                 sign_in_in_progress: self.auth.sign_in_in_progress(),
+                auth_busy: self.auth.auth_busy(),
+                token_refresh_in_progress: self.auth.token_refresh_in_progress(),
+                streamer_mode,
                 status_message: self.auth.status_message(),
                 accounts: &profile_accounts,
                 user_instance_active,
@@ -388,6 +403,7 @@ impl eframe::App for VertexApp {
                     self.auth.display_name(),
                     active_launch_auth.as_ref(),
                     self.auth.active_account_owns_minecraft(),
+                    streamer_mode,
                     &mut self.config,
                     &mut self.instance_store,
                     &account_avatars_by_key,
