@@ -16,16 +16,11 @@ use launcher_runtime as tokio_runtime;
 use launcher_ui::{console, install_activity, notification, screens, ui, window_effects};
 use std::{
     collections::HashMap,
-    fs::File,
-    io::{self, Write as _},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use textui::TextUi;
-use tracing::Subscriber;
-use tracing_subscriber::layer::{Context as LayerContext, Layer};
-use tracing_subscriber::prelude::*;
 
 use self::auth_state::{AuthState, REPAINT_INTERVAL};
 use self::config_format_modal::ModalAction;
@@ -38,6 +33,7 @@ mod create_instance_modal;
 mod fonts;
 mod native_options;
 mod taskbar_progress;
+mod tracing_setup;
 mod webview_sign_in;
 
 struct VertexApp {
@@ -716,7 +712,7 @@ fn recommended_java_runtime_for_game(game_version: &str) -> Option<JavaRuntimeVe
 }
 
 pub fn run() -> eframe::Result<()> {
-    let log_path = init_tracing();
+    let log_path = tracing_setup::init_tracing();
     if let Some(log_path) = log_path.as_deref() {
         tracing::info!(
             target: "vertexlauncher/app/startup",
@@ -749,171 +745,4 @@ pub fn run() -> eframe::Result<()> {
 
 pub fn maybe_run_webview_helper() -> Result<bool, String> {
     webview_sign_in::maybe_run_helper_from_args()
-}
-
-#[derive(Clone)]
-struct AppLogLayer {
-    writer: Arc<Mutex<Box<dyn io::Write + Send>>>,
-}
-
-impl<S> Layer<S> for AppLogLayer
-where
-    S: Subscriber,
-{
-    fn on_event(&self, event: &tracing::Event<'_>, _ctx: LayerContext<'_, S>) {
-        let meta = event.metadata();
-        let mut visitor = MessageVisitor::default();
-        event.record(&mut visitor);
-
-        let (date, time) = current_date_time_parts();
-        let level = meta.level().as_str();
-        let module_path = format_module_path(meta.target(), meta.file());
-        let message = if visitor.message.is_empty() {
-            visitor.fields
-        } else {
-            visitor.message
-        };
-        let line = if should_omit_module_path(meta.target(), &module_path) {
-            format!("[{date}][{time}][{level}]: {message}")
-        } else {
-            format!("[{date}][{time}][{level}][{module_path}]: {message}")
-        };
-
-        console::push_line(line.clone());
-        if let Ok(mut writer) = self.writer.lock() {
-            let _ = writeln!(writer, "{line}");
-        }
-    }
-}
-
-#[derive(Default)]
-struct MessageVisitor {
-    message: String,
-    fields: String,
-}
-
-impl tracing::field::Visit for MessageVisitor {
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        let rendered = format!("{value:?}");
-        if field.name() == "message" {
-            self.message = rendered.trim_matches('"').to_owned();
-            return;
-        }
-        if !self.fields.is_empty() {
-            self.fields.push(' ');
-        }
-        self.fields.push_str(field.name());
-        self.fields.push('=');
-        self.fields.push_str(rendered.trim_matches('"'));
-    }
-}
-
-fn init_tracing() -> Option<PathBuf> {
-    let started_epoch = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let log_dir = PathBuf::from("logs");
-    tracing::debug!(
-        target: "vertexlauncher/io",
-        op = "create_dir_all",
-        path = %log_dir.display(),
-        context = "initialize logging directory"
-    );
-    let _ = std::fs::create_dir_all(&log_dir);
-    let log_path = log_dir.join(format!("vertex_{started_epoch}.log"));
-    let (writer, active_log_path) = open_log_writer(log_path, &log_dir);
-
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-
-    let stderr_layer = tracing_subscriber::fmt::layer()
-        .with_ansi(false)
-        .without_time()
-        .with_target(false)
-        .with_level(false)
-        .with_writer(std::io::stderr);
-    let app_layer = AppLogLayer { writer };
-
-    let _ = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(stderr_layer)
-        .with(app_layer)
-        .try_init();
-
-    active_log_path
-}
-
-fn open_log_writer(
-    primary_log_path: PathBuf,
-    log_dir: &Path,
-) -> (Arc<Mutex<Box<dyn io::Write + Send>>>, Option<PathBuf>) {
-    if let Some(writer) = try_open_log_file(&primary_log_path, "initialize main log file") {
-        return (
-            Arc::new(Mutex::new(Box::new(writer))),
-            Some(primary_log_path),
-        );
-    }
-
-    let fallback_log_path = log_dir.join("vertex_fallback.log");
-    if let Some(writer) = try_open_log_file(&fallback_log_path, "initialize fallback log file") {
-        return (
-            Arc::new(Mutex::new(Box::new(writer))),
-            Some(fallback_log_path),
-        );
-    }
-
-    let temp_log_path = std::env::temp_dir().join("vertex_fallback.log");
-    if let Some(writer) = try_open_log_file(&temp_log_path, "initialize temp fallback log file") {
-        return (Arc::new(Mutex::new(Box::new(writer))), Some(temp_log_path));
-    }
-
-    tracing::warn!(
-        target: "vertexlauncher/io",
-        "Unable to open any log file; falling back to stderr/console logging only."
-    );
-    (Arc::new(Mutex::new(Box::new(io::sink()))), None)
-}
-
-fn try_open_log_file(path: &Path, context: &str) -> Option<File> {
-    tracing::debug!(
-        target: "vertexlauncher/io",
-        op = "file_create",
-        path = %path.display(),
-        context
-    );
-    match File::create(path) {
-        Ok(file) => Some(file),
-        Err(error) => {
-            tracing::warn!(
-                target: "vertexlauncher/io",
-                path = %path.display(),
-                error = %error,
-                "{context}"
-            );
-            None
-        }
-    }
-}
-
-fn current_date_time_parts() -> (String, String) {
-    let ts = humantime::format_rfc3339_seconds(SystemTime::now()).to_string();
-    if let Some((date, time)) = ts.split_once('T') {
-        return (date.to_owned(), time.trim_end_matches('Z').to_owned());
-    }
-    ("unknown-date".to_owned(), "unknown-time".to_owned())
-}
-
-fn format_module_path(target: &str, file: Option<&str>) -> String {
-    if let Some(file) = file
-        && let Some((crate_name, rest)) = file.split_once("/src/")
-    {
-        let crate_name = crate_name.rsplit('/').next().unwrap_or(crate_name);
-        return format!("{crate_name}/{}", rest.replace('\\', "/"));
-    }
-    target.replace("::", "/")
-}
-
-fn should_omit_module_path(target: &str, module_path: &str) -> bool {
-    target == "log" || module_path == "log"
 }

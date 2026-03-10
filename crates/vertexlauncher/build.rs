@@ -10,7 +10,9 @@ fn main() {
 
 #[cfg(target_os = "windows")]
 fn compile_windows_resources() -> Result<(), String> {
-    use image::{ExtendedColorType, ImageReader, codecs::ico::IcoEncoder, imageops::FilterType};
+    use image::{
+        ExtendedColorType, ImageEncoder, ImageReader, codecs::ico::IcoEncoder, imageops::FilterType,
+    };
     use std::{fs::File, io::Cursor, path::PathBuf};
 
     let out_dir = std::env::var("OUT_DIR")
@@ -28,7 +30,7 @@ fn compile_windows_resources() -> Result<(), String> {
     let mut icon_file = File::create(&icon_path)
         .map_err(|error| format!("failed to create generated .ico icon: {error}"))?;
     IcoEncoder::new(&mut icon_file)
-        .encode(
+        .write_image(
             resized.as_raw(),
             resized.width(),
             resized.height(),
