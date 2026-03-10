@@ -28,6 +28,15 @@ pub(crate) fn load_accounts_state() -> Result<Option<String>, AuthError> {
     match entry.get_password() {
         Ok(value) => Ok(Some(value)),
         Err(KeyringError::NoEntry) => Ok(None),
+        Err(err) if is_corrupt_secure_storage_error(&err) => {
+            tracing::warn!(
+                target: "vertexlauncher/auth/secret_store",
+                error = %err,
+                "ignoring unreadable cached accounts state entry"
+            );
+            let _ = delete_accounts_state();
+            Ok(None)
+        }
         Err(err) => Err(AuthError::SecureStorage(format!(
             "Failed to load cached accounts state from secure storage: {err}",
         ))),

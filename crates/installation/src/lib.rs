@@ -1318,7 +1318,7 @@ fn build_classpath(
     chain: &[serde_json::Value],
 ) -> Result<String, InstallationError> {
     let mut classpath = Vec::<String>::new();
-    let mut seen = HashSet::<String>::new();
+    let mut library_indices = HashMap::<String, usize>::new();
 
     for profile in chain {
         let Some(libraries) = profile
@@ -1343,9 +1343,13 @@ fn build_classpath(
             };
             let full = instance_root.join("libraries").join(artifact_path.as_str());
             if full.exists() {
-                let key = full.display().to_string();
-                if seen.insert(key.clone()) {
-                    classpath.push(key);
+                let entry = full.display().to_string();
+                let dedupe_key = library_classpath_dedupe_key(lib, artifact_path.as_str());
+                if let Some(existing_index) = library_indices.get(dedupe_key.as_str()).copied() {
+                    classpath[existing_index] = entry;
+                } else {
+                    library_indices.insert(dedupe_key, classpath.len());
+                    classpath.push(entry);
                 }
             }
         }
@@ -1371,6 +1375,20 @@ fn build_classpath(
     };
     classpath.push(selected_jar.display().to_string());
     Ok(classpath.join(classpath_separator()))
+}
+
+fn library_classpath_dedupe_key(lib: &serde_json::Value, artifact_path: &str) -> String {
+    if let Some(name) = lib.get("name").and_then(serde_json::Value::as_str) {
+        let mut parts = name.split(':');
+        if let (Some(group), Some(artifact)) = (parts.next(), parts.next()) {
+            let group = group.trim();
+            let artifact = artifact.trim();
+            if !group.is_empty() && !artifact.is_empty() {
+                return format!("{group}:{artifact}");
+            }
+        }
+    }
+    artifact_path.to_owned()
 }
 
 fn prepare_natives_dir(
