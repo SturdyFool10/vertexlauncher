@@ -220,7 +220,7 @@ fn fetch_and_tile_remote_image(url: &str) -> Result<TiledImage, String> {
     let response = ureq::get(url)
         .call()
         .map_err(|err| format!("failed to fetch remote icon {url}: {err}"))?;
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut bytes = Vec::new();
     reader
         .read_to_end(&mut bytes)

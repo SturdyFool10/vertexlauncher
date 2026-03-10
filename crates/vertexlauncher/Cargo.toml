@@ -20,15 +20,15 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 humantime.workspace = true
 url.workspace = true
-rfd = "0.15.4"
+rfd = "*"
 image.workspace = true
-flate2 = "1.1.5"
+flate2 = "*"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wry = "*"
 tao = "*"
-raw-window-handle = "0.6.2"
-windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+raw-window-handle = "*"
+windows = { version = "*", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 wry = "*"
@@ -37,10 +37,10 @@ tao = "*"
 [target.'cfg(target_os = "macos")'.dependencies]
 wry = "*"
 tao = "*"
-objc = "0.2.7"
+objc = "*"
 
 [build-dependencies]
 image.workspace = true
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
-winresource = "0.1.20"
+winresource = "*"

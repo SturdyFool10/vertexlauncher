@@ -3,7 +3,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use tracing::{debug, warn};
+use tracing::debug;
 use url::Url;
 use zeroize::Zeroizing;
 
@@ -11,9 +11,9 @@ use crate::constants::{
     BUILTIN_MICROSOFT_TENANT, DEVICE_CODE_SCOPE, LIVE_AUTHORIZE_URL, LIVE_REDIRECT_URI, LIVE_SCOPE,
     LIVE_TOKEN_URL, OAUTH_BASE_URL,
 };
-use crate::error::{AuthError, map_http_error, oauth_error_with_guidance};
+use crate::error::{AuthError, map_http_error};
 use crate::types::{LoginEvent, MinecraftLoginFlow};
-use crate::util::{generate_pkce_verifier, generate_random_token, pkce_challenge};
+use crate::util::{UreqResponseExt, generate_pkce_verifier, generate_random_token, pkce_challenge};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DeviceCodeResponse {
@@ -34,13 +34,6 @@ pub(crate) struct MicrosoftTokenResponse {
     pub(crate) access_token: String,
     #[serde(default)]
     pub(crate) refresh_token: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OAuthErrorResponse {
-    error: String,
-    #[serde(default)]
-    error_description: Option<String>,
 }
 
 pub(crate) fn login_begin(client_id: String) -> Result<MinecraftLoginFlow, AuthError> {
@@ -82,8 +75,8 @@ pub(crate) fn exchange_auth_code_for_microsoft_token(
 ) -> Result<MicrosoftTokenResponse, AuthError> {
     let response = agent
         .post(LIVE_TOKEN_URL)
-        .set("Accept", "application/json")
-        .send_form(&[
+        .header("Accept", "application/json")
+        .send_form([
             ("client_id", flow.client_id.as_str()),
             ("code", code),
             ("code_verifier", flow.verifier.as_str()),
@@ -94,21 +87,9 @@ pub(crate) fn exchange_auth_code_for_microsoft_token(
 
     match response {
         Ok(ok) => Ok(ok.into_json::<MicrosoftTokenResponse>()?),
-        Err(ureq::Error::Status(_, err_response)) => {
-            if let Ok(oauth_error) = err_response.into_json::<OAuthErrorResponse>() {
-                let description = oauth_error
-                    .error_description
-                    .unwrap_or_else(|| "No details provided".to_owned());
-                return Err(AuthError::OAuth(format!(
-                    "{}: {}",
-                    oauth_error.error, description
-                )));
-            }
-
-            Err(AuthError::OAuth(
-                "Authorization-code exchange failed with an unknown response".to_owned(),
-            ))
-        }
+        Err(ureq::Error::StatusCode(code)) => Err(AuthError::OAuth(format!(
+            "Authorization-code exchange failed with HTTP status {code}"
+        ))),
         Err(err) => Err(map_http_error(err)),
     }
 }
@@ -120,8 +101,8 @@ pub(crate) fn refresh_microsoft_token(
 ) -> Result<MicrosoftTokenResponse, AuthError> {
     let response = agent
         .post(LIVE_TOKEN_URL)
-        .set("Accept", "application/json")
-        .send_form(&[
+        .header("Accept", "application/json")
+        .send_form([
             ("client_id", client_id),
             ("refresh_token", refresh_token),
             ("grant_type", "refresh_token"),
@@ -131,21 +112,9 @@ pub(crate) fn refresh_microsoft_token(
 
     match response {
         Ok(ok) => Ok(ok.into_json::<MicrosoftTokenResponse>()?),
-        Err(ureq::Error::Status(_, err_response)) => {
-            if let Ok(oauth_error) = err_response.into_json::<OAuthErrorResponse>() {
-                let description = oauth_error
-                    .error_description
-                    .unwrap_or_else(|| "No details provided".to_owned());
-                return Err(AuthError::OAuth(format!(
-                    "{}: {}",
-                    oauth_error.error, description
-                )));
-            }
-
-            Err(AuthError::OAuth(
-                "Refresh-token exchange failed with an unknown response".to_owned(),
-            ))
-        }
+        Err(ureq::Error::StatusCode(code)) => Err(AuthError::OAuth(format!(
+            "Refresh-token exchange failed with HTTP status {code}"
+        ))),
         Err(err) => Err(map_http_error(err)),
     }
 }
@@ -248,43 +217,14 @@ pub(crate) fn request_device_code(
     let url = device_code_url(tenant);
     let response = agent
         .post(&url)
-        .set("Accept", "application/json")
-        .send_form(&[("client_id", client_id), ("scope", DEVICE_CODE_SCOPE)]);
+        .header("Accept", "application/json")
+        .send_form([("client_id", client_id), ("scope", DEVICE_CODE_SCOPE)]);
 
     match response {
         Ok(ok) => Ok(ok.into_json::<DeviceCodeResponse>()?),
-        Err(ureq::Error::Status(_, err_response)) => {
-            if let Ok(oauth_error) = err_response.into_json::<OAuthErrorResponse>() {
-                warn!(
-                    target: "vertexlauncher/auth/oauth",
-                    client_id,
-                    tenant,
-                    error = oauth_error.error.as_str(),
-                    "device-code request returned OAuth error"
-                );
-                if oauth_error.error == "unauthorized_client" {
-                    return Err(AuthError::OAuth(format!(
-                        "unauthorized_client for client id '{client_id}' on tenant '{tenant}'. \
-Set VERTEX_MSA_CLIENT_ID to your app id and ensure the app supports personal Microsoft accounts \
-plus public client flows. If your app is multi-tenant/AAD, try VERTEX_MSA_TENANT=common or \
-set auth::BUILTIN_MICROSOFT_TENANT in crates/auth/src/lib.rs.",
-                    )));
-                }
-
-                let description = oauth_error
-                    .error_description
-                    .unwrap_or_else(|| "No details provided".to_owned());
-                return Err(oauth_error_with_guidance(
-                    &oauth_error.error,
-                    &description,
-                    tenant,
-                ));
-            }
-
-            Err(AuthError::Http(
-                "HTTP status error while requesting device code".to_owned(),
-            ))
-        }
+        Err(ureq::Error::StatusCode(code)) => Err(AuthError::Http(format!(
+            "HTTP status {code} while requesting device code"
+        ))),
         Err(err) => Err(map_http_error(err)),
     }
 }
@@ -305,7 +245,7 @@ pub(crate) fn poll_for_microsoft_token(
     );
     let expires_after = Duration::from_secs(device_code.expires_in);
     let started_at = Instant::now();
-    let mut poll_interval_secs = device_code.interval.max(1);
+    let poll_interval_secs = device_code.interval.max(1);
     let mut sent_waiting = false;
 
     loop {
@@ -315,8 +255,8 @@ pub(crate) fn poll_for_microsoft_token(
 
         let response = agent
             .post(&token_url(tenant))
-            .set("Accept", "application/json")
-            .send_form(&[
+            .header("Accept", "application/json")
+            .send_form([
                 ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
                 ("client_id", client_id),
                 ("device_code", device_code.device_code.as_str()),
@@ -327,48 +267,10 @@ pub(crate) fn poll_for_microsoft_token(
                 let parsed = ok.into_json::<MicrosoftTokenResponse>()?;
                 return Ok(parsed);
             }
-            Err(ureq::Error::Status(_, err_response)) => {
-                let oauth_error = err_response.into_json::<OAuthErrorResponse>().ok();
-                let Some(oauth_error) = oauth_error else {
-                    return Err(AuthError::OAuth(
-                        "Token polling failed with unknown response".to_owned(),
-                    ));
-                };
-
-                match oauth_error.error.as_str() {
-                    "authorization_pending" => {
-                        if !sent_waiting {
-                            let _ = sender.send(LoginEvent::WaitingForAuthorization);
-                            sent_waiting = true;
-                        }
-                    }
-                    "slow_down" => {
-                        poll_interval_secs = (poll_interval_secs + 5).min(30);
-                        debug!(
-                            target: "vertexlauncher/auth/oauth",
-                            poll_interval_secs,
-                            "device-code polling asked to slow down"
-                        );
-                        if !sent_waiting {
-                            let _ = sender.send(LoginEvent::WaitingForAuthorization);
-                            sent_waiting = true;
-                        }
-                    }
-                    "authorization_declined" => return Err(AuthError::AuthorizationDeclined),
-                    "expired_token" | "bad_verification_code" => {
-                        warn!(
-                            target: "vertexlauncher/auth/oauth",
-                            error = oauth_error.error.as_str(),
-                            "device-code polling expired or invalidated"
-                        );
-                        return Err(AuthError::DeviceCodeExpired);
-                    }
-                    other => {
-                        let description = oauth_error
-                            .error_description
-                            .unwrap_or_else(|| "No details provided".to_owned());
-                        return Err(oauth_error_with_guidance(other, &description, tenant));
-                    }
+            Err(ureq::Error::StatusCode(_)) => {
+                if !sent_waiting {
+                    let _ = sender.send(LoginEvent::WaitingForAuthorization);
+                    sent_waiting = true;
                 }
             }
             Err(other) => return Err(map_http_error(other)),

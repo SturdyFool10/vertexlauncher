@@ -8,7 +8,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-ureq = { version = "2.12.1", features = ["json"] }
-flate2 = "1.1.5"
-tar = "0.4.44"
-zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+ureq = { version = "*", features = ["json"] }
+flate2 = "*"
+tar = "*"
+zip = { version = "*", default-features = false, features = ["deflate"] }

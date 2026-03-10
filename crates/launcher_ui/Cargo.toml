@@ -17,24 +17,26 @@ curseforge.workspace = true
 textui.workspace = true
 launcher_runtime.workspace = true
 toml.workspace = true
-raw-window-handle = "0.6.2"
+raw-window-handle = "*"
 tracing.workspace = true
 auth.workspace = true
 image.workspace = true
-rfd = "0.15.4"
-bytemuck = { version = "1.24.0", features = ["derive"] }
-ureq = { version = "2.12.1", features = ["json"] }
-flate2 = "1.1.5"
-base64 = "0.22.1"
+rfd = "*"
+bytemuck = { version = "*", features = ["derive"] }
+ureq = { version = "*", features = ["json"] }
+flate2 = "*"
+base64 = "*"
+tar = "*"
+xz2 = "*"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation"] }
+windows-sys = { version = "*", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11-dl = "2.21.0"
-wayland-backend = { version = "0.3.11", features = ["client_system"] }
-wayland-client = "0.31.12"
-wayland-protocols-plasma = { version = "0.3.10", default-features = false, features = ["client"] }
+x11-dl = "*"
+wayland-backend = { version = "*", features = ["client_system"] }
+wayland-client = "*"
+wayland-protocols-plasma = { version = "*", default-features = false, features = ["client"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc = "0.2.7"
+objc = "*"

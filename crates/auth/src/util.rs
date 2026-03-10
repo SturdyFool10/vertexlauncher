@@ -1,17 +1,15 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::io::{self, Read};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
+use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 use crate::error::AuthError;
 
 pub(crate) fn build_http_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(10))
-        .timeout_read(Duration::from_secs(20))
-        .timeout_write(Duration::from_secs(20))
-        .build()
+    ureq::Agent::new_with_defaults()
 }
 
 pub(crate) fn generate_pkce_verifier() -> String {
@@ -48,4 +46,23 @@ pub(crate) fn unix_now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+pub(crate) trait UreqResponseExt {
+    fn into_json<T: DeserializeOwned>(self) -> Result<T, AuthError>;
+    fn into_string(self) -> Result<String, io::Error>;
+}
+
+impl UreqResponseExt for ureq::http::Response<ureq::Body> {
+    fn into_json<T: DeserializeOwned>(mut self) -> Result<T, AuthError> {
+        self.body_mut()
+            .read_json::<T>()
+            .map_err(|err| AuthError::Http(err.to_string()))
+    }
+
+    fn into_string(mut self) -> Result<String, io::Error> {
+        let mut raw = String::new();
+        self.body_mut().as_reader().read_to_string(&mut raw)?;
+        Ok(raw)
+    }
 }

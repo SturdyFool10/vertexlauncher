@@ -3655,7 +3655,7 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
     let response = ureq::get(url)
         .call()
         .map_err(|err| format!("download request failed for {url}: {err}"))?;
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut bytes = Vec::new();
     reader
         .read_to_end(&mut bytes)

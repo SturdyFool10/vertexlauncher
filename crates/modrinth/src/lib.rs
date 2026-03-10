@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use std::io::Read as _;
 use tracing::{debug, warn};
 
 const DEFAULT_MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
@@ -33,7 +34,7 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
-            agent: ureq::Agent::new(),
+            agent: ureq::Agent::new_with_defaults(),
             base_url: DEFAULT_MODRINTH_API_BASE_URL.to_owned(),
             user_agent: DEFAULT_USER_AGENT.to_owned(),
         }
@@ -318,45 +319,50 @@ impl Client {
         let mut request = self
             .agent
             .get(&format!("{}{}", self.base_url, path))
-            .set("User-Agent", &self.user_agent);
+            .header("User-Agent", &self.user_agent);
 
         for (key, value) in query {
             request = request.query(key, value);
         }
 
-        let response = match request.call() {
+        let mut response = match request.config().http_status_as_error(false).build().call() {
             Ok(ok) => ok,
-            Err(ureq::Error::Status(status, response)) => {
-                let body = response.into_string().unwrap_or_default();
+            Err(err) => {
                 warn!(
                     target: "vertexlauncher/modrinth",
                     path,
-                    status,
-                    body_len = body.len(),
-                    "Modrinth returned non-success status"
-                );
-                return Err(ModrinthError::HttpStatus { status, body });
-            }
-            Err(ureq::Error::Transport(transport)) => {
-                warn!(
-                    target: "vertexlauncher/modrinth",
-                    path,
-                    error = %transport,
+                    error = %err,
                     "Modrinth transport error"
                 );
-                return Err(ModrinthError::Transport(transport.to_string()));
+                return Err(ModrinthError::Transport(err.to_string()));
             }
         };
 
-        let raw = response.into_string().map_err(|err| {
+        let status = response.status().as_u16();
+        let mut raw = String::new();
+        response
+            .body_mut()
+            .as_reader()
+            .read_to_string(&mut raw)
+            .map_err(|err| {
+                warn!(
+                    target: "vertexlauncher/modrinth",
+                    path,
+                    error = %err,
+                    "failed to read Modrinth response body"
+                );
+                ModrinthError::Read(err)
+            })?;
+        if status >= 400 {
             warn!(
                 target: "vertexlauncher/modrinth",
                 path,
-                error = %err,
-                "failed to read Modrinth response body"
+                status,
+                body_len = raw.len(),
+                "Modrinth returned non-success status"
             );
-            ModrinthError::Read(err)
-        })?;
+            return Err(ModrinthError::HttpStatus { status, body: raw });
+        }
 
         serde_json::from_str(&raw).map_err(|err| {
             warn!(

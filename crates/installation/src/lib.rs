@@ -2433,32 +2433,37 @@ fn prefetch_batch_total_bytes(tasks: &mut [FileDownloadTask], probe_workers: usi
 
 fn probe_content_length(url: &str) -> Option<u64> {
     let response = match http_agent()
-        .request("HEAD", url)
-        .set("User-Agent", DEFAULT_USER_AGENT)
+        .head(url)
+        .header("User-Agent", DEFAULT_USER_AGENT)
+        .config()
+        .http_status_as_error(false)
+        .build()
         .call()
     {
         Ok(response) => response,
-        Err(ureq::Error::Status(status, _)) => {
-            tracing::debug!(
-                target: "vertexlauncher/installation/downloads",
-                "Size prefetch HEAD failed for {} with status {}",
-                url,
-                status
-            );
-            return None;
-        }
-        Err(ureq::Error::Transport(transport)) => {
+        Err(err) => {
             tracing::debug!(
                 target: "vertexlauncher/installation/downloads",
                 "Size prefetch HEAD transport error for {}: {}",
                 url,
-                transport
+                err
             );
             return None;
         }
     };
+    if response.status().as_u16() >= 400 {
+        tracing::debug!(
+            target: "vertexlauncher/installation/downloads",
+            "Size prefetch HEAD failed for {} with status {}",
+            url,
+            response.status().as_u16()
+        );
+        return None;
+    }
     response
-        .header("Content-Length")
+        .headers()
+        .get("Content-Length")
+        .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|size| *size > 0)
 }
@@ -2572,10 +2577,12 @@ fn download_to_file(
         task.destination.display()
     );
 
-    let response = call_get_with_retry(task.url.as_str(), DEFAULT_USER_AGENT)?;
+    let mut response = call_get_response_with_retry(task.url.as_str(), DEFAULT_USER_AGENT)?;
     if task.expected_size.is_none()
         && let Some(content_length) = response
-            .header("Content-Length")
+            .headers()
+            .get("Content-Length")
+            .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|size| *size > 0)
     {
@@ -2585,7 +2592,7 @@ fn download_to_file(
     }
 
     let temp_path = task.destination.with_extension("downloading");
-    let mut reader = response.into_reader();
+    let mut reader = response.body_mut().as_reader();
     let mut file = fs_file_create(&temp_path)?;
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -3234,10 +3241,10 @@ fn download_file_simple(url: &str, destination: &Path) -> Result<(), Installatio
         fs_create_dir_all(parent)?;
     }
     let response = ureq::get(url)
-        .set("User-Agent", OPENJDK_USER_AGENT)
+        .header("User-Agent", OPENJDK_USER_AGENT)
         .call()
         .map_err(map_ureq_error)?;
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let temp = destination.with_extension("downloading");
     let mut file = fs_file_create(&temp)?;
     let mut buffer = [0u8; 128 * 1024];
@@ -4004,35 +4011,40 @@ fn get_json_with_user_agent<T: DeserializeOwned>(
     url: &str,
     user_agent: &str,
 ) -> Result<T, InstallationError> {
-    let response = call_get_with_retry(url, user_agent)?;
-    let raw = response.into_string().map_err(InstallationError::Io)?;
+    let raw = call_get_with_retry(url, user_agent)?;
     Ok(serde_json::from_str(&raw)?)
 }
 
 fn http_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(10))
-            .timeout_read(Duration::from_secs(30))
-            .timeout_write(Duration::from_secs(30))
-            .build()
-    })
+    AGENT.get_or_init(ureq::Agent::new_with_defaults)
 }
 
 fn get_text(url: &str) -> Result<String, InstallationError> {
-    let response = call_get_with_retry(url, DEFAULT_USER_AGENT)?;
-
-    response.into_string().map_err(InstallationError::Io)
+    call_get_with_retry(url, DEFAULT_USER_AGENT)
 }
 
-fn call_get_with_retry(url: &str, user_agent: &str) -> Result<ureq::Response, InstallationError> {
+fn call_get_response_with_retry(
+    url: &str,
+    user_agent: &str,
+) -> Result<ureq::http::Response<ureq::Body>, InstallationError> {
     let mut last_err = None;
     for attempt in 1..=HTTP_RETRY_ATTEMPTS {
-        match http_agent().get(url).set("User-Agent", user_agent).call() {
-            Ok(response) => return Ok(response),
-            Err(ureq::Error::Status(status, response)) => {
-                let body = response.into_string().unwrap_or_default();
+        match http_agent()
+            .get(url)
+            .header("User-Agent", user_agent)
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .call()
+        {
+            Ok(mut response) => {
+                let status = response.status().as_u16();
+                if status < 400 {
+                    return Ok(response);
+                }
+                let mut body = String::new();
+                let _ = response.body_mut().as_reader().read_to_string(&mut body);
                 let err = InstallationError::HttpStatus {
                     url: url.to_owned(),
                     status,
@@ -4044,15 +4056,15 @@ fn call_get_with_retry(url: &str, user_agent: &str) -> Result<ureq::Response, In
                 }
                 last_err = Some(err);
             }
-            Err(ureq::Error::Transport(transport)) => {
-                let err = InstallationError::Transport {
+            Err(err) => {
+                let mapped = InstallationError::Transport {
                     url: url.to_owned(),
-                    message: transport.to_string(),
+                    message: err.to_string(),
                 };
                 if attempt >= HTTP_RETRY_ATTEMPTS {
-                    return Err(err);
+                    return Err(mapped);
                 }
-                last_err = Some(err);
+                last_err = Some(mapped);
             }
         }
 
@@ -4071,10 +4083,22 @@ fn call_get_with_retry(url: &str, user_agent: &str) -> Result<ureq::Response, In
         );
         thread::sleep(delay);
     }
+
     Err(last_err.unwrap_or_else(|| InstallationError::Transport {
         url: url.to_owned(),
         message: "request failed without detailed error".to_owned(),
     }))
+}
+
+fn call_get_with_retry(url: &str, user_agent: &str) -> Result<String, InstallationError> {
+    let mut response = call_get_response_with_retry(url, user_agent)?;
+    let mut raw = String::new();
+    response
+        .body_mut()
+        .as_reader()
+        .read_to_string(&mut raw)
+        .map_err(InstallationError::Io)?;
+    Ok(raw)
 }
 
 fn should_retry_http_status(status: u16) -> bool {
@@ -4092,14 +4116,14 @@ fn retry_delay_for_attempt(attempt: u32) -> Duration {
 
 fn map_ureq_error(error: ureq::Error) -> InstallationError {
     match error {
-        ureq::Error::Status(status, response) => {
-            let url = response.get_url().to_owned();
-            let body = response.into_string().unwrap_or_default();
-            InstallationError::HttpStatus { url, status, body }
-        }
-        ureq::Error::Transport(transport) => InstallationError::Transport {
+        ureq::Error::StatusCode(status) => InstallationError::HttpStatus {
+            url: "<unknown>".to_owned(),
+            status,
+            body: String::new(),
+        },
+        other => InstallationError::Transport {
             url: "<transport>".to_owned(),
-            message: transport.to_string(),
+            message: other.to_string(),
         },
     }
 }

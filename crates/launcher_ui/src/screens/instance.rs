@@ -12,16 +12,20 @@ use installation::{
     running_instance_for_account, stop_running_instance_for_account,
 };
 use instances::{
-    InstanceStore, record_instance_launch_usage, set_instance_settings, set_instance_versions,
+    InstanceRecord, InstanceStore, record_instance_launch_usage, set_instance_settings,
+    set_instance_versions,
 };
 use modprovider::{ContentSource, UnifiedContentEntry, search_minecraft_content};
 use modrinth::Client as ModrinthClient;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, hash_map::DefaultHasher},
+    fs,
     hash::{Hash, Hasher},
+    io::Cursor,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, mpsc},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use textui::{ButtonOptions, LabelOptions, TextUi, TooltipOptions};
 
@@ -40,6 +44,9 @@ const FALLBACK_TOTAL_MEMORY_MIB: u128 = 20 * 1024;
 const MODLOADER_OPTIONS: [&str; 6] = ["Vanilla", "Fabric", "Forge", "NeoForge", "Quilt", "Custom"];
 const CUSTOM_MODLOADER_INDEX: usize = MODLOADER_OPTIONS.len() - 1;
 const INSTALLED_CONTENT_SCROLLBAR_RESERVE: f32 = 18.0;
+const VTMPACK_EXTENSION: &str = "vtmpack";
+const VTMPACK_MANIFEST_VERSION: u32 = 1;
+const VERTEX_CONTENT_MANIFEST_FILE_NAME: &str = ".vertex-content-manifest.toml";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InstalledContentTab {
@@ -1840,6 +1847,56 @@ fn render_instance_settings_modal(
                         } else {
                             state.status_message =
                                 Some("Instance was removed before opening its folder.".to_owned());
+                        }
+                    }
+                    ui.add_space(6.0);
+                    if text_ui
+                        .button(
+                            ui,
+                            ("instance_export_vtmpack", instance_id),
+                            "Export .vtmpack",
+                            &refresh_style,
+                        )
+                        .clicked()
+                    {
+                        if let Some(instance) = instances.find(instance_id) {
+                            let installations_root =
+                                PathBuf::from(config.minecraft_installations_root());
+                            let instance_root =
+                                instances::instance_root_path(&installations_root, instance);
+                            let default_file_name =
+                                default_vtmpack_file_name(instance.name.as_str());
+                            let selected_output = rfd::FileDialog::new()
+                                .set_title("Export Modpack")
+                                .set_file_name(default_file_name.as_str())
+                                .add_filter("Vertex Modpack", &[VTMPACK_EXTENSION])
+                                .save_file();
+
+                            if let Some(selected_path) = selected_output {
+                                let output_path = enforce_vtmpack_extension(selected_path);
+                                match export_instance_as_vtmpack(
+                                    instance,
+                                    instance_root.as_path(),
+                                    output_path.as_path(),
+                                ) {
+                                    Ok(stats) => {
+                                        state.status_message = Some(format!(
+                                            "Exported {} ({} bundled mods, {} config files) to {}",
+                                            instance.name,
+                                            stats.bundled_mod_files,
+                                            stats.config_files,
+                                            output_path.display()
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        state.status_message =
+                                            Some(format!("Failed to export .vtmpack: {err}"));
+                                    }
+                                }
+                            }
+                        } else {
+                            state.status_message =
+                                Some("Instance was removed before export.".to_owned());
                         }
                     }
                     ui.add_space(8.0);
@@ -3700,6 +3757,323 @@ fn configured_java_path_options(config: &Config) -> Vec<(u8, String)> {
         ));
     }
     options
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VtmpackExportStats {
+    bundled_mod_files: usize,
+    config_files: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct VtmpackManifest {
+    format: String,
+    version: u32,
+    exported_at_ms: u64,
+    instance: VtmpackInstanceMetadata,
+    downloadable_content: Vec<VtmpackDownloadableEntry>,
+    bundled_mods: Vec<String>,
+    configs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct VtmpackInstanceMetadata {
+    id: String,
+    name: String,
+    game_version: String,
+    modloader: String,
+    modloader_version: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct VtmpackDownloadableEntry {
+    project_key: String,
+    name: String,
+    file_path: String,
+    modrinth_project_id: Option<String>,
+    curseforge_project_id: Option<u64>,
+    selected_source: Option<String>,
+    selected_version_id: Option<String>,
+    selected_version_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ManagedContentManifest {
+    #[serde(default)]
+    projects: HashMap<String, ManagedContentManifestProject>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ManagedContentManifestProject {
+    #[serde(default)]
+    project_key: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    file_path: String,
+    #[serde(default)]
+    modrinth_project_id: Option<String>,
+    #[serde(default)]
+    curseforge_project_id: Option<u64>,
+    #[serde(default)]
+    selected_source: Option<String>,
+    #[serde(default)]
+    selected_version_id: Option<String>,
+    #[serde(default)]
+    selected_version_name: Option<String>,
+}
+
+fn default_vtmpack_file_name(instance_name: &str) -> String {
+    let mut out = String::new();
+    for ch in instance_name.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if ch.is_whitespace() || ch == '.' {
+            out.push('-');
+        }
+    }
+    let base = out.trim_matches('-');
+    if base.is_empty() {
+        format!("instance.{VTMPACK_EXTENSION}")
+    } else {
+        format!("{base}.{VTMPACK_EXTENSION}")
+    }
+}
+
+fn enforce_vtmpack_extension(mut path: PathBuf) -> PathBuf {
+    let has_expected_extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case(VTMPACK_EXTENSION))
+        .unwrap_or(false);
+    if !has_expected_extension {
+        path.set_extension(VTMPACK_EXTENSION);
+    }
+    path
+}
+
+fn export_instance_as_vtmpack(
+    instance: &InstanceRecord,
+    instance_root: &Path,
+    output_path: &Path,
+) -> Result<VtmpackExportStats, String> {
+    let managed_manifest_path = instance_root.join(VERTEX_CONTENT_MANIFEST_FILE_NAME);
+    let managed_manifest_raw = fs::read_to_string(managed_manifest_path.as_path()).ok();
+    let managed_manifest = managed_manifest_raw
+        .as_deref()
+        .and_then(|raw| toml::from_str::<ManagedContentManifest>(raw).ok())
+        .unwrap_or_default();
+
+    let downloadable_entries = managed_manifest
+        .projects
+        .iter()
+        .map(|(project_key, project)| VtmpackDownloadableEntry {
+            project_key: if project.project_key.trim().is_empty() {
+                project_key.clone()
+            } else {
+                project.project_key.clone()
+            },
+            name: project.name.clone(),
+            file_path: normalize_pack_path(project.file_path.as_str()),
+            modrinth_project_id: project.modrinth_project_id.clone(),
+            curseforge_project_id: project.curseforge_project_id,
+            selected_source: project.selected_source.clone(),
+            selected_version_id: project.selected_version_id.clone(),
+            selected_version_name: project.selected_version_name.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let downloadable_paths = downloadable_entries
+        .iter()
+        .map(|entry| normalize_pack_path(entry.file_path.as_str()))
+        .collect::<HashSet<_>>();
+
+    let mods_dir = instance_root.join("mods");
+    let mut bundled_mod_files = Vec::<PathBuf>::new();
+    if mods_dir.exists() {
+        let entries = fs::read_dir(mods_dir.as_path()).map_err(|err| {
+            format!(
+                "failed to read mods directory {}: {err}",
+                mods_dir.display()
+            )
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(instance_root)
+                .unwrap_or(path.as_path())
+                .to_path_buf();
+            let normalized = normalize_pack_path(relative.display().to_string().as_str());
+            if !downloadable_paths.contains(normalized.as_str()) {
+                bundled_mod_files.push(path);
+            }
+        }
+    }
+
+    let configs_dir = instance_root.join("config");
+    let mut config_files = Vec::<PathBuf>::new();
+    if configs_dir.exists() {
+        collect_regular_files_recursive(configs_dir.as_path(), &mut config_files).map_err(
+            |err| {
+                format!(
+                    "failed to collect config files under {}: {err}",
+                    configs_dir.display()
+                )
+            },
+        )?;
+    }
+
+    let bundled_mod_paths = bundled_mod_files
+        .iter()
+        .map(|path| {
+            let relative_from_mods = path
+                .strip_prefix(mods_dir.as_path())
+                .unwrap_or(path.as_path());
+            normalize_pack_path(
+                Path::new("bundled_mods")
+                    .join(relative_from_mods)
+                    .display()
+                    .to_string()
+                    .as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let config_paths = config_files
+        .iter()
+        .map(|path| {
+            let relative_from_configs = path
+                .strip_prefix(configs_dir.as_path())
+                .unwrap_or(path.as_path());
+            normalize_pack_path(
+                Path::new("configs")
+                    .join(relative_from_configs)
+                    .display()
+                    .to_string()
+                    .as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let pack_manifest = VtmpackManifest {
+        format: "vtmpack".to_owned(),
+        version: VTMPACK_MANIFEST_VERSION,
+        exported_at_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0),
+        instance: VtmpackInstanceMetadata {
+            id: instance.id.clone(),
+            name: instance.name.clone(),
+            game_version: instance.game_version.clone(),
+            modloader: instance.modloader.clone(),
+            modloader_version: instance.modloader_version.clone(),
+        },
+        downloadable_content: downloadable_entries,
+        bundled_mods: bundled_mod_paths,
+        configs: config_paths,
+    };
+
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create export directory {}: {err}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let output_file = fs::File::create(output_path)
+        .map_err(|err| format!("failed to create {}: {err}", output_path.display()))?;
+    let encoder = xz2::write::XzEncoder::new(output_file, 9);
+    let mut archive = tar::Builder::new(encoder);
+
+    let manifest_bytes = toml::to_string_pretty(&pack_manifest)
+        .map_err(|err| format!("failed to serialize vtmpack manifest: {err}"))?
+        .into_bytes();
+    append_bytes_to_archive(&mut archive, "manifest.toml", manifest_bytes.as_slice())?;
+
+    if let Some(raw) = managed_manifest_raw {
+        append_bytes_to_archive(
+            &mut archive,
+            "metadata/vertex-content-manifest.toml",
+            raw.as_bytes(),
+        )?;
+    }
+
+    for file in bundled_mod_files {
+        let relative = file
+            .strip_prefix(mods_dir.as_path())
+            .unwrap_or(file.as_path());
+        let target = Path::new("bundled_mods").join(relative);
+        archive
+            .append_path_with_name(file.as_path(), target.as_path())
+            .map_err(|err| format!("failed to append bundled mod {}: {err}", file.display()))?;
+    }
+
+    for file in config_files {
+        let relative = file
+            .strip_prefix(configs_dir.as_path())
+            .unwrap_or(file.as_path());
+        let target = Path::new("configs").join(relative);
+        archive
+            .append_path_with_name(file.as_path(), target.as_path())
+            .map_err(|err| format!("failed to append config file {}: {err}", file.display()))?;
+    }
+
+    archive
+        .finish()
+        .map_err(|err| format!("failed to finalize archive: {err}"))?;
+    let encoder = archive
+        .into_inner()
+        .map_err(|err| format!("failed to flush archive stream: {err}"))?;
+    encoder
+        .finish()
+        .map_err(|err| format!("failed to finalize xz stream: {err}"))?;
+
+    Ok(VtmpackExportStats {
+        bundled_mod_files: pack_manifest.bundled_mods.len(),
+        config_files: pack_manifest.configs.len(),
+    })
+}
+
+fn collect_regular_files_recursive(root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let entries = fs::read_dir(root)?;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_regular_files_recursive(path.as_path(), out)?;
+        } else if path.is_file() {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn append_bytes_to_archive(
+    archive: &mut tar::Builder<xz2::write::XzEncoder<fs::File>>,
+    path: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let mut header = tar::Header::new_gnu();
+    header.set_size(bytes.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    archive
+        .append_data(&mut header, path, Cursor::new(bytes))
+        .map_err(|err| format!("failed to append {path} to archive: {err}"))
+}
+
+fn normalize_pack_path(path: &str) -> String {
+    path.trim()
+        .trim_start_matches("./")
+        .trim_start_matches(".\\")
+        .replace('\\', "/")
 }
 
 fn ensure_selected_modloader_is_supported(state: &mut InstanceScreenState, game_version: &str) {

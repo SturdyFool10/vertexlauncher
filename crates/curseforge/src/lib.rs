@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use std::io::Read as _;
 use std::sync::{Mutex, OnceLock};
 use tracing::{debug, warn};
 
@@ -133,7 +134,7 @@ impl Client {
         }
 
         Ok(Self {
-            agent: ureq::Agent::new(),
+            agent: ureq::Agent::new_with_defaults(),
             base_url: DEFAULT_CURSEFORGE_API_BASE_URL.to_owned(),
             user_agent: DEFAULT_USER_AGENT.to_owned(),
             api_key,
@@ -334,46 +335,51 @@ impl Client {
         let mut request = self
             .agent
             .get(&format!("{}{}", self.base_url, path))
-            .set("User-Agent", &self.user_agent)
-            .set("x-api-key", &self.api_key);
+            .header("User-Agent", &self.user_agent)
+            .header("x-api-key", &self.api_key);
 
         for (key, value) in query {
             request = request.query(key, value);
         }
 
-        let response = match request.call() {
+        let mut response = match request.config().http_status_as_error(false).build().call() {
             Ok(ok) => ok,
-            Err(ureq::Error::Status(status, response)) => {
-                let body = response.into_string().unwrap_or_default();
+            Err(err) => {
                 warn!(
                     target: "vertexlauncher/curseforge",
                     path,
-                    status,
-                    body_len = body.len(),
-                    "CurseForge returned non-success status"
-                );
-                return Err(CurseForgeError::HttpStatus { status, body });
-            }
-            Err(ureq::Error::Transport(transport)) => {
-                warn!(
-                    target: "vertexlauncher/curseforge",
-                    path,
-                    error = %transport,
+                    error = %err,
                     "CurseForge transport error"
                 );
-                return Err(CurseForgeError::Transport(transport.to_string()));
+                return Err(CurseForgeError::Transport(err.to_string()));
             }
         };
 
-        let raw = response.into_string().map_err(|err| {
+        let status = response.status().as_u16();
+        let mut raw = String::new();
+        response
+            .body_mut()
+            .as_reader()
+            .read_to_string(&mut raw)
+            .map_err(|err| {
+                warn!(
+                    target: "vertexlauncher/curseforge",
+                    path,
+                    error = %err,
+                    "failed to read CurseForge response body"
+                );
+                CurseForgeError::Read(err)
+            })?;
+        if status >= 400 {
             warn!(
                 target: "vertexlauncher/curseforge",
                 path,
-                error = %err,
-                "failed to read CurseForge response body"
+                status,
+                body_len = raw.len(),
+                "CurseForge returned non-success status"
             );
-            CurseForgeError::Read(err)
-        })?;
+            return Err(CurseForgeError::HttpStatus { status, body: raw });
+        }
 
         serde_json::from_str(&raw).map_err(|err| {
             warn!(

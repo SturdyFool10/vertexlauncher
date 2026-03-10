@@ -8,21 +8,21 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 image.workspace = true
-base64 = "0.22.1"
-ureq = { version = "2.12.1", features = ["json"] }
+base64 = "*"
+ureq = { version = "*", features = ["json"] }
 tokio.workspace = true
 tracing.workspace = true
 runtime_bootstrap.workspace = true
-zeroize = "1.8.2"
-rand = "0.9.2"
-sha2 = "0.10.9"
+zeroize = "*"
+rand = "*"
+sha2 = "*"
 url.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+keyring = { version = "*", default-features = false, features = ["windows-native"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+keyring = { version = "*", default-features = false, features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3.6.3", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust"] }
+keyring = { version = "*", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust"] }

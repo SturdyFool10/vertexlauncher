@@ -16,7 +16,7 @@ use crate::types::{
     CachedAccount, MinecraftCapeState, MinecraftProfileState, MinecraftSkinState,
     MinecraftSkinVariant,
 };
-use crate::util::{encode_base64, unix_now_secs};
+use crate::util::{UreqResponseExt, encode_base64, unix_now_secs};
 
 pub(crate) fn complete_minecraft_login(
     agent: &ureq::Agent,
@@ -89,7 +89,7 @@ fn authenticate_with_xbox_live_rps(
 ) -> Result<XboxUserAuthResult, AuthError> {
     let response = agent
         .post(XBOX_USER_AUTH_URL)
-        .set("Accept", "application/json")
+        .header("Accept", "application/json")
         .send_json(json!({
             "Properties": {
                 "AuthMethod": "RPS",
@@ -124,7 +124,7 @@ fn authenticate_with_xbox_live_rps(
 fn authorize_xsts(agent: &ureq::Agent, xbox_token: &str) -> Result<String, AuthError> {
     let response = agent
         .post(XSTS_AUTH_URL)
-        .set("Accept", "application/json")
+        .header("Accept", "application/json")
         .send_json(json!({
             "Properties": {
                 "SandboxId": "RETAIL",
@@ -151,7 +151,7 @@ fn authenticate_with_minecraft(
     let xtoken = format!("XBL3.0 x={user_hash};{xsts_token}");
     let launcher_response = agent
         .post(MINECRAFT_LOGIN_URL)
-        .set("Accept", "application/json")
+        .header("Accept", "application/json")
         .send_json(json!({
             "platform": "PC_LAUNCHER",
             "xtoken": xtoken,
@@ -162,17 +162,17 @@ fn authenticate_with_minecraft(
             let parsed = ok.into_json::<MinecraftLoginResponse>()?;
             Ok(parsed.access_token)
         }
-        Err(ureq::Error::Status(code, response)) if matches!(code, 400 | 401 | 403 | 404) => {
+        Err(ureq::Error::StatusCode(code)) if matches!(code, 400 | 401 | 403 | 404) => {
             warn!(
                 target: "vertexlauncher/auth/minecraft",
                 status = code,
                 "primary Minecraft token endpoint failed; trying legacy endpoint"
             );
-            let launcher_error = map_http_error(ureq::Error::Status(code, response)).to_string();
+            let launcher_error = map_http_error(ureq::Error::StatusCode(code)).to_string();
 
             let legacy_response = agent
                 .post(MINECRAFT_LOGIN_LEGACY_URL)
-                .set("Accept", "application/json")
+                .header("Accept", "application/json")
                 .send_json(json!({
                     "identityToken": format!("XBL3.0 x={user_hash};{xsts_token}"),
                 }));
@@ -198,8 +198,8 @@ fn fetch_minecraft_entitlements(
 ) -> Result<(), AuthError> {
     let response = agent
         .get(MINECRAFT_ENTITLEMENTS_URL)
-        .set("Accept", "application/json")
-        .set("Authorization", &format!("Bearer {minecraft_access_token}"))
+        .header("Accept", "application/json")
+        .header("Authorization", &format!("Bearer {minecraft_access_token}"))
         .call();
 
     match response {
@@ -217,13 +217,13 @@ fn fetch_minecraft_profile(
 ) -> Result<MinecraftProfileResponse, AuthError> {
     let response = agent
         .get(MINECRAFT_PROFILE_URL)
-        .set("Accept", "application/json")
-        .set("Authorization", &format!("Bearer {minecraft_access_token}"))
+        .header("Accept", "application/json")
+        .header("Authorization", &format!("Bearer {minecraft_access_token}"))
         .call();
 
     match response {
         Ok(ok) => Ok(ok.into_json::<MinecraftProfileResponse>()?),
-        Err(ureq::Error::Status(404, _)) => Err(AuthError::MinecraftProfileUnavailable),
+        Err(ureq::Error::StatusCode(404)) => Err(AuthError::MinecraftProfileUnavailable),
         Err(err) => Err(map_http_error(err)),
     }
 }
@@ -259,13 +259,13 @@ pub(crate) fn upload_profile_skin(
 
     let response = agent
         .post(MINECRAFT_PROFILE_SKINS_URL)
-        .set("Accept", "application/json")
-        .set("Authorization", &format!("Bearer {minecraft_access_token}"))
-        .set(
+        .header("Accept", "application/json")
+        .header("Authorization", &format!("Bearer {minecraft_access_token}"))
+        .header(
             "Content-Type",
             &format!("multipart/form-data; boundary={boundary}"),
         )
-        .send_bytes(&body);
+        .send(body.as_slice());
 
     match response {
         Ok(ok) => parse_mutation_profile_response(agent, minecraft_access_token, ok, "upload skin"),
@@ -280,25 +280,25 @@ pub(crate) fn set_active_profile_cape(
 ) -> Result<MinecraftProfileState, AuthError> {
     let put_response = agent
         .put(MINECRAFT_PROFILE_CAPE_ACTIVE_URL)
-        .set("Accept", "application/json")
-        .set("Authorization", &format!("Bearer {minecraft_access_token}"))
+        .header("Accept", "application/json")
+        .header("Authorization", &format!("Bearer {minecraft_access_token}"))
         .send_json(json!({ "capeId": cape_id }));
 
     match put_response {
         Ok(ok) => {
             parse_mutation_profile_response(agent, minecraft_access_token, ok, "set active cape")
         }
-        Err(ureq::Error::Status(code, response)) if matches!(code, 401 | 404 | 405) => {
+        Err(ureq::Error::StatusCode(code)) if matches!(code, 401 | 404 | 405) => {
             warn!(
                 target: "vertexlauncher/auth/minecraft",
                 status = code,
                 "PUT cape activation failed; retrying with POST compatibility fallback"
             );
-            let first_error = map_http_error(ureq::Error::Status(code, response)).to_string();
+            let first_error = map_http_error(ureq::Error::StatusCode(code)).to_string();
             let post_response = agent
-                .request("POST", MINECRAFT_PROFILE_CAPE_ACTIVE_URL)
-                .set("Accept", "application/json")
-                .set("Authorization", &format!("Bearer {minecraft_access_token}"))
+                .post(MINECRAFT_PROFILE_CAPE_ACTIVE_URL)
+                .header("Accept", "application/json")
+                .header("Authorization", &format!("Bearer {minecraft_access_token}"))
                 .send_json(json!({ "capeId": cape_id }));
 
             match post_response {
@@ -324,8 +324,8 @@ pub(crate) fn clear_active_profile_cape(
 ) -> Result<MinecraftProfileState, AuthError> {
     let response = agent
         .delete(MINECRAFT_PROFILE_CAPE_ACTIVE_URL)
-        .set("Accept", "application/json")
-        .set("Authorization", &format!("Bearer {minecraft_access_token}"))
+        .header("Accept", "application/json")
+        .header("Authorization", &format!("Bearer {minecraft_access_token}"))
         .call();
 
     match response {
@@ -339,7 +339,7 @@ pub(crate) fn clear_active_profile_cape(
 fn parse_mutation_profile_response(
     agent: &ureq::Agent,
     minecraft_access_token: &str,
-    response: ureq::Response,
+    response: ureq::http::Response<ureq::Body>,
     op: &str,
 ) -> Result<MinecraftProfileState, AuthError> {
     let raw = response.into_string()?;
@@ -462,12 +462,12 @@ fn build_profile_state_from_response(
 fn fetch_texture_base64(agent: &ureq::Agent, url: &str) -> Option<String> {
     let response = agent
         .get(url)
-        .set("Accept", "image/png,image/*")
+        .header("Accept", "image/png,image/*")
         .call()
         .ok()?;
 
     let mut bytes = Vec::new();
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     if reader.read_to_end(&mut bytes).is_err() || bytes.is_empty() {
         return None;
     }
@@ -494,11 +494,11 @@ pub(crate) fn resolve_cached_account_avatar(
     let agent = crate::util::build_http_agent();
     let response = agent
         .get(url)
-        .set("Accept", "image/png,image/*")
+        .header("Accept", "image/png,image/*")
         .call()
         .map_err(map_http_error)?;
     let mut bytes = Vec::new();
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     reader.read_to_end(&mut bytes)?;
     if bytes.is_empty() {
         return Ok(None);
