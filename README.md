@@ -1,82 +1,56 @@
 # Vertex Launcher
 
-An unofficial Minecraft launcher written in Rust, focused on being fast, capable, and pleasant to use.
+Native Minecraft launcher infrastructure written in Rust.
 
----
+Vertex Launcher is a multi-crate workspace that provides a desktop launcher, a quick-launch CLI, account handling, instance management, runtime/bootstrap logic, and in-app content discovery for the current Minecraft mod ecosystem.
 
-## Have
+## Current Capabilities
 
-What the project already has today:
+- Native desktop application built with `eframe/egui` and `wgpu`
+- Multi-instance library with create, import, delete, launch, and usage tracking flows
+- Microsoft account sign-in, cached account management, token refresh, and multi-account switching
+- Native quick-launch CLI for packs, worlds, and servers without opening the GUI
+- Minecraft runtime/bootstrap setup, OpenJDK provisioning, asset/version resolution, and modloader install flows
+- Modrinth and CurseForge content browsing inside the app
+- Content-type filtering for mods, resource packs, shaders, and data packs
+- In-app content detail/version browsing and per-instance content installation
+- Home screen activity feed with world/server discovery, favorites, and server reachability checks
+- Console/log surfaces, notifications, settings, skins, legal/privacy views, and theme/font customization
+- Download throttling and frame limiter controls for lower-power systems
 
-- A native Rust desktop launcher built with `eframe/egui` + `wgpu`
-- Core instance workflow in place: create, manage, and launch instances
-- Account authentication flow and launch context wiring
-- Headless quick-launch CLI for Steam/Steam Deck style direct launches
-- A library screen, settings screen, console view, legal page, and skin manager screen
-- A home screen that tracks usage and surfaces the most-used instances
-- Cross-instance world/server discovery on Home, sorted by recent activity
-- World favorites pinned at the top of Home
-- Server reachability checks with ping-status icons on Home
-- Streamer-mode-aware server display on Home (server IP hidden when streamer mode is enabled)
-- Configurable themes and UI font options
-- User-configurable CurseForge API key in Settings
-- Performance and quality controls (frame limiter, preview AA modes, runtime/config tuning)
-- Modular crates for install/runtime/auth/mod-provider responsibilities
-- multiple instances launched at a time
-- multiple accounts logged in at a time
-- a convenient vanilla minecraft launcher-less experience
----
+## Workspace Layout
 
-## Want
+- `crates/vertexlauncher`: desktop app entrypoint, app orchestration, CLI dispatch
+- `crates/launcher_ui`: screens, widgets, notifications, desktop UI helpers
+- `crates/installation`: game file resolution, modloader/runtime setup, launch orchestration
+- `crates/auth`: Microsoft/Minecraft auth, account cache, secret store integration
+- `crates/instances`: persisted instance records and usage/favorite metadata
+- `crates/modprovider`, `crates/modrinth`, `crates/curseforge`: content discovery providers
+- `crates/config`: persisted launcher configuration and config format handling
+- `crates/runtime_bootstrap`, `crates/launcher_runtime`: runtime creation and async task execution
+- `crates/textui`, `crates/fontloader`: text/layout/font support used by the UI
 
-What we are actively aiming for next:
+## Command Line
 
+These commands run without opening the desktop UI.
 
-- export and import manifests for modpacks
-- Modrinth content browsing in-app
-- CurseForge content browsing in-app
-- RustServerController integration
-- export of pre-made server instances for modpacks
-
----
-
-## Project Direction
-
-The goal is to keep building a launcher that feels reliable and flexible without getting in your way.
-
-- Privacy-respecting by default
-- Cross-platform where Minecraft can run
-- Fast and lightweight, including on older Vulkan-capable hardware
-- Stable enough for daily use
-- Friendly to both default users and power users
-- Ready to adapt as Minecraft and modding ecosystems evolve
-
-In short: keep the app native, keep it practical, and keep improving the experience one solid feature at a time. do it all while making it from scratch
-
----
-## Command Line (Quick Launch)
-
-These commands launch without showing the UI. They are designed for direct launch profiles (for example from Steam/Steam Deck).
-
-### Launch a modpack (instance) as a user
+Launch an instance:
 
 ```sh
 vertexlauncher --quick-launch-pack --instance <instance-id-or-name> --user <profile-id-or-username>
 ```
 
-### Launch a world in a modpack as a user
+Launch directly into a world:
 
 ```sh
 vertexlauncher --quick-launch-world --instance <instance-id-or-name> --world <world-folder-name> --user <profile-id-or-username>
 ```
 
-### Launch a server in a modpack as a user
+Launch directly into a server:
 
 ```sh
 vertexlauncher --quick-launch-server --instance <instance-id-or-name> --server <server-name-or-address> --user <profile-id-or-username>
 ```
-
-### Helper tools for generating/inspecting args
 
 Show quick-launch help:
 
@@ -84,44 +58,41 @@ Show quick-launch help:
 vertexlauncher --quick-launch-help
 ```
 
-List available worlds/servers for one instance:
+List available quick-launch targets for one instance:
 
 ```sh
 vertexlauncher --list-quick-launch-targets --instance <instance-id-or-name>
 ```
 
-Build a full launch arg string for scripts/profiles:
+Build an argument string for scripts or external launchers:
 
 ```sh
 vertexlauncher --build-quick-launch-args --mode <pack|world|server> --instance <instance-id-or-name> --user <profile-id-or-username> [--world <world-folder-name>] [--server <server-name-or-address>]
 ```
 
-### Quick-launch behavior
+## Project Direction
 
-- Refreshes only the selected account token required for launch.
-- Uses the same instance resolution as the UI (`id` or instance name).
-- World launch expects a world folder name from `saves/`.
-- Server launch accepts either a saved server name or direct address.
+The project is aimed at a practical native launcher with enough control for power users without turning into a browser shell or a piracy tool.
 
----
-## What we don't do
+- Uses valid Minecraft account data and launch credentials
+- Prefers native Rust codepaths over heavyweight web stacks
+- Keeps launcher concerns separated into reusable crates
+- Targets desktop environments where Minecraft itself can run
 
-in general, this launcher is designed to make life simpler for paying minecraft players, it is not an aide for pirates, and it will not allow you to launch the game without a valid Minecraft account and a valid Minecraft license.
+## Building
 
-# Installation
+There is no packaged installer yet. Build from source:
 
-Currently we are in a pre-alpha state, and as such there is no way to install this without building from source. I however do not like complex builds so just clone the repo and run 
 ```sh
 cargo build --release
-``` 
-inside the directory you cloned it into.
+```
 
-## Linux caveat
+## Linux Build Prerequisites
 
-On Linux, you need native development libraries installed before compilation will work.
-If these are missing, `cargo build` will fail during `pkg-config` checks for `gtk/glib/webkit`.
+On Linux, you need native development libraries for `gtk`, `glib`, and `webkit` before `cargo build` will succeed.
 
 For Debian/Ubuntu:
+
 ```sh
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
@@ -137,8 +108,9 @@ sudo apt-get install -y --no-install-recommends \
   libjavascriptcoregtk-4.1-dev
 ```
 
-If your distro does not provide `4.1` packages, use:
+If your distro ships `4.0` instead of `4.1`, use:
+
 - `libwebkit2gtk-4.0-dev`
 - `libjavascriptcoregtk-4.0-dev`
 
-On Wayland, taskbar/dock icons are resolved via desktop app ID. This app uses `vertexlauncher` as its app ID.
+On Wayland, the desktop app ID is `vertexlauncher`.

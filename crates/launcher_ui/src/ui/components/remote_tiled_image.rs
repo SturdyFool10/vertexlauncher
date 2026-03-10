@@ -29,7 +29,7 @@ struct TileImage {
     width: u32,
     height: u32,
     uri: String,
-    bytes: Vec<u8>,
+    bytes: Arc<[u8]>,
 }
 
 #[derive(Default)]
@@ -174,7 +174,7 @@ impl TiledImage {
                     width: tile.width,
                     height: tile.height,
                     uri: tile.uri.clone(),
-                    bytes: tile.bytes.clone(),
+                    bytes: Arc::clone(&tile.bytes),
                 })
                 .collect(),
         }
@@ -193,7 +193,7 @@ fn show_tiled(ui: &mut Ui, image: &TiledImage, desired_size: egui::Vec2) {
         let max_y = rect.top() + rect.height() * ((tile.y + tile.height) as f32 / height);
         let tile_rect =
             egui::Rect::from_min_max(egui::pos2(min_x, min_y), egui::pos2(max_x, max_y));
-        let image = egui::Image::from_bytes(tile.uri.clone(), tile.bytes.clone())
+        let image = egui::Image::from_bytes(tile.uri.clone(), Arc::clone(&tile.bytes))
             .fit_to_exact_size(tile_rect.size());
         let _ = ui.put(tile_rect, image);
     }
@@ -258,7 +258,7 @@ fn fetch_and_tile_remote_image(url: &str) -> Result<TiledImage, String> {
                 width: tile_width,
                 height: tile_height,
                 uri,
-                bytes: tile_bytes,
+                bytes: Arc::<[u8]>::from(tile_bytes),
             });
         }
     }

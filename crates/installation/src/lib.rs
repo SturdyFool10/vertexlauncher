@@ -3680,8 +3680,10 @@ fn url_encode_component(value: &str) -> String {
         if is_unreserved {
             out.push(byte as char);
         } else {
+            use std::fmt::Write as _;
+
             out.push('%');
-            out.push_str(&format!("{byte:02X}"));
+            let _ = write!(out, "{byte:02X}");
         }
     }
     out
@@ -4078,8 +4080,7 @@ fn call_get_response_with_retry(
             delay,
             last_err
                 .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| "request failed".to_owned())
+                .map_or_else(|| "request failed".to_owned(), ToString::to_string)
         );
         thread::sleep(delay);
     }

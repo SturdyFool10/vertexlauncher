@@ -2,7 +2,14 @@ use egui::Ui;
 use textui::{LabelOptions, TextUi};
 
 pub fn normalize_inline_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut normalized = String::with_capacity(text.len());
+    for word in text.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(word);
+    }
+    normalized
 }
 
 pub fn truncate_single_line_text_with_ellipsis(
@@ -34,12 +41,15 @@ pub fn truncate_single_line_text_with_ellipsis(
     }
 
     let mut cutoff = 0usize;
+    let mut candidate = String::with_capacity(normalized.len() + ellipsis.len());
     for (index, _) in normalized
         .char_indices()
         .skip(1)
         .chain(std::iter::once((normalized.len(), '\0')))
     {
-        let candidate = format!("{}{}", &normalized[..index], ellipsis);
+        candidate.clear();
+        candidate.push_str(&normalized[..index]);
+        candidate.push_str(ellipsis);
         if measure_width(candidate.as_str()) <= max_width {
             cutoff = index;
         } else {
@@ -50,6 +60,9 @@ pub fn truncate_single_line_text_with_ellipsis(
     if cutoff == 0 {
         ellipsis.to_owned()
     } else {
-        format!("{}{}", &normalized[..cutoff], ellipsis)
+        let mut truncated = String::with_capacity(cutoff + ellipsis.len());
+        truncated.push_str(&normalized[..cutoff]);
+        truncated.push_str(ellipsis);
+        truncated
     }
 }
