@@ -348,7 +348,12 @@ impl eframe::App for VertexApp {
             );
         }
 
-        let sidebar_output = ui::sidebar::render(ctx, self.active_screen, &self.instance_shortcuts);
+        let sidebar_output = ui::sidebar::render(
+            ctx,
+            self.active_screen,
+            &self.instance_shortcuts,
+            &mut self.text_ui,
+        );
 
         if let Some(next_screen) = sidebar_output.selected_screen {
             self.active_screen = next_screen;

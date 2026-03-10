@@ -15,7 +15,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock, mpsc},
     thread,
 };
-use textui::{LabelOptions, TextUi};
+use textui::{ButtonOptions, LabelOptions, TextUi};
 
 use crate::app::tokio_runtime;
 use crate::assets;
@@ -691,12 +691,37 @@ pub fn render(
     }
 
     ui.horizontal(|ui| {
+        let button_style = ButtonOptions {
+            text_color: ui.visuals().text_color(),
+            fill: ui.visuals().widgets.inactive.bg_fill,
+            fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+            fill_active: ui.visuals().widgets.active.bg_fill,
+            fill_selected: ui.visuals().selection.bg_fill,
+            stroke: ui.visuals().widgets.inactive.bg_stroke,
+            ..ButtonOptions::default()
+        };
         if state.current_view == ContentBrowserPage::Detail {
-            if ui.button("Back to Mod Browser").clicked() {
+            if text_ui
+                .button(
+                    ui,
+                    ("content_browser_back_to_browser", instance.id.as_str()),
+                    "Back to Mod Browser",
+                    &button_style,
+                )
+                .clicked()
+            {
                 state.current_view = ContentBrowserPage::Browse;
             }
         }
-        if ui.button("Back to Instance").clicked() {
+        if text_ui
+            .button(
+                ui,
+                ("content_browser_back_to_instance", instance.id.as_str()),
+                "Back to Instance",
+                &button_style,
+            )
+            .clicked()
+        {
             output.requested_screen = Some(AppScreen::Instance);
         }
     });
@@ -717,6 +742,15 @@ fn render_controls(
         .corner_radius(egui::CornerRadius::same(10))
         .inner_margin(egui::Margin::same(10));
     frame.show(ui, |ui| {
+        let button_style = ButtonOptions {
+            text_color: ui.visuals().text_color(),
+            fill: ui.visuals().widgets.inactive.bg_fill,
+            fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+            fill_active: ui.visuals().widgets.active.bg_fill,
+            fill_selected: ui.visuals().selection.bg_fill,
+            stroke: ui.visuals().widgets.inactive.bg_stroke,
+            ..ButtonOptions::default()
+        };
         let _ = text_ui.label(
             ui,
             ("content_browser_heading", instance_id),
@@ -752,7 +786,15 @@ fn render_controls(
                 });
 
             if ui
-                .add_enabled(!state.search_in_flight, egui::Button::new("Search"))
+                .add_enabled_ui(!state.search_in_flight, |ui| {
+                    text_ui.button(
+                        ui,
+                        ("content_browser_search_button", instance_id),
+                        "Search",
+                        &button_style,
+                    )
+                })
+                .inner
                 .clicked()
             {
                 request_search_for_current_filters(state, true);
@@ -972,11 +1014,26 @@ fn render_results(
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
+            let pagination_button_style = ButtonOptions {
+                min_size: egui::vec2(72.0, 30.0),
+                text_color: ui.visuals().text_color(),
+                fill: ui.visuals().widgets.inactive.bg_fill,
+                fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+                fill_active: ui.visuals().widgets.active.bg_fill,
+                fill_selected: ui.visuals().selection.bg_fill,
+                stroke: ui.visuals().widgets.inactive.bg_stroke,
+                ..ButtonOptions::default()
+            };
             if ui
-                .add_enabled(
-                    !state.search_in_flight && state.current_page > 1,
-                    egui::Button::new("Previous"),
-                )
+                .add_enabled_ui(!state.search_in_flight && state.current_page > 1, |ui| {
+                    text_ui.button(
+                        ui,
+                        ("content_browser_previous_page", instance_id),
+                        "Previous",
+                        &pagination_button_style,
+                    )
+                })
+                .inner
                 .clicked()
             {
                 outcome.requested_page = Some(state.current_page.saturating_sub(1).max(1));
@@ -1000,14 +1057,30 @@ fn render_results(
                     .max_decimals(0),
             );
             if ui
-                .add_enabled(!state.search_in_flight, egui::Button::new("Go"))
+                .add_enabled_ui(!state.search_in_flight, |ui| {
+                    text_ui.button(
+                        ui,
+                        ("content_browser_go_page", instance_id),
+                        "Go",
+                        &pagination_button_style,
+                    )
+                })
+                .inner
                 .clicked()
             {
                 outcome.requested_page = Some(page_value.max(1));
             }
 
             if ui
-                .add_enabled(!state.search_in_flight, egui::Button::new("Next"))
+                .add_enabled_ui(!state.search_in_flight, |ui| {
+                    text_ui.button(
+                        ui,
+                        ("content_browser_next_page", instance_id),
+                        "Next",
+                        &pagination_button_style,
+                    )
+                })
+                .inner
                 .clicked()
             {
                 outcome.requested_page = Some(state.current_page.saturating_add(1).max(1));
@@ -1397,12 +1470,36 @@ fn render_detail_page(
     ui.add_space(10.0);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+        let tab_style = ButtonOptions {
+            min_size: egui::vec2(96.0, 30.0),
+            text_color: ui.visuals().text_color(),
+            fill: ui.visuals().widgets.inactive.bg_fill,
+            fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+            fill_active: ui.visuals().widgets.active.bg_fill,
+            fill_selected: ui.visuals().selection.bg_fill,
+            stroke: ui.visuals().widgets.inactive.bg_stroke,
+            ..ButtonOptions::default()
+        };
         for (tab, label) in [
             (ContentDetailTab::Overview, "Overview"),
             (ContentDetailTab::Versions, "Versions"),
         ] {
             let selected = state.detail_tab == tab;
-            if ui.selectable_label(selected, label).clicked() {
+            if text_ui
+                .selectable_button(
+                    ui,
+                    (
+                        "content_browser_detail_tab",
+                        instance_id,
+                        &entry.dedupe_key,
+                        label,
+                    ),
+                    label,
+                    selected,
+                    &tab_style,
+                )
+                .clicked()
+            {
                 state.detail_tab = tab;
             }
         }

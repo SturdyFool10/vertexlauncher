@@ -49,6 +49,7 @@ const VTMPACK_MANIFEST_VERSION: u32 = 1;
 const VERTEX_CONTENT_MANIFEST_FILE_NAME: &str = ".vertex-content-manifest.toml";
 const CURSEFORGE_VERSION_LOOKUP_PAGE_SIZE: u32 = 50;
 const CURSEFORGE_VERSION_LOOKUP_MAX_PAGES: u32 = 5;
+const INSTALLED_CONTENT_PAGE_SIZES: [usize; 4] = [10, 25, 50, 100];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InstalledContentTab {
@@ -128,6 +129,8 @@ struct InstanceScreenState {
     java_override_enabled: bool,
     java_override_runtime_major: Option<u8>,
     selected_content_tab: InstalledContentTab,
+    installed_content_page_size: usize,
+    installed_content_page: usize,
     content_metadata_cache: HashMap<String, Option<UnifiedContentEntry>>,
     content_lookup_in_flight: HashSet<String>,
     content_lookup_results_tx: Option<mpsc::Sender<(String, Option<UnifiedContentEntry>)>>,
@@ -206,6 +209,8 @@ impl InstanceScreenState {
             java_override_enabled: instance.java_override_enabled,
             java_override_runtime_major: instance.java_override_runtime_major,
             selected_content_tab: InstalledContentTab::Mods,
+            installed_content_page_size: INSTALLED_CONTENT_PAGE_SIZES[1],
+            installed_content_page: 1,
             content_metadata_cache: HashMap::new(),
             content_lookup_in_flight: HashSet::new(),
             content_lookup_results_tx: None,
@@ -510,6 +515,7 @@ fn render_installed_content_section(
                 .clicked()
             {
                 state.selected_content_tab = tab;
+                state.installed_content_page = 1;
             }
         }
     });
@@ -538,6 +544,89 @@ fn render_installed_content_section(
         return;
     }
 
+    let page_size = if INSTALLED_CONTENT_PAGE_SIZES.contains(&state.installed_content_page_size) {
+        state.installed_content_page_size
+    } else {
+        INSTALLED_CONTENT_PAGE_SIZES[1]
+    };
+    state.installed_content_page_size = page_size;
+
+    let total_items = installed_files.len();
+    let total_pages = total_items.div_ceil(page_size).max(1);
+    state.installed_content_page = state.installed_content_page.clamp(1, total_pages);
+
+    ui.horizontal(|ui| {
+        ui.set_min_height(style::CONTROL_HEIGHT);
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        let label_style = LabelOptions {
+            line_height: style::CONTROL_HEIGHT - 6.0,
+            color: ui.visuals().text_color(),
+            wrap: false,
+            ..LabelOptions::default()
+        };
+        let muted_label_style = LabelOptions {
+            color: ui.visuals().weak_text_color(),
+            ..label_style.clone()
+        };
+
+        let _ = text_ui.label(
+            ui,
+            ("instance_content_page_size_label", instance_id),
+            "Items per page",
+            &label_style,
+        );
+        egui::ComboBox::from_id_salt(("instance_content_page_size", instance_id))
+            .selected_text(state.installed_content_page_size.to_string())
+            .show_ui(ui, |ui| {
+                for page_size in INSTALLED_CONTENT_PAGE_SIZES {
+                    if ui
+                        .selectable_value(
+                            &mut state.installed_content_page_size,
+                            page_size,
+                            page_size.to_string(),
+                        )
+                        .changed()
+                    {
+                        state.installed_content_page = 1;
+                    }
+                }
+            });
+
+        let _ = text_ui.label(
+            ui,
+            ("instance_content_page_label", instance_id),
+            "Page",
+            &label_style,
+        );
+        egui::ComboBox::from_id_salt(("instance_content_page", instance_id))
+            .selected_text(format!(
+                "{} / {}",
+                state.installed_content_page, total_pages
+            ))
+            .show_ui(ui, |ui| {
+                for page in 1..=total_pages {
+                    ui.selectable_value(
+                        &mut state.installed_content_page,
+                        page,
+                        format!("Page {page}"),
+                    );
+                }
+            });
+
+        let _ = text_ui.label(
+            ui,
+            ("instance_content_page_total", instance_id),
+            &format!("{total_items} installed"),
+            &muted_label_style,
+        );
+    });
+
+    ui.add_space(10.0);
+
+    let start_index = (state.installed_content_page - 1) * state.installed_content_page_size;
+    let end_index = (start_index + state.installed_content_page_size).min(total_items);
+    let visible_files = &installed_files[start_index..end_index];
+
     let mut pending_delete: Option<PathBuf> = None;
     let scroll_height = ui.available_height().max(180.0);
     egui::ScrollArea::vertical()
@@ -552,7 +641,8 @@ fn render_installed_content_section(
             let row_width = (ui.max_rect().width() - INSTALLED_CONTENT_SCROLLBAR_RESERVE).max(1.0);
             ui.set_min_width(row_width);
             ui.set_max_width(row_width);
-            for (entry_index, entry) in installed_files.iter().enumerate() {
+            for (visible_index, entry) in visible_files.iter().enumerate() {
+                let entry_index = start_index + visible_index;
                 if !state.content_metadata_cache.contains_key(&entry.lookup_key) {
                     request_content_metadata_lookup(
                         state,

@@ -1,4 +1,5 @@
 use egui::{Context, ScrollArea, SidePanel, Ui};
+use textui::{ButtonOptions, TextUi};
 
 use crate::assets;
 use crate::screens::AppScreen;
@@ -31,6 +32,7 @@ pub fn render(
     ctx: &Context,
     active_screen: AppScreen,
     profile_shortcuts: &[ProfileShortcut],
+    text_ui: &mut TextUi,
 ) -> SidebarOutput {
     let mut output = SidebarOutput::default();
     let viewport_width = ctx.input(|i| i.content_rect().width());
@@ -68,7 +70,14 @@ pub fn render(
                     .layout(egui::Layout::top_down(egui::Align::Min)),
                 |ui| {
                     ui.set_width(content_width);
-                    render_segments(ui, active_screen, profile_shortcuts, &mut output, layout);
+                    render_segments(
+                        ui,
+                        active_screen,
+                        profile_shortcuts,
+                        text_ui,
+                        &mut output,
+                        layout,
+                    );
                 },
             );
         });
@@ -80,6 +89,7 @@ fn render_segments(
     ui: &mut Ui,
     active_screen: AppScreen,
     profile_shortcuts: &[ProfileShortcut],
+    text_ui: &mut TextUi,
     output: &mut SidebarOutput,
     layout: SidebarLayout,
 ) {
@@ -145,19 +155,36 @@ fn render_segments(
                 .width(create_menu_width)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
                 .show(|ui| {
-                    if ui
-                        .add_sized(
-                            [ui.available_width().max(120.0), style::CONTROL_HEIGHT],
-                            egui::Button::new(create_menu_labels[0]),
+                    let popup_button_style = ButtonOptions {
+                        min_size: egui::vec2(
+                            ui.available_width().max(120.0),
+                            style::CONTROL_HEIGHT,
+                        ),
+                        text_color: ui.visuals().text_color(),
+                        fill: ui.visuals().widgets.inactive.bg_fill,
+                        fill_hovered: ui.visuals().widgets.hovered.bg_fill,
+                        fill_active: ui.visuals().widgets.active.bg_fill,
+                        fill_selected: ui.visuals().selection.bg_fill,
+                        stroke: ui.visuals().widgets.inactive.bg_stroke,
+                        ..ButtonOptions::default()
+                    };
+                    if text_ui
+                        .button(
+                            ui,
+                            "sidebar_create_from_scratch",
+                            create_menu_labels[0],
+                            &popup_button_style,
                         )
                         .clicked()
                     {
                         output.create_instance_clicked = true;
                     }
-                    if ui
-                        .add_sized(
-                            [ui.available_width().max(120.0), style::CONTROL_HEIGHT],
-                            egui::Button::new(create_menu_labels[1]),
+                    if text_ui
+                        .button(
+                            ui,
+                            "sidebar_import_profile",
+                            create_menu_labels[1],
+                            &popup_button_style,
                         )
                         .clicked()
                     {
