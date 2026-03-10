@@ -1,6 +1,8 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
-use std::sync::mpsc;
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    hash::{Hash, Hasher},
+    sync::mpsc,
+};
 
 use cosmic_text::{
     Action, Attrs, AttrsOwned, Buffer, Color, Edit, Editor, Family, FontFeatures, FontSystem,
@@ -260,8 +262,8 @@ struct TypographySnapshot {
 }
 
 struct AsyncRasterState {
-    tx: mpsc::Sender<AsyncRasterWorkerMessage>,
-    rx: mpsc::Receiver<AsyncRasterResponse>,
+    tx: Option<mpsc::Sender<AsyncRasterWorkerMessage>>,
+    rx: Option<mpsc::Receiver<AsyncRasterResponse>>,
     pending: HashSet<u64>,
     cache: HashMap<u64, RasterizedText>,
 }
@@ -335,10 +337,20 @@ impl TextUi {
 
         let (worker_tx, worker_rx) = mpsc::channel::<AsyncRasterWorkerMessage>();
         let (result_tx, result_rx) = mpsc::channel::<AsyncRasterResponse>();
-        std::thread::Builder::new()
+        let worker_spawn = std::thread::Builder::new()
             .name("textui-async-raster-worker".to_owned())
-            .spawn(move || async_raster_worker_loop(worker_rx, result_tx))
-            .expect("failed to spawn textui async raster worker");
+            .spawn(move || async_raster_worker_loop(worker_rx, result_tx));
+        let (worker_tx, result_rx) = match worker_spawn {
+            Ok(_) => (Some(worker_tx), Some(result_rx)),
+            Err(error) => {
+                warn!(
+                    target: "vertexlauncher/textui",
+                    error = %error,
+                    "failed to spawn textui async raster worker; falling back to synchronous text rasterization"
+                );
+                (None, None)
+            }
+        };
 
         Self {
             font_system: FontSystem::new(),
@@ -375,10 +387,9 @@ impl TextUi {
     ///
     /// This clears cached textures/input states so new faces are picked up.
     pub fn register_font_data(&mut self, bytes: Vec<u8>) {
-        let _ = self
-            .async_raster
-            .tx
-            .send(AsyncRasterWorkerMessage::RegisterFont(bytes.clone()));
+        if let Some(tx) = self.async_raster.tx.as_ref() {
+            let _ = tx.send(AsyncRasterWorkerMessage::RegisterFont(bytes.clone()));
+        }
         self.font_system.db_mut().load_font_data(bytes);
         self.textures.clear();
         self.input_states.clear();
@@ -1646,16 +1657,29 @@ impl TextUi {
     }
 
     fn poll_async_raster_results(&mut self) {
+        let mut should_reset_worker = false;
+        let Some(rx) = self.async_raster.rx.as_ref() else {
+            return;
+        };
         loop {
-            match self.async_raster.rx.try_recv() {
+            match rx.try_recv() {
                 Ok(response) => {
                     self.async_raster.pending.remove(&response.key_hash);
                     self.async_raster
                         .cache
                         .insert(response.key_hash, response.raster);
                 }
-                Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => break,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    should_reset_worker = true;
+                    break;
+                }
             }
+        }
+        if should_reset_worker {
+            self.async_raster.tx = None;
+            self.async_raster.rx = None;
+            self.async_raster.pending.clear();
         }
     }
 
@@ -1670,19 +1694,35 @@ impl TextUi {
         if let Some(raster) = self.async_raster.cache.get(&key_hash) {
             return Some(raster.clone());
         }
+        let Some(tx) = self.async_raster.tx.as_ref().cloned() else {
+            return Some(self.rasterize_plain_text(
+                text.as_str(),
+                options,
+                width_points_opt,
+                scale,
+            ));
+        };
         if self.async_raster.pending.insert(key_hash) {
+            let request_text = text.clone();
             let request = AsyncRasterRequest {
                 key_hash,
-                kind: AsyncRasterKind::Plain(text),
+                kind: AsyncRasterKind::Plain(request_text),
                 options: options.clone(),
                 width_points_opt,
                 scale,
                 typography: self.typography_snapshot(),
             };
-            let _ = self
-                .async_raster
-                .tx
-                .send(AsyncRasterWorkerMessage::Render(request));
+            if tx.send(AsyncRasterWorkerMessage::Render(request)).is_err() {
+                self.async_raster.pending.remove(&key_hash);
+                self.async_raster.tx = None;
+                self.async_raster.rx = None;
+                return Some(self.rasterize_plain_text(
+                    text.as_str(),
+                    options,
+                    width_points_opt,
+                    scale,
+                ));
+            }
         }
         None
     }
@@ -1698,19 +1738,35 @@ impl TextUi {
         if let Some(raster) = self.async_raster.cache.get(&key_hash) {
             return Some(raster.clone());
         }
+        let Some(tx) = self.async_raster.tx.as_ref().cloned() else {
+            return Some(self.rasterize_rich_text(
+                spans.as_slice(),
+                options,
+                width_points_opt,
+                scale,
+            ));
+        };
         if self.async_raster.pending.insert(key_hash) {
+            let request_spans = spans.clone();
             let request = AsyncRasterRequest {
                 key_hash,
-                kind: AsyncRasterKind::Rich(spans),
+                kind: AsyncRasterKind::Rich(request_spans),
                 options: options.clone(),
                 width_points_opt,
                 scale,
                 typography: self.typography_snapshot(),
             };
-            let _ = self
-                .async_raster
-                .tx
-                .send(AsyncRasterWorkerMessage::Render(request));
+            if tx.send(AsyncRasterWorkerMessage::Render(request)).is_err() {
+                self.async_raster.pending.remove(&key_hash);
+                self.async_raster.tx = None;
+                self.async_raster.rx = None;
+                return Some(self.rasterize_rich_text(
+                    spans.as_slice(),
+                    options,
+                    width_points_opt,
+                    scale,
+                ));
+            }
         }
         None
     }

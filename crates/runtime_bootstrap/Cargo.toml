@@ -1,9 +1,9 @@
 [package]
-name = "launcher_runtime"
+name = "runtime_bootstrap"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-runtime_bootstrap.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

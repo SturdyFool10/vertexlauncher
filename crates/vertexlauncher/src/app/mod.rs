@@ -14,12 +14,14 @@ use instances::{
 };
 use launcher_runtime as tokio_runtime;
 use launcher_ui::{console, install_activity, notification, screens, ui, window_effects};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, Write as _},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 use textui::TextUi;
 use tracing::Subscriber;
 use tracing_subscriber::layer::{Context as LayerContext, Layer};
@@ -715,7 +717,18 @@ fn recommended_java_runtime_for_game(game_version: &str) -> Option<JavaRuntimeVe
 
 pub fn run() -> eframe::Result<()> {
     let log_path = init_tracing();
-    tracing::info!(target: "vertexlauncher/app/startup", "Launcher started. Log file: {}", log_path.display());
+    if let Some(log_path) = log_path.as_deref() {
+        tracing::info!(
+            target: "vertexlauncher/app/startup",
+            "Launcher started. Log file: {}",
+            log_path.display()
+        );
+    } else {
+        tracing::info!(
+            target: "vertexlauncher/app/startup",
+            "Launcher started. File logging unavailable; using stderr/console only."
+        );
+    }
     launcher_runtime::init();
     #[cfg(target_os = "macos")]
     app_icon::apply_macos_dock_icon();
@@ -740,7 +753,7 @@ pub fn maybe_run_webview_helper() -> Result<bool, String> {
 
 #[derive(Clone)]
 struct AppLogLayer {
-    file: Arc<Mutex<File>>,
+    writer: Arc<Mutex<Box<dyn io::Write + Send>>>,
 }
 
 impl<S> Layer<S> for AppLogLayer
@@ -767,8 +780,8 @@ where
         };
 
         console::push_line(line.clone());
-        if let Ok(mut file) = self.file.lock() {
-            let _ = writeln!(file, "{line}");
+        if let Ok(mut writer) = self.writer.lock() {
+            let _ = writeln!(writer, "{line}");
         }
     }
 }
@@ -795,7 +808,7 @@ impl tracing::field::Visit for MessageVisitor {
     }
 }
 
-fn init_tracing() -> PathBuf {
+fn init_tracing() -> Option<PathBuf> {
     let started_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -809,23 +822,7 @@ fn init_tracing() -> PathBuf {
     );
     let _ = std::fs::create_dir_all(&log_dir);
     let log_path = log_dir.join(format!("vertex_{started_epoch}.log"));
-    tracing::debug!(
-        target: "vertexlauncher/io",
-        op = "file_create",
-        path = %log_path.display(),
-        context = "initialize main log file"
-    );
-    let file = File::create(&log_path).unwrap_or_else(|_| {
-        let fallback = log_dir.join("vertex_fallback.log");
-        tracing::debug!(
-            target: "vertexlauncher/io",
-            op = "file_create",
-            path = %fallback.display(),
-            context = "initialize fallback log file"
-        );
-        File::create(fallback).expect("unable to create fallback log file")
-    });
-    let file = Arc::new(Mutex::new(file));
+    let (writer, active_log_path) = open_log_writer(log_path, &log_dir);
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
@@ -836,7 +833,7 @@ fn init_tracing() -> PathBuf {
         .with_target(false)
         .with_level(false)
         .with_writer(std::io::stderr);
-    let app_layer = AppLogLayer { file };
+    let app_layer = AppLogLayer { writer };
 
     let _ = tracing_subscriber::registry()
         .with(env_filter)
@@ -844,7 +841,59 @@ fn init_tracing() -> PathBuf {
         .with(app_layer)
         .try_init();
 
-    log_path
+    active_log_path
+}
+
+fn open_log_writer(
+    primary_log_path: PathBuf,
+    log_dir: &Path,
+) -> (Arc<Mutex<Box<dyn io::Write + Send>>>, Option<PathBuf>) {
+    if let Some(writer) = try_open_log_file(&primary_log_path, "initialize main log file") {
+        return (
+            Arc::new(Mutex::new(Box::new(writer))),
+            Some(primary_log_path),
+        );
+    }
+
+    let fallback_log_path = log_dir.join("vertex_fallback.log");
+    if let Some(writer) = try_open_log_file(&fallback_log_path, "initialize fallback log file") {
+        return (
+            Arc::new(Mutex::new(Box::new(writer))),
+            Some(fallback_log_path),
+        );
+    }
+
+    let temp_log_path = std::env::temp_dir().join("vertex_fallback.log");
+    if let Some(writer) = try_open_log_file(&temp_log_path, "initialize temp fallback log file") {
+        return (Arc::new(Mutex::new(Box::new(writer))), Some(temp_log_path));
+    }
+
+    tracing::warn!(
+        target: "vertexlauncher/io",
+        "Unable to open any log file; falling back to stderr/console logging only."
+    );
+    (Arc::new(Mutex::new(Box::new(io::sink()))), None)
+}
+
+fn try_open_log_file(path: &Path, context: &str) -> Option<File> {
+    tracing::debug!(
+        target: "vertexlauncher/io",
+        op = "file_create",
+        path = %path.display(),
+        context
+    );
+    match File::create(path) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            tracing::warn!(
+                target: "vertexlauncher/io",
+                path = %path.display(),
+                error = %error,
+                "{context}"
+            );
+            None
+        }
+    }
 }
 
 fn current_date_time_parts() -> (String, String) {

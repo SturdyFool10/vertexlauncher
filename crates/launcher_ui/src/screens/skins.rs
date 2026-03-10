@@ -1266,7 +1266,9 @@ fn apply_taa_rgba(
         });
         return;
     }
-    let hist = history.as_mut().expect("history initialized");
+    let Some(hist) = history.as_mut() else {
+        return;
+    };
     for i in (0..len).step_by(4) {
         let curr_a = color[i + 3] as f32 / 255.0;
         if curr_a <= 0.001 {

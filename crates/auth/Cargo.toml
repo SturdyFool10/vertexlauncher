@@ -12,6 +12,7 @@ base64 = "0.22.1"
 ureq = { version = "2.12.1", features = ["json"] }
 tokio.workspace = true
 tracing.workspace = true
+runtime_bootstrap.workspace = true
 zeroize = "1.8.2"
 rand = "*"
 sha2 = "*"

@@ -12,6 +12,7 @@ members = [
     "crates/vertexlauncher",
     "crates/modprovider",
     "crates/modrinth",
+    "crates/runtime_bootstrap",
     "crates/textui",
 ]
 default-members = [
@@ -50,6 +51,7 @@ launcher_ui = { path = "crates/launcher_ui" }
 modrinth = { path = "crates/modrinth" }
 modprovider = { path = "crates/modprovider" }
 fontloader = { path = "crates/fontloader" }
+runtime_bootstrap = { path = "crates/runtime_bootstrap" }
 textui = { path = "crates/textui" }
 
 [profile.dev]
