@@ -52,6 +52,7 @@ fn render_settings_contents(
                     config::ToggleSettingId::StreamerModeEnabled,
                     config::ToggleSettingId::WindowBlurEnabled,
                     config::ToggleSettingId::OpenTypeFeaturesEnabled,
+                    config::ToggleSettingId::SkinPreview3dLayersEnabled,
                 ],
             );
             render_selected_text_settings(
@@ -79,7 +80,6 @@ fn render_settings_contents(
                     config::ToggleSettingId::FrameLimiterEnabled,
                 ],
             );
-            render_selected_int_settings(ui, text_ui, config, &[IntSettingId::FrameLimitFps]);
             render_download_settings(ui, text_ui, config);
         },
     );

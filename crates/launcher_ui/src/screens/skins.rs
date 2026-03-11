@@ -46,6 +46,7 @@ pub fn render(
     preview_motion_blur_amount: f32,
     preview_motion_blur_shutter_frames: f32,
     preview_motion_blur_sample_count: i32,
+    preview_3d_layers_enabled: bool,
 ) {
     let state_id = ui.make_persistent_id("skins_screen_state");
     let mut state = ui
@@ -75,6 +76,7 @@ pub fn render(
     state.preview_motion_blur_amount = preview_motion_blur_amount.clamp(0.0, 1.0);
     state.preview_motion_blur_shutter_frames = preview_motion_blur_shutter_frames.max(0.0);
     state.preview_motion_blur_sample_count = preview_motion_blur_sample_count.max(1) as usize;
+    state.preview_3d_layers_enabled = preview_3d_layers_enabled;
     if state.last_preview_aa_mode != state.preview_aa_mode
         || state.last_preview_motion_blur_enabled != state.preview_motion_blur_enabled
         || (state.last_preview_motion_blur_amount - state.preview_motion_blur_amount).abs()
@@ -84,6 +86,7 @@ pub fn render(
             .abs()
             > f32::EPSILON
         || state.last_preview_motion_blur_sample_count != state.preview_motion_blur_sample_count
+        || state.last_preview_3d_layers_enabled != state.preview_3d_layers_enabled
     {
         state.preview_texture = None;
         state.preview_history = None;
@@ -92,6 +95,7 @@ pub fn render(
         state.last_preview_motion_blur_amount = state.preview_motion_blur_amount;
         state.last_preview_motion_blur_shutter_frames = state.preview_motion_blur_shutter_frames;
         state.last_preview_motion_blur_sample_count = state.preview_motion_blur_sample_count;
+        state.last_preview_3d_layers_enabled = state.preview_3d_layers_enabled;
     }
     state.poll_worker(ui.ctx());
     state.try_consume_open_refresh();
@@ -321,6 +325,7 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
     let preview_motion_blur_amount = state.preview_motion_blur_amount;
     let preview_motion_blur_shutter_frames = state.preview_motion_blur_shutter_frames;
     let preview_motion_blur_sample_count = state.preview_motion_blur_sample_count;
+    let preview_3d_layers_enabled = state.preview_3d_layers_enabled;
     let preview_texture = &mut state.preview_texture;
     let preview_history = &mut state.preview_history;
 
@@ -349,6 +354,7 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
             preview_motion_blur_amount,
             preview_motion_blur_shutter_frames,
             preview_motion_blur_sample_count,
+            preview_3d_layers_enabled,
             preview_texture,
             preview_history,
         );
@@ -427,6 +433,7 @@ fn draw_character(
     preview_motion_blur_amount: f32,
     preview_motion_blur_shutter_frames: f32,
     preview_motion_blur_sample_count: usize,
+    preview_3d_layers_enabled: bool,
     preview_texture: &mut Option<TextureHandle>,
     preview_history: &mut Option<PreviewHistory>,
 ) {
@@ -442,7 +449,9 @@ fn draw_character(
         time_seconds,
         walk_phase,
         variant,
+        preview_3d_layers_enabled,
         show_elytra,
+        skin_sample.clone(),
         cape_sample.clone(),
         default_elytra_sample.clone(),
     );
@@ -460,7 +469,9 @@ fn draw_character(
                 preview_motion_blur_shutter_frames,
                 preview_motion_blur_sample_count,
                 variant,
+                preview_3d_layers_enabled,
                 show_elytra,
+                Some(Arc::clone(skin_sample)),
                 cape_sample,
                 default_elytra_sample,
                 preview_motion_blur_amount,
@@ -508,6 +519,167 @@ struct BuiltCharacterScene {
     cape_render_sample: Option<Arc<RgbaImage>>,
 }
 
+#[derive(Clone, Copy)]
+enum OverlayVoxelFace {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    Front,
+    Back,
+}
+
+#[derive(Clone, Copy)]
+struct OverlayRegionSpec {
+    face: OverlayVoxelFace,
+    tex_x: u32,
+    tex_y: u32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Clone, Copy)]
+struct OverlayPartSpec {
+    size: Vec3,
+    pivot_top_center: Vec3,
+    rotate_x: f32,
+    rotate_z: f32,
+}
+
+fn add_voxel_overlay_layer(
+    out: &mut Vec<RenderTriangle>,
+    image: &RgbaImage,
+    part: OverlayPartSpec,
+    regions: &[OverlayRegionSpec],
+    camera: &Camera,
+    projection: Projection,
+    rect: Rect,
+    light_dir: Vec3,
+) {
+    const VOXEL_THICKNESS: f32 = 0.92;
+    const VOXEL_GAP: f32 = 0.08;
+
+    for region in regions {
+        for row in 0..region.height {
+            for col in 0..region.width {
+                let tex_x = region.tex_x + col;
+                let tex_y = region.tex_y + row;
+                if tex_x >= image.width() || tex_y >= image.height() {
+                    continue;
+                }
+                if image.get_pixel(tex_x, tex_y).0[3] == 0 {
+                    continue;
+                }
+
+                let uv =
+                    uv_rect_with_inset([image.width(), image.height()], tex_x, tex_y, 1, 1, 0.02);
+                let voxel_uv = FaceUvs {
+                    top: uv,
+                    bottom: uv,
+                    left: uv,
+                    right: uv,
+                    front: uv,
+                    back: uv,
+                };
+                let (size, local_center) = overlay_voxel_geometry(
+                    part.size,
+                    region.face,
+                    col,
+                    row,
+                    region.width,
+                    region.height,
+                    VOXEL_THICKNESS,
+                    VOXEL_GAP,
+                );
+
+                add_cuboid_triangles_with_y(
+                    out,
+                    TriangleTexture::Skin,
+                    CuboidSpec {
+                        size,
+                        pivot_top_center: part.pivot_top_center,
+                        rotate_x: part.rotate_x,
+                        rotate_z: part.rotate_z,
+                        uv: voxel_uv,
+                        cull_backfaces: false,
+                    },
+                    camera,
+                    projection,
+                    rect,
+                    light_dir,
+                    0.0,
+                    local_center,
+                );
+            }
+        }
+    }
+}
+
+fn overlay_voxel_geometry(
+    part_size: Vec3,
+    face: OverlayVoxelFace,
+    col: u32,
+    row: u32,
+    _width: u32,
+    _height: u32,
+    thickness: f32,
+    gap: f32,
+) -> (Vec3, Vec3) {
+    let half_w = part_size.x * 0.5;
+    let half_d = part_size.z * 0.5;
+    let half_t = thickness * 0.5;
+    match face {
+        OverlayVoxelFace::Front => (
+            Vec3::new(1.0, 1.0, thickness),
+            Vec3::new(
+                -half_w + col as f32 + 0.5,
+                -(row as f32) - 0.5,
+                half_d + gap + half_t,
+            ),
+        ),
+        OverlayVoxelFace::Back => (
+            Vec3::new(1.0, 1.0, thickness),
+            Vec3::new(
+                half_w - col as f32 - 0.5,
+                -(row as f32) - 0.5,
+                -half_d - gap - half_t,
+            ),
+        ),
+        OverlayVoxelFace::Left => (
+            Vec3::new(thickness, 1.0, 1.0),
+            Vec3::new(
+                -half_w - gap - half_t,
+                -(row as f32) - 0.5,
+                -half_d + col as f32 + 0.5,
+            ),
+        ),
+        OverlayVoxelFace::Right => (
+            Vec3::new(thickness, 1.0, 1.0),
+            Vec3::new(
+                half_w + gap + half_t,
+                -(row as f32) - 0.5,
+                half_d - col as f32 - 0.5,
+            ),
+        ),
+        OverlayVoxelFace::Top => (
+            Vec3::new(1.0, thickness, 1.0),
+            Vec3::new(
+                -half_w + col as f32 + 0.5,
+                gap + half_t,
+                -half_d + row as f32 + 0.5,
+            ),
+        ),
+        OverlayVoxelFace::Bottom => (
+            Vec3::new(1.0, thickness, 1.0),
+            Vec3::new(
+                -half_w + col as f32 + 0.5,
+                -part_size.y - gap - half_t,
+                half_d - row as f32 - 0.5,
+            ),
+        ),
+    }
+}
+
 fn build_character_scene(
     rect: Rect,
     cape_uv: FaceUvs,
@@ -515,7 +687,9 @@ fn build_character_scene(
     time_seconds: f32,
     walk_phase: f32,
     variant: MinecraftSkinVariant,
+    preview_3d_layers_enabled: bool,
     show_elytra: bool,
+    skin_sample: Option<Arc<RgbaImage>>,
     cape_sample: Option<Arc<RgbaImage>>,
     default_elytra_sample: Option<Arc<RgbaImage>>,
 ) -> BuiltCharacterScene {
@@ -694,22 +868,86 @@ fn build_character_scene(
         rect,
         light_dir,
     );
-    add_cuboid_triangles(
-        &mut overlay_tris,
-        TriangleTexture::Skin,
-        CuboidSpec {
-            size: Vec3::new(8.6, 12.6, 4.6),
-            pivot_top_center: Vec3::new(0.0, 24.2, 0.0) + model_offset,
-            rotate_x: 0.0,
-            rotate_z: 0.0,
-            uv: torso_overlay_uv,
-            cull_backfaces: false,
-        },
-        &camera,
-        projection,
-        rect,
-        light_dir,
-    );
+    if preview_3d_layers_enabled {
+        if let Some(skin_image) = skin_sample.as_ref() {
+            let torso_regions = [
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Top,
+                    tex_x: 20,
+                    tex_y: 32,
+                    width: 8,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Bottom,
+                    tex_x: 28,
+                    tex_y: 32,
+                    width: 8,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Left,
+                    tex_x: 28,
+                    tex_y: 36,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Right,
+                    tex_x: 16,
+                    tex_y: 36,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Front,
+                    tex_x: 20,
+                    tex_y: 36,
+                    width: 8,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Back,
+                    tex_x: 32,
+                    tex_y: 36,
+                    width: 8,
+                    height: 12,
+                },
+            ];
+            add_voxel_overlay_layer(
+                &mut overlay_tris,
+                skin_image,
+                OverlayPartSpec {
+                    size: Vec3::new(8.0, 12.0, 4.0),
+                    pivot_top_center: Vec3::new(0.0, 24.0, 0.0) + model_offset,
+                    rotate_x: 0.0,
+                    rotate_z: 0.0,
+                },
+                &torso_regions,
+                &camera,
+                projection,
+                rect,
+                light_dir,
+            );
+        }
+    } else {
+        add_cuboid_triangles(
+            &mut overlay_tris,
+            TriangleTexture::Skin,
+            CuboidSpec {
+                size: Vec3::new(8.6, 12.6, 4.6),
+                pivot_top_center: Vec3::new(0.0, 24.2, 0.0) + model_offset,
+                rotate_x: 0.0,
+                rotate_z: 0.0,
+                uv: torso_overlay_uv,
+                cull_backfaces: false,
+            },
+            &camera,
+            projection,
+            rect,
+            light_dir,
+        );
+    }
 
     add_cuboid_triangles(
         &mut base_tris,
@@ -727,22 +965,86 @@ fn build_character_scene(
         rect,
         light_dir,
     );
-    add_cuboid_triangles(
-        &mut overlay_tris,
-        TriangleTexture::Skin,
-        CuboidSpec {
-            size: Vec3::new(8.8, 8.8, 8.8),
-            pivot_top_center: Vec3::new(0.0, 32.4, 0.0) + model_offset,
-            rotate_x: 0.0,
-            rotate_z: 0.0,
-            uv: head_overlay_uv,
-            cull_backfaces: false,
-        },
-        &camera,
-        projection,
-        rect,
-        light_dir,
-    );
+    if preview_3d_layers_enabled {
+        if let Some(skin_image) = skin_sample.as_ref() {
+            let head_regions = [
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Top,
+                    tex_x: 40,
+                    tex_y: 0,
+                    width: 8,
+                    height: 8,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Bottom,
+                    tex_x: 48,
+                    tex_y: 0,
+                    width: 8,
+                    height: 8,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Left,
+                    tex_x: 48,
+                    tex_y: 8,
+                    width: 8,
+                    height: 8,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Right,
+                    tex_x: 32,
+                    tex_y: 8,
+                    width: 8,
+                    height: 8,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Front,
+                    tex_x: 40,
+                    tex_y: 8,
+                    width: 8,
+                    height: 8,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Back,
+                    tex_x: 56,
+                    tex_y: 8,
+                    width: 8,
+                    height: 8,
+                },
+            ];
+            add_voxel_overlay_layer(
+                &mut overlay_tris,
+                skin_image,
+                OverlayPartSpec {
+                    size: Vec3::new(8.0, 8.0, 8.0),
+                    pivot_top_center: Vec3::new(0.0, 32.0, 0.0) + model_offset,
+                    rotate_x: 0.0,
+                    rotate_z: 0.0,
+                },
+                &head_regions,
+                &camera,
+                projection,
+                rect,
+                light_dir,
+            );
+        }
+    } else {
+        add_cuboid_triangles(
+            &mut overlay_tris,
+            TriangleTexture::Skin,
+            CuboidSpec {
+                size: Vec3::new(8.8, 8.8, 8.8),
+                pivot_top_center: Vec3::new(0.0, 32.4, 0.0) + model_offset,
+                rotate_x: 0.0,
+                rotate_z: 0.0,
+                uv: head_overlay_uv,
+                cull_backfaces: false,
+            },
+            &camera,
+            projection,
+            rect,
+            light_dir,
+        );
+    }
 
     let shoulder_x = 4.0 + arm_width * 0.5;
     add_cuboid_triangles(
@@ -761,22 +1063,102 @@ fn build_character_scene(
         rect,
         light_dir,
     );
-    add_cuboid_triangles(
-        &mut overlay_tris,
-        TriangleTexture::Skin,
-        CuboidSpec {
-            size: Vec3::new(arm_width + 0.55, 12.55, 4.55),
-            pivot_top_center: Vec3::new(-shoulder_x, 24.15, 0.0) + model_offset,
-            rotate_x: arm_swing,
-            rotate_z: 0.0,
-            uv: left_arm_overlay_uv,
-            cull_backfaces: false,
-        },
-        &camera,
-        projection,
-        rect,
-        light_dir,
-    );
+    if preview_3d_layers_enabled {
+        if let Some(skin_image) = skin_sample.as_ref() {
+            let left_arm_regions = [
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Top,
+                    tex_x: if variant == MinecraftSkinVariant::Slim {
+                        52
+                    } else {
+                        52
+                    },
+                    tex_y: 48,
+                    width: arm_width as u32,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Bottom,
+                    tex_x: if variant == MinecraftSkinVariant::Slim {
+                        55
+                    } else {
+                        56
+                    },
+                    tex_y: 48,
+                    width: arm_width as u32,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Left,
+                    tex_x: if variant == MinecraftSkinVariant::Slim {
+                        55
+                    } else {
+                        56
+                    },
+                    tex_y: 52,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Right,
+                    tex_x: 48,
+                    tex_y: 52,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Front,
+                    tex_x: 52,
+                    tex_y: 52,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Back,
+                    tex_x: if variant == MinecraftSkinVariant::Slim {
+                        59
+                    } else {
+                        60
+                    },
+                    tex_y: 52,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+            ];
+            add_voxel_overlay_layer(
+                &mut overlay_tris,
+                skin_image,
+                OverlayPartSpec {
+                    size: Vec3::new(arm_width, 12.0, 4.0),
+                    pivot_top_center: Vec3::new(-shoulder_x, 24.0, 0.0) + model_offset,
+                    rotate_x: arm_swing,
+                    rotate_z: 0.0,
+                },
+                &left_arm_regions,
+                &camera,
+                projection,
+                rect,
+                light_dir,
+            );
+        }
+    } else {
+        add_cuboid_triangles(
+            &mut overlay_tris,
+            TriangleTexture::Skin,
+            CuboidSpec {
+                size: Vec3::new(arm_width + 0.55, 12.55, 4.55),
+                pivot_top_center: Vec3::new(-shoulder_x, 24.15, 0.0) + model_offset,
+                rotate_x: arm_swing,
+                rotate_z: 0.0,
+                uv: left_arm_overlay_uv,
+                cull_backfaces: false,
+            },
+            &camera,
+            projection,
+            rect,
+            light_dir,
+        );
+    }
     add_cuboid_triangles(
         &mut base_tris,
         TriangleTexture::Skin,
@@ -793,22 +1175,98 @@ fn build_character_scene(
         rect,
         light_dir,
     );
-    add_cuboid_triangles(
-        &mut overlay_tris,
-        TriangleTexture::Skin,
-        CuboidSpec {
-            size: Vec3::new(arm_width + 0.55, 12.55, 4.55),
-            pivot_top_center: Vec3::new(shoulder_x, 24.15, 0.0) + model_offset,
-            rotate_x: -arm_swing,
-            rotate_z: 0.0,
-            uv: right_arm_overlay_uv,
-            cull_backfaces: false,
-        },
-        &camera,
-        projection,
-        rect,
-        light_dir,
-    );
+    if preview_3d_layers_enabled {
+        if let Some(skin_image) = skin_sample.as_ref() {
+            let right_arm_regions = [
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Top,
+                    tex_x: 44,
+                    tex_y: 32,
+                    width: arm_width as u32,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Bottom,
+                    tex_x: if variant == MinecraftSkinVariant::Slim {
+                        47
+                    } else {
+                        48
+                    },
+                    tex_y: 32,
+                    width: arm_width as u32,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Left,
+                    tex_x: if variant == MinecraftSkinVariant::Slim {
+                        47
+                    } else {
+                        48
+                    },
+                    tex_y: 36,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Right,
+                    tex_x: 40,
+                    tex_y: 36,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Front,
+                    tex_x: 44,
+                    tex_y: 36,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Back,
+                    tex_x: if variant == MinecraftSkinVariant::Slim {
+                        51
+                    } else {
+                        52
+                    },
+                    tex_y: 36,
+                    width: arm_width as u32,
+                    height: 12,
+                },
+            ];
+            add_voxel_overlay_layer(
+                &mut overlay_tris,
+                skin_image,
+                OverlayPartSpec {
+                    size: Vec3::new(arm_width, 12.0, 4.0),
+                    pivot_top_center: Vec3::new(shoulder_x, 24.0, 0.0) + model_offset,
+                    rotate_x: -arm_swing,
+                    rotate_z: 0.0,
+                },
+                &right_arm_regions,
+                &camera,
+                projection,
+                rect,
+                light_dir,
+            );
+        }
+    } else {
+        add_cuboid_triangles(
+            &mut overlay_tris,
+            TriangleTexture::Skin,
+            CuboidSpec {
+                size: Vec3::new(arm_width + 0.55, 12.55, 4.55),
+                pivot_top_center: Vec3::new(shoulder_x, 24.15, 0.0) + model_offset,
+                rotate_x: -arm_swing,
+                rotate_z: 0.0,
+                uv: right_arm_overlay_uv,
+                cull_backfaces: false,
+            },
+            &camera,
+            projection,
+            rect,
+            light_dir,
+        );
+    }
 
     add_cuboid_triangles(
         &mut base_tris,
@@ -826,22 +1284,86 @@ fn build_character_scene(
         rect,
         light_dir,
     );
-    add_cuboid_triangles(
-        &mut overlay_tris,
-        TriangleTexture::Skin,
-        CuboidSpec {
-            size: Vec3::new(4.55, 12.55, 4.55),
-            pivot_top_center: Vec3::new(-2.0, 12.15, 0.0) + model_offset,
-            rotate_x: leg_swing,
-            rotate_z: 0.0,
-            uv: leg_overlay_uv,
-            cull_backfaces: false,
-        },
-        &camera,
-        projection,
-        rect,
-        light_dir,
-    );
+    if preview_3d_layers_enabled {
+        if let Some(skin_image) = skin_sample.as_ref() {
+            let left_leg_regions = [
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Top,
+                    tex_x: 4,
+                    tex_y: 48,
+                    width: 4,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Bottom,
+                    tex_x: 8,
+                    tex_y: 48,
+                    width: 4,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Left,
+                    tex_x: 8,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Right,
+                    tex_x: 0,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Front,
+                    tex_x: 4,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Back,
+                    tex_x: 12,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+            ];
+            add_voxel_overlay_layer(
+                &mut overlay_tris,
+                skin_image,
+                OverlayPartSpec {
+                    size: Vec3::new(4.0, 12.0, 4.0),
+                    pivot_top_center: Vec3::new(-2.0, 12.0, 0.0) + model_offset,
+                    rotate_x: leg_swing,
+                    rotate_z: 0.0,
+                },
+                &left_leg_regions,
+                &camera,
+                projection,
+                rect,
+                light_dir,
+            );
+        }
+    } else {
+        add_cuboid_triangles(
+            &mut overlay_tris,
+            TriangleTexture::Skin,
+            CuboidSpec {
+                size: Vec3::new(4.55, 12.55, 4.55),
+                pivot_top_center: Vec3::new(-2.0, 12.15, 0.0) + model_offset,
+                rotate_x: leg_swing,
+                rotate_z: 0.0,
+                uv: leg_overlay_uv,
+                cull_backfaces: false,
+            },
+            &camera,
+            projection,
+            rect,
+            light_dir,
+        );
+    }
 
     add_cuboid_triangles(
         &mut base_tris,
@@ -859,22 +1381,86 @@ fn build_character_scene(
         rect,
         light_dir,
     );
-    add_cuboid_triangles(
-        &mut overlay_tris,
-        TriangleTexture::Skin,
-        CuboidSpec {
-            size: Vec3::new(4.55, 12.55, 4.55),
-            pivot_top_center: Vec3::new(2.0, 12.15, 0.0) + model_offset,
-            rotate_x: -leg_swing,
-            rotate_z: 0.0,
-            uv: leg_overlay_uv,
-            cull_backfaces: false,
-        },
-        &camera,
-        projection,
-        rect,
-        light_dir,
-    );
+    if preview_3d_layers_enabled {
+        if let Some(skin_image) = skin_sample.as_ref() {
+            let right_leg_regions = [
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Top,
+                    tex_x: 4,
+                    tex_y: 48,
+                    width: 4,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Bottom,
+                    tex_x: 8,
+                    tex_y: 48,
+                    width: 4,
+                    height: 4,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Left,
+                    tex_x: 8,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Right,
+                    tex_x: 0,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Front,
+                    tex_x: 4,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+                OverlayRegionSpec {
+                    face: OverlayVoxelFace::Back,
+                    tex_x: 12,
+                    tex_y: 52,
+                    width: 4,
+                    height: 12,
+                },
+            ];
+            add_voxel_overlay_layer(
+                &mut overlay_tris,
+                skin_image,
+                OverlayPartSpec {
+                    size: Vec3::new(4.0, 12.0, 4.0),
+                    pivot_top_center: Vec3::new(2.0, 12.0, 0.0) + model_offset,
+                    rotate_x: -leg_swing,
+                    rotate_z: 0.0,
+                },
+                &right_leg_regions,
+                &camera,
+                projection,
+                rect,
+                light_dir,
+            );
+        }
+    } else {
+        add_cuboid_triangles(
+            &mut overlay_tris,
+            TriangleTexture::Skin,
+            CuboidSpec {
+                size: Vec3::new(4.55, 12.55, 4.55),
+                pivot_top_center: Vec3::new(2.0, 12.15, 0.0) + model_offset,
+                rotate_x: -leg_swing,
+                rotate_z: 0.0,
+                uv: leg_overlay_uv,
+                cull_backfaces: false,
+            },
+            &camera,
+            projection,
+            rect,
+            light_dir,
+        );
+    }
 
     let mut scene_tris = base_tris;
     scene_tris.extend(overlay_tris);
@@ -940,7 +1526,9 @@ fn build_motion_blur_scene_samples(
     shutter_frames: f32,
     sample_count: usize,
     variant: MinecraftSkinVariant,
+    preview_3d_layers_enabled: bool,
     show_elytra: bool,
+    skin_sample: Option<Arc<RgbaImage>>,
     cape_sample: Option<Arc<RgbaImage>>,
     default_elytra_sample: Option<Arc<RgbaImage>>,
     amount: f32,
@@ -994,7 +1582,9 @@ fn build_motion_blur_scene_samples(
             time_seconds,
             walk_phase,
             variant,
+            preview_3d_layers_enabled,
             show_elytra,
+            skin_sample.clone(),
             cape_sample.clone(),
             default_elytra_sample.clone(),
         );
@@ -4602,9 +5192,14 @@ struct SkinManagerState {
     last_preview_motion_blur_shutter_frames: f32,
     preview_motion_blur_sample_count: usize,
     last_preview_motion_blur_sample_count: usize,
+    preview_3d_layers_enabled: bool,
+    last_preview_3d_layers_enabled: bool,
     skin_texture_hash: Option<u64>,
     skin_texture: Option<TextureHandle>,
     skin_sample: Option<Arc<RgbaImage>>,
+    animated_skin_texture_hash: Option<u64>,
+    animated_skin_texture: Option<TextureHandle>,
+    animated_skin_sample: Option<Arc<RgbaImage>>,
     cape_texture_hash: Option<u64>,
     cape_texture: Option<TextureHandle>,
     cape_sample: Option<Arc<RgbaImage>>,
@@ -4653,9 +5248,14 @@ impl Default for SkinManagerState {
             last_preview_motion_blur_shutter_frames: 0.75,
             preview_motion_blur_sample_count: 5,
             last_preview_motion_blur_sample_count: 5,
+            preview_3d_layers_enabled: false,
+            last_preview_3d_layers_enabled: false,
             skin_texture_hash: None,
             skin_texture: None,
             skin_sample: None,
+            animated_skin_texture_hash: None,
+            animated_skin_texture: None,
+            animated_skin_sample: None,
             cape_texture_hash: None,
             cape_texture: None,
             cape_sample: None,
@@ -4727,6 +5327,9 @@ impl SkinManagerState {
         self.skin_texture_hash = None;
         self.skin_texture = None;
         self.skin_sample = None;
+        self.animated_skin_texture_hash = None;
+        self.animated_skin_texture = None;
+        self.animated_skin_sample = None;
         self.cape_texture_hash = None;
         self.cape_texture = None;
         self.cape_sample = None;
@@ -4773,6 +5376,9 @@ impl SkinManagerState {
         self.skin_texture_hash = None;
         self.skin_texture = None;
         self.skin_sample = None;
+        self.animated_skin_texture_hash = None;
+        self.animated_skin_texture = None;
+        self.animated_skin_sample = None;
         self.cape_texture_hash = None;
         self.cape_texture = None;
         self.cape_sample = None;
@@ -4915,6 +5521,9 @@ impl SkinManagerState {
             self.skin_texture = None;
             self.skin_texture_hash = None;
             self.skin_sample = None;
+            self.animated_skin_texture = None;
+            self.animated_skin_texture_hash = None;
+            self.animated_skin_sample = None;
             return;
         };
 
@@ -4928,6 +5537,9 @@ impl SkinManagerState {
 
         let Some(image) = decode_skin_rgba(bytes) else {
             self.skin_sample = None;
+            self.animated_skin_texture = None;
+            self.animated_skin_texture_hash = None;
+            self.animated_skin_sample = None;
             return;
         };
         let image = Arc::new(image);
@@ -5038,6 +5650,9 @@ impl SkinManagerState {
                 self.pending_skin_path = Some(path.display().to_string());
                 self.skin_texture_hash = None;
                 self.skin_sample = None;
+                self.animated_skin_texture = None;
+                self.animated_skin_texture_hash = None;
+                self.animated_skin_sample = None;
                 self.preview_texture = None;
                 self.preview_history = None;
             }
@@ -5277,6 +5892,9 @@ impl SkinManagerState {
         self.pending_cape_id = profile.active_cape_id;
         self.skin_texture_hash = None;
         self.skin_sample = None;
+        self.animated_skin_texture_hash = None;
+        self.animated_skin_texture = None;
+        self.animated_skin_sample = None;
         self.cape_texture_hash = None;
         self.cape_sample = None;
         self.preview_texture = None;

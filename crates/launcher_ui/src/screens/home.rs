@@ -1102,7 +1102,8 @@ fn split_server_address(address: &str) -> (String, u16) {
         return (host.to_owned(), port);
     }
     if let Some((host, port)) = trimmed.rsplit_once(':')
-        && host.contains('.')
+        && !host.is_empty()
+        && !host.contains(':')
         && let Ok(port) = port.parse::<u16>()
     {
         return (host.to_owned(), port);

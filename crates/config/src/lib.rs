@@ -251,6 +251,8 @@ pub enum ToggleSettingId {
     StreamerModeEnabled,
     WindowBlurEnabled,
     OpenTypeFeaturesEnabled,
+    SkinPreviewFreshFormatEnabled,
+    SkinPreview3dLayersEnabled,
     SnapshotsAndBetasEnabled,
     ForceJava21Minimum,
     FrameLimiterEnabled,
@@ -293,6 +295,20 @@ impl ToggleSettingId {
                 label: "Enable OpenType Features",
                 info_tooltip: Some(
                     "When enabled and the list below is empty, defaults to liga, calt.",
+                ),
+            },
+            ToggleSettingId::SkinPreviewFreshFormatEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::SkinPreviewFreshFormatEnabled,
+                label: "Enable Fresh Skin Format Support",
+                info_tooltip: Some(
+                    "Keeps the skin preview compatible with Fresh Moves / Fresh Player Animations style skin layouts without adopting pack-specific limb animation behavior.",
+                ),
+            },
+            ToggleSettingId::SkinPreview3dLayersEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::SkinPreview3dLayersEnabled,
+                label: "Enable 3D Skin Layers",
+                info_tooltip: Some(
+                    "Turns skin second-layer pixels into voxelized 3D detail in the skin preview. Compatible with the Fresh skin format toggle.",
                 ),
             },
             ToggleSettingId::SnapshotsAndBetasEnabled => ToggleSettingSpec {
@@ -510,6 +526,8 @@ pub struct Config {
     skin_preview_motion_blur_amount: f32,
     skin_preview_motion_blur_shutter_frames: f32,
     skin_preview_motion_blur_sample_count: i32,
+    skin_preview_fresh_format_enabled: bool,
+    skin_preview_3d_layers_enabled: bool,
     frame_limiter_enabled: bool,
     frame_limit_fps: i32,
     ui_font_size: f32,
@@ -603,6 +621,22 @@ impl Config {
             SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_MIN,
             SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_MAX,
         );
+    }
+
+    pub fn skin_preview_fresh_format_enabled(&self) -> bool {
+        self.skin_preview_fresh_format_enabled
+    }
+
+    pub fn set_skin_preview_fresh_format_enabled(&mut self, enabled: bool) {
+        self.skin_preview_fresh_format_enabled = enabled;
+    }
+
+    pub fn skin_preview_3d_layers_enabled(&self) -> bool {
+        self.skin_preview_3d_layers_enabled
+    }
+
+    pub fn set_skin_preview_3d_layers_enabled(&mut self, enabled: bool) {
+        self.skin_preview_3d_layers_enabled = enabled;
     }
 
     /// Returns whether frame limiter is enabled.
@@ -846,6 +880,8 @@ impl Config {
             skin_preview_motion_blur_amount: _,
             skin_preview_motion_blur_shutter_frames: _,
             skin_preview_motion_blur_sample_count: _,
+            skin_preview_fresh_format_enabled,
+            skin_preview_3d_layers_enabled,
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas,
@@ -882,6 +918,14 @@ impl Config {
             open_type_features_enabled,
         );
         visit(
+            ToggleSettingId::SkinPreviewFreshFormatEnabled.spec(),
+            skin_preview_fresh_format_enabled,
+        );
+        visit(
+            ToggleSettingId::SkinPreview3dLayersEnabled.spec(),
+            skin_preview_3d_layers_enabled,
+        );
+        visit(
             ToggleSettingId::SnapshotsAndBetasEnabled.spec(),
             include_snapshots_and_betas,
         );
@@ -915,6 +959,8 @@ impl Config {
             skin_preview_motion_blur_amount: _,
             skin_preview_motion_blur_shutter_frames: _,
             skin_preview_motion_blur_sample_count: _,
+            skin_preview_fresh_format_enabled: _,
+            skin_preview_3d_layers_enabled: _,
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
@@ -953,6 +999,8 @@ impl Config {
             skin_preview_motion_blur_enabled: _,
             skin_preview_motion_blur_amount,
             skin_preview_motion_blur_shutter_frames,
+            skin_preview_fresh_format_enabled: _,
+            skin_preview_3d_layers_enabled: _,
             ui_font_size,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
@@ -1000,6 +1048,8 @@ impl Config {
             skin_preview_motion_blur_amount: _,
             skin_preview_motion_blur_shutter_frames: _,
             skin_preview_msaa_samples,
+            skin_preview_fresh_format_enabled: _,
+            skin_preview_3d_layers_enabled: _,
             ui_font_size: _,
             ui_font_weight,
             frame_limiter_enabled: _,
@@ -1049,6 +1099,8 @@ impl Config {
             skin_preview_motion_blur_amount: _,
             skin_preview_motion_blur_shutter_frames: _,
             skin_preview_motion_blur_sample_count: _,
+            skin_preview_fresh_format_enabled: _,
+            skin_preview_3d_layers_enabled: _,
             ui_font_size: _,
             ui_font_weight: _,
             frame_limiter_enabled: _,
@@ -1108,6 +1160,8 @@ impl Default for Config {
             skin_preview_motion_blur_amount: 0.15,
             skin_preview_motion_blur_shutter_frames: 0.75,
             skin_preview_motion_blur_sample_count: 5,
+            skin_preview_fresh_format_enabled: false,
+            skin_preview_3d_layers_enabled: false,
             frame_limiter_enabled: false,
             frame_limit_fps: 120,
             ui_font_size: 18.0,

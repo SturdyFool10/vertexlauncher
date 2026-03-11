@@ -842,12 +842,13 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
     })?;
     let natives_dir =
         prepare_natives_dir(instance_root.as_path(), profile_id.as_str(), &profile_chain)?;
-    let classpath = build_classpath(
+    let classpath_entries = build_classpath_entries(
         instance_root.as_path(),
         profile_id.as_str(),
         request.game_version.as_str(),
         &profile_chain,
     )?;
+    let classpath = join_classpath(&classpath_entries);
     let (mut launch_log_file, launch_log_path) = prepare_launch_log_file(instance_root.as_path())?;
     let launch_log_for_error = launch_log_path.display().to_string();
     let _ = writeln!(
@@ -888,9 +889,12 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
     );
 
     let mut jvm_args = collect_jvm_arguments(&profile_chain, &launch_context);
-    if !jvm_args.iter().any(|arg| arg.contains("${classpath}")) {
+    if should_use_environment_classpath() {
+        command.env("CLASSPATH", classpath.as_str());
+        strip_explicit_classpath_args(&mut jvm_args);
+    } else if !jvm_args.iter().any(|arg| arg.contains("${classpath}")) {
         jvm_args.push("-cp".to_owned());
-        jvm_args.push(classpath);
+        jvm_args.push(classpath.clone());
     }
     for arg in jvm_args {
         command.arg(arg);
@@ -1315,13 +1319,13 @@ fn resolve_main_class(chain: &[serde_json::Value]) -> Option<String> {
     None
 }
 
-fn build_classpath(
+fn build_classpath_entries(
     instance_root: &Path,
     profile_id: &str,
     game_version: &str,
     chain: &[serde_json::Value],
-) -> Result<String, InstallationError> {
-    let mut classpath = Vec::<String>::new();
+) -> Result<Vec<PathBuf>, InstallationError> {
+    let mut classpath = Vec::<PathBuf>::new();
     let mut library_indices = HashMap::<String, usize>::new();
 
     for profile in chain {
@@ -1347,13 +1351,12 @@ fn build_classpath(
             };
             let full = instance_root.join("libraries").join(artifact_path.as_str());
             if full.exists() {
-                let entry = full.display().to_string();
                 let dedupe_key = library_classpath_dedupe_key(lib, artifact_path.as_str());
                 if let Some(existing_index) = library_indices.get(dedupe_key.as_str()).copied() {
-                    classpath[existing_index] = entry;
+                    classpath[existing_index] = full;
                 } else {
                     library_indices.insert(dedupe_key, classpath.len());
-                    classpath.push(entry);
+                    classpath.push(full);
                 }
             }
         }
@@ -1377,8 +1380,34 @@ fn build_classpath(
             path: launch_jar.display().to_string(),
         });
     };
-    classpath.push(selected_jar.display().to_string());
-    Ok(classpath.join(classpath_separator()))
+    classpath.push(selected_jar);
+    Ok(classpath)
+}
+
+fn join_classpath(entries: &[PathBuf]) -> String {
+    entries
+        .iter()
+        .map(|entry| entry.display().to_string())
+        .collect::<Vec<_>>()
+        .join(classpath_separator())
+}
+
+fn strip_explicit_classpath_args(args: &mut Vec<String>) {
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut index = 0usize;
+    while index < args.len() {
+        let current = args[index].as_str();
+        if current == "-cp" || current == "-classpath" {
+            index += 1;
+            if index < args.len() {
+                index += 1;
+            }
+            continue;
+        }
+        filtered.push(args[index].clone());
+        index += 1;
+    }
+    *args = filtered;
 }
 
 fn library_classpath_dedupe_key(lib: &serde_json::Value, artifact_path: &str) -> String {
@@ -1884,6 +1913,10 @@ fn classpath_separator() -> &'static str {
     } else {
         ":"
     }
+}
+
+fn should_use_environment_classpath() -> bool {
+    cfg!(target_os = "windows")
 }
 
 fn current_os_natives_key() -> &'static str {
