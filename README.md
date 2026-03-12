@@ -124,6 +124,19 @@ The project is aimed at a practical native launcher with enough control for powe
 - Keeps launcher concerns separated into reusable crates
 - Targets desktop environments where Minecraft itself can run
 
-## Building
+# What we will never do
 
-There is no packaged installer yet. Build from source:
+Our goal is to provide a high-quality, secure, and reliable launcher for Minecraft. We will never:
+
+- assist in the distribution or sale of cracked or pirated Minecraft content
+- tell people how or where to obtain cracked or pirated Minecraft content
+- attempt to steal credentials or data from Minecraft accounts
+- ban people from using this launcher due to:
+  - their beliefs
+  - their speech so long as it is lawful in the United States
+  - who they voted for
+  - who they affiliate with
+- try to allow people to continue using this launcher after they have been banned from Minecraft
+
+We care about community trust, and above that as well, I as the owner of this project hate pirates, that is all anyone needs to know.
+Free speech is a core value of this project, and we will never censor or ban people for their opinions.
