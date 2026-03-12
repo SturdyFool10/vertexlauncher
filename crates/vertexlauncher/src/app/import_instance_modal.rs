@@ -124,7 +124,6 @@ impl ImportMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LauncherKind {
-    Vertex,
     Modrinth,
     CurseForge,
     Prism,
@@ -135,7 +134,6 @@ pub enum LauncherKind {
 impl LauncherKind {
     fn label(self) -> &'static str {
         match self {
-            Self::Vertex => "Vertex instance folder",
             Self::Modrinth => "Modrinth launcher instance",
             Self::CurseForge => "CurseForge instance",
             Self::Prism => "Prism / MultiMC / PolyMC instance",
@@ -145,9 +143,8 @@ impl LauncherKind {
     }
 }
 
-const LAUNCHER_KIND_OPTIONS: [&str; 6] = [
+const LAUNCHER_KIND_OPTIONS: [&str; 5] = [
     "Auto-detect",
-    "Vertex",
     "Modrinth",
     "CurseForge",
     "Prism / MultiMC",
@@ -160,11 +157,10 @@ fn selected_import_mode(state: &ImportInstanceState) -> ImportMode {
 
 fn selected_launcher_hint(state: &ImportInstanceState) -> Option<LauncherKind> {
     match state.launcher_kind_index {
-        1 => Some(LauncherKind::Vertex),
-        2 => Some(LauncherKind::Modrinth),
-        3 => Some(LauncherKind::CurseForge),
-        4 => Some(LauncherKind::Prism),
-        5 => Some(LauncherKind::ATLauncher),
+        1 => Some(LauncherKind::Modrinth),
+        2 => Some(LauncherKind::CurseForge),
+        3 => Some(LauncherKind::Prism),
+        4 => Some(LauncherKind::ATLauncher),
         _ => None,
     }
 }
@@ -680,7 +676,6 @@ fn inspect_launcher_details(
 
     let launcher = launcher_hint.unwrap_or_else(|| detect_launcher_kind(path));
     match launcher {
-        LauncherKind::Vertex => inspect_vertex_launcher_instance(path),
         LauncherKind::Modrinth => inspect_modrinth_launcher_instance(path),
         LauncherKind::CurseForge => inspect_curseforge_launcher_instance(path),
         LauncherKind::Prism => inspect_prism_launcher_instance(path),
@@ -728,7 +723,7 @@ fn import_launcher_instance(
 
 fn detect_launcher_kind(path: &Path) -> LauncherKind {
     if path.join(MANAGED_CONTENT_MANIFEST_FILE_NAME).is_file() {
-        LauncherKind::Vertex
+        LauncherKind::Unknown
     } else if path.join("profile.json").is_file() || looks_like_modrinth_profile_path(path) {
         LauncherKind::Modrinth
     } else if path.join("minecraftinstance.json").is_file() {
@@ -740,10 +735,6 @@ fn detect_launcher_kind(path: &Path) -> LauncherKind {
     } else {
         LauncherKind::Unknown
     }
-}
-
-fn inspect_vertex_launcher_instance(path: &Path) -> Result<LauncherInspection, String> {
-    inspect_generic_launcher_instance_with_launcher(path, LauncherKind::Vertex)
 }
 
 fn inspect_modrinth_launcher_instance(path: &Path) -> Result<LauncherInspection, String> {

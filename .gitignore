@@ -9,3 +9,4 @@ logs/
 instances.json
 /instances/
 /themes/
+**/*.jar.log

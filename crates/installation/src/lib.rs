@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -33,6 +35,8 @@ const HTTP_RETRY_ATTEMPTS: u32 = 4;
 const HTTP_RETRY_BASE_DELAY_MS: u64 = 350;
 const OPENJDK_USER_AGENT: &str =
     "VertexLauncher-JavaProvisioner/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub fn display_user_path(path: &Path) -> String {
     #[cfg(target_os = "windows")]
@@ -872,7 +876,11 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
         request.game_version.as_str(),
         &profile_chain,
     )?;
-    let classpath = join_classpath(&classpath_entries);
+    let classpath = prepare_launch_classpath(
+        instance_root.as_path(),
+        profile_id.as_str(),
+        &classpath_entries,
+    )?;
     let (mut launch_log_file, launch_log_path) = prepare_launch_log_file(instance_root.as_path())?;
     let launch_log_for_error = display_user_path(launch_log_path.as_path());
     let _ = writeln!(
@@ -883,6 +891,7 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
         display_user_path(instance_root.as_path())
     );
     let stderr_log = launch_log_file.try_clone()?;
+    let mut command_log = launch_log_file.try_clone()?;
 
     let mut command = Command::new(java.as_str());
     command
@@ -901,7 +910,7 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
         request.game_version.as_str(),
         profile_id.as_str(),
         resolve_assets_index_name(&profile_chain, request.game_version.as_str()),
-        classpath.as_str(),
+        classpath.resolved.as_str(),
         natives_dir.as_path(),
         request.player_name.as_deref(),
         request.player_uuid.as_deref(),
@@ -914,11 +923,14 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
 
     let mut jvm_args = collect_jvm_arguments(&profile_chain, &launch_context);
     if should_use_environment_classpath() {
-        command.env("CLASSPATH", classpath.as_str());
+        command.env("CLASSPATH", classpath.resolved.as_str());
         strip_explicit_classpath_args(&mut jvm_args);
-    } else if !jvm_args.iter().any(|arg| arg.contains("${classpath}")) {
+    } else if let Some(argfile) = classpath.argfile.as_ref() {
+        strip_explicit_classpath_args(&mut jvm_args);
+        command.arg(format!("@{}", display_user_path(argfile.as_path())));
+    } else if !has_explicit_classpath_args(&jvm_args) {
         jvm_args.push("-cp".to_owned());
-        jvm_args.push(classpath.clone());
+        jvm_args.push(classpath.resolved.clone());
     }
     for arg in jvm_args {
         command.arg(arg);
@@ -930,6 +942,17 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
     for arg in game_args {
         command.arg(arg);
     }
+
+    let command_args = command
+        .get_args()
+        .map(|arg| quote_command_arg(arg.to_string_lossy().as_ref()))
+        .collect::<Vec<_>>();
+    let _ = writeln!(
+        command_log,
+        "[vertexlauncher] Command: {} {}",
+        quote_command_arg(java.as_str()),
+        command_args.join(" ")
+    );
 
     let mut child = spawn_command_child(&mut command, java.as_str())?;
     thread::sleep(Duration::from_millis(1200));
@@ -1108,10 +1131,8 @@ fn prune_finished_processes(processes: &mut HashMap<String, Vec<RunningInstanceP
 }
 
 fn instance_process_key(instance_root: &Path) -> String {
-    fs_canonicalize(instance_root)
-        .unwrap_or_else(|_| instance_root.to_path_buf())
-        .display()
-        .to_string()
+    let normalized = fs_canonicalize(instance_root).unwrap_or_else(|_| instance_root.to_path_buf());
+    display_user_path(normalized.as_path())
 }
 
 fn normalize_account_key(value: Option<&str>) -> Option<String> {
@@ -1140,10 +1161,12 @@ fn normalize_java_executable(configured: Option<&str>) -> String {
             java = "java".to_owned();
         } else if java_path.is_relative() {
             if let Ok(canonical) = fs_canonicalize(java_path) {
-                java = canonical.display().to_string();
+                java = display_user_path(canonical.as_path());
             } else if let Ok(cwd) = std::env::current_dir() {
-                java = cwd.join(java_path).display().to_string();
+                java = display_user_path(cwd.join(java_path).as_path());
             }
+        } else {
+            java = display_user_path(java_path);
         }
     }
     java
@@ -1162,6 +1185,10 @@ fn run_command_output(cmd: &mut Command, executable: &str) -> Result<Output, Ins
 }
 
 fn spawn_command_child(cmd: &mut Command, executable: &str) -> Result<Child, InstallationError> {
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd.spawn().map_err(|err| {
         if err.kind() == ErrorKind::NotFound {
             InstallationError::JavaExecutableNotFound {
@@ -1411,9 +1438,64 @@ fn build_classpath_entries(
 fn join_classpath(entries: &[PathBuf]) -> String {
     entries
         .iter()
-        .map(|entry| entry.display().to_string())
+        .map(|entry| display_user_path(entry.as_path()))
         .collect::<Vec<_>>()
         .join(classpath_separator())
+}
+
+struct LaunchClasspath {
+    resolved: String,
+    argfile: Option<PathBuf>,
+}
+
+fn prepare_launch_classpath(
+    instance_root: &Path,
+    profile_id: &str,
+    entries: &[PathBuf],
+) -> Result<LaunchClasspath, InstallationError> {
+    let joined = join_classpath(entries);
+    if joined.len() <= 7000 {
+        return Ok(LaunchClasspath {
+            resolved: joined,
+            argfile: None,
+        });
+    }
+
+    let argfile = write_classpath_argfile(instance_root, profile_id, joined.as_str())?;
+    Ok(LaunchClasspath {
+        resolved: joined,
+        argfile: Some(argfile),
+    })
+}
+
+fn write_classpath_argfile(
+    instance_root: &Path,
+    profile_id: &str,
+    classpath: &str,
+) -> Result<PathBuf, InstallationError> {
+    let cache_dir = instance_root.join(".vertexlauncher");
+    fs_create_dir_all(&cache_dir)?;
+    let argfile_path = cache_dir.join(format!("classpath-{profile_id}.args"));
+    let argfile_contents = format!("-cp\n{}\n", quote_java_argfile_value(classpath));
+    fs_write(argfile_path.as_path(), argfile_contents.as_bytes())?;
+    Ok(argfile_path)
+}
+
+fn quote_command_arg(arg: &str) -> String {
+    if arg.is_empty()
+        || arg
+            .chars()
+            .any(|ch| ch.is_whitespace() || matches!(ch, '"' | '\''))
+    {
+        format!("{arg:?}")
+    } else {
+        arg.to_owned()
+    }
+}
+
+fn quote_java_argfile_value(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }
 
 fn strip_explicit_classpath_args(args: &mut Vec<String>) {
@@ -1432,6 +1514,11 @@ fn strip_explicit_classpath_args(args: &mut Vec<String>) {
         index += 1;
     }
     *args = filtered;
+}
+
+fn has_explicit_classpath_args(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.as_str(), "-cp" | "-classpath"))
 }
 
 fn library_classpath_dedupe_key(lib: &serde_json::Value, artifact_path: &str) -> String {
@@ -1584,11 +1671,11 @@ fn build_launch_context(
     substitutions.insert("version_name".to_owned(), profile_id.to_owned());
     substitutions.insert(
         "game_directory".to_owned(),
-        instance_root.display().to_string(),
+        display_user_path(instance_root),
     );
     substitutions.insert(
         "assets_root".to_owned(),
-        instance_root.join("assets").display().to_string(),
+        display_user_path(instance_root.join("assets").as_path()),
     );
     substitutions.insert("assets_index_name".to_owned(), assets_index_name.to_owned());
     substitutions.insert("auth_uuid".to_owned(), uuid.to_owned());
@@ -1601,17 +1688,17 @@ fn build_launch_context(
     substitutions.insert("classpath".to_owned(), classpath.to_owned());
     substitutions.insert(
         "library_directory".to_owned(),
-        instance_root.join("libraries").display().to_string(),
+        display_user_path(instance_root.join("libraries").as_path()),
     );
     substitutions.insert(
         "natives_directory".to_owned(),
-        natives_dir.display().to_string(),
+        display_user_path(natives_dir),
     );
     substitutions.insert("launcher_name".to_owned(), "vertexlauncher".to_owned());
     substitutions.insert("launcher_version".to_owned(), "0.1".to_owned());
     substitutions.insert(
         "quickPlayPath".to_owned(),
-        instance_root.join("quickPlay").display().to_string(),
+        display_user_path(instance_root.join("quickPlay").as_path()),
     );
     if let Some(world) = quick_play_singleplayer
         .map(str::trim)
@@ -1909,10 +1996,17 @@ fn rule_applies_to_current_os(os_value: Option<&serde_json::Value>) -> bool {
     let Some(os_object) = os_value.and_then(serde_json::Value::as_object) else {
         return true;
     };
-    let Some(name) = os_object.get("name").and_then(serde_json::Value::as_str) else {
-        return true;
-    };
-    name == current_os_natives_key()
+    if let Some(name) = os_object.get("name").and_then(serde_json::Value::as_str)
+        && name != current_os_natives_key()
+    {
+        return false;
+    }
+    if let Some(arch) = os_object.get("arch").and_then(serde_json::Value::as_str)
+        && !arch_matches_current_target(arch)
+    {
+        return false;
+    }
+    true
 }
 
 fn substitute_tokens(raw: &str, context: &LaunchContext) -> String {
@@ -1940,7 +2034,7 @@ fn classpath_separator() -> &'static str {
 }
 
 fn should_use_environment_classpath() -> bool {
-    cfg!(target_os = "windows")
+    false
 }
 
 fn current_os_natives_key() -> &'static str {
@@ -1958,6 +2052,17 @@ fn current_arch_natives_value() -> &'static str {
         "64"
     } else {
         "32"
+    }
+}
+
+fn arch_matches_current_target(expected: &str) -> bool {
+    let normalized = expected.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "x86" | "i386" | "i686" | "32" => cfg!(target_arch = "x86"),
+        "x86_64" | "amd64" | "64" => cfg!(target_arch = "x86_64"),
+        "arm64" | "aarch64" => cfg!(target_arch = "aarch64"),
+        "arm" => cfg!(target_arch = "arm"),
+        other => std::env::consts::ARCH.eq_ignore_ascii_case(other),
     }
 }
 
@@ -3098,22 +3203,21 @@ fn run_modloader_installer_and_verify(
     ensure_launcher_profiles(instance_root)?;
     let installer_target =
         fs_canonicalize(instance_root).unwrap_or_else(|_| instance_root.to_path_buf());
+    let installer_path_arg = display_user_path(installer_path.as_path());
+    let installer_target_arg = display_user_path(installer_target.as_path());
 
     // Try both flag variants used by Forge/NeoForge installers.
     let mut last_failure = None;
     for flag in ["--installClient", "--install-client"] {
         let mut cmd = Command::new(java.as_str());
         cmd.arg("-jar")
-            .arg(installer_path.as_path())
+            .arg(installer_path_arg.as_str())
             .arg(flag)
-            .arg(installer_target.as_path())
+            .arg(installer_target_arg.as_str())
             .current_dir(installer_target.as_path());
         let command_line = format!(
             "{} -jar {} {} {}",
-            java,
-            installer_path.display(),
-            flag,
-            installer_target.display()
+            java, installer_path_arg, flag, installer_target_arg
         );
         let output = run_command_output(&mut cmd, java.as_str())?;
         if output.status.success() {
