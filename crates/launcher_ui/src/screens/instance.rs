@@ -51,6 +51,7 @@ mod runtime;
 mod runtime_prepare_operation;
 mod runtime_prepare_outcome;
 
+use content::ContentApplyResult;
 use content::{poll_content_lookup_results, render_installed_content_section};
 use content_lookup_result::ContentLookupResult;
 use installed_content_cache::InstalledContentCache;
@@ -143,6 +144,7 @@ pub fn render(
     if state.version_catalog_in_flight
         || !state.modloader_versions_in_flight.is_empty()
         || state.runtime_prepare_in_flight
+        || state.content_apply_in_flight
     {
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
@@ -161,11 +163,15 @@ pub fn render(
     ui.add_space(12.0);
 
     let selected_game_version_for_runtime = selected_game_version(&state).to_owned();
-    let external_activity =
-        install_activity::snapshot().filter(|activity| activity.instance_id == state.name_input);
+    let external_activity = install_activity::snapshot().filter(|activity| {
+        activity.instance_id == state.name_input
+            || activity.instance_id == instance_snapshot.name
+            || activity.instance_id == instance_id
+    });
     let external_install_active = external_activity
         .as_ref()
-        .is_some_and(|activity| !matches!(activity.stage, InstallStage::Complete));
+        .is_some_and(|activity| !matches!(activity.stage, InstallStage::Complete))
+        || state.content_apply_in_flight;
     render_runtime_row(
         ui,
         text_ui,

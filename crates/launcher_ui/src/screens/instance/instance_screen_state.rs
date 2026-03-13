@@ -10,7 +10,7 @@ use installation::{
 use vtmpack::VtmpackExportOptions;
 
 use super::{
-    ContentLookupResult, INSTALLED_CONTENT_PAGE_SIZES, InstalledContentCache,
+    ContentApplyResult, ContentLookupResult, INSTALLED_CONTENT_PAGE_SIZES, InstalledContentCache,
     RuntimePrepareOutcome, split_modloader,
 };
 
@@ -46,6 +46,9 @@ pub(super) struct InstanceScreenState {
     pub(super) content_hash_cache: Option<InstalledContentHashCache>,
     pub(super) content_hash_cache_dirty: bool,
     pub(super) content_hash_cache_dirty_since: Option<Instant>,
+    pub(super) content_apply_in_flight: bool,
+    pub(super) content_apply_results_tx: Option<mpsc::Sender<ContentApplyResult>>,
+    pub(super) content_apply_results_rx: Option<Arc<Mutex<mpsc::Receiver<ContentApplyResult>>>>,
     pub(super) content_lookup_in_flight: HashSet<String>,
     pub(super) content_lookup_results_tx: Option<mpsc::Sender<ContentLookupResult>>,
     pub(super) content_lookup_results_rx: Option<Arc<Mutex<mpsc::Receiver<ContentLookupResult>>>>,
@@ -118,6 +121,9 @@ impl InstanceScreenState {
             content_hash_cache: None,
             content_hash_cache_dirty: false,
             content_hash_cache_dirty_since: None,
+            content_apply_in_flight: false,
+            content_apply_results_tx: None,
+            content_apply_results_rx: None,
             content_lookup_in_flight: HashSet::new(),
             content_lookup_results_tx: None,
             content_lookup_results_rx: None,

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use curseforge::Client as CurseForgeClient;
 use managed_content::InstalledContentIdentity;
 use modprovider::{ContentSource, UnifiedContentEntry, search_minecraft_content};
-use modrinth::Client as ModrinthClient;
+use modrinth::{Client as ModrinthClient, ModrinthError};
 
 use crate::{
     InstalledContentFile, InstalledContentHashCache, InstalledContentHashCacheUpdate,
@@ -16,6 +16,7 @@ const CONTENT_HASH_CACHE_DIR_NAME: &str = "cache";
 const CONTENT_HASH_CACHE_FILE_NAME: &str = "content_hash_cache.json";
 const CURSEFORGE_VERSION_LOOKUP_PAGE_SIZE: u32 = 50;
 const CURSEFORGE_VERSION_LOOKUP_MAX_PAGES: u32 = 5;
+const LOOKUP_CACHE_KEY_PREFIX: &str = "lookup::";
 const HEURISTIC_WARNING_MESSAGE: &str =
     "Resolved from filename search. This match is heuristic and may be wrong.";
 
@@ -120,11 +121,7 @@ impl InstalledContentResolver {
         let Ok(cache) = serde_json::from_str::<InstalledContentHashCache>(raw.as_str()) else {
             return InstalledContentHashCache::default();
         };
-        if cache.version == InstalledContentHashCache::default().version {
-            cache
-        } else {
-            InstalledContentHashCache::default()
-        }
+        cache.into_current().unwrap_or_default()
     }
 
     pub fn save_hash_cache(
@@ -169,16 +166,46 @@ impl InstalledContentResolver {
             None
         };
 
+        if let Some(resolution) = exact_hash_resolution.as_ref() {
+            hash_cache_updates.extend(lookup_cache_updates_for_request(request, resolution));
+        }
+
+        let managed_resolution = if exact_hash_resolution.is_none() {
+            managed_content_metadata(
+                request.file_path.as_path(),
+                request.disk_file_name.as_str(),
+                request.managed_identity.as_ref(),
+                request.kind,
+                request.game_version.as_str(),
+                request.loader.as_str(),
+            )
+        } else {
+            None
+        };
+        if let Some(resolution) = managed_resolution.as_ref() {
+            hash_cache_updates.extend(lookup_cache_updates_for_request(request, resolution));
+        }
+
+        let lookup_cached_resolution =
+            if exact_hash_resolution.is_none() && managed_resolution.is_none() {
+                resolve_lookup_cache_metadata(request, hash_cache)
+            } else {
+                None
+            };
+
+        let heuristic_resolution = if exact_hash_resolution.is_none()
+            && managed_resolution.is_none()
+            && lookup_cached_resolution.is_none()
+        {
+            heuristic_content_metadata(request)
+        } else {
+            None
+        };
+
         let resolution = exact_hash_resolution
-            .or_else(|| {
-                managed_content_metadata(
-                    request.file_path.as_path(),
-                    request.disk_file_name.as_str(),
-                    request.managed_identity.as_ref(),
-                    request.kind,
-                )
-            })
-            .or_else(|| heuristic_content_metadata(request));
+            .or(managed_resolution)
+            .or(lookup_cached_resolution)
+            .or(heuristic_resolution);
 
         ResolveInstalledContentResult {
             resolution,
@@ -203,6 +230,7 @@ fn resolve_modrinth_hash_metadata(
     let modrinth = ModrinthClient::default();
     let loaders = modrinth_loader_slugs(loader);
     let game_versions = normalized_game_versions(game_version);
+    let mut saw_transient_error = false;
 
     for (algorithm, hash) in [("sha512", sha512.as_str()), ("sha1", sha1.as_str())] {
         let hash_key = format!("{algorithm}:{hash}");
@@ -221,11 +249,16 @@ fn resolve_modrinth_hash_metadata(
             continue;
         }
 
-        let Some(version) = modrinth
-            .get_version_from_hash(hash, algorithm)
-            .ok()
-            .flatten()
-        else {
+        let version = match modrinth.get_version_from_hash(hash, algorithm) {
+            Ok(version) => version,
+            Err(err) => {
+                if should_skip_hash_cache_update(&err) {
+                    saw_transient_error = true;
+                }
+                continue;
+            }
+        };
+        let Some(version) = version else {
             continue;
         };
         let Some(entry) = modrinth_entry_from_project_id(&modrinth, version.project_id.as_str())
@@ -261,6 +294,10 @@ fn resolve_modrinth_hash_metadata(
             },
         ];
         return (Some(resolution), updates);
+    }
+
+    if saw_transient_error {
+        return (None, Vec::new());
     }
 
     (
@@ -322,6 +359,8 @@ fn managed_content_metadata(
     disk_file_name: &str,
     managed_identity: Option<&InstalledContentIdentity>,
     kind: InstalledContentKind,
+    game_version: &str,
+    loader: &str,
 ) -> Option<ResolvedInstalledContent> {
     let identity = managed_identity?;
 
@@ -349,7 +388,14 @@ fn managed_content_metadata(
                 installed_version_label: non_empty_owned(version.version_number.as_str()),
                 resolution_kind: InstalledContentResolutionKind::Managed,
                 warning_message: None,
-                update: None,
+                update: resolve_managed_modrinth_update(
+                    &modrinth,
+                    project_id,
+                    kind,
+                    game_version,
+                    loader,
+                    Some(version_id),
+                ),
             })
         }
         ContentSource::CurseForge => {
@@ -378,7 +424,14 @@ fn managed_content_metadata(
                 installed_version_label: non_empty_owned(file.display_name.as_str()),
                 resolution_kind: InstalledContentResolutionKind::Managed,
                 warning_message: None,
-                update: None,
+                update: resolve_managed_curseforge_update(
+                    &curseforge,
+                    project_id,
+                    version_id,
+                    kind,
+                    game_version,
+                    loader,
+                ),
             })
         }
     }
@@ -424,6 +477,98 @@ fn heuristic_content_metadata(
     }
 
     None
+}
+
+fn resolve_lookup_cache_metadata(
+    request: &ResolveInstalledContentRequest,
+    hash_cache: &InstalledContentHashCache,
+) -> Option<ResolvedInstalledContent> {
+    for cache_key in lookup_cache_keys_for_request(request) {
+        if let Some(Some(resolution)) = hash_cache.entries.get(cache_key.as_str()) {
+            return Some(resolution.clone());
+        }
+    }
+
+    None
+}
+
+fn lookup_cache_updates_for_request(
+    request: &ResolveInstalledContentRequest,
+    resolution: &ResolvedInstalledContent,
+) -> Vec<InstalledContentHashCacheUpdate> {
+    let cached_resolution = lookup_cache_resolution(resolution);
+    lookup_cache_keys_for_request_and_resolution(request, resolution)
+        .into_iter()
+        .map(|cache_key| InstalledContentHashCacheUpdate {
+            hash_key: cache_key,
+            resolution: Some(cached_resolution.clone()),
+        })
+        .collect()
+}
+
+fn lookup_cache_resolution(resolution: &ResolvedInstalledContent) -> ResolvedInstalledContent {
+    ResolvedInstalledContent {
+        entry: resolution.entry.clone(),
+        installed_version_id: None,
+        installed_version_label: None,
+        resolution_kind: InstalledContentResolutionKind::HeuristicSearch,
+        warning_message: Some(HEURISTIC_WARNING_MESSAGE.to_owned()),
+        update: None,
+    }
+}
+
+fn lookup_cache_keys_for_request(request: &ResolveInstalledContentRequest) -> Vec<String> {
+    let mut cache_keys = Vec::new();
+    push_lookup_cache_key(&mut cache_keys, request.kind, request.lookup_query.as_str());
+    if let Some(fallback_lookup_query) = request.fallback_lookup_query.as_deref() {
+        push_lookup_cache_key(&mut cache_keys, request.kind, fallback_lookup_query);
+    }
+    cache_keys
+}
+
+fn lookup_cache_keys_for_request_and_resolution(
+    request: &ResolveInstalledContentRequest,
+    resolution: &ResolvedInstalledContent,
+) -> Vec<String> {
+    let mut cache_keys = lookup_cache_keys_for_request(request);
+    push_lookup_cache_key(
+        &mut cache_keys,
+        request.kind,
+        resolution.entry.name.as_str(),
+    );
+    cache_keys
+}
+
+fn push_lookup_cache_key(cache_keys: &mut Vec<String>, kind: InstalledContentKind, query: &str) {
+    let Some(cache_key) = lookup_cache_key(kind, query) else {
+        return;
+    };
+    if !cache_keys.iter().any(|existing| existing == &cache_key) {
+        cache_keys.push(cache_key);
+    }
+}
+
+fn lookup_cache_key(kind: InstalledContentKind, query: &str) -> Option<String> {
+    let normalized_query = normalize_lookup_cache_query(query)?;
+    Some(format!(
+        "{LOOKUP_CACHE_KEY_PREFIX}{}::{normalized_query}",
+        kind.folder_name()
+    ))
+}
+
+fn normalize_lookup_cache_query(query: &str) -> Option<String> {
+    let normalized_query = normalize_lookup_key(query);
+    if normalized_query.is_empty() {
+        return None;
+    }
+
+    let tokens = split_lookup_tokens(normalized_query.as_str());
+    let canonical_tokens = trim_ignorable_lookup_suffix(tokens.as_slice());
+    if canonical_tokens.is_empty() {
+        Some(normalized_query)
+    } else {
+        Some(canonical_tokens.join(" "))
+    }
 }
 
 fn search_modrinth_heuristic_content(
@@ -510,6 +655,92 @@ fn find_curseforge_project_file(
     None
 }
 
+fn resolve_managed_modrinth_update(
+    modrinth: &ModrinthClient,
+    project_id: &str,
+    kind: InstalledContentKind,
+    game_version: &str,
+    loader: &str,
+    installed_version_id: Option<&str>,
+) -> Option<InstalledContentUpdate> {
+    let loaders = if kind == InstalledContentKind::Mods {
+        modrinth_loader_slugs(loader)
+    } else {
+        Vec::new()
+    };
+    let game_versions = normalized_game_versions(game_version);
+    let latest = modrinth
+        .list_project_versions(project_id, loaders.as_slice(), game_versions.as_slice())
+        .ok()?
+        .into_iter()
+        .filter(|version| !version.files.is_empty())
+        .max_by(|left, right| left.date_published.cmp(&right.date_published))?;
+    if installed_version_id.is_some_and(|value| value == latest.id) {
+        return None;
+    }
+
+    Some(InstalledContentUpdate {
+        latest_version_id: latest.id,
+        latest_version_label: non_empty_owned(latest.version_number.as_str())
+            .unwrap_or_else(|| "Unknown update".to_owned()),
+    })
+}
+
+fn resolve_managed_curseforge_update(
+    curseforge: &CurseForgeClient,
+    project_id: u64,
+    installed_version_id: u64,
+    kind: InstalledContentKind,
+    game_version: &str,
+    loader: &str,
+) -> Option<InstalledContentUpdate> {
+    let game_version = normalize_optional(game_version);
+    let mod_loader_type = if kind == InstalledContentKind::Mods {
+        curseforge_mod_loader_type(loader)
+    } else {
+        None
+    };
+    let mut index = 0u32;
+    let mut latest: Option<curseforge::File> = None;
+
+    for _ in 0..CURSEFORGE_VERSION_LOOKUP_MAX_PAGES {
+        let batch = curseforge
+            .list_mod_files(
+                project_id,
+                game_version.as_deref(),
+                mod_loader_type,
+                index,
+                CURSEFORGE_VERSION_LOOKUP_PAGE_SIZE,
+            )
+            .ok()?;
+        let batch_len = batch.len() as u32;
+        for file in batch {
+            if file.download_url.is_none() {
+                continue;
+            }
+            match latest.as_ref() {
+                Some(current) if current.file_date >= file.file_date => {}
+                _ => latest = Some(file),
+            }
+        }
+        if batch_len < CURSEFORGE_VERSION_LOOKUP_PAGE_SIZE {
+            break;
+        }
+        index = index.saturating_add(CURSEFORGE_VERSION_LOOKUP_PAGE_SIZE);
+    }
+
+    let latest = latest?;
+    if latest.id == installed_version_id {
+        return None;
+    }
+
+    Some(InstalledContentUpdate {
+        latest_version_id: latest.id.to_string(),
+        latest_version_label: non_empty_owned(latest.display_name.as_str())
+            .unwrap_or_else(|| "Unknown update".to_owned()),
+    })
+}
+
 fn is_jar_file(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
@@ -532,6 +763,16 @@ fn modrinth_loader_slug(loader: &str) -> Option<&'static str> {
     }
 }
 
+fn curseforge_mod_loader_type(loader: &str) -> Option<u32> {
+    match loader.trim().to_ascii_lowercase().as_str() {
+        "forge" => Some(1),
+        "fabric" => Some(4),
+        "quilt" => Some(5),
+        "neoforge" => Some(6),
+        _ => None,
+    }
+}
+
 fn normalized_game_versions(game_version: &str) -> Vec<String> {
     normalize_optional(game_version).into_iter().collect()
 }
@@ -543,6 +784,17 @@ fn normalize_optional(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_owned())
     }
+}
+
+fn should_skip_hash_cache_update(err: &ModrinthError) -> bool {
+    err.is_rate_limited()
+        || matches!(
+            err,
+            ModrinthError::HttpStatus { .. }
+                | ModrinthError::Transport(_)
+                | ModrinthError::Read(_)
+                | ModrinthError::Json(_)
+        )
 }
 
 fn non_empty_owned(value: &str) -> Option<String> {
@@ -947,6 +1199,91 @@ mod tests {
         assert!(
             levenshtein_distance("iris shaders", "iris")
                 < levenshtein_distance("iris shaders", "indium")
+        );
+    }
+
+    #[test]
+    fn resolve_uses_lookup_cache_before_falling_back_to_heuristic_search() {
+        let request = ResolveInstalledContentRequest {
+            file_path: PathBuf::from("resourcepacks/fresh-animations.zip"),
+            disk_file_name: "fresh-animations.zip".to_owned(),
+            lookup_query: "fresh animations".to_owned(),
+            fallback_lookup_key: None,
+            fallback_lookup_query: None,
+            managed_identity: None,
+            kind: InstalledContentKind::ResourcePacks,
+            game_version: "1.21.1".to_owned(),
+            loader: "fabric".to_owned(),
+        };
+        let mut hash_cache = InstalledContentHashCache::default();
+        hash_cache.entries.insert(
+            "lookup::resourcepacks::fresh animations".to_owned(),
+            Some(ResolvedInstalledContent {
+                entry: UnifiedContentEntry {
+                    id: "modrinth:freshanimations".to_owned(),
+                    name: "Fresh Animations".to_owned(),
+                    summary: String::new(),
+                    content_type: "resourcepack".to_owned(),
+                    source: ContentSource::Modrinth,
+                    project_url: None,
+                    icon_url: None,
+                },
+                installed_version_id: None,
+                installed_version_label: None,
+                resolution_kind: InstalledContentResolutionKind::HeuristicSearch,
+                warning_message: Some(HEURISTIC_WARNING_MESSAGE.to_owned()),
+                update: None,
+            }),
+        );
+
+        let result = InstalledContentResolver::resolve(&request, &hash_cache);
+        let resolution = result
+            .resolution
+            .expect("expected lookup cache to resolve content");
+
+        assert_eq!(resolution.entry.name, "Fresh Animations");
+        assert!(result.hash_cache_updates.is_empty());
+    }
+
+    #[test]
+    fn lookup_cache_updates_seed_canonical_query_aliases() {
+        let request = ResolveInstalledContentRequest {
+            file_path: PathBuf::from("mods/sodium-fabric-0.6.0.jar"),
+            disk_file_name: "sodium-fabric-0.6.0.jar".to_owned(),
+            lookup_query: "sodium fabric".to_owned(),
+            fallback_lookup_key: None,
+            fallback_lookup_query: None,
+            managed_identity: None,
+            kind: InstalledContentKind::Mods,
+            game_version: "1.21.1".to_owned(),
+            loader: "fabric".to_owned(),
+        };
+        let resolution = ResolvedInstalledContent {
+            entry: entry("Sodium", ContentSource::Modrinth),
+            installed_version_id: Some("version-1".to_owned()),
+            installed_version_label: Some("0.6.0".to_owned()),
+            resolution_kind: InstalledContentResolutionKind::ExactHash,
+            warning_message: None,
+            update: None,
+        };
+
+        let updates = lookup_cache_updates_for_request(&request, &resolution);
+
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].hash_key, "lookup::mods::sodium");
+        assert_eq!(
+            updates[0]
+                .resolution
+                .as_ref()
+                .and_then(|value| value.warning_message.as_deref()),
+            Some(HEURISTIC_WARNING_MESSAGE)
+        );
+        assert_eq!(
+            updates[0]
+                .resolution
+                .as_ref()
+                .and_then(|value| value.installed_version_id.as_deref()),
+            None
         );
     }
 }

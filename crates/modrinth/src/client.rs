@@ -2,6 +2,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::io::Read as _;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 use crate::response_records::{ProjectRecord, ProjectVersionRecord, SearchResponse};
@@ -10,6 +12,17 @@ use crate::{ModrinthError, Project, ProjectVersion, SearchProject};
 const DEFAULT_MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
 const DEFAULT_USER_AGENT: &str =
     "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
+const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Copy, Debug)]
+struct RateLimitState {
+    until: Instant,
+}
+
+fn rate_limit_store() -> &'static Mutex<Option<RateLimitState>> {
+    static STORE: OnceLock<Mutex<Option<RateLimitState>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(None))
+}
 
 /// Lightweight Modrinth API client.
 ///
@@ -379,6 +392,7 @@ impl Client {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, ModrinthError> {
+        self.check_rate_limit(path)?;
         debug!(
             target: "vertexlauncher/modrinth",
             path,
@@ -406,6 +420,7 @@ impl Client {
         path: &str,
         body: &B,
     ) -> Result<T, ModrinthError> {
+        self.check_rate_limit(path)?;
         debug!(
             target: "vertexlauncher/modrinth",
             path,
@@ -445,6 +460,7 @@ impl Client {
         };
 
         let status = response.status().as_u16();
+        let retry_after_secs = parse_retry_after_seconds(response.headers());
         let mut raw = String::new();
         response
             .body_mut()
@@ -459,6 +475,13 @@ impl Client {
                 );
                 ModrinthError::Read(err)
             })?;
+        if status == 429 {
+            self.note_rate_limit(path, retry_after_secs);
+            return Err(ModrinthError::rate_limited(
+                self.active_rate_limit_retry_after_seconds()
+                    .or(retry_after_secs),
+            ));
+        }
         if status >= 400 {
             warn!(
                 target: "vertexlauncher/modrinth",
@@ -480,6 +503,53 @@ impl Client {
             ModrinthError::Json(err)
         })
     }
+
+    fn check_rate_limit(&self, path: &str) -> Result<(), ModrinthError> {
+        let Some(retry_after_secs) = self.active_rate_limit_retry_after_seconds() else {
+            return Ok(());
+        };
+        debug!(
+            target: "vertexlauncher/modrinth",
+            path,
+            retry_after_secs,
+            "skipping Modrinth request during active cooldown"
+        );
+        Err(ModrinthError::rate_limited(Some(retry_after_secs)))
+    }
+
+    fn active_rate_limit_retry_after_seconds(&self) -> Option<u64> {
+        let Ok(mut guard) = rate_limit_store().lock() else {
+            return None;
+        };
+        let Some(state) = *guard else {
+            return None;
+        };
+        let now = Instant::now();
+        if state.until <= now {
+            *guard = None;
+            return None;
+        }
+        Some(state.until.saturating_duration_since(now).as_secs().max(1))
+    }
+
+    fn note_rate_limit(&self, path: &str, retry_after_secs: Option<u64>) {
+        let cooldown = Duration::from_secs(retry_after_secs.unwrap_or(60).max(1));
+        let until = Instant::now() + cooldown.max(DEFAULT_RATE_LIMIT_COOLDOWN);
+        if let Ok(mut guard) = rate_limit_store().lock() {
+            match *guard {
+                Some(existing) if existing.until >= until => {}
+                _ => {
+                    *guard = Some(RateLimitState { until });
+                }
+            }
+        }
+        warn!(
+            target: "vertexlauncher/modrinth",
+            path,
+            retry_after_secs = retry_after_secs.unwrap_or(DEFAULT_RATE_LIMIT_COOLDOWN.as_secs()),
+            "Modrinth rate limited request; backing off further API calls"
+        );
+    }
 }
 
 #[derive(Serialize)]
@@ -500,6 +570,14 @@ struct VersionFileUpdateRequest<'a> {
 
 fn string_slice_is_empty(values: &[String]) -> bool {
     values.is_empty()
+}
+
+fn parse_retry_after_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
+    headers
+        .get("retry-after")
+        .or_else(|| headers.get("Retry-After"))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
 }
 
 fn normalize_hash_algorithm(value: &str) -> Result<&'static str, ModrinthError> {

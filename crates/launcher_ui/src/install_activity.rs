@@ -46,6 +46,25 @@ pub fn set_progress(instance_id: &str, progress: &InstallProgress) {
     });
 }
 
+pub fn set_status(instance_id: &str, stage: InstallStage, message: impl Into<String>) {
+    let mut guard = match store().lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    guard.active = Some(InstallActivitySnapshot {
+        instance_id: instance_id.to_owned(),
+        stage,
+        message: message.into(),
+        downloaded_files: 0,
+        total_files: 1,
+        downloaded_bytes: 0,
+        total_bytes: None,
+        bytes_per_second: 0.0,
+        eta_seconds: None,
+        updated_at: Instant::now(),
+    });
+}
+
 pub fn clear_instance(instance_id: &str) {
     let mut guard = match store().lock() {
         Ok(guard) => guard,

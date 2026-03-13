@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Once;
+use std::sync::{Mutex, Once, OnceLock};
 use std::thread;
 
 use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
@@ -147,7 +147,7 @@ fn search_modrinth(query: &str, limit: u32) -> ProviderSearchResult {
     let mut result = ProviderSearchResult::default();
     let modrinth = ModrinthClient::default();
 
-    match modrinth.list_project_types() {
+    match modrinth_project_types_cached(&modrinth) {
         Ok(types) => {
             result.discovered_types.extend(
                 types
@@ -156,12 +156,6 @@ fn search_modrinth(query: &str, limit: u32) -> ProviderSearchResult {
             );
         }
         Err(err) => {
-            warn!(
-                target: "vertexlauncher/modprovider",
-                provider = "Modrinth",
-                error = %err,
-                "provider type discovery failed"
-            );
             result
                 .warnings
                 .push(format!("Modrinth project type discovery failed: {err}"));
@@ -204,6 +198,30 @@ fn search_modrinth(query: &str, limit: u32) -> ProviderSearchResult {
         "provider query complete"
     );
     result
+}
+
+fn modrinth_project_types_cached(client: &ModrinthClient) -> Result<Vec<String>, String> {
+    static CACHE: OnceLock<Mutex<Option<Result<Vec<String>, String>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(cache) = cache.lock()
+        && let Some(cached) = cache.as_ref()
+    {
+        return cached.clone();
+    }
+
+    let fetched = client.list_project_types().map_err(|err| err.to_string());
+    if let Err(err) = fetched.as_ref() {
+        warn!(
+            target: "vertexlauncher/modprovider",
+            provider = "Modrinth",
+            error = %err,
+            "provider type discovery failed"
+        );
+    }
+    if let Ok(mut cache) = cache.lock() {
+        *cache = Some(fetched.clone());
+    }
+    fetched
 }
 
 /// Runs CurseForge discovery/search and converts records into unified entries.

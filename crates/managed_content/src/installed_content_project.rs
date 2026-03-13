@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ManagedContentSource;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstalledContentProject {
     #[serde(default)]
     pub project_key: String,

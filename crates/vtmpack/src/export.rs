@@ -6,7 +6,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use managed_content::{CONTENT_MANIFEST_FILE_NAME, ContentInstallManifest, ManagedContentSource};
+use managed_content::{
+    CONTENT_MANIFEST_FILE_NAME, ContentInstallManifest, ManagedContentSource, load_content_manifest,
+};
 
 use crate::constants::VTMPACK_MANIFEST_VERSION;
 use crate::{
@@ -42,12 +44,7 @@ pub fn export_instance_as_vtmpack(
     output_path: &Path,
     options: &VtmpackExportOptions,
 ) -> Result<VtmpackExportStats, String> {
-    let managed_manifest_path = instance_root.join(CONTENT_MANIFEST_FILE_NAME);
-    let managed_manifest = fs::read_to_string(managed_manifest_path.as_path())
-        .ok()
-        .as_deref()
-        .and_then(|raw| toml::from_str::<ContentInstallManifest>(raw).ok())
-        .unwrap_or_default();
+    let managed_manifest = load_content_manifest(instance_root);
     let sanitized_managed_manifest =
         sanitize_managed_manifest_for_export(&managed_manifest, options);
 

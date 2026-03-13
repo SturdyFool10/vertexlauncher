@@ -12,5 +12,6 @@ pub use installed_content_project::InstalledContentProject;
 pub use managed_content_source::ManagedContentSource;
 pub use manifest_io::{
     content_manifest_path, load_content_manifest, load_managed_content_identities,
-    normalize_content_manifest, normalize_content_path_key, save_content_manifest,
+    normalize_content_manifest, normalize_content_path_key,
+    remove_content_manifest_entries_for_path, save_content_manifest,
 };

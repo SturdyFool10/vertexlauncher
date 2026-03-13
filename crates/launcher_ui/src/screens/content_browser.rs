@@ -17,11 +17,13 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, mpsc},
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use textui::{ButtonOptions, LabelOptions, TextUi};
 
 use crate::app::tokio_runtime;
 use crate::assets;
+use crate::install_activity;
 use crate::notification;
 use crate::ui::components::{remote_tiled_image, text_helpers};
 
@@ -38,6 +40,7 @@ const DETAIL_VERSION_FETCH_MAX_PAGES: u32 = 5;
 const TILE_ACTION_BUTTON_WIDTH: f32 = 28.0;
 const TILE_ACTION_BUTTON_HEIGHT: f32 = 28.0;
 const TILE_ACTION_BUTTON_GAP_XS: f32 = 4.0;
+const TILE_DOWNLOAD_PROGRESS_WIDTH: f32 = 96.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ContentBrowserPage {
@@ -313,6 +316,12 @@ struct ContentDownloadOutcome {
     removed_files: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActiveContentDownload {
+    dedupe_key: String,
+    version_id: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 struct BrowserVersionEntry {
     source: ManagedContentSource,
@@ -347,6 +356,7 @@ struct ContentBrowserState {
     mod_sort_mode: ModSortMode,
     loader: BrowserLoader,
     active_instance_id: Option<String>,
+    active_instance_name: Option<String>,
     auto_populated_instance_id: Option<String>,
     current_page: u32,
     current_view: ContentBrowserPage,
@@ -377,6 +387,7 @@ struct ContentBrowserState {
     search_rx: Option<Arc<Mutex<mpsc::Receiver<SearchUpdate>>>>,
     download_queue: VecDeque<QueuedContentDownload>,
     download_in_flight: bool,
+    active_download: Option<ActiveContentDownload>,
     download_tx: Option<mpsc::Sender<Result<ContentDownloadOutcome, String>>>,
     download_rx: Option<Arc<Mutex<mpsc::Receiver<Result<ContentDownloadOutcome, String>>>>>,
     status_message: Option<String>,
@@ -393,6 +404,7 @@ impl Default for ContentBrowserState {
             mod_sort_mode: ModSortMode::Popularity,
             loader: BrowserLoader::Any,
             active_instance_id: None,
+            active_instance_name: None,
             auto_populated_instance_id: None,
             current_page: 1,
             current_view: ContentBrowserPage::Browse,
@@ -422,6 +434,7 @@ impl Default for ContentBrowserState {
             search_rx: None,
             download_queue: VecDeque::new(),
             download_in_flight: false,
+            active_download: None,
             download_tx: None,
             download_rx: None,
             status_message: None,
@@ -495,12 +508,14 @@ pub fn render(
 
     if state.active_instance_id.as_deref() != Some(instance.id.as_str()) {
         state.active_instance_id = Some(instance.id.clone());
+        state.active_instance_name = Some(instance.name.clone());
         state.loader = browser_loader_from_modloader(instance.modloader.as_str());
         state.minecraft_version_filter = instance.game_version.clone();
         state.content_scope = ContentScope::Mods;
         state.mod_sort_mode = ModSortMode::Popularity;
         state.download_queue.clear();
         state.download_in_flight = false;
+        state.active_download = None;
         state.current_page = 1;
         state.current_view = ContentBrowserPage::Browse;
         state.detail_entry = None;
@@ -548,7 +563,7 @@ pub fn render(
     );
     ui.add_space(8.0);
 
-    maybe_start_queued_download(&mut state, instance_root.as_path());
+    maybe_start_queued_download(&mut state, instance.name.as_str(), instance_root.as_path());
 
     if let Some(status) = state.status_message.as_deref() {
         let _ = text_ui.label(
@@ -704,10 +719,11 @@ fn render_controls(
             },
         );
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
             let edit = egui::TextEdit::singleline(&mut state.query_input)
                 .hint_text("Search project names, summaries, and tags")
-                .desired_width((ui.available_width() - 300.0).max(200.0));
+                .desired_width((ui.available_width() - 460.0).max(160.0));
             let response = ui.add(edit);
             let run_search = response.lost_focus()
                 && ui.input(|input| input.key_pressed(egui::Key::Enter))
@@ -967,13 +983,21 @@ fn render_results(
                         ui.add_space(6.0);
                     }
 
-                    let download_enabled = !content_is_installed(manifest, entry);
+                    let installed_project =
+                        installed_project_for_entry(manifest, entry).map(|(_, project)| project);
+                    let download_enabled = installed_project.is_none();
+                    let download_in_flight = state
+                        .active_download
+                        .as_ref()
+                        .is_some_and(|active| active.dedupe_key == entry.dedupe_key);
                     let tile_outcome = render_result_tile(
                         ui,
                         text_ui,
                         (instance_id, &entry.dedupe_key),
                         entry,
+                        installed_project,
                         download_enabled,
+                        download_in_flight,
                     );
                     if tile_outcome.download_clicked {
                         state.download_queue.push_back(QueuedContentDownload {
@@ -1091,7 +1115,9 @@ fn render_result_tile(
     text_ui: &mut TextUi,
     id_source: impl std::hash::Hash + Copy,
     entry: &BrowserProjectEntry,
+    installed_project: Option<&InstalledContentProject>,
     download_enabled: bool,
+    download_in_flight: bool,
 ) -> ResultTileOutcome {
     let frame = egui::Frame::new()
         .fill(ui.visuals().widgets.inactive.bg_fill)
@@ -1104,8 +1130,11 @@ fn render_result_tile(
             let mut download_clicked = false;
             let mut download_button_rect = egui::Rect::NOTHING;
             let mut info_button_rect = egui::Rect::NOTHING;
-            let action_cluster_width =
-                (TILE_ACTION_BUTTON_WIDTH * 2.0) + (TILE_ACTION_BUTTON_GAP_XS * 2.0);
+            let installed_label = installed_project
+                .and_then(|project| project.selected_version_name.as_deref())
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| "Installed".to_owned());
 
             let render_thumbnail = |ui: &mut Ui| {
                 let thumb_frame = egui::Frame::new()
@@ -1153,17 +1182,77 @@ fn render_result_tile(
                         } else {
                             entry.summary.trim()
                         };
-                        let row_width = ui.available_width().max(120.0);
-                        let header_width = (row_width - action_cluster_width).max(80.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                            let mut info_hasher = std::collections::hash_map::DefaultHasher::new();
+                            (id_source, "info-svg").hash(&mut info_hasher);
+                            let info_button_id =
+                                format!("content-browser-info-{}", info_hasher.finish());
+                            let info_button = render_rounded_icon_button(
+                                ui,
+                                info_button_id.as_str(),
+                                assets::ADJUSTMENTS_SVG,
+                                "Open mod details",
+                                ui.visuals().widgets.inactive.weak_bg_fill,
+                                TILE_ACTION_BUTTON_WIDTH,
+                                TILE_ACTION_BUTTON_HEIGHT,
+                                true,
+                            );
+                            info_button_rect = info_button.rect;
+                            if info_button.clicked {
+                                open_clicked = true;
+                            }
+                            ui.add_space(TILE_ACTION_BUTTON_GAP_XS);
 
-                        ui.horizontal_top(|ui| {
+                            if download_in_flight {
+                                let progress_width = TILE_DOWNLOAD_PROGRESS_WIDTH
+                                    .min(ui.available_width().max(64.0))
+                                    .max(TILE_ACTION_BUTTON_WIDTH * 2.5);
+                                let progress = ui.add_sized(
+                                    egui::vec2(progress_width, TILE_ACTION_BUTTON_HEIGHT),
+                                    egui::ProgressBar::new(0.0)
+                                        .animate(true)
+                                        .text("Downloading"),
+                                );
+                                download_button_rect = progress.rect;
+                            } else {
+                                let mut download_hasher =
+                                    std::collections::hash_map::DefaultHasher::new();
+                                (id_source, "download-svg").hash(&mut download_hasher);
+                                let download_button_id = format!(
+                                    "content-browser-download-{}",
+                                    download_hasher.finish()
+                                );
+                                let download_button = render_rounded_icon_button(
+                                    ui,
+                                    download_button_id.as_str(),
+                                    if download_enabled {
+                                        assets::DOWNLOAD_SVG
+                                    } else {
+                                        assets::CHECK_SVG
+                                    },
+                                    if download_enabled {
+                                        "Quick install latest compatible version"
+                                    } else {
+                                        "Already installed in this instance"
+                                    },
+                                    ui.visuals().selection.bg_fill,
+                                    TILE_ACTION_BUTTON_WIDTH,
+                                    TILE_ACTION_BUTTON_HEIGHT,
+                                    download_enabled,
+                                );
+                                download_button_rect = download_button.rect;
+                                if download_button.clicked {
+                                    download_clicked = true;
+                                }
+                            }
+                            ui.add_space(TILE_ACTION_BUTTON_GAP_XS);
+
                             ui.allocate_ui_with_layout(
-                                egui::vec2(header_width, 0.0),
+                                egui::vec2(ui.available_width().max(80.0), 0.0),
                                 egui::Layout::top_down(egui::Align::Min),
                                 |ui| {
-                                    ui.set_max_width(header_width);
                                     ui.horizontal_wrapped(|ui| {
-                                        ui.set_max_width(header_width);
+                                        ui.set_max_width(ui.available_width().max(80.0));
                                         ui.spacing_mut().item_spacing.x = 2.0;
                                         let _ = text_ui.label(
                                             ui,
@@ -1192,6 +1281,14 @@ fn render_result_tile(
                                                 source.label(),
                                             );
                                         }
+                                        if installed_project.is_some() {
+                                            render_chip(
+                                                ui,
+                                                text_ui,
+                                                (id_source, "installed"),
+                                                installed_label.as_str(),
+                                            );
+                                        }
                                     });
                                     if ui.min_rect().height() < TILE_ACTION_BUTTON_HEIGHT {
                                         ui.add_space(
@@ -1200,48 +1297,6 @@ fn render_result_tile(
                                     }
                                 },
                             );
-                            ui.add_space(TILE_ACTION_BUTTON_GAP_XS);
-                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                            (id_source, "download-svg").hash(&mut hasher);
-                            let download_button_id =
-                                format!("content-browser-download-{}", hasher.finish());
-                            let download_button = render_rounded_icon_button(
-                                ui,
-                                download_button_id.as_str(),
-                                assets::DOWNLOAD_SVG,
-                                if download_enabled {
-                                    "Quick install latest compatible version"
-                                } else {
-                                    "Already installed"
-                                },
-                                ui.visuals().selection.bg_fill,
-                                TILE_ACTION_BUTTON_WIDTH,
-                                TILE_ACTION_BUTTON_HEIGHT,
-                                download_enabled,
-                            );
-                            download_button_rect = download_button.rect;
-                            if download_button.clicked {
-                                download_clicked = true;
-                            }
-                            ui.add_space(TILE_ACTION_BUTTON_GAP_XS);
-                            let mut info_hasher = std::collections::hash_map::DefaultHasher::new();
-                            (id_source, "info-svg").hash(&mut info_hasher);
-                            let info_button_id =
-                                format!("content-browser-info-{}", info_hasher.finish());
-                            let info_button = render_rounded_icon_button(
-                                ui,
-                                info_button_id.as_str(),
-                                assets::ADJUSTMENTS_SVG,
-                                "Open mod details",
-                                ui.visuals().widgets.inactive.weak_bg_fill,
-                                TILE_ACTION_BUTTON_WIDTH,
-                                TILE_ACTION_BUTTON_HEIGHT,
-                                true,
-                            );
-                            info_button_rect = info_button.rect;
-                            if info_button.clicked {
-                                open_clicked = true;
-                            }
                         });
                         ui.add_space(4.0);
                         egui::Frame::new()
@@ -1391,6 +1446,8 @@ fn render_detail_page(
 
     request_detail_versions(state);
     let manifest = load_content_manifest(instance_root);
+    let installed_project =
+        installed_project_for_entry(&manifest, &entry).map(|(_, project)| project);
 
     egui::Frame::new()
         .fill(ui.visuals().widgets.inactive.bg_fill)
@@ -1444,6 +1501,19 @@ fn render_detail_page(
                                     source.label(),
                                 ),
                                 source.label(),
+                            );
+                        }
+                        if let Some(installed) = installed_project {
+                            let installed_label = installed
+                                .selected_version_name
+                                .as_deref()
+                                .filter(|value| !value.trim().is_empty())
+                                .unwrap_or("Installed");
+                            render_chip(
+                                ui,
+                                text_ui,
+                                ("detail-installed", instance_id, &entry.dedupe_key),
+                                installed_label,
                             );
                         }
                     });
@@ -1957,7 +2027,7 @@ fn version_row_action(
     entry: &BrowserProjectEntry,
     version: &BrowserVersionEntry,
 ) -> VersionRowAction {
-    let Some(installed) = manifest.projects.get(&entry.dedupe_key) else {
+    let Some((_, installed)) = installed_project_for_entry(manifest, entry) else {
         return VersionRowAction::Download;
     };
     if installed.selected_source == Some(version.source.into())
@@ -1969,8 +2039,43 @@ fn version_row_action(
     }
 }
 
-fn content_is_installed(manifest: &ContentInstallManifest, entry: &BrowserProjectEntry) -> bool {
-    manifest.projects.contains_key(&entry.dedupe_key)
+fn installed_project_for_entry<'a>(
+    manifest: &'a ContentInstallManifest,
+    entry: &BrowserProjectEntry,
+) -> Option<(&'a str, &'a InstalledContentProject)> {
+    manifest
+        .projects
+        .get_key_value(entry.dedupe_key.as_str())
+        .map(|(key, project)| (key.as_str(), project))
+        .or_else(|| {
+            manifest
+                .projects
+                .iter()
+                .find(|(_, project)| installed_project_matches_entry(project, entry))
+                .map(|(key, project)| (key.as_str(), project))
+        })
+}
+
+fn installed_project_matches_entry(
+    project: &InstalledContentProject,
+    entry: &BrowserProjectEntry,
+) -> bool {
+    if let (Some(project_id), Some(entry_project_id)) = (
+        project.modrinth_project_id.as_deref(),
+        entry.modrinth_project_id.as_deref(),
+    ) && project_id == entry_project_id
+    {
+        return true;
+    }
+
+    if let (Some(project_id), Some(entry_project_id)) =
+        (project.curseforge_project_id, entry.curseforge_project_id)
+        && project_id == entry_project_id
+    {
+        return true;
+    }
+
+    false
 }
 
 fn version_matches_loader(version: &BrowserVersionEntry, loader: BrowserLoader) -> bool {
@@ -2158,20 +2263,30 @@ fn apply_pending_external_detail_open(state: &mut ContentBrowserState) {
         return;
     };
 
-    let Some(content_type) = parse_content_type(entry.content_type.as_str()) else {
+    let Ok(browser_entry) = browser_entry_from_unified_content(&entry) else {
         return;
     };
 
+    open_detail_page(state, &browser_entry);
+}
+
+fn browser_entry_from_unified_content(
+    entry: &UnifiedContentEntry,
+) -> Result<BrowserProjectEntry, String> {
+    let Some(content_type) = parse_content_type(entry.content_type.as_str()) else {
+        return Err(format!("Unsupported content type for {}.", entry.name));
+    };
+    let name_key = normalize_lookup_key(entry.name.as_str());
+    if name_key.is_empty() {
+        return Err("Content entry name cannot be empty.".to_owned());
+    }
+
     let mut browser_entry = BrowserProjectEntry {
-        dedupe_key: format!(
-            "{}::{}",
-            content_type.label().to_ascii_lowercase(),
-            normalize_lookup_key(entry.name.as_str())
-        ),
-        name: entry.name,
-        summary: entry.summary,
+        dedupe_key: format!("{}::{name_key}", content_type.label().to_ascii_lowercase()),
+        name: entry.name.clone(),
+        summary: entry.summary.clone(),
         content_type,
-        icon_url: entry.icon_url,
+        icon_url: entry.icon_url.clone(),
         modrinth_project_id: None,
         curseforge_project_id: None,
         sources: vec![entry.source],
@@ -2197,7 +2312,7 @@ fn apply_pending_external_detail_open(state: &mut ContentBrowserState) {
         }
     }
 
-    open_detail_page(state, &browser_entry);
+    Ok(browser_entry)
 }
 
 fn ensure_version_catalog_channel(state: &mut ContentBrowserState) {
@@ -2410,6 +2525,145 @@ fn fetch_versions_for_entry(
             .then_with(|| left.version_name.cmp(&right.version_name))
     });
     Ok(versions)
+}
+
+fn fetch_exact_version_for_entry(
+    entry: &BrowserProjectEntry,
+    source: ManagedContentSource,
+    version_id: &str,
+) -> Result<BrowserVersionEntry, String> {
+    match source {
+        ManagedContentSource::Modrinth => {
+            let modrinth = ModrinthClient::default();
+            let version = modrinth
+                .get_version(version_id)
+                .map_err(|err| format!("Modrinth version lookup failed for {version_id}: {err}"))?;
+            let file = version
+                .files
+                .iter()
+                .find(|file| file.primary)
+                .or_else(|| version.files.first())
+                .ok_or_else(|| {
+                    format!("No downloadable file found for Modrinth version {version_id}.")
+                })?;
+            let mut dependencies = Vec::new();
+            for dep in version.dependencies {
+                if !dep.dependency_type.eq_ignore_ascii_case("required") {
+                    continue;
+                }
+                if let Some(dep_project) = dep.project_id {
+                    dependencies.push(DependencyRef::ModrinthProject(dep_project));
+                } else if let Some(dep_version) = dep.version_id
+                    && let Ok(version_detail) = modrinth.get_version(dep_version.as_str())
+                    && !version_detail.project_id.trim().is_empty()
+                {
+                    dependencies.push(DependencyRef::ModrinthProject(version_detail.project_id));
+                }
+            }
+            Ok(BrowserVersionEntry {
+                source,
+                version_id: version.id,
+                version_name: version.version_number,
+                file_name: file.filename.clone(),
+                file_url: file.url.clone(),
+                published_at: version.date_published,
+                loaders: version.loaders,
+                game_versions: version.game_versions,
+                dependencies,
+            })
+        }
+        ManagedContentSource::CurseForge => {
+            let curseforge = CurseForgeClient::from_env()
+                .ok_or_else(|| "CurseForge API key missing.".to_owned())?;
+            let project_id = entry
+                .curseforge_project_id
+                .ok_or_else(|| format!("CurseForge project id missing for {}.", entry.name))?;
+            let version_id_u64 = version_id
+                .trim()
+                .parse::<u64>()
+                .map_err(|err| format!("Invalid CurseForge version id {version_id}: {err}"))?;
+            let file = fetch_curseforge_versions(&curseforge, project_id)?
+                .into_iter()
+                .find(|file| file.id == version_id_u64)
+                .ok_or_else(|| {
+                    format!(
+                        "Could not find CurseForge version {} for {}.",
+                        version_id, entry.name
+                    )
+                })?;
+            let download_url = file
+                .download_url
+                .clone()
+                .ok_or_else(|| format!("CurseForge version {} has no download URL.", version_id))?;
+            let mut dependencies = Vec::new();
+            for dep in file.dependencies {
+                if dep.relation_type == CONTENT_DOWNLOAD_REQUIRED_DEPENDENCY_RELATION_TYPE {
+                    dependencies.push(DependencyRef::CurseForgeProject(dep.mod_id));
+                }
+            }
+            let (loaders, game_versions) = split_curseforge_game_versions(file.game_versions);
+            Ok(BrowserVersionEntry {
+                source,
+                version_id: file.id.to_string(),
+                version_name: file.display_name.clone(),
+                file_name: file.file_name,
+                file_url: download_url,
+                published_at: file.file_date,
+                loaders,
+                game_versions,
+                dependencies,
+            })
+        }
+    }
+}
+
+pub(crate) fn update_installed_content_to_version(
+    instance_root: &Path,
+    entry: &UnifiedContentEntry,
+    installed_file_path: &Path,
+    version_id: &str,
+    game_version: &str,
+    loader_label: &str,
+) -> Result<String, String> {
+    let browser_entry = browser_entry_from_unified_content(entry)?;
+    let source = ManagedContentSource::from(entry.source);
+    let version = fetch_exact_version_for_entry(&browser_entry, source, version_id)?;
+    let target_path = content_target_path(instance_root, &browser_entry, &version);
+    let staged_existing_path =
+        stage_existing_file_for_update(installed_file_path, target_path.as_path())?;
+    let mut outcome = match apply_content_install_request(
+        instance_root,
+        ContentInstallRequest::Exact {
+            entry: browser_entry,
+            version,
+            game_version: game_version.trim().to_owned(),
+            loader: browser_loader_from_modloader(loader_label),
+        },
+    ) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            if let Some(staged_path) = staged_existing_path {
+                restore_staged_update_file(staged_path.as_path(), installed_file_path).map_err(
+                    |restore_err| {
+                        format!("{err} (also failed to restore original file: {restore_err})")
+                    },
+                )?;
+            }
+            return Err(err);
+        }
+    };
+    finalize_updated_file_replacement(
+        installed_file_path,
+        target_path.as_path(),
+        staged_existing_path.as_deref(),
+        &mut outcome.removed_files,
+    )?;
+    Ok(format!(
+        "Updated {}: {} added, {} removed.",
+        outcome.project_name,
+        outcome.added_files.len(),
+        outcome.removed_files.len()
+    ))
 }
 
 fn fetch_curseforge_versions(
@@ -3011,7 +3265,11 @@ fn ensure_download_channel(state: &mut ContentBrowserState) {
     state.download_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
-fn maybe_start_queued_download(state: &mut ContentBrowserState, instance_root: &Path) {
+fn maybe_start_queued_download(
+    state: &mut ContentBrowserState,
+    instance_name: &str,
+    instance_root: &Path,
+) {
     if state.download_in_flight {
         return;
     }
@@ -3025,7 +3283,13 @@ fn maybe_start_queued_download(state: &mut ContentBrowserState, instance_root: &
     };
 
     state.download_in_flight = true;
+    state.active_download = Some(active_download_from_request(&next.request));
     state.download_notification_active = true;
+    install_activity::set_status(
+        instance_name,
+        installation::InstallStage::DownloadingCore,
+        "Applying content changes...",
+    );
     notification::progress!(
         notification::Severity::Info,
         "content-browser/download",
@@ -3069,12 +3333,20 @@ fn poll_downloads(state: &mut ContentBrowserState) {
         state.download_tx = None;
         state.download_rx = None;
         state.download_in_flight = false;
+        state.active_download = None;
+        if let Some(instance_name) = state.active_instance_name.as_deref() {
+            install_activity::clear_instance(instance_name);
+        }
     }
 
     for update in updates {
         state.download_in_flight = false;
+        state.active_download = None;
         if state.download_notification_active {
             state.download_notification_active = false;
+        }
+        if let Some(instance_name) = state.active_instance_name.as_deref() {
+            install_activity::clear_instance(instance_name);
         }
         match update {
             Ok(result) => {
@@ -3120,6 +3392,19 @@ struct ResolvedDownload {
     dependencies: Vec<DependencyRef>,
 }
 
+fn active_download_from_request(request: &ContentInstallRequest) -> ActiveContentDownload {
+    match request {
+        ContentInstallRequest::Latest { entry, .. } => ActiveContentDownload {
+            dedupe_key: entry.dedupe_key.clone(),
+            version_id: None,
+        },
+        ContentInstallRequest::Exact { entry, version, .. } => ActiveContentDownload {
+            dedupe_key: entry.dedupe_key.clone(),
+            version_id: Some(version.version_id.clone()),
+        },
+    }
+}
+
 fn apply_content_install_request(
     instance_root: &Path,
     request: ContentInstallRequest,
@@ -3159,11 +3444,18 @@ fn apply_content_install_request(
     };
 
     let mut manifest = load_content_manifest(instance_root);
-    if let Some(existing) = manifest.projects.get(&root_entry.dedupe_key).cloned() {
+    let existing_project = installed_project_for_entry(&manifest, &root_entry)
+        .map(|(key, project)| (key.to_owned(), project.clone()));
+    let root_project_key = existing_project
+        .as_ref()
+        .map(|(key, _)| key.clone())
+        .unwrap_or_else(|| root_entry.dedupe_key.clone());
+
+    if let Some((existing_project_key, existing)) = existing_project {
         if existing.selected_source == Some(root_download.source)
             && existing.selected_version_id.as_deref() == Some(root_download.version_id.as_str())
         {
-            if let Some(record) = manifest.projects.get_mut(&root_entry.dedupe_key) {
+            if let Some(record) = manifest.projects.get_mut(existing_project_key.as_str()) {
                 record.explicitly_installed = true;
             }
             save_content_manifest(instance_root, &manifest)?;
@@ -3173,7 +3465,7 @@ fn apply_content_install_request(
                 removed_files,
             });
         }
-        let dependents = manifest_dependents(&manifest, root_entry.dedupe_key.as_str());
+        let dependents = manifest_dependents(&manifest, existing_project_key.as_str());
         if !dependents.is_empty() {
             return Err(format!(
                 "Cannot switch {} while it is required by {}.",
@@ -3184,7 +3476,7 @@ fn apply_content_install_request(
         remove_installed_project(
             instance_root,
             &mut manifest,
-            root_entry.dedupe_key.as_str(),
+            existing_project_key.as_str(),
             true,
             &mut removed_files,
         )?;
@@ -3198,12 +3490,14 @@ fn apply_content_install_request(
         root_download,
         game_version.as_str(),
         loader,
+        Some(root_project_key.as_str()),
         &modrinth,
         curseforge.as_ref(),
         None,
         true,
         &mut visited,
         &mut added_files,
+        &mut removed_files,
     )?;
     save_content_manifest(instance_root, &manifest)?;
 
@@ -3222,14 +3516,18 @@ fn install_project_recursive(
     resolved: ResolvedDownload,
     game_version: &str,
     loader: BrowserLoader,
+    project_key_override: Option<&str>,
     modrinth: &ModrinthClient,
     curseforge: Option<&CurseForgeClient>,
     parent_key: Option<&str>,
     explicit: bool,
     visited: &mut HashSet<String>,
     added_files: &mut Vec<String>,
+    removed_files: &mut Vec<String>,
 ) -> Result<(), String> {
-    let project_key = entry.dedupe_key.clone();
+    let project_key = project_key_override
+        .map(str::to_owned)
+        .unwrap_or_else(|| entry.dedupe_key.clone());
     if let Some(parent_key) = parent_key {
         append_project_dependency(manifest, parent_key, project_key.as_str());
     }
@@ -3241,80 +3539,158 @@ fn install_project_recursive(
         return Ok(());
     }
 
-    if let Some(existing) = manifest.projects.get_mut(&project_key) {
-        if explicit {
-            existing.explicitly_installed = true;
-        }
-        return Ok(());
-    }
-
+    let existing = manifest.projects.get(&project_key).cloned();
     let target_dir = instance_root.join(entry.content_type.folder_name());
     std::fs::create_dir_all(target_dir.as_path())
         .map_err(|err| format!("failed to create content folder {:?}: {err}", target_dir))?;
     let target_name = normalized_filename(resolved.file_name.as_str(), resolved.file_url.as_str());
     let target_path = target_dir.join(target_name.as_str());
-    if !target_path.exists() {
-        download_file(resolved.file_url.as_str(), target_path.as_path())?;
-        added_files.push(target_path.display().to_string());
+    if let Some(existing) = existing.as_ref()
+        && existing.selected_source == Some(resolved.source)
+        && existing.selected_version_id.as_deref() == Some(resolved.version_id.as_str())
+    {
+        if explicit && let Some(record) = manifest.projects.get_mut(&project_key) {
+            record.explicitly_installed = true;
+        }
+        return Ok(());
     }
 
-    let file_path = target_path
-        .strip_prefix(instance_root)
-        .unwrap_or(target_path.as_path())
-        .display()
-        .to_string();
-    manifest.projects.insert(
-        project_key.clone(),
-        InstalledContentProject {
-            project_key: project_key.clone(),
-            name: entry.name.clone(),
-            folder_name: entry.content_type.folder_name().to_owned(),
-            file_path,
-            modrinth_project_id: entry.modrinth_project_id.clone(),
-            curseforge_project_id: entry.curseforge_project_id,
-            selected_source: Some(resolved.source),
-            selected_version_id: Some(resolved.version_id.clone()),
-            selected_version_name: Some(resolved.version_name.clone()),
-            explicitly_installed: explicit,
-            direct_dependencies: Vec::new(),
-        },
-    );
+    let previous_file_path = existing
+        .as_ref()
+        .map(|project| instance_root.join(project.file_path.as_str()));
+    let staged_previous_path = match previous_file_path.as_ref() {
+        Some(previous_file_path) => {
+            stage_existing_file_for_update(previous_file_path.as_path(), target_path.as_path())?
+        }
+        None => None,
+    };
+    let previous_dependency_keys = existing
+        .as_ref()
+        .map(|project| project.direct_dependencies.clone())
+        .unwrap_or_default();
+    let explicitly_installed = explicit
+        || existing
+            .as_ref()
+            .is_some_and(|project| project.explicitly_installed);
 
-    let mut dependency_keys = Vec::new();
-    for dependency in resolved.dependencies {
-        let Some(dep_entry) = dependency_to_browser_entry(&dependency, modrinth, curseforge)?
-        else {
-            continue;
-        };
-        let dep_resolved =
-            resolve_best_download(&dep_entry, game_version, loader, modrinth, curseforge)?
-                .ok_or_else(|| {
-                    format!(
-                        "No compatible downloadable file found for dependency {}.",
-                        dep_entry.name
-                    )
+    let install_result = (|| -> Result<(), String> {
+        if existing.is_some() || !target_path.exists() {
+            download_file(resolved.file_url.as_str(), target_path.as_path())?;
+            if !added_files
+                .iter()
+                .any(|path| path == &target_path.display().to_string())
+            {
+                added_files.push(target_path.display().to_string());
+            }
+        }
+
+        let file_path = target_path
+            .strip_prefix(instance_root)
+            .unwrap_or(target_path.as_path())
+            .display()
+            .to_string();
+        manifest.projects.insert(
+            project_key.clone(),
+            InstalledContentProject {
+                project_key: project_key.clone(),
+                name: entry.name.clone(),
+                folder_name: entry.content_type.folder_name().to_owned(),
+                file_path,
+                modrinth_project_id: entry.modrinth_project_id.clone(),
+                curseforge_project_id: entry.curseforge_project_id,
+                selected_source: Some(resolved.source),
+                selected_version_id: Some(resolved.version_id.clone()),
+                selected_version_name: Some(resolved.version_name.clone()),
+                explicitly_installed,
+                direct_dependencies: Vec::new(),
+            },
+        );
+
+        let mut dependency_keys = Vec::new();
+        for dependency in resolved.dependencies {
+            let Some(dep_entry) = dependency_to_browser_entry(&dependency, modrinth, curseforge)?
+            else {
+                continue;
+            };
+            let dep_resolved =
+                resolve_best_download(&dep_entry, game_version, loader, modrinth, curseforge)?
+                    .ok_or_else(|| {
+                        format!(
+                            "No compatible downloadable file found for dependency {}.",
+                            dep_entry.name
+                        )
+                    })?;
+            dependency_keys.push(dep_entry.dedupe_key.clone());
+            install_project_recursive(
+                instance_root,
+                manifest,
+                &dep_entry,
+                dep_resolved,
+                game_version,
+                loader,
+                None,
+                modrinth,
+                curseforge,
+                Some(project_key.as_str()),
+                false,
+                visited,
+                added_files,
+                removed_files,
+            )?;
+        }
+
+        if let Some(record) = manifest.projects.get_mut(&project_key) {
+            record.direct_dependencies = dependency_keys.clone();
+            if explicit {
+                record.explicitly_installed = true;
+            }
+        }
+
+        if let Some(previous_file_path) = previous_file_path.as_ref() {
+            finalize_updated_file_replacement(
+                previous_file_path.as_path(),
+                target_path.as_path(),
+                staged_previous_path.as_deref(),
+                removed_files,
+            )?;
+        }
+
+        for dependency_key in previous_dependency_keys {
+            if dependency_keys
+                .iter()
+                .any(|current| current == &dependency_key)
+            {
+                continue;
+            }
+            remove_installed_project(
+                instance_root,
+                manifest,
+                dependency_key.as_str(),
+                false,
+                removed_files,
+            )?;
+        }
+
+        Ok(())
+    })();
+
+    match install_result {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            if let (Some(staged_previous_path), Some(previous_file_path)) =
+                (staged_previous_path.as_ref(), previous_file_path.as_ref())
+            {
+                restore_staged_update_file(
+                    staged_previous_path.as_path(),
+                    previous_file_path.as_path(),
+                )
+                .map_err(|restore_err| {
+                    format!("{err} (also failed to restore original file: {restore_err})")
                 })?;
-        dependency_keys.push(dep_entry.dedupe_key.clone());
-        install_project_recursive(
-            instance_root,
-            manifest,
-            &dep_entry,
-            dep_resolved,
-            game_version,
-            loader,
-            modrinth,
-            curseforge,
-            Some(project_key.as_str()),
-            false,
-            visited,
-            added_files,
-        )?;
+            }
+            Err(err)
+        }
     }
-
-    if let Some(record) = manifest.projects.get_mut(&project_key) {
-        record.direct_dependencies = dependency_keys;
-    }
-    Ok(())
 }
 
 fn append_project_dependency(
@@ -3387,6 +3763,130 @@ fn resolved_download_from_version(version: BrowserVersionEntry) -> ResolvedDownl
         file_name: version.file_name,
         published_at: version.published_at,
         dependencies: version.dependencies,
+    }
+}
+
+fn content_target_path(
+    instance_root: &Path,
+    entry: &BrowserProjectEntry,
+    version: &BrowserVersionEntry,
+) -> PathBuf {
+    let target_dir = instance_root.join(entry.content_type.folder_name());
+    let target_name = normalized_filename(version.file_name.as_str(), version.file_url.as_str());
+    target_dir.join(target_name)
+}
+
+fn stage_existing_file_for_update(
+    existing_file_path: &Path,
+    target_path: &Path,
+) -> Result<Option<PathBuf>, String> {
+    if !paths_match_for_update(existing_file_path, target_path) || !existing_file_path.exists() {
+        return Ok(None);
+    }
+
+    let staged_path = staged_update_backup_path(existing_file_path);
+    std::fs::rename(existing_file_path, staged_path.as_path()).map_err(|err| {
+        format!(
+            "failed to stage existing content {} for replacement: {err}",
+            existing_file_path.display()
+        )
+    })?;
+    Ok(Some(staged_path))
+}
+
+fn finalize_updated_file_replacement(
+    previous_file_path: &Path,
+    target_path: &Path,
+    staged_previous_path: Option<&Path>,
+    removed_files: &mut Vec<String>,
+) -> Result<(), String> {
+    if let Some(staged_previous_path) = staged_previous_path {
+        remove_content_path(staged_previous_path)?;
+        removed_files.push(staged_previous_path.display().to_string());
+        return Ok(());
+    }
+
+    if paths_match_for_update(previous_file_path, target_path) || !previous_file_path.exists() {
+        return Ok(());
+    }
+
+    remove_content_path(previous_file_path)?;
+    removed_files.push(previous_file_path.display().to_string());
+    Ok(())
+}
+
+fn restore_staged_update_file(
+    staged_previous_path: &Path,
+    previous_file_path: &Path,
+) -> Result<(), String> {
+    if !staged_previous_path.exists() {
+        return Ok(());
+    }
+
+    if previous_file_path.exists() {
+        remove_content_path(previous_file_path)?;
+    }
+
+    std::fs::rename(staged_previous_path, previous_file_path).map_err(|err| {
+        format!(
+            "failed to restore {} from {}: {err}",
+            previous_file_path.display(),
+            staged_previous_path.display()
+        )
+    })
+}
+
+fn staged_update_backup_path(existing_file_path: &Path) -> PathBuf {
+    let parent = existing_file_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let file_name = existing_file_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("content.bin");
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+
+    let mut attempt = 0u32;
+    loop {
+        let candidate = parent.join(format!(
+            ".vertex-update-backup-{file_name}-{timestamp}-{attempt}"
+        ));
+        if !candidate.exists() {
+            return candidate;
+        }
+        attempt += 1;
+    }
+}
+
+fn remove_content_path(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+            .map_err(|err| format!("failed to remove {}: {err}", path.display()))
+    } else {
+        std::fs::remove_file(path)
+            .map_err(|err| format!("failed to remove {}: {err}", path.display()))
+    }
+}
+
+fn paths_match_for_update(left: &Path, right: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        left.as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        left == right
     }
 }
 
@@ -3662,4 +4162,86 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
     file.write_all(&bytes)
         .map_err(|err| format!("failed to write {:?}: {err}", destination))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_test_root(test_name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "vertexlauncher-content-browser-{test_name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn same_path_update_stages_and_removes_previous_file() {
+        let root = temp_test_root("same-path");
+        let mods_dir = root.join("mods");
+        std::fs::create_dir_all(mods_dir.as_path()).expect("create mods dir");
+        let mod_path = mods_dir.join("example.jar");
+        std::fs::write(mod_path.as_path(), b"old").expect("write old mod");
+
+        let staged_path = stage_existing_file_for_update(mod_path.as_path(), mod_path.as_path())
+            .expect("stage old file")
+            .expect("expected staged path");
+        assert!(
+            !mod_path.exists(),
+            "original path should be free for replacement"
+        );
+        assert!(
+            staged_path.exists(),
+            "backup path should exist after staging"
+        );
+
+        std::fs::write(mod_path.as_path(), b"new").expect("write replacement mod");
+        let mut removed_files = Vec::new();
+        finalize_updated_file_replacement(
+            mod_path.as_path(),
+            mod_path.as_path(),
+            Some(staged_path.as_path()),
+            &mut removed_files,
+        )
+        .expect("finalize replacement");
+
+        assert!(mod_path.exists(), "new mod should remain in place");
+        assert!(
+            !staged_path.exists(),
+            "staged backup should be removed after successful replacement"
+        );
+        assert_eq!(removed_files, vec![staged_path.display().to_string()]);
+
+        let _ = std::fs::remove_dir_all(root.as_path());
+    }
+
+    #[test]
+    fn different_path_update_removes_superseded_previous_file() {
+        let root = temp_test_root("different-path");
+        let mods_dir = root.join("mods");
+        std::fs::create_dir_all(mods_dir.as_path()).expect("create mods dir");
+        let old_path = mods_dir.join("example-1.0.jar");
+        let new_path = mods_dir.join("example-2.0.jar");
+        std::fs::write(old_path.as_path(), b"old").expect("write old mod");
+        std::fs::write(new_path.as_path(), b"new").expect("write new mod");
+
+        let mut removed_files = Vec::new();
+        finalize_updated_file_replacement(
+            old_path.as_path(),
+            new_path.as_path(),
+            None,
+            &mut removed_files,
+        )
+        .expect("finalize replacement");
+
+        assert!(!old_path.exists(), "old mod should be removed after update");
+        assert!(new_path.exists(), "new mod should remain after update");
+        assert_eq!(removed_files, vec![old_path.display().to_string()]);
+
+        let _ = std::fs::remove_dir_all(root.as_path());
+    }
 }
