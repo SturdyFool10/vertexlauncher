@@ -5,11 +5,11 @@ use std::{
 };
 
 use cosmic_text::{
-    Action, Attrs, AttrsOwned, Buffer, Color, Edit, Editor, Family, FontFeatures, FontSystem,
-    Metrics, Motion, Shaping, Style as FontStyle, SwashCache, Weight, Wrap,
+    Action, Attrs, AttrsOwned, Buffer, Color, Cursor, Edit, Editor, Family, FontFeatures,
+    FontSystem, Metrics, Motion, Selection, Shaping, Style as FontStyle, SwashCache, Weight, Wrap,
 };
 use egui::{
-    self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense, Stroke,
+    self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense,
     TextureHandle, TextureOptions, Ui, Vec2,
 };
 use pulldown_cmark::{
@@ -22,186 +22,21 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use tracing::warn;
 
+mod button_options;
+mod code_block_options;
+mod input_options;
+mod label_options;
+mod markdown_options;
+mod tooltip_options;
+
+pub use button_options::ButtonOptions;
+pub use code_block_options::CodeBlockOptions;
+pub use input_options::InputOptions;
+pub use label_options::LabelOptions;
+pub use markdown_options::MarkdownOptions;
+pub use tooltip_options::TooltipOptions;
+
 const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "liga, calt";
-
-/// Styling options for plain/rich labels.
-#[derive(Clone, Debug)]
-pub struct LabelOptions {
-    pub font_size: f32,
-    pub line_height: f32,
-    pub color: Color32,
-    pub wrap: bool,
-    pub monospace: bool,
-    pub weight: u16,
-    pub italic: bool,
-    pub padding: Vec2,
-}
-
-impl Default for LabelOptions {
-    fn default() -> Self {
-        Self {
-            font_size: 18.0,
-            line_height: 24.0,
-            color: Color32::WHITE,
-            wrap: true,
-            monospace: false,
-            weight: 400,
-            italic: false,
-            padding: egui::vec2(0.0, 0.0),
-        }
-    }
-}
-
-/// Styling options for syntax-highlighted code blocks.
-#[derive(Clone, Debug)]
-pub struct CodeBlockOptions {
-    pub font_size: f32,
-    pub line_height: f32,
-    pub text_color: Color32,
-    pub background_color: Color32,
-    pub stroke: Stroke,
-    pub wrap: bool,
-    pub language: Option<String>,
-    pub padding: Vec2,
-    pub corner_radius: u8,
-}
-
-impl Default for CodeBlockOptions {
-    fn default() -> Self {
-        Self {
-            font_size: 16.0,
-            line_height: 22.0,
-            text_color: Color32::from_rgb(230, 230, 230),
-            background_color: Color32::from_rgb(16, 18, 22),
-            stroke: Stroke::new(1.0, Color32::from_rgb(36, 40, 48)),
-            wrap: true,
-            language: None,
-            padding: egui::vec2(10.0, 10.0),
-            corner_radius: 8,
-        }
-    }
-}
-
-/// Markdown rendering options.
-#[derive(Clone, Debug)]
-pub struct MarkdownOptions {
-    pub body: LabelOptions,
-    pub heading_scale: f32,
-    pub paragraph_spacing: f32,
-    pub code: CodeBlockOptions,
-}
-
-impl Default for MarkdownOptions {
-    fn default() -> Self {
-        Self {
-            body: LabelOptions::default(),
-            heading_scale: 1.28,
-            paragraph_spacing: 8.0,
-            code: CodeBlockOptions::default(),
-        }
-    }
-}
-
-/// Styling/behavior options for single/multi-line text inputs.
-#[derive(Clone, Debug)]
-pub struct InputOptions {
-    pub font_size: f32,
-    pub line_height: f32,
-    pub text_color: Color32,
-    pub cursor_color: Color32,
-    pub selection_color: Color32,
-    pub selected_text_color: Color32,
-    pub background_color: Color32,
-    pub stroke: Stroke,
-    pub padding: Vec2,
-    pub monospace: bool,
-    pub min_width: f32,
-    pub desired_width: Option<f32>,
-    pub desired_rows: usize,
-}
-
-impl Default for InputOptions {
-    fn default() -> Self {
-        Self {
-            font_size: 18.0,
-            line_height: 24.0,
-            text_color: Color32::WHITE,
-            cursor_color: Color32::from_rgb(90, 170, 255),
-            selection_color: Color32::from_rgba_premultiplied(90, 170, 255, 80),
-            selected_text_color: Color32::WHITE,
-            background_color: Color32::from_rgb(11, 13, 16),
-            stroke: Stroke::new(1.0, Color32::from_rgb(45, 50, 60)),
-            padding: egui::vec2(8.0, 6.0),
-            monospace: false,
-            min_width: 64.0,
-            desired_width: None,
-            desired_rows: 5,
-        }
-    }
-}
-
-/// Styling options for button widgets.
-#[derive(Clone, Debug)]
-pub struct ButtonOptions {
-    pub font_size: f32,
-    pub line_height: f32,
-    pub text_color: Color32,
-    pub fill: Color32,
-    pub fill_hovered: Color32,
-    pub fill_active: Color32,
-    pub fill_selected: Color32,
-    pub stroke: Stroke,
-    pub corner_radius: u8,
-    pub padding: Vec2,
-    pub min_size: Vec2,
-}
-
-impl Default for ButtonOptions {
-    fn default() -> Self {
-        Self {
-            font_size: 18.0,
-            line_height: 24.0,
-            text_color: Color32::WHITE,
-            fill: Color32::from_rgb(24, 28, 34),
-            fill_hovered: Color32::from_rgb(30, 35, 42),
-            fill_active: Color32::from_rgb(36, 43, 52),
-            fill_selected: Color32::from_rgb(40, 56, 74),
-            stroke: Stroke::new(1.0, Color32::from_rgb(52, 58, 68)),
-            corner_radius: 8,
-            padding: egui::vec2(10.0, 6.0),
-            min_size: egui::vec2(88.0, 30.0),
-        }
-    }
-}
-
-/// Styling options for tooltip overlays.
-#[derive(Clone, Debug)]
-pub struct TooltipOptions {
-    pub text: LabelOptions,
-    pub background: Color32,
-    pub stroke: Stroke,
-    pub corner_radius: u8,
-    pub padding: Vec2,
-    pub offset: Vec2,
-}
-
-impl Default for TooltipOptions {
-    fn default() -> Self {
-        let mut text = LabelOptions::default();
-        text.font_size = 14.0;
-        text.line_height = 18.0;
-        text.wrap = true;
-
-        Self {
-            text,
-            background: Color32::from_rgba_premultiplied(14, 16, 20, 245),
-            stroke: Stroke::new(1.0, Color32::from_rgb(42, 48, 58)),
-            corner_radius: 6,
-            padding: egui::vec2(8.0, 6.0),
-            offset: egui::vec2(10.0, 6.0),
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 struct SpanStyle {
@@ -277,6 +112,7 @@ enum AsyncRasterWorkerMessage {
 struct InputState {
     editor: Editor<'static>,
     last_text: String,
+    attrs_fingerprint: u64,
     multiline: bool,
 }
 
@@ -1132,8 +968,11 @@ impl TextUi {
         let desired_size = egui::vec2(width, height);
         let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
 
-        if response.hovered() {
-            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Text);
+        if response.hovered() || response.has_focus() {
+            ui.output_mut(|o| {
+                o.cursor_icon = egui::CursorIcon::Text;
+                o.mutable_text_under_cursor = true;
+            });
         }
 
         if response.clicked() {
@@ -1145,6 +984,7 @@ impl TextUi {
         let content_rect = rect.shrink2(options.padding);
         let content_width_px = (content_rect.width() * scale).max(1.0);
         let content_height_px = (content_rect.height() * scale).max(1.0);
+        let attrs_fingerprint = self.input_attrs_fingerprint(options, scale);
 
         let mut state = self
             .input_states
@@ -1155,7 +995,9 @@ impl TextUi {
             state = Self::new_input_state(&mut self.font_system, text, multiline);
         }
 
-        if !has_focus && state.last_text != *text {
+        let needs_text_sync = !has_focus && state.last_text != *text;
+        let needs_attrs_sync = state.attrs_fingerprint != attrs_fingerprint;
+        if needs_text_sync || needs_attrs_sync {
             self.replace_editor_text(
                 &mut state.editor,
                 text,
@@ -1166,6 +1008,7 @@ impl TextUi {
                 scale,
             );
             state.last_text.clone_from(text);
+            state.attrs_fingerprint = attrs_fingerprint;
         }
 
         self.configure_editor(
@@ -1218,19 +1061,7 @@ impl TextUi {
             has_focus,
         );
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        "input".hash(&mut hasher);
-        text.hash(&mut hasher);
-        options.font_size.to_bits().hash(&mut hasher);
-        options.line_height.to_bits().hash(&mut hasher);
-        options.text_color.hash(&mut hasher);
-        options.background_color.hash(&mut hasher);
-        has_focus.hash(&mut hasher);
-        let cursor = state.editor.cursor();
-        cursor.line.hash(&mut hasher);
-        cursor.index.hash(&mut hasher);
-        format!("{:?}", cursor.affinity).hash(&mut hasher);
-        let fingerprint = hasher.finish();
+        let fingerprint = input_texture_fingerprint(&state.editor, text, options, has_focus);
 
         let texture = self.update_texture(
             ui.ctx(),
@@ -1241,14 +1072,33 @@ impl TextUi {
         );
         self.input_states.insert(id, state);
 
+        let frame_fill = if has_focus {
+            options
+                .background_color_focused
+                .or(options.background_color_hovered)
+                .unwrap_or(options.background_color)
+        } else if response.hovered() {
+            options
+                .background_color_hovered
+                .unwrap_or(options.background_color)
+        } else {
+            options.background_color
+        };
+        let frame_stroke = if has_focus {
+            options
+                .stroke_focused
+                .or(options.stroke_hovered)
+                .unwrap_or(options.stroke)
+        } else if response.hovered() {
+            options.stroke_hovered.unwrap_or(options.stroke)
+        } else {
+            options.stroke
+        };
+        let corner_radius = CornerRadius::same(options.corner_radius);
+
+        ui.painter().rect_filled(rect, corner_radius, frame_fill);
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(6), options.background_color);
-        ui.painter().rect_stroke(
-            rect,
-            CornerRadius::same(6),
-            options.stroke,
-            egui::StrokeKind::Inside,
-        );
+            .rect_stroke(rect, corner_radius, frame_stroke, egui::StrokeKind::Inside);
 
         paint_texture(ui, &texture, content_rect);
 
@@ -1271,6 +1121,7 @@ impl TextUi {
         InputState {
             editor: Editor::new(buffer),
             last_text: text.to_owned(),
+            attrs_fingerprint: 0,
             multiline,
         }
     }
@@ -1288,6 +1139,8 @@ impl TextUi {
         let attrs_owned = self.input_attrs_owned(options, scale);
         let effective_font_size = self.effective_font_size(options.font_size) * scale;
         let effective_line_height = self.effective_line_height(options.line_height) * scale;
+        let previous_cursor = editor.cursor();
+        let previous_selection = editor.selection();
         editor.with_buffer_mut(|buffer| {
             let mut borrowed = buffer.borrow_with(&mut self.font_system);
             borrowed.set_metrics_and_size(
@@ -1304,6 +1157,8 @@ impl TextUi {
             borrowed.set_text(text, &attrs, Shaping::Advanced, None);
             borrowed.shape_until_scroll(true);
         });
+        editor.set_cursor(clamp_cursor_to_editor(editor, previous_cursor));
+        editor.set_selection(clamp_selection_to_editor(editor, previous_selection));
     }
 
     fn configure_editor(
@@ -1344,6 +1199,7 @@ impl TextUi {
         process_keyboard: bool,
     ) -> bool {
         let mut changed = false;
+        let modifiers = ui.ctx().input(|i| i.modifiers);
 
         if let Some(pointer_pos) = response.interact_pointer_pos() {
             let x = ((pointer_pos.x - content_rect.min.x) * scale).round() as i32;
@@ -1360,10 +1216,14 @@ impl TextUi {
                     .action(Action::DoubleClick { x, y });
                 changed = true;
             } else if response.clicked() {
-                editor
-                    .borrow_with(&mut self.font_system)
-                    .action(Action::Click { x, y });
-                changed = true;
+                if modifiers.shift {
+                    changed |= extend_selection_to_pointer(editor, x, y);
+                } else {
+                    editor
+                        .borrow_with(&mut self.font_system)
+                        .action(Action::Click { x, y });
+                    changed = true;
+                }
             }
 
             if response.dragged() {
@@ -1378,25 +1238,32 @@ impl TextUi {
             let events = ui.ctx().input(|i| i.events.clone());
             for event in events {
                 match event {
-                    egui::Event::Text(text) => {
-                        for ch in text.chars() {
-                            if !multiline && (ch == '\n' || ch == '\r') {
-                                continue;
-                            }
-                            editor
-                                .borrow_with(&mut self.font_system)
-                                .action(Action::Insert(ch));
+                    egui::Event::Text(mut text) => {
+                        if !multiline {
+                            text = text.replace(['\n', '\r'], "");
+                        }
+                        if !text.is_empty() {
+                            editor.insert_string(&text, None);
                             changed = true;
+                        }
+                    }
+                    egui::Event::Copy => {
+                        if let Some(selection) = editor.copy_selection() {
+                            ui.ctx().copy_text(selection);
+                        }
+                    }
+                    egui::Event::Cut => {
+                        if let Some(selection) = editor.copy_selection() {
+                            ui.ctx().copy_text(selection);
+                            changed |= editor.delete_selection();
                         }
                     }
                     egui::Event::Paste(mut pasted) => {
                         if !multiline {
                             pasted = pasted.replace(['\n', '\r'], " ");
                         }
-                        for ch in pasted.chars() {
-                            editor
-                                .borrow_with(&mut self.font_system)
-                                .action(Action::Insert(ch));
+                        if !pasted.is_empty() {
+                            editor.insert_string(&pasted, None);
                             changed = true;
                         }
                     }
@@ -1406,10 +1273,13 @@ impl TextUi {
                         modifiers,
                         ..
                     } if pressed => {
-                        if let Some(action) = key_to_action(key, modifiers, multiline) {
-                            editor.borrow_with(&mut self.font_system).action(action);
-                            changed = true;
-                        }
+                        changed |= handle_editor_key_event(
+                            &mut self.font_system,
+                            editor,
+                            key,
+                            modifiers,
+                            multiline,
+                        );
                     }
                     _ => {}
                 }
@@ -1874,6 +1744,22 @@ impl TextUi {
 
         AttrsOwned::new(&attrs)
     }
+
+    fn input_attrs_fingerprint(&self, options: &InputOptions, scale: f32) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        "input_attrs".hash(&mut hasher);
+        options.font_size.to_bits().hash(&mut hasher);
+        options.line_height.to_bits().hash(&mut hasher);
+        options.text_color.hash(&mut hasher);
+        options.monospace.hash(&mut hasher);
+        scale.to_bits().hash(&mut hasher);
+        self.ui_font_family.hash(&mut hasher);
+        self.ui_font_size_scale.to_bits().hash(&mut hasher);
+        self.ui_font_weight.hash(&mut hasher);
+        self.open_type_features_enabled.hash(&mut hasher);
+        self.open_type_features_to_enable.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 fn parse_feature_tag_list(feature_tags_csv: &str) -> Vec<[u8; 4]> {
@@ -2071,27 +1957,323 @@ fn editor_to_string(editor: &Editor<'static>) -> String {
     out
 }
 
-fn key_to_action(key: Key, modifiers: egui::Modifiers, multiline: bool) -> Option<Action> {
-    let command = modifiers.command || modifiers.ctrl;
+fn input_texture_fingerprint(
+    editor: &Editor<'static>,
+    text: &str,
+    options: &InputOptions,
+    has_focus: bool,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    "input".hash(&mut hasher);
+    text.hash(&mut hasher);
+    options.font_size.to_bits().hash(&mut hasher);
+    options.line_height.to_bits().hash(&mut hasher);
+    options.text_color.hash(&mut hasher);
+    options.cursor_color.hash(&mut hasher);
+    options.selection_color.hash(&mut hasher);
+    options.selected_text_color.hash(&mut hasher);
+    has_focus.hash(&mut hasher);
+    hash_cursor(editor.cursor(), &mut hasher);
+    hash_selection(editor.selection(), &mut hasher);
+    hasher.finish()
+}
+
+fn hash_cursor<H: Hasher>(cursor: Cursor, state: &mut H) {
+    cursor.line.hash(state);
+    cursor.index.hash(state);
+    format!("{:?}", cursor.affinity).hash(state);
+}
+
+fn hash_selection<H: Hasher>(selection: Selection, state: &mut H) {
+    match selection {
+        Selection::None => {
+            0_u8.hash(state);
+        }
+        Selection::Normal(cursor) => {
+            1_u8.hash(state);
+            hash_cursor(cursor, state);
+        }
+        Selection::Line(cursor) => {
+            2_u8.hash(state);
+            hash_cursor(cursor, state);
+        }
+        Selection::Word(cursor) => {
+            3_u8.hash(state);
+            hash_cursor(cursor, state);
+        }
+    }
+}
+
+fn clamp_cursor_to_editor(editor: &Editor<'static>, cursor: Cursor) -> Cursor {
+    editor.with_buffer(|buffer| {
+        let Some(last_line) = buffer.lines.len().checked_sub(1) else {
+            return Cursor::new_with_affinity(0, 0, cursor.affinity);
+        };
+        let line = cursor.line.min(last_line);
+        let index = cursor.index.min(buffer.lines[line].text().len());
+        Cursor::new_with_affinity(line, index, cursor.affinity)
+    })
+}
+
+fn clamp_selection_to_editor(editor: &Editor<'static>, selection: Selection) -> Selection {
+    match selection {
+        Selection::None => Selection::None,
+        Selection::Normal(cursor) => Selection::Normal(clamp_cursor_to_editor(editor, cursor)),
+        Selection::Line(cursor) => Selection::Line(clamp_cursor_to_editor(editor, cursor)),
+        Selection::Word(cursor) => Selection::Word(clamp_cursor_to_editor(editor, cursor)),
+    }
+}
+
+fn selection_anchor(selection: Selection) -> Option<Cursor> {
+    match selection {
+        Selection::None => None,
+        Selection::Normal(cursor) | Selection::Line(cursor) | Selection::Word(cursor) => {
+            Some(cursor)
+        }
+    }
+}
+
+fn extend_selection_to_pointer(editor: &mut Editor<'static>, x: i32, y: i32) -> bool {
+    let anchor = selection_anchor(editor.selection()).unwrap_or_else(|| editor.cursor());
+    let Some(new_cursor) = editor.with_buffer(|buffer| buffer.hit(x as f32, y as f32)) else {
+        return false;
+    };
+
+    editor.set_cursor(new_cursor);
+    if new_cursor == anchor {
+        editor.set_selection(Selection::None);
+    } else {
+        editor.set_selection(Selection::Normal(anchor));
+    }
+    true
+}
+
+fn select_all(editor: &mut Editor<'static>) -> bool {
+    let end = editor.with_buffer(|buffer| {
+        let Some(line) = buffer.lines.len().checked_sub(1) else {
+            return Cursor::new(0, 0);
+        };
+        Cursor::new(line, buffer.lines[line].text().len())
+    });
+    editor.set_selection(Selection::Normal(Cursor::new(0, 0)));
+    editor.set_cursor(end);
+    true
+}
+
+fn handle_editor_key_event(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    key: Key,
+    modifiers: egui::Modifiers,
+    multiline: bool,
+) -> bool {
+    if modifiers.command && key == Key::A {
+        return select_all(editor);
+    }
+
+    if handle_editor_delete_shortcut(font_system, editor, key, modifiers) {
+        return true;
+    }
+
+    if cfg!(target_os = "macos") && modifiers.ctrl && !modifiers.shift {
+        if let Some(motion) = mac_control_motion(key) {
+            return handle_editor_motion_key(font_system, editor, key, modifiers, motion);
+        }
+    }
+
+    let Some(action) = key_to_action(key, modifiers, multiline) else {
+        return false;
+    };
+
+    match action {
+        Action::Motion(motion) => {
+            handle_editor_motion_key(font_system, editor, key, modifiers, motion)
+        }
+        _ => {
+            editor.borrow_with(font_system).action(action);
+            true
+        }
+    }
+}
+
+fn handle_editor_motion_key(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    key: Key,
+    modifiers: egui::Modifiers,
+    motion: Motion,
+) -> bool {
+    if modifiers.shift {
+        if editor.selection() == Selection::None {
+            editor.set_selection(Selection::Normal(editor.cursor()));
+        }
+        editor
+            .borrow_with(font_system)
+            .action(Action::Motion(motion));
+        return true;
+    }
+
+    if let Some((start, end)) = editor.selection_bounds() {
+        if modifiers.is_none() && key == Key::ArrowLeft {
+            editor.set_selection(Selection::None);
+            editor.set_cursor(start);
+            return true;
+        }
+        if modifiers.is_none() && key == Key::ArrowRight {
+            editor.set_selection(Selection::None);
+            editor.set_cursor(end);
+            return true;
+        }
+        editor.set_selection(Selection::None);
+    }
+
+    editor
+        .borrow_with(font_system)
+        .action(Action::Motion(motion));
+    true
+}
+
+fn handle_editor_delete_shortcut(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    key: Key,
+    modifiers: egui::Modifiers,
+) -> bool {
     match key {
-        Key::ArrowLeft => Some(if command {
+        Key::Backspace if modifiers.mac_cmd => delete_to_motion(font_system, editor, Motion::Home),
+        Key::Backspace if modifiers.alt || modifiers.ctrl => {
+            delete_to_motion(font_system, editor, Motion::PreviousWord)
+        }
+        Key::Delete if (!modifiers.shift || !cfg!(target_os = "windows")) && modifiers.mac_cmd => {
+            delete_forward_to_motion(font_system, editor, Motion::End)
+        }
+        Key::Delete
+            if (!modifiers.shift || !cfg!(target_os = "windows"))
+                && (modifiers.alt || modifiers.ctrl) =>
+        {
+            delete_forward_to_motion(font_system, editor, Motion::NextWord)
+        }
+        Key::H if modifiers.ctrl => {
+            editor.borrow_with(font_system).action(Action::Backspace);
+            true
+        }
+        Key::K if modifiers.ctrl => delete_forward_to_motion(font_system, editor, Motion::End),
+        Key::U if modifiers.ctrl => delete_to_motion(font_system, editor, Motion::Home),
+        Key::W if modifiers.ctrl => delete_to_motion(font_system, editor, Motion::PreviousWord),
+        _ => false,
+    }
+}
+
+fn delete_to_motion(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    motion: Motion,
+) -> bool {
+    if editor.delete_selection() {
+        return true;
+    }
+
+    let end = editor.cursor();
+    let Some(start) = cursor_after_motion(font_system, editor, end, motion) else {
+        return false;
+    };
+    delete_cursor_range(editor, start, end)
+}
+
+fn delete_forward_to_motion(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    motion: Motion,
+) -> bool {
+    if editor.delete_selection() {
+        return true;
+    }
+
+    let start = editor.cursor();
+    let Some(end) = cursor_after_motion(font_system, editor, start, motion) else {
+        return false;
+    };
+    delete_cursor_range(editor, start, end)
+}
+
+fn cursor_after_motion(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    cursor: Cursor,
+    motion: Motion,
+) -> Option<Cursor> {
+    editor.with_buffer_mut(|buffer| {
+        let mut borrowed = buffer.borrow_with(font_system);
+        borrowed
+            .cursor_motion(cursor, None, motion)
+            .map(|(next, _)| next)
+    })
+}
+
+fn delete_cursor_range(editor: &mut Editor<'static>, first: Cursor, second: Cursor) -> bool {
+    if first == second {
+        return false;
+    }
+
+    let (start, end) = ordered_cursor_pair(first, second);
+    editor.set_selection(Selection::None);
+    editor.set_cursor(start);
+    editor.delete_range(start, end);
+    true
+}
+
+fn ordered_cursor_pair(first: Cursor, second: Cursor) -> (Cursor, Cursor) {
+    if first <= second {
+        (first, second)
+    } else {
+        (second, first)
+    }
+}
+
+fn mac_control_motion(key: Key) -> Option<Motion> {
+    match key {
+        Key::A => Some(Motion::Home),
+        Key::E => Some(Motion::End),
+        Key::B => Some(Motion::Left),
+        Key::F => Some(Motion::Right),
+        Key::P => Some(Motion::Up),
+        Key::N => Some(Motion::Down),
+        _ => None,
+    }
+}
+
+fn key_to_action(key: Key, modifiers: egui::Modifiers, multiline: bool) -> Option<Action> {
+    match key {
+        Key::ArrowLeft => Some(if modifiers.alt || modifiers.ctrl {
             Action::Motion(Motion::PreviousWord)
+        } else if modifiers.mac_cmd {
+            Action::Motion(Motion::Home)
         } else {
             Action::Motion(Motion::Left)
         }),
-        Key::ArrowRight => Some(if command {
+        Key::ArrowRight => Some(if modifiers.alt || modifiers.ctrl {
             Action::Motion(Motion::NextWord)
+        } else if modifiers.mac_cmd {
+            Action::Motion(Motion::End)
         } else {
             Action::Motion(Motion::Right)
         }),
-        Key::ArrowUp => Some(Action::Motion(Motion::Up)),
-        Key::ArrowDown => Some(Action::Motion(Motion::Down)),
-        Key::Home => Some(if command {
+        Key::ArrowUp => Some(if modifiers.command {
+            Action::Motion(Motion::BufferStart)
+        } else {
+            Action::Motion(Motion::Up)
+        }),
+        Key::ArrowDown => Some(if modifiers.command {
+            Action::Motion(Motion::BufferEnd)
+        } else {
+            Action::Motion(Motion::Down)
+        }),
+        Key::Home => Some(if modifiers.ctrl {
             Action::Motion(Motion::BufferStart)
         } else {
             Action::Motion(Motion::Home)
         }),
-        Key::End => Some(if command {
+        Key::End => Some(if modifiers.ctrl {
             Action::Motion(Motion::BufferEnd)
         } else {
             Action::Motion(Motion::End)
@@ -2100,8 +2282,13 @@ fn key_to_action(key: Key, modifiers: egui::Modifiers, multiline: bool) -> Optio
         Key::PageDown => Some(Action::Motion(Motion::PageDown)),
         Key::Backspace => Some(Action::Backspace),
         Key::Delete => Some(Action::Delete),
+        Key::Escape => Some(Action::Escape),
         Key::Enter if multiline => Some(Action::Enter),
-        Key::Tab => Some(Action::Insert('\t')),
+        Key::Tab if multiline => Some(if modifiers.shift {
+            Action::Unindent
+        } else {
+            Action::Indent
+        }),
         _ => None,
     }
 }

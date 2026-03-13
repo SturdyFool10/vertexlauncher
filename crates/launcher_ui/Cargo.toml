@@ -8,9 +8,11 @@ eframe.workspace = true
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+content_resolver.workspace = true
 config.workspace = true
 instances.workspace = true
 installation.workspace = true
+managed_content.workspace = true
 modprovider.workspace = true
 modrinth.workspace = true
 curseforge.workspace = true
@@ -28,6 +30,7 @@ flate2 = "*"
 base64 = "*"
 tar = "*"
 xz2 = "*"
+vtmpack.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "*", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation"] }

@@ -11,7 +11,7 @@ use config::SkinPreviewAaMode;
 use eframe::egui_wgpu::wgpu::util::DeviceExt as _;
 use eframe::egui_wgpu::{self, wgpu};
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Ui};
-use image::RgbaImage;
+use image::{RgbaImage, imageops::FilterType};
 use textui::{ButtonOptions, TextUi};
 
 use super::LaunchAuthContext;
@@ -29,6 +29,7 @@ const CAPE_TILE_WIDTH_MIN: f32 = 132.0;
 const CAPE_TILE_HEIGHT: f32 = 186.0;
 const SKIN_PREVIEW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const SKIN_PREVIEW_NEAR: f32 = 1.5;
+const SKIN_PREVIEW_ANISOTROPY_CLAMP: u16 = 16;
 const MOTION_BLUR_MIN_ANGULAR_SPAN: f32 = 0.015;
 
 pub fn render(
@@ -1913,12 +1914,12 @@ fn render_cpu_post_aa_scene(
 
     let color_image = egui::ColorImage::from_rgba_unmultiplied([width, height], &color);
     if let Some(texture) = preview_texture.as_mut() {
-        texture.set(color_image, TextureOptions::LINEAR);
+        texture.set(color_image, TextureOptions::NEAREST);
     } else {
         *preview_texture = Some(ctx.load_texture(
             "skins/preview/post-aa-frame",
             color_image,
-            TextureOptions::LINEAR,
+            TextureOptions::NEAREST,
         ));
     }
     if let Some(texture) = preview_texture.as_ref() {
@@ -2717,6 +2718,7 @@ struct SkinPreviewPostProcessWgpuResources {
     taa_pipeline: wgpu::RenderPipeline,
     present_pipeline: wgpu::RenderPipeline,
     texture_bind_group_layout: wgpu::BindGroupLayout,
+    texture_sampler: wgpu::Sampler,
     uniform_bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
     scalar_uniform_bind_group_layout: wgpu::BindGroupLayout,
@@ -2781,8 +2783,40 @@ struct VertexOut {
 
 @group(0) @binding(0)
 var preview_tex: texture_2d<f32>;
+@group(0) @binding(1)
+var preview_sampler: sampler;
 @group(1) @binding(0)
 var<uniform> globals: Globals;
+
+fn sample_preview_pixel_art(uv: vec2<f32>) -> vec4<f32> {
+    let dims_i = textureDimensions(preview_tex);
+    let dims = vec2<f32>(dims_i);
+    let texel = 0.5 / dims;
+    let clamped_uv = clamp(uv, texel, vec2<f32>(1.0) - texel);
+    let uv_grad_x = dpdx(clamped_uv);
+    let uv_grad_y = dpdy(clamped_uv);
+    let texel_grad_x = uv_grad_x * dims;
+    let texel_grad_y = uv_grad_y * dims;
+    let footprint = max(
+        max(abs(texel_grad_x.x), abs(texel_grad_x.y)),
+        max(abs(texel_grad_y.x), abs(texel_grad_y.y)),
+    );
+    let pixel = clamp(
+        vec2<i32>(clamped_uv * dims),
+        vec2<i32>(0),
+        vec2<i32>(dims_i) - vec2<i32>(1),
+    );
+    let nearest = textureLoad(preview_tex, pixel, 0);
+    let filtered = textureSampleGrad(
+        preview_tex,
+        preview_sampler,
+        clamped_uv,
+        uv_grad_x,
+        uv_grad_y,
+    );
+    let filtered_mix = smoothstep(0.85, 1.35, footprint);
+    return mix(nearest, filtered, filtered_mix);
+}
 
 @vertex
 fn vs_main(input: VertexIn) -> VertexOut {
@@ -2800,10 +2834,7 @@ fn vs_main(input: VertexIn) -> VertexOut {
 
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
-    let dims = vec2<f32>(textureDimensions(preview_tex));
-    let uv = clamp(input.uv, vec2<f32>(0.0), vec2<f32>(0.999999));
-    let texel = vec2<i32>(floor(uv * dims));
-    let sampled = textureLoad(preview_tex, texel, 0) * input.color;
+    let sampled = sample_preview_pixel_art(input.uv) * input.color;
     if sampled.a <= 0.001 {
         discard;
     }
@@ -3140,17 +3171,27 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("skins-preview-post-texture-layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
             });
+        let texture_sampler =
+            create_skin_preview_sampler(device, "skins-preview-post-texture-sampler");
         let scene_uniform_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("skins-preview-post-scene-uniform-layout"),
@@ -3458,6 +3499,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &texture_bind_group_layout,
+                &texture_sampler,
                 OFFSCREEN_FORMAT,
                 [1, 1],
                 1,
@@ -3467,6 +3509,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &texture_bind_group_layout,
+                &texture_sampler,
                 OFFSCREEN_FORMAT,
                 [1, 1],
                 1,
@@ -3476,6 +3519,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &texture_bind_group_layout,
+                &texture_sampler,
                 OFFSCREEN_FORMAT,
                 [1, 1],
                 1,
@@ -3485,6 +3529,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &texture_bind_group_layout,
+                &texture_sampler,
                 OFFSCREEN_FORMAT,
                 [1, 1],
                 1,
@@ -3517,6 +3562,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             taa_pipeline,
             present_pipeline,
             texture_bind_group_layout,
+            texture_sampler,
             uniform_bind_group,
             uniform_buffer,
             scalar_uniform_bind_group_layout: scalar_uniform_layout,
@@ -3562,6 +3608,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &self.texture_bind_group_layout,
+                &self.texture_sampler,
                 OFFSCREEN_FORMAT,
                 size,
                 1,
@@ -3575,6 +3622,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &self.texture_bind_group_layout,
+                &self.texture_sampler,
                 OFFSCREEN_FORMAT,
                 size,
                 1,
@@ -3588,6 +3636,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &self.texture_bind_group_layout,
+                &self.texture_sampler,
                 OFFSCREEN_FORMAT,
                 size,
                 1,
@@ -3601,6 +3650,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             create_preview_render_texture(
                 device,
                 &self.texture_bind_group_layout,
+                &self.texture_sampler,
                 OFFSCREEN_FORMAT,
                 size,
                 1,
@@ -3663,7 +3713,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
                 height: size[1].max(1),
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: preview_mip_level_count(size),
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
@@ -3671,35 +3721,16 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             view_formats: &[],
         });
 
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            image.as_raw(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size[0] * 4),
-                rows_per_image: Some(size[1]),
-            },
-            wgpu::Extent3d {
-                width: size[0].max(1),
-                height: size[1].max(1),
-                depth_or_array_layers: 1,
-            },
-        );
+        write_preview_texture_mips(queue, &texture, image);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("skins-preview-post-source-bind-group"),
-            layout: &self.texture_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            }],
-        });
+        let bind_group = create_preview_texture_bind_group(
+            device,
+            &self.texture_bind_group_layout,
+            &self.texture_sampler,
+            &view,
+            "skins-preview-post-source-bind-group",
+        );
 
         *target = Some(UploadedPreviewTexture {
             hash,
@@ -3823,6 +3854,7 @@ fn create_preview_index_buffer(
 fn create_preview_render_texture(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
     format: wgpu::TextureFormat,
     size: [u32; 2],
     sample_count: u32,
@@ -3846,15 +3878,114 @@ fn create_preview_render_texture(
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let bind_group = create_preview_texture_bind_group(device, layout, sampler, &view, label);
+    (texture, view, bind_group)
+}
+
+fn create_skin_preview_sampler(device: &wgpu::Device, label: &'static str) -> wgpu::Sampler {
+    // Keep the sampler fully linear so wgpu can enable anisotropy; the fragment shaders
+    // switch to exact texel loads whenever the skin is magnified to preserve crisp pixels.
+    device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(label),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Linear,
+        anisotropy_clamp: SKIN_PREVIEW_ANISOTROPY_CLAMP,
+        ..Default::default()
+    })
+}
+
+fn create_preview_texture_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    view: &wgpu::TextureView,
+    label: &'static str,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
         layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(&view),
-        }],
-    });
-    (texture, view, bind_group)
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
+}
+
+fn preview_mip_level_count(size: [u32; 2]) -> u32 {
+    size[0].max(size[1]).max(1).ilog2() + 1
+}
+
+fn write_preview_texture_mips(queue: &wgpu::Queue, texture: &wgpu::Texture, image: &RgbaImage) {
+    let mut mip_image = image.clone();
+    let mip_level_count = preview_mip_level_count([image.width(), image.height()]);
+
+    for mip_level in 0..mip_level_count {
+        let width = mip_image.width().max(1);
+        let height = mip_image.height().max(1);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            mip_image.as_raw(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        if mip_level + 1 < mip_level_count {
+            let next_width = (width / 2).max(1);
+            let next_height = (height / 2).max(1);
+            mip_image = resize_preview_mip(&mip_image, next_width, next_height);
+        }
+    }
+}
+
+fn resize_preview_mip(image: &RgbaImage, width: u32, height: u32) -> RgbaImage {
+    let mut premultiplied = image.clone();
+    for pixel in premultiplied.pixels_mut() {
+        let alpha = u16::from(pixel[3]);
+        pixel[0] = ((u16::from(pixel[0]) * alpha + 127) / 255) as u8;
+        pixel[1] = ((u16::from(pixel[1]) * alpha + 127) / 255) as u8;
+        pixel[2] = ((u16::from(pixel[2]) * alpha + 127) / 255) as u8;
+    }
+
+    let mut resized = image::imageops::resize(&premultiplied, width, height, FilterType::Triangle);
+    for pixel in resized.pixels_mut() {
+        let alpha = pixel[3];
+        if alpha == 0 {
+            pixel[0] = 0;
+            pixel[1] = 0;
+            pixel[2] = 0;
+            continue;
+        }
+
+        let scale = 255.0 / f32::from(alpha);
+        pixel[0] = (f32::from(pixel[0]) * scale).round().clamp(0.0, 255.0) as u8;
+        pixel[1] = (f32::from(pixel[1]) * scale).round().clamp(0.0, 255.0) as u8;
+        pixel[2] = (f32::from(pixel[2]) * scale).round().clamp(0.0, 255.0) as u8;
+    }
+
+    resized
 }
 
 fn create_preview_color_texture(
@@ -4103,6 +4234,7 @@ struct UploadedPreviewTexture {
 struct SkinPreviewWgpuResources {
     pipeline: Option<wgpu::RenderPipeline>,
     texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    texture_sampler: wgpu::Sampler,
     uniform_bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
     skin_texture: Option<UploadedPreviewTexture>,
@@ -4162,15 +4294,44 @@ fn vs_main(input: VertexIn) -> VertexOut {
 
 @group(0) @binding(0)
 var preview_tex: texture_2d<f32>;
+@group(0) @binding(1)
+var preview_sampler: sampler;
 @group(1) @binding(0)
 var<uniform> globals: Globals;
 
+fn sample_preview_pixel_art(uv: vec2<f32>) -> vec4<f32> {
+    let dims_i = textureDimensions(preview_tex);
+    let dims = vec2<f32>(dims_i);
+    let texel = 0.5 / dims;
+    let clamped_uv = clamp(uv, texel, vec2<f32>(1.0) - texel);
+    let uv_grad_x = dpdx(clamped_uv);
+    let uv_grad_y = dpdy(clamped_uv);
+    let texel_grad_x = uv_grad_x * dims;
+    let texel_grad_y = uv_grad_y * dims;
+    let footprint = max(
+        max(abs(texel_grad_x.x), abs(texel_grad_x.y)),
+        max(abs(texel_grad_y.x), abs(texel_grad_y.y)),
+    );
+    let pixel = clamp(
+        vec2<i32>(clamped_uv * dims),
+        vec2<i32>(0),
+        vec2<i32>(dims_i) - vec2<i32>(1),
+    );
+    let nearest = textureLoad(preview_tex, pixel, 0);
+    let filtered = textureSampleGrad(
+        preview_tex,
+        preview_sampler,
+        clamped_uv,
+        uv_grad_x,
+        uv_grad_y,
+    );
+    let filtered_mix = smoothstep(0.85, 1.35, footprint);
+    return mix(nearest, filtered, filtered_mix);
+}
+
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
-    let dims = vec2<f32>(textureDimensions(preview_tex));
-    let uv = clamp(input.uv, vec2<f32>(0.0, 0.0), vec2<f32>(0.999999, 0.999999));
-    let texel = vec2<i32>(floor(uv * dims));
-    let sampled = textureLoad(preview_tex, texel, 0) * input.color;
+    let sampled = sample_preview_pixel_art(input.uv) * input.color;
     if sampled.a <= 0.001 {
         discard;
     }
@@ -4183,17 +4344,26 @@ fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("skins-preview-texture-layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
             });
+        let texture_sampler = create_skin_preview_sampler(device, "skins-preview-texture-sampler");
 
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -4300,6 +4470,7 @@ fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
         Self {
             pipeline: Some(pipeline),
             texture_bind_group_layout: Some(texture_bind_group_layout),
+            texture_sampler,
             uniform_bind_group,
             uniform_buffer,
             skin_texture: None,
@@ -4350,7 +4521,7 @@ fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
                 height: size[1].max(1),
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count: preview_mip_level_count(size),
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
@@ -4358,35 +4529,16 @@ fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
             view_formats: &[],
         });
 
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            image.as_raw(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size[0] * 4),
-                rows_per_image: Some(size[1]),
-            },
-            wgpu::Extent3d {
-                width: size[0].max(1),
-                height: size[1].max(1),
-                depth_or_array_layers: 1,
-            },
-        );
+        write_preview_texture_mips(queue, &texture, image);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("skins-preview-texture-bind-group"),
+        let bind_group = create_preview_texture_bind_group(
+            device,
             layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            }],
-        });
+            &self.texture_sampler,
+            &view,
+            "skins-preview-texture-bind-group",
+        );
 
         *target = Some(UploadedPreviewTexture {
             hash,

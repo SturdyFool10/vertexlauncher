@@ -16,6 +16,7 @@ instances.workspace = true
 installation.workspace = true
 launcher_runtime.workspace = true
 launcher_ui.workspace = true
+managed_content.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 humantime.workspace = true
@@ -31,6 +32,7 @@ flate2 = "*"
 ureq.workspace = true
 tar = "*"
 xz2 = "*"
+vtmpack.workspace = true
 zip = { version = "*", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

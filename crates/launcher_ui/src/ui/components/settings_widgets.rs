@@ -5,7 +5,10 @@ use textui::{ButtonOptions, InputOptions, LabelOptions, TextUi, TooltipOptions};
 
 use crate::{
     assets,
-    ui::components::{icon_button, text_helpers},
+    ui::{
+        components::{icon_button, text_helpers},
+        text_input_theme,
+    },
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -1208,53 +1211,25 @@ fn row_label_options(ui: &Ui) -> LabelOptions {
 }
 
 fn number_input_options(ui: &Ui, metrics: ControlMetrics) -> InputOptions {
-    let selection = ui.visuals().selection.bg_fill;
-    InputOptions {
-        font_size: 17.0,
-        line_height: 22.0,
-        text_color: ui.visuals().text_color(),
-        cursor_color: ui.visuals().text_cursor.stroke.color,
-        selection_color: egui::Color32::from_rgba_premultiplied(
-            selection.r(),
-            selection.g(),
-            selection.b(),
-            92,
-        ),
-        selected_text_color: ui.visuals().text_color(),
-        background_color: ui.visuals().widgets.inactive.bg_fill,
-        stroke: ui.visuals().widgets.inactive.bg_stroke,
-        desired_rows: 1,
-        desired_width: Some(metrics.number_input_width),
-        min_width: metrics.number_input_width,
-        monospace: true,
-        padding: egui::vec2(6.0, 4.0),
-        ..InputOptions::default()
-    }
+    let mut options = text_input_theme::themed_text_input_options(ui, true);
+    options.font_size = 17.0;
+    options.line_height = 22.0;
+    options.desired_rows = 1;
+    options.desired_width = Some(metrics.number_input_width);
+    options.min_width = metrics.number_input_width;
+    options.padding = egui::vec2(6.0, 4.0);
+    options
 }
 
 fn text_input_options(ui: &Ui, metrics: ControlMetrics) -> InputOptions {
-    let selection = ui.visuals().selection.bg_fill;
-    InputOptions {
-        font_size: 17.0,
-        line_height: 22.0,
-        text_color: ui.visuals().text_color(),
-        cursor_color: ui.visuals().text_cursor.stroke.color,
-        selection_color: egui::Color32::from_rgba_premultiplied(
-            selection.r(),
-            selection.g(),
-            selection.b(),
-            92,
-        ),
-        selected_text_color: ui.visuals().text_color(),
-        background_color: ui.visuals().widgets.inactive.bg_fill,
-        stroke: ui.visuals().widgets.inactive.bg_stroke,
-        desired_rows: 1,
-        desired_width: Some(metrics.dropdown_width),
-        min_width: metrics.dropdown_width,
-        monospace: false,
-        padding: egui::vec2(6.0, 4.0),
-        ..InputOptions::default()
-    }
+    let mut options = text_input_theme::themed_text_input_options(ui, false);
+    options.font_size = 17.0;
+    options.line_height = 22.0;
+    options.desired_rows = 1;
+    options.desired_width = Some(metrics.dropdown_width);
+    options.min_width = metrics.dropdown_width;
+    options.padding = egui::vec2(6.0, 4.0);
+    options
 }
 
 fn control_metrics(ui: &Ui) -> ControlMetrics {

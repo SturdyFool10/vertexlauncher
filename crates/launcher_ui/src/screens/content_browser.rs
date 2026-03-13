@@ -3,9 +3,12 @@ use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
 use installation::{MinecraftVersionEntry, fetch_version_catalog};
 use instances::{InstanceStore, instance_root_path};
+use managed_content::{
+    ContentInstallManifest, InstalledContentProject, ManagedContentSource, load_content_manifest,
+    save_content_manifest,
+};
 use modprovider::{ContentSource, UnifiedContentEntry};
 use modrinth::Client as ModrinthClient;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
@@ -30,7 +33,6 @@ const DEFAULT_DISCOVERY_QUERY_MOD: &str = "mod";
 const DEFAULT_DISCOVERY_QUERY_RESOURCE_PACK: &str = "resource pack";
 const DEFAULT_DISCOVERY_QUERY_SHADER: &str = "shader";
 const DEFAULT_DISCOVERY_QUERY_DATA_PACK: &str = "data pack";
-const CONTENT_MANIFEST_FILE_NAME: &str = ".vertex-content-manifest.toml";
 const DETAIL_VERSION_FETCH_PAGE_SIZE: u32 = 50;
 const DETAIL_VERSION_FETCH_MAX_PAGES: u32 = 5;
 const TILE_ACTION_BUTTON_WIDTH: f32 = 28.0;
@@ -329,69 +331,6 @@ enum VersionRowAction {
     Download,
     Installed,
     Switch,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct ContentInstallManifest {
-    projects: HashMap<String, InstalledContentProject>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct InstalledContentProject {
-    project_key: String,
-    name: String,
-    folder_name: String,
-    file_path: String,
-    modrinth_project_id: Option<String>,
-    curseforge_project_id: Option<u64>,
-    selected_source: ManagedContentSource,
-    selected_version_id: String,
-    selected_version_name: String,
-    explicitly_installed: bool,
-    direct_dependencies: Vec<String>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct InstalledContentIdentity {
-    pub name: String,
-    pub file_path: String,
-    pub source: ContentSource,
-    pub modrinth_project_id: Option<String>,
-    pub curseforge_project_id: Option<u64>,
-    pub selected_version_id: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-enum ManagedContentSource {
-    Modrinth,
-    CurseForge,
-}
-
-impl ManagedContentSource {
-    fn label(self) -> &'static str {
-        match self {
-            ManagedContentSource::Modrinth => "Modrinth",
-            ManagedContentSource::CurseForge => "CurseForge",
-        }
-    }
-}
-
-impl From<ContentSource> for ManagedContentSource {
-    fn from(value: ContentSource) -> Self {
-        match value {
-            ContentSource::Modrinth => ManagedContentSource::Modrinth,
-            ContentSource::CurseForge => ManagedContentSource::CurseForge,
-        }
-    }
-}
-
-impl From<ManagedContentSource> for ContentSource {
-    fn from(value: ManagedContentSource) -> Self {
-        match value {
-            ManagedContentSource::Modrinth => ContentSource::Modrinth,
-            ManagedContentSource::CurseForge => ContentSource::CurseForge,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -767,7 +706,7 @@ fn render_controls(
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             let edit = egui::TextEdit::singleline(&mut state.query_input)
-                .hint_text("Search across Modrinth + CurseForge")
+                .hint_text("Search project names, summaries, and tags")
                 .desired_width((ui.available_width() - 300.0).max(200.0));
             let response = ui.add(edit);
             let run_search = response.lost_focus()
@@ -799,7 +738,52 @@ fn render_controls(
             {
                 request_search_for_current_filters(state, true);
             }
+
+            if text_ui
+                .button(
+                    ui,
+                    ("content_browser_identify_file_button", instance_id),
+                    "Identify .jar",
+                    &button_style,
+                )
+                .clicked()
+            {
+                if let Some(selected_path) = rfd::FileDialog::new()
+                    .set_title("Identify Mod File")
+                    .add_filter("Minecraft Mod", &["jar"])
+                    .pick_file()
+                {
+                    match identify_mod_file_by_hash(selected_path.as_path()) {
+                        Ok(entry) => {
+                            let project_name = entry.name.clone();
+                            request_open_detail_for_content(entry);
+                            apply_pending_external_detail_open(state);
+                            state.status_message = Some(format!(
+                                "Identified {} from {}.",
+                                project_name,
+                                selected_path.display()
+                            ));
+                        }
+                        Err(err) => {
+                            state.status_message = Some(format!(
+                                "Could not identify {}: {err}",
+                                selected_path.display()
+                            ));
+                        }
+                    }
+                }
+            }
         });
+        let _ = text_ui.label(
+            ui,
+            ("content_browser_search_help", instance_id),
+            "Project search uses provider metadata and compatibility facets, not local file names. Use the instance page for exact file-hash identification.",
+            &LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..LabelOptions::default()
+            },
+        );
 
         ui.add_space(6.0);
         let gap = ui.spacing().item_spacing.x;
@@ -1976,8 +1960,8 @@ fn version_row_action(
     let Some(installed) = manifest.projects.get(&entry.dedupe_key) else {
         return VersionRowAction::Download;
     };
-    if installed.selected_source == version.source
-        && installed.selected_version_id == version.version_id
+    if installed.selected_source == Some(version.source.into())
+        && installed.selected_version_id.as_deref() == Some(version.version_id.as_str())
     {
         VersionRowAction::Installed
     } else {
@@ -3176,8 +3160,8 @@ fn apply_content_install_request(
 
     let mut manifest = load_content_manifest(instance_root);
     if let Some(existing) = manifest.projects.get(&root_entry.dedupe_key).cloned() {
-        if existing.selected_source == root_download.source
-            && existing.selected_version_id == root_download.version_id
+        if existing.selected_source == Some(root_download.source)
+            && existing.selected_version_id.as_deref() == Some(root_download.version_id.as_str())
         {
             if let Some(record) = manifest.projects.get_mut(&root_entry.dedupe_key) {
                 record.explicitly_installed = true;
@@ -3288,9 +3272,9 @@ fn install_project_recursive(
             file_path,
             modrinth_project_id: entry.modrinth_project_id.clone(),
             curseforge_project_id: entry.curseforge_project_id,
-            selected_source: resolved.source,
-            selected_version_id: resolved.version_id.clone(),
-            selected_version_name: resolved.version_name.clone(),
+            selected_source: Some(resolved.source),
+            selected_version_id: Some(resolved.version_id.clone()),
+            selected_version_name: Some(resolved.version_name.clone()),
             explicitly_installed: explicit,
             direct_dependencies: Vec::new(),
         },
@@ -3617,99 +3601,6 @@ fn dependency_to_browser_entry(
     }
 }
 
-fn content_manifest_path(instance_root: &Path) -> PathBuf {
-    instance_root.join(CONTENT_MANIFEST_FILE_NAME)
-}
-
-fn load_content_manifest(instance_root: &Path) -> ContentInstallManifest {
-    let path = content_manifest_path(instance_root);
-    let mut manifest = std::fs::read_to_string(path.as_path())
-        .ok()
-        .and_then(|raw| toml::from_str::<ContentInstallManifest>(&raw).ok())
-        .unwrap_or_default();
-    normalize_content_manifest(instance_root, &mut manifest);
-    manifest
-}
-
-pub(crate) fn load_managed_content_identities(
-    instance_root: &Path,
-) -> HashMap<String, InstalledContentIdentity> {
-    let manifest = load_content_manifest(instance_root);
-    manifest
-        .projects
-        .into_values()
-        .map(|project| {
-            (
-                normalize_content_path_key(project.file_path.as_str()),
-                InstalledContentIdentity {
-                    name: project.name,
-                    file_path: project.file_path,
-                    source: project.selected_source.into(),
-                    modrinth_project_id: project.modrinth_project_id,
-                    curseforge_project_id: project.curseforge_project_id,
-                    selected_version_id: project.selected_version_id,
-                },
-            )
-        })
-        .collect()
-}
-
-fn save_content_manifest(
-    instance_root: &Path,
-    manifest: &ContentInstallManifest,
-) -> Result<(), String> {
-    let mut normalized = manifest.clone();
-    normalize_content_manifest(instance_root, &mut normalized);
-    let path = content_manifest_path(instance_root);
-    if normalized.projects.is_empty() {
-        if path.exists() {
-            let _ = std::fs::remove_file(path.as_path());
-        }
-        return Ok(());
-    }
-    let raw = toml::to_string_pretty(&normalized)
-        .map_err(|err| format!("failed to serialize content manifest: {err}"))?;
-    std::fs::write(path.as_path(), raw)
-        .map_err(|err| format!("failed to write content manifest {}: {err}", path.display()))
-}
-
-fn normalize_content_manifest(instance_root: &Path, manifest: &mut ContentInstallManifest) {
-    let missing_keys: Vec<String> = manifest
-        .projects
-        .iter()
-        .filter_map(|(key, value)| {
-            let file_path = instance_root.join(value.file_path.as_str());
-            if file_path.exists() {
-                None
-            } else {
-                Some(key.clone())
-            }
-        })
-        .collect();
-    for key in missing_keys {
-        manifest.projects.remove(key.as_str());
-    }
-
-    let project_keys: HashSet<String> = manifest.projects.keys().cloned().collect();
-    for (key, value) in &mut manifest.projects {
-        value.project_key = key.clone();
-        value
-            .direct_dependencies
-            .retain(|dependency| dependency != key && project_keys.contains(dependency));
-        value.direct_dependencies.sort();
-        value.direct_dependencies.dedup();
-    }
-}
-
-fn normalize_content_path_key(value: &str) -> String {
-    value
-        .trim()
-        .trim_start_matches("./")
-        .trim_start_matches(".\\")
-        .replace('\\', "/")
-        .to_ascii_lowercase()
-}
-
 fn normalize_optional(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -3717,6 +3608,35 @@ fn normalize_optional(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_owned())
     }
+}
+
+fn identify_mod_file_by_hash(path: &Path) -> Result<UnifiedContentEntry, String> {
+    let (sha1, sha512) = modrinth::hash_file_sha1_and_sha512_hex(path)
+        .map_err(|err| format!("failed to hash file: {err}"))?;
+    let modrinth = ModrinthClient::default();
+
+    for (algorithm, hash) in [("sha512", sha512.as_str()), ("sha1", sha1.as_str())] {
+        let Some(version) = modrinth
+            .get_version_from_hash(hash, algorithm)
+            .map_err(|err| format!("Modrinth hash lookup failed: {err}"))?
+        else {
+            continue;
+        };
+        let project = modrinth
+            .get_project(version.project_id.as_str())
+            .map_err(|err| format!("Modrinth project lookup failed: {err}"))?;
+        return Ok(UnifiedContentEntry {
+            id: format!("modrinth:{}", project.project_id),
+            name: project.title,
+            summary: project.description.trim().to_owned(),
+            content_type: project.project_type,
+            source: ContentSource::Modrinth,
+            project_url: Some(project.project_url),
+            icon_url: project.icon_url,
+        });
+    }
+
+    Err("no Modrinth project matched this file hash".to_owned())
 }
 
 fn normalized_filename(name: &str, url: &str) -> String {

@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Once;
 use std::thread;
@@ -9,7 +10,7 @@ use tracing::{debug, warn};
 static CURSEFORGE_MISSING_KEY_WARN_ONCE: Once = Once::new();
 
 /// Upstream platform that provided a unified content result.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ContentSource {
     Modrinth,
     CurseForge,
@@ -27,7 +28,7 @@ impl ContentSource {
 }
 
 /// Provider-agnostic content record returned from search.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnifiedContentEntry {
     pub id: String,
     pub name: String,

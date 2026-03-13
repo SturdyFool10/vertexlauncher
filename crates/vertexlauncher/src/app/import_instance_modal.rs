@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -13,16 +13,19 @@ use launcher_ui::{
     ui::style,
     ui::{components::settings_widgets, modal},
 };
+use managed_content::{
+    CONTENT_MANIFEST_FILE_NAME, ContentInstallManifest, InstalledContentProject,
+};
 use modrinth::Client as ModrinthClient;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use textui::{ButtonOptions, LabelOptions, TextUi};
+use vtmpack::{VtmpackDownloadableEntry, VtmpackManifest, read_vtmpack_manifest};
 
 const MODAL_GAP_SM: f32 = 6.0;
 const MODAL_GAP_MD: f32 = 8.0;
 const MODAL_GAP_LG: f32 = 10.0;
 const ACTION_BUTTON_MAX_WIDTH: f32 = 260.0;
-const MANAGED_CONTENT_MANIFEST_FILE_NAME: &str = ".vertex-content-manifest.toml";
 
 #[derive(Debug, Default)]
 pub struct ImportInstanceState {
@@ -639,7 +642,7 @@ struct LauncherInspection {
     modloader_version: String,
     summary: String,
     source_root: PathBuf,
-    managed_manifest: ManagedContentManifest,
+    managed_manifest: ContentInstallManifest,
 }
 
 fn inspect_launcher_instance(
@@ -722,7 +725,7 @@ fn import_launcher_instance(
 }
 
 fn detect_launcher_kind(path: &Path) -> LauncherKind {
-    if path.join(MANAGED_CONTENT_MANIFEST_FILE_NAME).is_file() {
+    if path.join(CONTENT_MANIFEST_FILE_NAME).is_file() {
         LauncherKind::Unknown
     } else if path.join("profile.json").is_file() || looks_like_modrinth_profile_path(path) {
         LauncherKind::Modrinth
@@ -791,7 +794,7 @@ fn inspect_modrinth_launcher_instance(path: &Path) -> Result<LauncherInspection,
         ]),
     );
     let mut managed_manifest =
-        load_existing_managed_manifest(path).unwrap_or_else(|_| ManagedContentManifest::default());
+        load_existing_managed_manifest(path).unwrap_or_else(|_| ContentInstallManifest::default());
     if managed_manifest.projects.is_empty() {
         managed_manifest = extract_managed_manifest_from_json(
             &profile,
@@ -1103,7 +1106,7 @@ fn inspect_curseforge_launcher_instance(path: &Path) -> Result<LauncherInspectio
     ]);
     let (modloader, modloader_version) = infer_loader_pair(loader_hint, loader_version_hint);
     let mut managed_manifest =
-        load_existing_managed_manifest(path).unwrap_or_else(|_| ManagedContentManifest::default());
+        load_existing_managed_manifest(path).unwrap_or_else(|_| ContentInstallManifest::default());
     if managed_manifest.projects.is_empty() {
         managed_manifest = extract_managed_manifest_from_json(
             &manifest,
@@ -1190,7 +1193,7 @@ fn inspect_atlauncher_instance(path: &Path) -> Result<LauncherInspection, String
             .and_then(|value| json_string_at_path(value, &["loaderVersion"])),
     );
     let mut managed_manifest =
-        load_existing_managed_manifest(path).unwrap_or_else(|_| ManagedContentManifest::default());
+        load_existing_managed_manifest(path).unwrap_or_else(|_| ContentInstallManifest::default());
     if managed_manifest.projects.is_empty()
         && let Some(value) = manifest.as_ref()
     {
@@ -1252,7 +1255,7 @@ fn build_launcher_inspection(
     modloader: String,
     modloader_version: String,
     source_root: PathBuf,
-    managed_manifest: ManagedContentManifest,
+    managed_manifest: ContentInstallManifest,
 ) -> LauncherInspection {
     let mods_count = count_regular_files(source_root.join("mods").as_path());
     let config_count = count_regular_files(source_root.join("config").as_path());
@@ -1279,17 +1282,13 @@ fn build_launcher_inspection(
 fn copy_launcher_instance_content(
     source_root: &Path,
     destination_root: &Path,
-    managed_manifest: &ManagedContentManifest,
+    managed_manifest: &ContentInstallManifest,
 ) -> Result<(), String> {
     copy_dir_recursive(source_root, source_root, destination_root)?;
     if !managed_manifest.projects.is_empty() {
         let raw = toml::to_string_pretty(managed_manifest)
             .map_err(|err| format!("failed to serialize managed import manifest: {err}"))?;
-        fs::write(
-            destination_root.join(MANAGED_CONTENT_MANIFEST_FILE_NAME),
-            raw,
-        )
-        .map_err(|err| {
+        fs::write(destination_root.join(CONTENT_MANIFEST_FILE_NAME), raw).map_err(|err| {
             format!(
                 "failed to write managed import manifest into {}: {err}",
                 destination_root.display()
@@ -1344,7 +1343,7 @@ fn should_skip_import_path(relative: &Path) -> bool {
         "profile.json",
         "minecraftinstance.json",
         "instance.json",
-        MANAGED_CONTENT_MANIFEST_FILE_NAME,
+        CONTENT_MANIFEST_FILE_NAME,
     ];
     if skip_exact
         .iter()
@@ -1508,10 +1507,10 @@ fn trailing_loader_version(loader_hint: &str, explicit_version: &str) -> String 
         .unwrap_or_default()
 }
 
-fn load_existing_managed_manifest(path: &Path) -> Result<ManagedContentManifest, String> {
-    let manifest_path = path.join(MANAGED_CONTENT_MANIFEST_FILE_NAME);
+fn load_existing_managed_manifest(path: &Path) -> Result<ContentInstallManifest, String> {
+    let manifest_path = path.join(CONTENT_MANIFEST_FILE_NAME);
     if !manifest_path.exists() {
-        return Ok(ManagedContentManifest::default());
+        return Ok(ContentInstallManifest::default());
     }
     let raw = fs::read_to_string(manifest_path.as_path())
         .map_err(|err| format!("failed to read {}: {err}", manifest_path.display()))?;
@@ -1530,8 +1529,8 @@ fn extract_managed_manifest_from_json(
     value: &Value,
     source_root: &Path,
     source_hint: ManagedContentSourceHint,
-) -> ManagedContentManifest {
-    let mut manifest = ManagedContentManifest::default();
+) -> ContentInstallManifest {
+    let mut manifest = ContentInstallManifest::default();
     walk_json_for_projects(value, source_root, source_hint, &mut manifest);
     manifest
 }
@@ -1540,7 +1539,7 @@ fn walk_json_for_projects(
     value: &Value,
     source_root: &Path,
     source_hint: ManagedContentSourceHint,
-    manifest: &mut ManagedContentManifest,
+    manifest: &mut ContentInstallManifest,
 ) {
     maybe_add_project_from_json(value, source_root, source_hint, manifest);
     match value {
@@ -1562,7 +1561,7 @@ fn maybe_add_project_from_json(
     value: &Value,
     source_root: &Path,
     source_hint: ManagedContentSourceHint,
-    manifest: &mut ManagedContentManifest,
+    manifest: &mut ContentInstallManifest,
 ) {
     let Value::Object(map) = value else {
         return;
@@ -1669,15 +1668,20 @@ fn maybe_add_project_from_json(
     };
     manifest.projects.insert(
         project_key.clone(),
-        ManagedContentManifestProject {
+        InstalledContentProject {
             project_key,
             name,
             file_path,
             modrinth_project_id,
             curseforge_project_id,
-            selected_source: source.map(str::to_owned),
+            selected_source: match source {
+                Some("modrinth") => Some(managed_content::ManagedContentSource::Modrinth),
+                Some("curseforge") => Some(managed_content::ManagedContentSource::CurseForge),
+                _ => None,
+            },
             selected_version_id: non_empty(version_id.as_str()),
             selected_version_name: non_empty(version_name.as_str()),
+            ..InstalledContentProject::default()
         },
     );
 }
@@ -1888,8 +1892,8 @@ fn extract_vtmpack_payload(package_path: &Path, instance_root: &Path) -> Result<
         if entry_string == "manifest.toml" {
             continue;
         }
-        if entry_string == format!("metadata/{MANAGED_CONTENT_MANIFEST_FILE_NAME}") {
-            let destination = instance_root.join(MANAGED_CONTENT_MANIFEST_FILE_NAME);
+        if entry_string == format!("metadata/{CONTENT_MANIFEST_FILE_NAME}") {
+            let destination = instance_root.join(CONTENT_MANIFEST_FILE_NAME);
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent).map_err(|err| {
                     format!(
@@ -2139,36 +2143,6 @@ fn extract_mrpack_overrides(package_path: &Path, instance_root: &Path) -> Result
     Ok(())
 }
 
-fn read_vtmpack_manifest(path: &Path) -> Result<VtmpackManifest, String> {
-    let file =
-        fs::File::open(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
-    let decoder = xz2::read::XzDecoder::new(file);
-    let mut archive = tar::Archive::new(decoder);
-
-    for entry in archive
-        .entries()
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?
-    {
-        let mut entry = entry.map_err(|err| format!("failed to read archive entry: {err}"))?;
-        let entry_path = entry
-            .path()
-            .map_err(|err| format!("failed to decode archive path: {err}"))?;
-        if entry_path == Path::new("manifest.toml") {
-            let mut raw = String::new();
-            entry
-                .read_to_string(&mut raw)
-                .map_err(|err| format!("failed to read manifest.toml: {err}"))?;
-            return toml::from_str(&raw)
-                .map_err(|err| format!("failed to parse vtmpack manifest: {err}"));
-        }
-    }
-
-    Err(format!(
-        "No manifest.toml found in Vertex pack {}",
-        path.display()
-    ))
-}
-
 fn read_mrpack_manifest(path: &Path) -> Result<MrpackManifest, String> {
     let file =
         fs::File::open(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
@@ -2290,39 +2264,6 @@ struct MrpackDependencyInfo {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct VtmpackManifest {
-    instance: VtmpackInstanceMetadata,
-    #[serde(default)]
-    downloadable_content: Vec<VtmpackDownloadableEntry>,
-    #[serde(default)]
-    bundled_mods: Vec<String>,
-    #[serde(default)]
-    configs: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct VtmpackInstanceMetadata {
-    name: String,
-    game_version: String,
-    modloader: String,
-    #[serde(default)]
-    modloader_version: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct VtmpackDownloadableEntry {
-    #[serde(default)]
-    name: String,
-    file_path: String,
-    #[serde(default)]
-    curseforge_project_id: Option<u64>,
-    #[serde(default)]
-    selected_source: Option<String>,
-    #[serde(default)]
-    selected_version_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 struct MrpackManifest {
     #[serde(default)]
     name: String,
@@ -2348,32 +2289,6 @@ struct MrpackFile {
 struct MrpackFileEnv {
     #[serde(default)]
     client: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ManagedContentManifest {
-    #[serde(default)]
-    projects: BTreeMap<String, ManagedContentManifestProject>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ManagedContentManifestProject {
-    #[serde(default)]
-    project_key: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    file_path: String,
-    #[serde(default)]
-    modrinth_project_id: Option<String>,
-    #[serde(default)]
-    curseforge_project_id: Option<u64>,
-    #[serde(default)]
-    selected_source: Option<String>,
-    #[serde(default)]
-    selected_version_id: Option<String>,
-    #[serde(default)]
-    selected_version_name: Option<String>,
 }
 
 #[cfg(test)]

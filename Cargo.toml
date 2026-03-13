@@ -3,9 +3,11 @@ resolver = "3"
 members = [
     "crates/auth",
     "crates/config",
+    "crates/content_resolver",
     "crates/curseforge",
     "crates/fontloader",
     "crates/installation",
+    "crates/managed_content",
     "crates/instances",
     "crates/launcher_runtime",
     "crates/launcher_ui",
@@ -14,6 +16,7 @@ members = [
     "crates/modrinth",
     "crates/runtime_bootstrap",
     "crates/textui",
+    "crates/vtmpack",
 ]
 default-members = [
     "crates/vertexlauncher",
@@ -45,16 +48,19 @@ ureq = { version = "3.2.0", features = ["json"] }
 # internal crates
 auth = { path = "crates/auth" }
 config = { path = "crates/config" }
+content_resolver = { path = "crates/content_resolver" }
 curseforge = { path = "crates/curseforge" }
 installation = { path = "crates/installation" }
 instances = { path = "crates/instances" }
 launcher_runtime = { path = "crates/launcher_runtime" }
 launcher_ui = { path = "crates/launcher_ui" }
+managed_content = { path = "crates/managed_content" }
 modrinth = { path = "crates/modrinth" }
 modprovider = { path = "crates/modprovider" }
 fontloader = { path = "crates/fontloader" }
 runtime_bootstrap = { path = "crates/runtime_bootstrap" }
 textui = { path = "crates/textui" }
+vtmpack = { path = "crates/vtmpack" }
 
 [profile.dev]
 # Your crates (workspace members): keep normal dev behavior
