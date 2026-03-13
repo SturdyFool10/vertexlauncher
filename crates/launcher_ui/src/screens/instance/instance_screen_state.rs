@@ -15,6 +15,13 @@ use super::{
 };
 
 #[derive(Clone, Debug)]
+pub(super) struct InstalledContentEntryUiCache {
+    pub(super) description_source: String,
+    pub(super) description_width_bucket: u32,
+    pub(super) truncated_description: String,
+}
+
+#[derive(Clone, Debug)]
 pub(super) struct InstanceScreenState {
     pub(super) running: bool,
     pub(super) status_message: Option<String>,
@@ -34,9 +41,11 @@ pub(super) struct InstanceScreenState {
     pub(super) installed_content_page_size: usize,
     pub(super) installed_content_page: usize,
     pub(super) installed_content_cache: InstalledContentCache,
+    pub(super) installed_content_entry_ui_cache: HashMap<String, InstalledContentEntryUiCache>,
     pub(super) content_metadata_cache: HashMap<String, Option<ResolvedInstalledContent>>,
     pub(super) content_hash_cache: Option<InstalledContentHashCache>,
     pub(super) content_hash_cache_dirty: bool,
+    pub(super) content_hash_cache_dirty_since: Option<Instant>,
     pub(super) content_lookup_in_flight: HashSet<String>,
     pub(super) content_lookup_results_tx: Option<mpsc::Sender<ContentLookupResult>>,
     pub(super) content_lookup_results_rx: Option<Arc<Mutex<mpsc::Receiver<ContentLookupResult>>>>,
@@ -104,9 +113,11 @@ impl InstanceScreenState {
             installed_content_page_size: INSTALLED_CONTENT_PAGE_SIZES[1],
             installed_content_page: 1,
             installed_content_cache: InstalledContentCache::default(),
+            installed_content_entry_ui_cache: HashMap::new(),
             content_metadata_cache: HashMap::new(),
             content_hash_cache: None,
             content_hash_cache_dirty: false,
+            content_hash_cache_dirty_since: None,
             content_lookup_in_flight: HashSet::new(),
             content_lookup_results_tx: None,
             content_lookup_results_rx: None,
@@ -144,5 +155,6 @@ impl InstanceScreenState {
 
     pub(super) fn invalidate_installed_content_cache(&mut self) {
         self.installed_content_cache.clear();
+        self.installed_content_entry_ui_cache.clear();
     }
 }

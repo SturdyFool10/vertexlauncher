@@ -1,5 +1,7 @@
 use super::*;
 
+const CONTENT_HASH_CACHE_FLUSH_DEBOUNCE: Duration = Duration::from_millis(750);
+
 pub(super) fn render_installed_content_section(
     ui: &mut Ui,
     text_ui: &mut TextUi,
@@ -243,6 +245,9 @@ pub(super) fn render_installed_content_section(
     let visible_files = &installed_files[start_index..end_index];
     let selected_game_version = selected_game_version(state).to_owned();
     let selected_modloader = selected_modloader_value(state).to_owned();
+    let delete_icon_color = ui.visuals().error_fg_color;
+    let delete_button_icon_svg = apply_color_to_svg(assets::TRASH_X_SVG, delete_icon_color);
+    let warning_icon_svg = apply_color_to_svg(assets::WARN_SVG, ui.visuals().warn_fg_color);
 
     let mut pending_delete: Option<(PathBuf, String)> = None;
     let scroll_height = ui.available_height().max(180.0);
@@ -279,6 +284,30 @@ pub(super) fn render_installed_content_section(
                     .content_metadata_cache
                     .get(&entry.lookup_key)
                     .and_then(|meta| meta.as_ref());
+                let display_name = metadata
+                    .map(|value| value.entry.name.clone())
+                    .unwrap_or_else(|| entry.file_name.clone());
+                let description = metadata
+                    .map(|value| {
+                        if value.entry.summary.trim().is_empty() {
+                            entry.file_name.clone()
+                        } else {
+                            value.entry.summary.clone()
+                        }
+                    })
+                    .unwrap_or_else(|| entry.file_name.clone());
+                let platform_label = metadata
+                    .map(|value| value.entry.source.label().to_owned())
+                    .unwrap_or_else(|| "Unknown".to_owned());
+                let version_label =
+                    metadata.and_then(|value| value.installed_version_label.clone());
+                let warning_message = metadata.and_then(|value| value.warning_message.clone());
+                let update_label = metadata
+                    .and_then(|value| value.update.as_ref())
+                    .map(|update| format!("Update: {}", update.latest_version_label));
+                let icon_url = metadata
+                    .and_then(|value| value.entry.icon_url.as_deref())
+                    .map(str::to_owned);
 
                 let rendered = ui
                     .scope_builder(
@@ -293,8 +322,18 @@ pub(super) fn render_installed_content_section(
                                 ui,
                                 text_ui,
                                 (instance_id, entry_index),
+                                state,
                                 entry,
-                                metadata,
+                                display_name.as_str(),
+                                description.as_str(),
+                                platform_label.as_str(),
+                                version_label.as_deref(),
+                                warning_message.as_deref(),
+                                update_label.as_deref(),
+                                icon_url.as_deref(),
+                                delete_button_icon_svg.as_slice(),
+                                delete_icon_color,
+                                warning_icon_svg.as_slice(),
                             )
                         },
                     )
@@ -303,7 +342,11 @@ pub(super) fn render_installed_content_section(
                 if rendered.delete_clicked {
                     pending_delete = Some((entry.file_path.clone(), entry.lookup_key.clone()));
                 } else if rendered.open_clicked {
-                    if let Some(metadata) = metadata.cloned() {
+                    if let Some(metadata) = state
+                        .content_metadata_cache
+                        .get(&entry.lookup_key)
+                        .and_then(|meta| meta.clone())
+                    {
                         crate::screens::content_browser::request_open_detail_for_content(
                             metadata.entry,
                         );
@@ -328,6 +371,7 @@ pub(super) fn render_installed_content_section(
             Ok(()) => {
                 state.invalidate_installed_content_cache();
                 state.content_metadata_cache.remove(&lookup_key);
+                state.installed_content_entry_ui_cache.remove(&lookup_key);
                 state.status_message = Some("Removed installed content.".to_owned());
             }
             Err(err) => {
@@ -336,6 +380,15 @@ pub(super) fn render_installed_content_section(
         }
     }
 
+    if state.content_hash_cache_dirty {
+        let repaint_after = state
+            .content_hash_cache_dirty_since
+            .map(|dirty_since| {
+                CONTENT_HASH_CACHE_FLUSH_DEBOUNCE.saturating_sub(dirty_since.elapsed())
+            })
+            .unwrap_or(CONTENT_HASH_CACHE_FLUSH_DEBOUNCE);
+        ui.ctx().request_repaint_after(repaint_after);
+    }
     flush_content_hash_cache(state, instance_root);
 }
 
@@ -370,32 +423,23 @@ fn render_installed_content_entry(
     ui: &mut Ui,
     text_ui: &mut TextUi,
     id_source: impl std::hash::Hash + Copy,
+    state: &mut InstanceScreenState,
     entry: &InstalledContentFile,
-    metadata: Option<&ResolvedInstalledContent>,
+    display_name: &str,
+    description: &str,
+    platform_label: &str,
+    version_label: Option<&str>,
+    warning_message: Option<&str>,
+    update_label: Option<&str>,
+    icon_url: Option<&str>,
+    delete_button_icon_svg: &[u8],
+    delete_icon_color: egui::Color32,
+    warning_icon_svg: &[u8],
 ) -> InstalledEntryRenderResult {
     const INSTALLED_TILE_GAP: f32 = 8.0;
     const INSTALLED_TILE_THUMBNAIL_FRAME_PADDING: f32 = 8.0;
     const INSTALLED_DESCRIPTION_LINE_HEIGHT: f32 = 20.0;
     const INSTALLED_DESCRIPTION_FRAME_Y_PADDING: i8 = 3;
-
-    let display_name = metadata
-        .map(|value| value.entry.name.clone())
-        .unwrap_or_else(|| entry.file_name.clone());
-    let description = metadata
-        .map(|value| {
-            if value.entry.summary.trim().is_empty() {
-                entry.file_name.clone()
-            } else {
-                value.entry.summary.clone()
-            }
-        })
-        .unwrap_or_else(|| entry.file_name.clone());
-    let platform_label = metadata
-        .map(|value| value.entry.source.label())
-        .unwrap_or("Unknown");
-    let version_label = metadata.and_then(|value| value.installed_version_label.as_deref());
-    let warning_message = metadata.and_then(|value| value.warning_message.as_deref());
-    let update_label = metadata.and_then(|value| value.update.as_ref());
     let available_width = ui.available_width().max(1.0);
     let tile_width = (available_width - (style::SPACE_XS * 2.0)).max(1.0);
     let side_padding = ((available_width - tile_width) * 0.5).max(0.0);
@@ -430,7 +474,8 @@ fn render_installed_content_entry(
                         if render_installed_content_action_button(
                             ui,
                             delete_button_id.as_str(),
-                            assets::TRASH_X_SVG,
+                            delete_button_icon_svg,
+                            delete_icon_color,
                             "Delete this content",
                             action_button_width,
                             action_button_width,
@@ -459,7 +504,7 @@ fn render_installed_content_entry(
                                                 render_content_thumbnail(
                                                     ui,
                                                     id_source,
-                                                    metadata,
+                                                    icon_url,
                                                     thumbnail_size,
                                                 );
                                             });
@@ -475,7 +520,7 @@ fn render_installed_content_entry(
                                         let _ = text_ui.label(
                                             ui,
                                             (id_source, "name"),
-                                            display_name.as_str(),
+                                            display_name,
                                             &LabelOptions {
                                                 font_size: 19.0,
                                                 line_height: 24.0,
@@ -488,8 +533,7 @@ fn render_installed_content_entry(
 
                                         ui.add_space(4.0);
                                         ui.horizontal_wrapped(|ui| {
-                                            ui.spacing_mut().item_spacing =
-                                                egui::vec2(6.0, 4.0);
+                                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
                                             render_installed_content_badge(
                                                 ui,
                                                 text_ui,
@@ -513,11 +557,7 @@ fn render_installed_content_entry(
                                                     ui,
                                                     text_ui,
                                                     (id_source, "update_badge"),
-                                                    format!(
-                                                        "Update: {}",
-                                                        update.latest_version_label
-                                                    )
-                                                    .as_str(),
+                                                    update,
                                                     ui.visuals().warn_fg_color.gamma_multiply(0.16),
                                                     ui.visuals().warn_fg_color,
                                                 );
@@ -527,6 +567,7 @@ fn render_installed_content_entry(
                                                     ui,
                                                     warning_message,
                                                     id_source,
+                                                    warning_icon_svg,
                                                 );
                                             }
                                         });
@@ -551,10 +592,12 @@ fn render_installed_content_entry(
                                                     ..LabelOptions::default()
                                                 };
                                                 let truncated_description =
-                                                    text_helpers::truncate_single_line_text_with_ellipsis(
+                                                    cached_truncated_description(
+                                                        state,
                                                         text_ui,
                                                         ui,
-                                                        description.as_str(),
+                                                        entry.lookup_key.as_str(),
+                                                        description,
                                                         ui.available_width().max(1.0),
                                                         &description_style,
                                                     );
@@ -604,14 +647,9 @@ fn render_installed_content_entry(
     }
 }
 
-fn render_content_thumbnail(
-    ui: &mut Ui,
-    id_source: impl Hash,
-    metadata: Option<&ResolvedInstalledContent>,
-    size: f32,
-) {
+fn render_content_thumbnail(ui: &mut Ui, id_source: impl Hash, icon_url: Option<&str>, size: f32) {
     let size = egui::vec2(size, size);
-    if let Some(icon_url) = metadata.and_then(|value| value.entry.icon_url.as_deref()) {
+    if let Some(icon_url) = icon_url {
         remote_tiled_image::show(
             ui,
             icon_url,
@@ -638,13 +676,12 @@ fn render_content_thumbnail(
 fn render_installed_content_action_button(
     ui: &mut Ui,
     icon_id: &str,
-    svg_bytes: &'static [u8],
+    themed_svg: &[u8],
+    icon_color: egui::Color32,
     tooltip: &str,
     width: f32,
     height: f32,
 ) -> bool {
-    let icon_color = ui.visuals().error_fg_color;
-    let themed_svg = apply_color_to_svg(svg_bytes, icon_color);
     let uri = format!(
         "bytes://instance-installed-content-action/{icon_id}-{:02x}{:02x}{:02x}.svg",
         icon_color.r(),
@@ -671,7 +708,7 @@ fn render_installed_content_action_button(
         egui::StrokeKind::Inside,
     );
 
-    let image = egui::Image::from_bytes(uri, themed_svg)
+    let image = egui::Image::from_bytes(uri, themed_svg.to_vec())
         .fit_to_exact_size(egui::vec2(icon_size, icon_size));
     let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(icon_size, icon_size));
     let _ = ui.put(icon_rect, image);
@@ -712,16 +749,18 @@ fn render_installed_content_warning(
     ui: &mut Ui,
     warning_message: &str,
     id_source: impl std::hash::Hash + Copy,
+    warning_icon_svg: &[u8],
 ) {
-    let warning_icon = apply_color_to_svg(assets::WARN_SVG, ui.visuals().warn_fg_color);
     let mut hasher = DefaultHasher::new();
     id_source.hash(&mut hasher);
     let uri = format!(
         "bytes://instance-installed-content-warning/{}.svg",
         hasher.finish()
     );
-    let response = ui
-        .add(egui::Image::from_bytes(uri, warning_icon).fit_to_exact_size(egui::vec2(16.0, 16.0)));
+    let response = ui.add(
+        egui::Image::from_bytes(uri, warning_icon_svg.to_vec())
+            .fit_to_exact_size(egui::vec2(16.0, 16.0)),
+    );
     response.on_hover_text(warning_message);
 }
 
@@ -735,18 +774,62 @@ fn flush_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Pat
     if !state.content_hash_cache_dirty {
         return;
     }
+    let Some(dirty_since) = state.content_hash_cache_dirty_since else {
+        state.content_hash_cache_dirty_since = Some(Instant::now());
+        return;
+    };
+    if dirty_since.elapsed() < CONTENT_HASH_CACHE_FLUSH_DEBOUNCE {
+        return;
+    }
 
     if let Some(cache) = state.content_hash_cache.as_ref()
         && InstalledContentResolver::save_hash_cache(instance_root, cache).is_ok()
     {
         state.content_hash_cache_dirty = false;
+        state.content_hash_cache_dirty_since = None;
     }
 }
 
 fn clear_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Path) {
     state.content_hash_cache = Some(InstalledContentHashCache::default());
     state.content_hash_cache_dirty = false;
+    state.content_hash_cache_dirty_since = None;
     let _ = InstalledContentResolver::clear_hash_cache(instance_root);
+}
+
+fn cached_truncated_description(
+    state: &mut InstanceScreenState,
+    text_ui: &mut TextUi,
+    ui: &Ui,
+    lookup_key: &str,
+    description: &str,
+    max_width: f32,
+    label_options: &LabelOptions,
+) -> String {
+    let width_bucket = (max_width.max(0.0) / 8.0).round() as u32;
+    if let Some(cache_entry) = state.installed_content_entry_ui_cache.get(lookup_key)
+        && cache_entry.description_source == description
+        && cache_entry.description_width_bucket == width_bucket
+    {
+        return cache_entry.truncated_description.clone();
+    }
+
+    let truncated_description = text_helpers::truncate_single_line_text_with_ellipsis(
+        text_ui,
+        ui,
+        description,
+        max_width,
+        label_options,
+    );
+    state.installed_content_entry_ui_cache.insert(
+        lookup_key.to_owned(),
+        InstalledContentEntryUiCache {
+            description_source: description.to_owned(),
+            description_width_bucket: width_bucket,
+            truncated_description: truncated_description.clone(),
+        },
+    );
+    truncated_description
 }
 
 fn ensure_content_lookup_channel(state: &mut InstanceScreenState) {
@@ -839,6 +922,7 @@ pub(super) fn poll_content_lookup_results(state: &mut InstanceScreenState) {
             .get_or_insert_with(InstalledContentHashCache::default);
         if cache.apply_updates(result.hash_cache_updates) {
             state.content_hash_cache_dirty = true;
+            state.content_hash_cache_dirty_since = Some(Instant::now());
         }
         state
             .content_metadata_cache

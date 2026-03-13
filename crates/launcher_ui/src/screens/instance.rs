@@ -4,7 +4,7 @@ use config::{
 };
 use content_resolver::{
     InstalledContentFile, InstalledContentHashCache, InstalledContentKind,
-    InstalledContentResolver, ResolveInstalledContentRequest, ResolvedInstalledContent,
+    InstalledContentResolver, ResolveInstalledContentRequest,
 };
 use egui::Ui;
 use installation::{
@@ -56,7 +56,7 @@ use content_lookup_result::ContentLookupResult;
 use installed_content_cache::InstalledContentCache;
 use installed_entry_render_result::InstalledEntryRenderResult;
 pub use instance_screen_output::InstanceScreenOutput;
-use instance_screen_state::InstanceScreenState;
+use instance_screen_state::{InstalledContentEntryUiCache, InstanceScreenState};
 use runtime::*;
 use runtime_prepare_operation::RuntimePrepareOperation;
 use runtime_prepare_outcome::RuntimePrepareOutcome;
