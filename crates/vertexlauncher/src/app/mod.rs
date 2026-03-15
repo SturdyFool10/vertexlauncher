@@ -36,9 +36,12 @@ mod create_instance_modal;
 mod fonts;
 mod import_instance_modal;
 mod native_options;
+mod single_instance;
 mod taskbar_progress;
 mod tracing_setup;
 mod webview_sign_in;
+
+pub use single_instance::{SingleInstanceError, acquire_single_instance};
 
 struct VertexApp {
     fonts: FontController,

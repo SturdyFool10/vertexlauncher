@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use curseforge::Client as CurseForgeClient;
 use managed_content::InstalledContentIdentity;
@@ -17,6 +18,45 @@ const CONTENT_HASH_CACHE_FILE_NAME: &str = "content_hash_cache.json";
 const LOOKUP_CACHE_KEY_PREFIX: &str = "lookup::";
 const HEURISTIC_WARNING_MESSAGE: &str =
     "Resolved from filename search. This match is heuristic and may be wrong.";
+
+fn modrinth_entry_cache() -> &'static Mutex<HashMap<String, Option<UnifiedContentEntry>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<UnifiedContentEntry>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn modrinth_version_cache() -> &'static Mutex<HashMap<String, Option<modrinth::ProjectVersion>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<modrinth::ProjectVersion>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn modrinth_latest_version_cache()
+-> &'static Mutex<HashMap<String, Option<modrinth::ProjectVersion>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<modrinth::ProjectVersion>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn curseforge_project_cache() -> &'static Mutex<HashMap<u64, Option<curseforge::Project>>> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, Option<curseforge::Project>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn curseforge_file_cache() -> &'static Mutex<HashMap<u64, Option<curseforge::File>>> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, Option<curseforge::File>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn should_cache_modrinth_absence(err: &ModrinthError) -> bool {
+    matches!(err, ModrinthError::HttpStatus { status: 404, .. })
+}
+
+fn should_cache_curseforge_absence(err: &curseforge::CurseForgeError) -> bool {
+    matches!(
+        err,
+        curseforge::CurseForgeError::HttpStatus { status: 404, .. }
+    )
+}
 
 pub struct InstalledContentResolver;
 
@@ -345,16 +385,36 @@ fn modrinth_entry_from_project_id(
     modrinth: &ModrinthClient,
     project_id: &str,
 ) -> Option<UnifiedContentEntry> {
-    let project = modrinth.get_project(project_id).ok()?;
-    Some(UnifiedContentEntry {
-        id: format!("modrinth:{}", project.project_id),
-        name: project.title,
-        summary: project.description.trim().to_owned(),
-        content_type: project.project_type,
-        source: ContentSource::Modrinth,
-        project_url: Some(project.project_url),
-        icon_url: project.icon_url,
-    })
+    if let Ok(cache) = modrinth_entry_cache().lock()
+        && let Some(cached) = cache.get(project_id)
+    {
+        return cached.clone();
+    }
+
+    match modrinth.get_project(project_id) {
+        Ok(project) => {
+            let entry = UnifiedContentEntry {
+                id: format!("modrinth:{}", project.project_id),
+                name: project.title,
+                summary: project.description.trim().to_owned(),
+                content_type: project.project_type,
+                source: ContentSource::Modrinth,
+                project_url: Some(project.project_url),
+                icon_url: project.icon_url,
+            };
+            if let Ok(mut cache) = modrinth_entry_cache().lock() {
+                cache.insert(project_id.to_owned(), Some(entry.clone()));
+            }
+            Some(entry)
+        }
+        Err(err) if should_cache_modrinth_absence(&err) => {
+            if let Ok(mut cache) = modrinth_entry_cache().lock() {
+                cache.insert(project_id.to_owned(), None);
+            }
+            None
+        }
+        Err(_) => None,
+    }
 }
 
 fn managed_content_metadata(
@@ -378,7 +438,7 @@ fn managed_content_metadata(
             }
 
             let modrinth = ModrinthClient::default();
-            let version = modrinth.get_version(version_id).ok()?;
+            let version = cached_modrinth_version(&modrinth, version_id)?;
             if version.project_id != project_id
                 || !version_contains_file_name(version.files.as_slice(), disk_file_name)
             {
@@ -405,14 +465,14 @@ fn managed_content_metadata(
             let project_id = identity.curseforge_project_id?;
             let version_id = identity.selected_version_id.trim().parse::<u64>().ok()?;
             let curseforge = CurseForgeClient::from_env()?;
-            let file = find_curseforge_project_file(&curseforge, version_id)?;
+            let file = cached_curseforge_file(&curseforge, version_id)?;
             if !file_name_matches(file.file_name.as_str(), disk_file_name)
                 || !file_name_matches(file_path.file_name()?.to_str()?, disk_file_name)
             {
                 return None;
             }
 
-            let project = curseforge.get_mod(project_id).ok()?;
+            let project = cached_curseforge_project(&curseforge, project_id)?;
             Some(ResolvedInstalledContent {
                 entry: UnifiedContentEntry {
                     id: format!("curseforge:{}", project.id),
@@ -632,11 +692,121 @@ fn version_contains_file_name(
         .any(|file| file_name_matches(file.filename.as_str(), disk_file_name))
 }
 
-fn find_curseforge_project_file(
+fn cached_modrinth_version(
+    modrinth: &ModrinthClient,
+    version_id: &str,
+) -> Option<modrinth::ProjectVersion> {
+    if let Ok(cache) = modrinth_version_cache().lock()
+        && let Some(cached) = cache.get(version_id)
+    {
+        return cached.clone();
+    }
+
+    match modrinth.get_version(version_id) {
+        Ok(version) => {
+            if let Ok(mut cache) = modrinth_version_cache().lock() {
+                cache.insert(version_id.to_owned(), Some(version.clone()));
+            }
+            Some(version)
+        }
+        Err(err) if should_cache_modrinth_absence(&err) => {
+            if let Ok(mut cache) = modrinth_version_cache().lock() {
+                cache.insert(version_id.to_owned(), None);
+            }
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+fn cached_latest_modrinth_project_version(
+    modrinth: &ModrinthClient,
+    project_id: &str,
+    loaders: &[String],
+    game_versions: &[String],
+) -> Option<modrinth::ProjectVersion> {
+    let cache_key = format!(
+        "{project_id}|{}|{}",
+        loaders.join(","),
+        game_versions.join(",")
+    );
+    if let Ok(cache) = modrinth_latest_version_cache().lock()
+        && let Some(cached) = cache.get(cache_key.as_str())
+    {
+        return cached.clone();
+    }
+
+    match modrinth.list_project_versions(project_id, loaders, game_versions) {
+        Ok(versions) => {
+            let latest = versions
+                .into_iter()
+                .filter(|version| !version.files.is_empty())
+                .max_by(|left, right| left.date_published.cmp(&right.date_published));
+            if let Ok(mut cache) = modrinth_latest_version_cache().lock() {
+                cache.insert(cache_key, latest.clone());
+            }
+            latest
+        }
+        Err(err) if should_cache_modrinth_absence(&err) => {
+            if let Ok(mut cache) = modrinth_latest_version_cache().lock() {
+                cache.insert(cache_key, None);
+            }
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+fn cached_curseforge_project(
     client: &CurseForgeClient,
-    version_id: u64,
-) -> Option<curseforge::File> {
-    client.get_files(&[version_id]).ok()?.into_iter().next()
+    project_id: u64,
+) -> Option<curseforge::Project> {
+    if let Ok(cache) = curseforge_project_cache().lock()
+        && let Some(cached) = cache.get(&project_id)
+    {
+        return cached.clone();
+    }
+
+    match client.get_mod(project_id) {
+        Ok(project) => {
+            if let Ok(mut cache) = curseforge_project_cache().lock() {
+                cache.insert(project_id, Some(project.clone()));
+            }
+            Some(project)
+        }
+        Err(err) if should_cache_curseforge_absence(&err) => {
+            if let Ok(mut cache) = curseforge_project_cache().lock() {
+                cache.insert(project_id, None);
+            }
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+fn cached_curseforge_file(client: &CurseForgeClient, file_id: u64) -> Option<curseforge::File> {
+    if let Ok(cache) = curseforge_file_cache().lock()
+        && let Some(cached) = cache.get(&file_id)
+    {
+        return cached.clone();
+    }
+
+    match client.get_files(&[file_id]) {
+        Ok(files) => {
+            let file = files.into_iter().next();
+            if let Ok(mut cache) = curseforge_file_cache().lock() {
+                cache.insert(file_id, file.clone());
+            }
+            file
+        }
+        Err(err) if should_cache_curseforge_absence(&err) => {
+            if let Ok(mut cache) = curseforge_file_cache().lock() {
+                cache.insert(file_id, None);
+            }
+            None
+        }
+        Err(_) => None,
+    }
 }
 
 fn resolve_managed_modrinth_update(
@@ -653,12 +823,12 @@ fn resolve_managed_modrinth_update(
         Vec::new()
     };
     let game_versions = normalized_game_versions(game_version);
-    let latest = modrinth
-        .list_project_versions(project_id, loaders.as_slice(), game_versions.as_slice())
-        .ok()?
-        .into_iter()
-        .filter(|version| !version.files.is_empty())
-        .max_by(|left, right| left.date_published.cmp(&right.date_published))?;
+    let latest = cached_latest_modrinth_project_version(
+        modrinth,
+        project_id,
+        loaders.as_slice(),
+        game_versions.as_slice(),
+    )?;
     if installed_version_id.is_some_and(|value| value == latest.id) {
         return None;
     }
@@ -696,11 +866,7 @@ fn resolve_managed_curseforge_update(
         })
         .map(|index| index.file_id)
         .max()?;
-    let latest = curseforge
-        .get_files(&[latest_file_id])
-        .ok()?
-        .into_iter()
-        .next()?;
+    let latest = cached_curseforge_file(curseforge, latest_file_id)?;
     if latest.download_url.is_none() {
         return None;
     }
@@ -1348,5 +1514,39 @@ mod tests {
                 .and_then(|value| value.installed_version_id.as_deref()),
             None
         );
+    }
+
+    #[test]
+    fn modrinth_absence_cache_only_treats_not_found_as_stable() {
+        assert!(should_cache_modrinth_absence(&ModrinthError::HttpStatus {
+            status: 404,
+            body: String::new(),
+        }));
+        assert!(!should_cache_modrinth_absence(&ModrinthError::HttpStatus {
+            status: 429,
+            body: String::new(),
+        }));
+        assert!(!should_cache_modrinth_absence(&ModrinthError::Transport(
+            "timeout".to_owned(),
+        )));
+    }
+
+    #[test]
+    fn curseforge_absence_cache_only_treats_not_found_as_stable() {
+        assert!(should_cache_curseforge_absence(
+            &curseforge::CurseForgeError::HttpStatus {
+                status: 404,
+                body: String::new(),
+            }
+        ));
+        assert!(!should_cache_curseforge_absence(
+            &curseforge::CurseForgeError::HttpStatus {
+                status: 429,
+                body: String::new(),
+            }
+        ));
+        assert!(!should_cache_curseforge_absence(
+            &curseforge::CurseForgeError::Transport("timeout".to_owned())
+        ));
     }
 }

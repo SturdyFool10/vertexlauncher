@@ -3,6 +3,7 @@ use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::io::Read as _;
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
@@ -13,15 +14,26 @@ const DEFAULT_MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
 const DEFAULT_USER_AGENT: &str =
     "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
 const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);
+const DEFAULT_MIN_REQUEST_SPACING: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug)]
 struct RateLimitState {
-    until: Instant,
+    next_request_at: Instant,
+    cooldown_until: Option<Instant>,
 }
 
-fn rate_limit_store() -> &'static Mutex<Option<RateLimitState>> {
-    static STORE: OnceLock<Mutex<Option<RateLimitState>>> = OnceLock::new();
-    STORE.get_or_init(|| Mutex::new(None))
+impl RateLimitState {
+    fn new() -> Self {
+        Self {
+            next_request_at: Instant::now(),
+            cooldown_until: None,
+        }
+    }
+}
+
+fn rate_limit_store() -> &'static Mutex<RateLimitState> {
+    static STORE: OnceLock<Mutex<RateLimitState>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(RateLimitState::new()))
 }
 
 /// Lightweight Modrinth API client.
@@ -439,7 +451,7 @@ impl Client {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, ModrinthError> {
-        self.check_rate_limit(path)?;
+        self.acquire_rate_limit_slot(path);
         debug!(
             target: "vertexlauncher/modrinth",
             path,
@@ -467,7 +479,7 @@ impl Client {
         path: &str,
         body: &B,
     ) -> Result<T, ModrinthError> {
-        self.check_rate_limit(path)?;
+        self.acquire_rate_limit_slot(path);
         debug!(
             target: "vertexlauncher/modrinth",
             path,
@@ -508,6 +520,7 @@ impl Client {
 
         let status = response.status().as_u16();
         let retry_after_secs = parse_retry_after_seconds(response.headers());
+        self.note_response_budget(response.headers());
         let mut raw = String::new();
         response
             .body_mut()
@@ -525,8 +538,7 @@ impl Client {
         if status == 429 {
             self.note_rate_limit(path, retry_after_secs);
             return Err(ModrinthError::rate_limited(
-                self.active_rate_limit_retry_after_seconds()
-                    .or(retry_after_secs),
+                retry_after_secs.or(Some(DEFAULT_RATE_LIMIT_COOLDOWN.as_secs())),
             ));
         }
         if status >= 400 {
@@ -551,44 +563,47 @@ impl Client {
         })
     }
 
-    fn check_rate_limit(&self, path: &str) -> Result<(), ModrinthError> {
-        let Some(retry_after_secs) = self.active_rate_limit_retry_after_seconds() else {
-            return Ok(());
-        };
-        debug!(
-            target: "vertexlauncher/modrinth",
-            path,
-            retry_after_secs,
-            "skipping Modrinth request during active cooldown"
-        );
-        Err(ModrinthError::rate_limited(Some(retry_after_secs)))
+    fn acquire_rate_limit_slot(&self, path: &str) {
+        loop {
+            let Some(wait) = self.reserve_next_request_slot() else {
+                return;
+            };
+            debug!(
+                target: "vertexlauncher/modrinth",
+                path,
+                wait_ms = wait.as_millis() as u64,
+                "waiting for Modrinth rate-limit slot"
+            );
+            thread::sleep(wait);
+        }
     }
 
-    fn active_rate_limit_retry_after_seconds(&self) -> Option<u64> {
+    fn reserve_next_request_slot(&self) -> Option<Duration> {
         let Ok(mut guard) = rate_limit_store().lock() else {
             return None;
         };
-        let Some(state) = *guard else {
-            return None;
-        };
         let now = Instant::now();
-        if state.until <= now {
-            *guard = None;
-            return None;
+        if let Some(cooldown_until) = guard.cooldown_until {
+            if cooldown_until > now {
+                return Some(cooldown_until.saturating_duration_since(now));
+            }
+            guard.cooldown_until = None;
         }
-        Some(state.until.saturating_duration_since(now).as_secs().max(1))
+        if guard.next_request_at > now {
+            return Some(guard.next_request_at.saturating_duration_since(now));
+        }
+        guard.next_request_at = now + DEFAULT_MIN_REQUEST_SPACING;
+        None
     }
 
     fn note_rate_limit(&self, path: &str, retry_after_secs: Option<u64>) {
         let cooldown = Duration::from_secs(retry_after_secs.unwrap_or(60).max(1));
         let until = Instant::now() + cooldown.max(DEFAULT_RATE_LIMIT_COOLDOWN);
         if let Ok(mut guard) = rate_limit_store().lock() {
-            match *guard {
-                Some(existing) if existing.until >= until => {}
-                _ => {
-                    *guard = Some(RateLimitState { until });
-                }
+            if guard.cooldown_until.is_none_or(|existing| existing < until) {
+                guard.cooldown_until = Some(until);
             }
+            guard.next_request_at = guard.next_request_at.max(until);
         }
         warn!(
             target: "vertexlauncher/modrinth",
@@ -596,6 +611,31 @@ impl Client {
             retry_after_secs = retry_after_secs.unwrap_or(DEFAULT_RATE_LIMIT_COOLDOWN.as_secs()),
             "Modrinth rate limited request; backing off further API calls"
         );
+    }
+
+    fn note_response_budget(&self, headers: &ureq::http::HeaderMap) {
+        let Some(reset_secs) = parse_ratelimit_reset_seconds(headers) else {
+            return;
+        };
+        let Some(remaining) = parse_ratelimit_remaining(headers) else {
+            return;
+        };
+        let wait = rate_limit_wait_from_budget(reset_secs, remaining);
+        if let Ok(mut guard) = rate_limit_store().lock() {
+            let next_request_at = Instant::now() + wait;
+            if guard.next_request_at < next_request_at {
+                guard.next_request_at = next_request_at;
+            }
+            if remaining == 0 {
+                let cooldown_until = Instant::now() + Duration::from_secs(reset_secs.max(1));
+                if guard
+                    .cooldown_until
+                    .is_none_or(|existing| existing < cooldown_until)
+                {
+                    guard.cooldown_until = Some(cooldown_until);
+                }
+            }
+        }
     }
 }
 
@@ -625,6 +665,37 @@ fn parse_retry_after_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
         .or_else(|| headers.get("Retry-After"))
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
+fn parse_ratelimit_remaining(headers: &ureq::http::HeaderMap) -> Option<u64> {
+    headers
+        .get("x-ratelimit-remaining")
+        .or_else(|| headers.get("X-Ratelimit-Remaining"))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
+fn parse_ratelimit_reset_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
+    headers
+        .get("x-ratelimit-reset")
+        .or_else(|| headers.get("X-Ratelimit-Reset"))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
+fn rate_limit_wait_from_budget(reset_secs: u64, remaining: u64) -> Duration {
+    if remaining == 0 {
+        return Duration::from_secs(reset_secs.max(1));
+    }
+
+    let window_millis = u128::from(reset_secs) * 1000;
+    if window_millis == 0 {
+        return DEFAULT_MIN_REQUEST_SPACING;
+    }
+
+    let min_spacing_millis = DEFAULT_MIN_REQUEST_SPACING.as_millis();
+    let per_request_millis = window_millis.div_ceil(u128::from(remaining));
+    Duration::from_millis(per_request_millis.max(min_spacing_millis) as u64)
 }
 
 fn normalize_hash_algorithm(value: &str) -> Result<&'static str, ModrinthError> {
@@ -662,4 +733,27 @@ fn normalize_hash(value: &str) -> String {
 
 fn non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limit_budget_keeps_subsecond_spacing() {
+        let wait = rate_limit_wait_from_budget(60, 299);
+        assert_eq!(wait, DEFAULT_MIN_REQUEST_SPACING);
+    }
+
+    #[test]
+    fn rate_limit_budget_expands_spacing_when_budget_is_tight() {
+        let wait = rate_limit_wait_from_budget(60, 10);
+        assert_eq!(wait, Duration::from_secs(6));
+    }
+
+    #[test]
+    fn rate_limit_budget_uses_reset_window_for_empty_budget() {
+        let wait = rate_limit_wait_from_budget(17, 0);
+        assert_eq!(wait, Duration::from_secs(17));
+    }
 }

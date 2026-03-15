@@ -45,6 +45,7 @@ const TILE_ACTION_BUTTON_HEIGHT: f32 = 28.0;
 const TILE_ACTION_BUTTON_GAP_XS: f32 = 4.0;
 const TILE_DOWNLOAD_PROGRESS_WIDTH: f32 = 96.0;
 const CONTENT_UPDATE_LOG_TARGET: &str = "vertexlauncher/content_update";
+const VERTEX_PREFETCH_DIR_NAME: &str = "vertex_prefetch";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ContentBrowserPage {
@@ -2675,6 +2676,7 @@ pub(crate) fn bulk_update_installed_content(
     let mut planned_versions = HashMap::new();
     let mut queued_paths = HashSet::new();
     let mut download_tasks = Vec::new();
+    let mut prefetched_paths = HashMap::new();
     let mut root_updates = Vec::new();
 
     for update in updates {
@@ -2695,6 +2697,7 @@ pub(crate) fn bulk_update_installed_content(
             &mut planned_versions,
             &mut queued_paths,
             &mut download_tasks,
+            &mut prefetched_paths,
         )?;
         if should_apply {
             tracing::debug!(
@@ -2713,17 +2716,6 @@ pub(crate) fn bulk_update_installed_content(
         }
     }
 
-    let prefetched_paths: HashMap<PathBuf, PathBuf> = download_tasks
-        .iter()
-        .filter_map(|task| {
-            task.destination.file_name().map(|_| {
-                (
-                    prefetched_target_path(task.destination.as_path()),
-                    task.destination.clone(),
-                )
-            })
-        })
-        .collect();
     if !download_tasks.is_empty() {
         tracing::info!(
             target: CONTENT_UPDATE_LOG_TARGET,
@@ -2741,27 +2733,32 @@ pub(crate) fn bulk_update_installed_content(
         .map_err(|err| format!("failed to download queued content updates: {err}"))?;
     }
 
-    let mut applied = 0usize;
-    for (entry, installed_file_path, version_id) in root_updates {
-        tracing::info!(
-            target: CONTENT_UPDATE_LOG_TARGET,
-            instance_root = %instance_root.display(),
-            project = %entry.name,
-            version_id = %version_id,
-            installed_path = %installed_file_path.display(),
-            "applying prefetched content update"
-        );
-        update_installed_content_to_version_with_prefetched_downloads(
-            instance_root,
-            &entry,
-            installed_file_path.as_path(),
-            version_id.as_str(),
-            game_version,
-            loader_label,
-            &prefetched_paths,
-        )?;
-        applied += 1;
-    }
+    let apply_result = (|| -> Result<usize, String> {
+        let mut applied = 0usize;
+        for (entry, installed_file_path, version_id) in root_updates {
+            tracing::info!(
+                target: CONTENT_UPDATE_LOG_TARGET,
+                instance_root = %instance_root.display(),
+                project = %entry.name,
+                version_id = %version_id,
+                installed_path = %installed_file_path.display(),
+                "applying prefetched content update"
+            );
+            update_installed_content_to_version_with_prefetched_downloads(
+                instance_root,
+                &entry,
+                installed_file_path.as_path(),
+                version_id.as_str(),
+                game_version,
+                loader_label,
+                &prefetched_paths,
+            )?;
+            applied += 1;
+        }
+        Ok(applied)
+    })();
+    cleanup_prefetched_downloads(instance_root)?;
+    let applied = apply_result?;
     tracing::info!(
         target: CONTENT_UPDATE_LOG_TARGET,
         instance_root = %instance_root.display(),
@@ -2918,6 +2915,7 @@ fn collect_content_download_tasks_for_request(
     planned_versions: &mut HashMap<String, String>,
     queued_paths: &mut HashSet<PathBuf>,
     download_tasks: &mut Vec<DownloadBatchTask>,
+    prefetched_paths: &mut HashMap<PathBuf, PathBuf>,
 ) -> Result<bool, String> {
     let project_key = installed_project_for_entry(manifest, entry)
         .map(|(key, _)| key.to_owned())
@@ -2945,9 +2943,12 @@ fn collect_content_download_tasks_for_request(
 
     planned_versions.insert(project_key, resolved.version_id.clone());
     if (existing.is_some() || !target_path.exists()) && queued_paths.insert(target_path.clone()) {
+        let prefetched_target =
+            prefetched_target_path(instance_root, entry.content_type, target_path.as_path());
+        prefetched_paths.insert(target_path.clone(), prefetched_target.clone());
         download_tasks.push(DownloadBatchTask {
             url: resolved.file_url.clone(),
-            destination: prefetched_target_path(target_path.as_path()),
+            destination: prefetched_target,
             expected_size: None,
         });
     }
@@ -2975,6 +2976,7 @@ fn collect_content_download_tasks_for_request(
             planned_versions,
             queued_paths,
             download_tasks,
+            prefetched_paths,
         )?;
     }
 
@@ -4715,12 +4717,35 @@ fn normalize_optional(value: &str) -> Option<String> {
     }
 }
 
-fn prefetched_target_path(target_path: &Path) -> PathBuf {
+fn vertex_prefetch_root(instance_root: &Path) -> PathBuf {
+    instance_root.join(VERTEX_PREFETCH_DIR_NAME)
+}
+
+fn prefetched_target_path(
+    instance_root: &Path,
+    content_type: BrowserContentType,
+    target_path: &Path,
+) -> PathBuf {
     let file_name = target_path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("content.bin");
-    target_path.with_file_name(format!(".vertex-prefetch-{file_name}"))
+    vertex_prefetch_root(instance_root)
+        .join(content_type.folder_name())
+        .join(file_name)
+}
+
+fn cleanup_prefetched_downloads(instance_root: &Path) -> Result<(), String> {
+    let prefetch_root = vertex_prefetch_root(instance_root);
+    if prefetch_root.exists() {
+        tracing::debug!(
+            target: CONTENT_UPDATE_LOG_TARGET,
+            prefetch_root = %prefetch_root.display(),
+            "removing vertex prefetch directory"
+        );
+        remove_content_path(prefetch_root.as_path())?;
+    }
+    Ok(())
 }
 
 fn modrinth_dependency_project_ids(
@@ -5017,5 +5042,21 @@ mod tests {
         assert_eq!(stale_path_to_remove, Some(stale_path.clone()));
 
         let _ = std::fs::remove_dir_all(root.as_path());
+    }
+
+    #[test]
+    fn prefetched_target_uses_vertex_prefetch_tree() {
+        let instance_root = PathBuf::from("instance-root");
+        let target = PathBuf::from("resourcepacks/example-pack.zip");
+        let prefetched = prefetched_target_path(
+            instance_root.as_path(),
+            BrowserContentType::ResourcePack,
+            target.as_path(),
+        );
+
+        assert_eq!(
+            prefetched,
+            instance_root.join("vertex_prefetch/resourcepacks/example-pack.zip")
+        );
     }
 }

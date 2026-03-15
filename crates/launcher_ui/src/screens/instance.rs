@@ -17,7 +17,7 @@ use installation::{
 use instances::{
     InstanceStore, record_instance_launch_usage, set_instance_settings, set_instance_versions,
 };
-use managed_content::{InstalledContentIdentity, load_managed_content_identities};
+use managed_content::load_managed_content_identities;
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},
     hash::{Hash, Hasher},

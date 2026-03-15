@@ -2,16 +2,40 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::io::Read as _;
 use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 const DEFAULT_CURSEFORGE_API_BASE_URL: &str = "https://api.curseforge.com";
 const DEFAULT_USER_AGENT: &str =
     "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
+const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);
+const DEFAULT_MIN_REQUEST_SPACING: Duration = Duration::from_millis(500);
 pub const MINECRAFT_GAME_ID: u32 = 432;
 static API_KEY_OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
+#[derive(Clone, Copy, Debug)]
+struct RateLimitState {
+    next_request_at: Instant,
+    cooldown_until: Option<Instant>,
+}
+
+impl RateLimitState {
+    fn new() -> Self {
+        Self {
+            next_request_at: Instant::now(),
+            cooldown_until: None,
+        }
+    }
+}
+
 fn api_key_override_store() -> &'static Mutex<Option<String>> {
     API_KEY_OVERRIDE.get_or_init(|| Mutex::new(None))
+}
+
+fn rate_limit_store() -> &'static Mutex<RateLimitState> {
+    static STORE: OnceLock<Mutex<RateLimitState>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(RateLimitState::new()))
 }
 
 /// Errors returned by CurseForge API requests.
@@ -385,6 +409,7 @@ impl Client {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, CurseForgeError> {
+        self.acquire_rate_limit_slot(path);
         debug!(
             target: "vertexlauncher/curseforge",
             path,
@@ -413,6 +438,7 @@ impl Client {
         path: &str,
         body: &B,
     ) -> Result<T, CurseForgeError> {
+        self.acquire_rate_limit_slot(path);
         debug!(
             target: "vertexlauncher/curseforge",
             path,
@@ -451,6 +477,7 @@ impl Client {
         };
 
         let status = response.status().as_u16();
+        let retry_after_secs = parse_retry_after_seconds(response.headers());
         let mut raw = String::new();
         response
             .body_mut()
@@ -465,6 +492,9 @@ impl Client {
                 );
                 CurseForgeError::Read(err)
             })?;
+        if status == 429 {
+            self.note_rate_limit(path, retry_after_secs);
+        }
         if status >= 400 {
             warn!(
                 target: "vertexlauncher/curseforge",
@@ -476,6 +506,8 @@ impl Client {
             return Err(CurseForgeError::HttpStatus { status, body: raw });
         }
 
+        self.note_successful_request();
+
         serde_json::from_str(&raw).map_err(|err| {
             warn!(
                 target: "vertexlauncher/curseforge",
@@ -485,6 +517,71 @@ impl Client {
             );
             CurseForgeError::Json(err)
         })
+    }
+
+    fn acquire_rate_limit_slot(&self, path: &str) {
+        loop {
+            let Some(wait) = self.reserve_next_request_slot() else {
+                return;
+            };
+            debug!(
+                target: "vertexlauncher/curseforge",
+                path,
+                wait_ms = wait.as_millis() as u64,
+                "waiting for CurseForge rate-limit slot"
+            );
+            thread::sleep(wait);
+        }
+    }
+
+    fn reserve_next_request_slot(&self) -> Option<Duration> {
+        let Ok(mut guard) = rate_limit_store().lock() else {
+            return None;
+        };
+        let now = Instant::now();
+        if let Some(cooldown_until) = guard.cooldown_until {
+            if cooldown_until > now {
+                return Some(cooldown_until.saturating_duration_since(now));
+            }
+            guard.cooldown_until = None;
+        }
+        if guard.next_request_at > now {
+            return Some(guard.next_request_at.saturating_duration_since(now));
+        }
+        guard.next_request_at = now + DEFAULT_MIN_REQUEST_SPACING;
+        None
+    }
+
+    fn note_rate_limit(&self, path: &str, retry_after_secs: Option<u64>) {
+        let cooldown = Duration::from_secs(
+            retry_after_secs
+                .unwrap_or(DEFAULT_RATE_LIMIT_COOLDOWN.as_secs())
+                .max(1),
+        );
+        let until = Instant::now() + cooldown;
+        if let Ok(mut guard) = rate_limit_store().lock() {
+            if guard.cooldown_until.is_none_or(|existing| existing < until) {
+                guard.cooldown_until = Some(until);
+            }
+            guard.next_request_at = guard.next_request_at.max(until);
+        }
+        warn!(
+            target: "vertexlauncher/curseforge",
+            path,
+            retry_after_secs = retry_after_secs.unwrap_or(DEFAULT_RATE_LIMIT_COOLDOWN.as_secs()),
+            "CurseForge rate limited request; backing off further API calls"
+        );
+    }
+
+    fn note_successful_request(&self) {
+        if let Ok(mut guard) = rate_limit_store().lock() {
+            if guard
+                .cooldown_until
+                .is_some_and(|until| until <= Instant::now())
+            {
+                guard.cooldown_until = None;
+            }
+        }
     }
 }
 
@@ -498,6 +595,14 @@ pub fn set_api_key_override(api_key: Option<String>) {
     if let Ok(mut store) = api_key_override_store().lock() {
         *store = normalized;
     }
+}
+
+fn parse_retry_after_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
+    headers
+        .get("retry-after")
+        .or_else(|| headers.get("Retry-After"))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
 }
 
 #[derive(Debug, Deserialize)]

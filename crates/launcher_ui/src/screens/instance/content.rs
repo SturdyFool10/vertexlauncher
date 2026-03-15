@@ -1,12 +1,17 @@
+use super::content_lookup_result::ContentLookupResultEntry;
 use super::*;
+use std::collections::HashSet;
 
 const CONTENT_HASH_CACHE_FLUSH_DEBOUNCE: Duration = Duration::from_millis(750);
+const CONTENT_LOOKUP_REPAINT_INTERVAL: Duration = Duration::from_millis(100);
+const CONTENT_LOOKUP_BATCH_SIZE: usize = 24;
 const CONTENT_UPDATE_PREFETCH_BATCH_SIZE: usize = 4;
 const CONTENT_UPDATE_LOG_TARGET: &str = "vertexlauncher/content_update";
 
 #[derive(Clone, Debug)]
 pub(super) struct ContentApplyResult {
-    pub(super) lookup_key: String,
+    pub(super) kind: InstalledContentKind,
+    pub(super) focus_lookup_keys: Vec<String>,
     pub(super) status_message: Result<String, String>,
 }
 
@@ -86,6 +91,10 @@ pub(super) fn render_installed_content_section(
                 {
                     state.invalidate_installed_content_cache();
                     state.content_metadata_cache.clear();
+                    state.content_lookup_in_flight.clear();
+                    state.content_lookup_latest_serial_by_key.clear();
+                    state.content_lookup_retry_after_by_key.clear();
+                    state.content_lookup_failure_count_by_key.clear();
                     clear_content_hash_cache(state, instance_root);
                     state.status_message =
                         Some("Refreshed installed content metadata and hash cache.".to_owned());
@@ -247,12 +256,8 @@ pub(super) fn render_installed_content_section(
         selected_modloader.as_str(),
     );
     let has_bulk_update_available = tab_has_known_available_update(state, installed_files.as_ref());
-    if !has_bulk_update_available
-        && installed_files
-            .iter()
-            .any(|entry| !state.content_metadata_cache.contains_key(&entry.lookup_key))
-    {
-        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    if let Some(delay) = installed_content_lookup_repaint_delay(state, installed_files.as_ref()) {
+        ui.ctx().request_repaint_after(delay);
     }
 
     if has_bulk_update_available {
@@ -287,6 +292,15 @@ pub(super) fn render_installed_content_section(
     let start_index = (state.installed_content_page - 1) * state.installed_content_page_size;
     let end_index = (start_index + state.installed_content_page_size).min(total_items);
     let visible_files = &installed_files[start_index..end_index];
+    let _ = request_content_metadata_lookup_batch(
+        state,
+        visible_files,
+        state.selected_content_tab,
+        selected_game_version.as_str(),
+        selected_modloader.as_str(),
+        false,
+        CONTENT_LOOKUP_BATCH_SIZE,
+    );
     let delete_icon_color = ui.visuals().error_fg_color;
     let delete_button_icon_svg = apply_color_to_svg(assets::TRASH_X_SVG, delete_icon_color);
     let warning_icon_svg = apply_color_to_svg(assets::WARN_SVG, ui.visuals().warn_fg_color);
@@ -308,21 +322,6 @@ pub(super) fn render_installed_content_section(
             ui.set_max_width(row_width);
             for (visible_index, entry) in visible_files.iter().enumerate() {
                 let entry_index = start_index + visible_index;
-                if !state.content_metadata_cache.contains_key(&entry.lookup_key) {
-                    request_content_metadata_lookup(
-                        state,
-                        entry.lookup_key.as_str(),
-                        entry.file_path.as_path(),
-                        entry.file_name.as_str(),
-                        entry.lookup_query.as_str(),
-                        entry.fallback_lookup_key.as_deref(),
-                        entry.fallback_lookup_query.as_deref(),
-                        entry.managed_identity.as_ref(),
-                        state.selected_content_tab,
-                        selected_game_version.as_str(),
-                        selected_modloader.as_str(),
-                    );
-                }
                 let metadata = state
                     .content_metadata_cache
                     .get(&entry.lookup_key)
@@ -429,6 +428,16 @@ pub(super) fn render_installed_content_section(
                         path.as_path(),
                     );
                 state.invalidate_installed_content_cache();
+                state.content_lookup_in_flight.remove(lookup_key.as_str());
+                state
+                    .content_lookup_latest_serial_by_key
+                    .remove(lookup_key.as_str());
+                state
+                    .content_lookup_retry_after_by_key
+                    .remove(lookup_key.as_str());
+                state
+                    .content_lookup_failure_count_by_key
+                    .remove(lookup_key.as_str());
                 state.content_metadata_cache.remove(&lookup_key);
                 state.installed_content_entry_ui_cache.remove(&lookup_key);
                 state.status_message = Some(match manifest_update_result {
@@ -988,32 +997,15 @@ fn prefetch_bulk_update_metadata(
         return;
     }
 
-    let mut scheduled = 0usize;
-    for entry in installed_files {
-        if state.content_metadata_cache.contains_key(&entry.lookup_key)
-            || state.content_lookup_in_flight.contains(&entry.lookup_key)
-        {
-            continue;
-        }
-
-        request_content_metadata_lookup(
-            state,
-            entry.lookup_key.as_str(),
-            entry.file_path.as_path(),
-            entry.file_name.as_str(),
-            entry.lookup_query.as_str(),
-            entry.fallback_lookup_key.as_deref(),
-            entry.fallback_lookup_query.as_deref(),
-            entry.managed_identity.as_ref(),
-            kind,
-            game_version,
-            loader,
-        );
-        scheduled += 1;
-        if scheduled >= CONTENT_UPDATE_PREFETCH_BATCH_SIZE {
-            break;
-        }
-    }
+    let _ = request_content_metadata_lookup_batch(
+        state,
+        installed_files,
+        kind,
+        game_version,
+        loader,
+        false,
+        CONTENT_UPDATE_PREFETCH_BATCH_SIZE,
+    );
 }
 
 fn tab_has_known_available_update(
@@ -1126,68 +1118,122 @@ fn ensure_content_lookup_channel(state: &mut InstanceScreenState) {
     state.content_lookup_results_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn request_content_metadata_lookup(
+fn should_request_content_metadata_lookup(
     state: &mut InstanceScreenState,
     lookup_key: &str,
-    file_path: &Path,
-    disk_file_name: &str,
-    lookup_query: &str,
-    fallback_lookup_key: Option<&str>,
-    fallback_lookup_query: Option<&str>,
-    managed_identity: Option<&InstalledContentIdentity>,
+    force_refresh: bool,
+) -> bool {
+    let now = Instant::now();
+    if lookup_key.trim().is_empty() || state.content_lookup_in_flight.contains(lookup_key) {
+        return false;
+    }
+    if !force_refresh {
+        if state
+            .content_metadata_cache
+            .get(lookup_key)
+            .is_some_and(|resolution| resolution.is_some())
+        {
+            return false;
+        }
+        if let Some(retry_at) = state.content_lookup_retry_after_by_key.get(lookup_key)
+            && *retry_at > now
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn mark_content_metadata_lookup_requested(
+    state: &mut InstanceScreenState,
+    lookup_key: &str,
+) -> u64 {
+    state.content_lookup_request_serial = state.content_lookup_request_serial.saturating_add(1);
+    let request_serial = state.content_lookup_request_serial;
+    state.content_lookup_in_flight.insert(lookup_key.to_owned());
+    state.content_lookup_retry_after_by_key.remove(lookup_key);
+    state
+        .content_lookup_latest_serial_by_key
+        .insert(lookup_key.to_owned(), request_serial);
+    request_serial
+}
+
+#[allow(clippy::too_many_arguments)]
+fn request_content_metadata_lookup_batch(
+    state: &mut InstanceScreenState,
+    files: &[InstalledContentFile],
     kind: InstalledContentKind,
     game_version: &str,
     loader: &str,
-) {
-    if lookup_key.trim().is_empty()
-        || state.content_lookup_in_flight.contains(lookup_key)
-        || state.content_metadata_cache.contains_key(lookup_key)
-    {
-        return;
+    force_refresh: bool,
+    max_batch_size: usize,
+) -> usize {
+    if files.is_empty() || max_batch_size == 0 {
+        return 0;
     }
 
     ensure_content_lookup_channel(state);
     let Some(tx) = state.content_lookup_results_tx.as_ref().cloned() else {
-        return;
+        return 0;
     };
 
-    let key_for_state = lookup_key.to_owned();
-    state.content_lookup_in_flight.insert(key_for_state.clone());
-    let lookup_key = key_for_state;
-    let request = ResolveInstalledContentRequest {
-        file_path: file_path.to_path_buf(),
-        disk_file_name: disk_file_name.trim().to_owned(),
-        lookup_query: lookup_query.trim().to_owned(),
-        fallback_lookup_key: fallback_lookup_key
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned),
-        fallback_lookup_query: fallback_lookup_query
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned),
-        managed_identity: managed_identity.cloned(),
-        kind,
-        game_version: game_version.trim().to_owned(),
-        loader: loader.trim().to_owned(),
-    };
+    let mut work_items = Vec::new();
+    for file in files {
+        if work_items.len() >= max_batch_size {
+            break;
+        }
+        if !should_request_content_metadata_lookup(state, file.lookup_key.as_str(), force_refresh) {
+            continue;
+        }
+        let request_serial =
+            mark_content_metadata_lookup_requested(state, file.lookup_key.as_str());
+        work_items.push((request_serial, file.clone()));
+    }
+    if work_items.is_empty() {
+        return 0;
+    }
+    let scheduled_count = work_items.len();
+
     let hash_cache = state.content_hash_cache.clone().unwrap_or_default();
+    let game_version = game_version.trim().to_owned();
+    let loader = loader.trim().to_owned();
+    let work_items_for_failure = work_items.clone();
 
     let _ = tokio_runtime::spawn(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            InstalledContentResolver::resolve(&request, &hash_cache)
+        let result = match tokio_runtime::spawn_blocking(move || {
+            resolve_installed_content_lookup_batch(
+                work_items.as_slice(),
+                kind,
+                game_version.as_str(),
+                loader.as_str(),
+                hash_cache,
+            )
         })
         .await
-        .ok();
-        if let Some(result) = result {
-            let _ = tx.send(ContentLookupResult {
-                lookup_key,
-                resolution: result.resolution,
-                hash_cache_updates: result.hash_cache_updates,
-            });
-        }
+        {
+            Ok(result) => result,
+            Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/ui/instance",
+                    "Installed content lookup batch task failed: {err}"
+                );
+                ContentLookupResult {
+                    results: work_items_for_failure
+                        .into_iter()
+                        .map(|(request_serial, file)| ContentLookupResultEntry {
+                            request_serial,
+                            lookup_key: file.lookup_key,
+                            resolution: None,
+                        })
+                        .collect(),
+                    hash_cache_updates: Vec::new(),
+                }
+            }
+        };
+        let _ = tx.send(result);
     });
+
+    scheduled_count
 }
 
 pub(super) fn poll_content_lookup_results(state: &mut InstanceScreenState) {
@@ -1199,9 +1245,6 @@ pub(super) fn poll_content_lookup_results(state: &mut InstanceScreenState) {
     };
 
     while let Ok(result) = guard.try_recv() {
-        state
-            .content_lookup_in_flight
-            .remove(result.lookup_key.as_str());
         let cache = state
             .content_hash_cache
             .get_or_insert_with(InstalledContentHashCache::default);
@@ -1209,10 +1252,265 @@ pub(super) fn poll_content_lookup_results(state: &mut InstanceScreenState) {
             state.content_hash_cache_dirty = true;
             state.content_hash_cache_dirty_since = Some(Instant::now());
         }
-        state
-            .content_metadata_cache
-            .insert(result.lookup_key, result.resolution);
+
+        for result in result.results {
+            let is_latest = state
+                .content_lookup_latest_serial_by_key
+                .get(result.lookup_key.as_str())
+                .copied()
+                == Some(result.request_serial);
+            if !is_latest {
+                continue;
+            }
+            state
+                .content_lookup_in_flight
+                .remove(result.lookup_key.as_str());
+            if let Some(resolution) = result.resolution {
+                state
+                    .content_lookup_retry_after_by_key
+                    .remove(result.lookup_key.as_str());
+                state
+                    .content_lookup_failure_count_by_key
+                    .remove(result.lookup_key.as_str());
+                state
+                    .content_metadata_cache
+                    .insert(result.lookup_key, Some(resolution));
+                continue;
+            }
+
+            let failure_count = state
+                .content_lookup_failure_count_by_key
+                .entry(result.lookup_key.clone())
+                .and_modify(|count| *count = count.saturating_add(1))
+                .or_insert(1);
+            state.content_lookup_retry_after_by_key.insert(
+                result.lookup_key.clone(),
+                Instant::now() + content_lookup_retry_delay(*failure_count),
+            );
+            state
+                .content_metadata_cache
+                .entry(result.lookup_key)
+                .or_insert(None);
+        }
     }
+}
+
+fn resolve_installed_content_lookup_batch(
+    work_items: &[(u64, InstalledContentFile)],
+    kind: InstalledContentKind,
+    game_version: &str,
+    loader_label: &str,
+    mut hash_cache: InstalledContentHashCache,
+) -> ContentLookupResult {
+    let installed_files = work_items
+        .iter()
+        .map(|(_, file)| file.clone())
+        .collect::<Vec<_>>();
+    let original_hash_cache = hash_cache.clone();
+    let resolved_by_lookup_key = resolve_installed_content_metadata_batch(
+        installed_files.as_slice(),
+        kind,
+        game_version,
+        loader_label,
+        &mut hash_cache,
+    )
+    .into_iter()
+    .map(|(file, resolution)| (file.lookup_key, resolution))
+    .collect::<std::collections::HashMap<_, _>>();
+
+    ContentLookupResult {
+        results: work_items
+            .iter()
+            .map(|(request_serial, file)| ContentLookupResultEntry {
+                request_serial: *request_serial,
+                lookup_key: file.lookup_key.clone(),
+                resolution: resolved_by_lookup_key
+                    .get(file.lookup_key.as_str())
+                    .cloned(),
+            })
+            .collect(),
+        hash_cache_updates: hash_cache_diff_updates(&original_hash_cache, &hash_cache),
+    }
+}
+
+fn hash_cache_diff_updates(
+    previous: &InstalledContentHashCache,
+    current: &InstalledContentHashCache,
+) -> Vec<content_resolver::InstalledContentHashCacheUpdate> {
+    current
+        .entries
+        .iter()
+        .filter(|(hash_key, resolution)| {
+            previous.entries.get(hash_key.as_str()) != Some(*resolution)
+        })
+        .map(
+            |(hash_key, resolution)| content_resolver::InstalledContentHashCacheUpdate {
+                hash_key: hash_key.clone(),
+                resolution: resolution.clone(),
+            },
+        )
+        .collect()
+}
+
+fn refresh_cached_metadata_after_apply(
+    state: &mut InstanceScreenState,
+    instance_root: &Path,
+    kind: InstalledContentKind,
+    focus_lookup_keys: &[String],
+) {
+    let managed_identities = load_managed_content_identities(instance_root);
+    let installed_files: Arc<[InstalledContentFile]> =
+        InstalledContentResolver::scan_installed_content_files(
+            instance_root,
+            kind,
+            &managed_identities,
+        )
+        .into();
+    let active_keys = installed_files
+        .iter()
+        .map(|entry| entry.lookup_key.clone())
+        .collect::<HashSet<_>>();
+    let key_prefix = format!("{}::", kind.folder_name());
+
+    state.installed_content_cache.managed_identities = Some(managed_identities);
+    state
+        .installed_content_cache
+        .files_by_tab
+        .insert(kind, installed_files.clone());
+    state
+        .content_metadata_cache
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+    state
+        .installed_content_entry_ui_cache
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+    state
+        .content_lookup_in_flight
+        .retain(|key| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+    state
+        .content_lookup_latest_serial_by_key
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+    state
+        .content_lookup_retry_after_by_key
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+    state
+        .content_lookup_failure_count_by_key
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+
+    if installed_files.is_empty() {
+        return;
+    }
+
+    let selected_game_version = selected_game_version(state).to_owned();
+    let selected_modloader = selected_modloader_value(state).to_owned();
+    let mut refresh_keys = HashSet::new();
+    for lookup_key in focus_lookup_keys {
+        if active_keys.contains(lookup_key) {
+            refresh_keys.insert(lookup_key.clone());
+        }
+    }
+
+    let (start_index, end_index) = if state.selected_content_tab == kind {
+        let total_items = installed_files.len();
+        let total_pages = total_items
+            .div_ceil(state.installed_content_page_size.max(1))
+            .max(1);
+        state.installed_content_page = state.installed_content_page.clamp(1, total_pages);
+        let start = (state.installed_content_page - 1) * state.installed_content_page_size;
+        let end = (start + state.installed_content_page_size).min(total_items);
+        (start, end)
+    } else {
+        (
+            0,
+            installed_files
+                .len()
+                .min(CONTENT_UPDATE_PREFETCH_BATCH_SIZE),
+        )
+    };
+
+    for entry in &installed_files[start_index..end_index] {
+        refresh_keys.insert(entry.lookup_key.clone());
+    }
+
+    let refresh_files = installed_files
+        .iter()
+        .filter(|entry| refresh_keys.contains(&entry.lookup_key))
+        .cloned()
+        .collect::<Vec<_>>();
+    for entry in &refresh_files {
+        state
+            .content_lookup_in_flight
+            .remove(entry.lookup_key.as_str());
+        state
+            .content_lookup_retry_after_by_key
+            .remove(entry.lookup_key.as_str());
+        state
+            .content_lookup_failure_count_by_key
+            .remove(entry.lookup_key.as_str());
+    }
+    let _ = request_content_metadata_lookup_batch(
+        state,
+        refresh_files.as_slice(),
+        kind,
+        selected_game_version.as_str(),
+        selected_modloader.as_str(),
+        true,
+        refresh_files.len(),
+    );
+
+    prefetch_bulk_update_metadata(
+        state,
+        installed_files.as_ref(),
+        kind,
+        selected_game_version.as_str(),
+        selected_modloader.as_str(),
+    );
+}
+
+fn content_lookup_retry_delay(failure_count: u8) -> Duration {
+    match failure_count {
+        0 | 1 => Duration::from_secs(2),
+        2 => Duration::from_secs(10),
+        3 => Duration::from_secs(30),
+        _ => Duration::from_secs(120),
+    }
+}
+
+fn installed_content_lookup_repaint_delay(
+    state: &InstanceScreenState,
+    installed_files: &[InstalledContentFile],
+) -> Option<Duration> {
+    let now = Instant::now();
+    let mut next_retry: Option<Duration> = None;
+
+    for entry in installed_files {
+        if state.content_lookup_in_flight.contains(&entry.lookup_key)
+            || !state.content_metadata_cache.contains_key(&entry.lookup_key)
+        {
+            return Some(CONTENT_LOOKUP_REPAINT_INTERVAL);
+        }
+
+        if state
+            .content_metadata_cache
+            .get(&entry.lookup_key)
+            .is_some_and(|resolution| resolution.is_none())
+        {
+            match state
+                .content_lookup_retry_after_by_key
+                .get(&entry.lookup_key)
+            {
+                Some(retry_at) if *retry_at > now => {
+                    let remaining = retry_at.saturating_duration_since(now);
+                    next_retry = Some(match next_retry {
+                        Some(current) => current.min(remaining),
+                        None => remaining,
+                    });
+                }
+                _ => return Some(CONTENT_LOOKUP_REPAINT_INTERVAL),
+            }
+        }
+    }
+
+    next_retry
 }
 
 fn ensure_content_apply_channel(state: &mut InstanceScreenState) {
@@ -1257,6 +1555,7 @@ fn request_content_update(
     };
     let instance_name = state.name_input.clone();
     let instance_root = instance_root.to_path_buf();
+    let kind = state.selected_content_tab;
 
     state.content_apply_in_flight = true;
     state.status_message = Some(format!("Updating {}...", project_name));
@@ -1307,8 +1606,10 @@ fn request_content_update(
                 "individual content update failed: {err}"
             ),
         }
+        let focus_lookup_keys = vec![lookup_key.clone()];
         let _ = tx.send(ContentApplyResult {
-            lookup_key,
+            kind,
+            focus_lookup_keys,
             status_message: result,
         });
     });
@@ -1397,7 +1698,8 @@ fn request_bulk_content_update(
             ),
         }
         let _ = tx.send(ContentApplyResult {
-            lookup_key: format!("bulk::{}", kind.folder_name()),
+            kind,
+            focus_lookup_keys: Vec::new(),
             status_message: result,
         });
     });
@@ -1460,7 +1762,7 @@ fn update_all_installed_content(
         let manifest = managed_content::load_content_manifest(instance_root);
         let mut cleaned_stale_duplicates = 0usize;
         let mut updates = Vec::new();
-        for (file, resolution) in resolve_installed_content_updates_batch(
+        for (file, resolution) in resolve_installed_content_metadata_batch(
             installed_files.as_slice(),
             kind,
             game_version,
@@ -1671,7 +1973,7 @@ fn resolve_installed_content_for_update(
     result.resolution
 }
 
-fn resolve_installed_content_updates_batch(
+fn resolve_installed_content_metadata_batch(
     installed_files: &[InstalledContentFile],
     kind: InstalledContentKind,
     game_version: &str,
@@ -1688,6 +1990,13 @@ fn resolve_installed_content_updates_batch(
         game_version,
         loader_label,
         hash_cache,
+        prefetched.as_mut_slice(),
+    );
+    prefetch_managed_modrinth_updates(
+        installed_files,
+        kind,
+        game_version,
+        loader_label,
         prefetched.as_mut_slice(),
     );
     prefetch_managed_curseforge_updates(
@@ -1945,6 +2254,110 @@ fn prefetch_modrinth_hash_updates(
     let _ = hash_cache.apply_updates(cache_updates);
 }
 
+fn prefetch_managed_modrinth_updates(
+    installed_files: &[InstalledContentFile],
+    kind: InstalledContentKind,
+    game_version: &str,
+    loader_label: &str,
+    prefetched: &mut [Option<content_resolver::ResolvedInstalledContent>],
+) {
+    #[derive(Clone)]
+    struct ModrinthWorkItem {
+        index: usize,
+        project_id: String,
+        version_id: String,
+    }
+
+    let mut work_items = Vec::new();
+    for (index, file) in installed_files.iter().enumerate() {
+        if prefetched[index].is_some() {
+            continue;
+        }
+        let Some(identity) = file.managed_identity.as_ref() else {
+            continue;
+        };
+        if identity.source != modprovider::ContentSource::Modrinth {
+            continue;
+        }
+        let Some(project_id) = identity.modrinth_project_id.as_ref() else {
+            continue;
+        };
+        let version_id = identity.selected_version_id.trim();
+        if version_id.is_empty() {
+            continue;
+        }
+        work_items.push(ModrinthWorkItem {
+            index,
+            project_id: project_id.clone(),
+            version_id: version_id.to_owned(),
+        });
+    }
+    if work_items.is_empty() {
+        return;
+    }
+
+    let modrinth = modrinth::Client::default();
+    let versions_by_id = match modrinth.get_versions(
+        &work_items
+            .iter()
+            .map(|item| item.version_id.clone())
+            .collect::<Vec<_>>(),
+    ) {
+        Ok(versions) => versions
+            .into_iter()
+            .map(|version| (version.id.clone(), version))
+            .collect::<std::collections::HashMap<_, _>>(),
+        Err(_) => return,
+    };
+    let projects_by_id = modrinth_projects_by_id_prefetch(
+        &modrinth,
+        &work_items
+            .iter()
+            .map(|item| item.project_id.clone())
+            .collect::<Vec<_>>(),
+    );
+    let loaders = if kind == InstalledContentKind::Mods {
+        modrinth_loader_slugs_for_update_prefetch(loader_label)
+    } else {
+        Vec::new()
+    };
+    let game_versions = normalized_game_versions_for_update_prefetch(game_version);
+    let latest_versions_by_project_id = modrinth_latest_versions_by_project_prefetch(
+        &modrinth,
+        &work_items
+            .iter()
+            .map(|item| item.project_id.clone())
+            .collect::<Vec<_>>(),
+        loaders.as_slice(),
+        game_versions.as_slice(),
+    );
+
+    for item in work_items {
+        let Some(version) = versions_by_id.get(item.version_id.as_str()) else {
+            continue;
+        };
+        if version.project_id != item.project_id {
+            continue;
+        }
+        let file = &installed_files[item.index];
+        if !version_contains_file_name_for_update_prefetch(
+            version.files.as_slice(),
+            file.file_name.as_str(),
+        ) {
+            continue;
+        }
+        let Some(project) = projects_by_id.get(item.project_id.as_str()) else {
+            continue;
+        };
+
+        prefetched[item.index] = Some(modrinth_resolution_from_prefetched_managed(
+            project,
+            version,
+            latest_versions_by_project_id.get(item.project_id.as_str()),
+        ));
+    }
+}
+
 fn prefetch_managed_curseforge_updates(
     installed_files: &[InstalledContentFile],
     kind: InstalledContentKind,
@@ -2107,6 +2520,37 @@ fn modrinth_projects_by_id_prefetch(
         .collect()
 }
 
+fn modrinth_latest_versions_by_project_prefetch(
+    modrinth: &modrinth::Client,
+    project_ids: &[String],
+    loaders: &[String],
+    game_versions: &[String],
+) -> std::collections::HashMap<String, modrinth::ProjectVersion> {
+    let mut latest_versions = std::collections::HashMap::new();
+    let mut seen = HashSet::new();
+
+    for project_id in project_ids {
+        if !seen.insert(project_id.clone()) {
+            continue;
+        }
+        let Ok(versions) =
+            modrinth.list_project_versions(project_id.as_str(), loaders, game_versions)
+        else {
+            continue;
+        };
+        let Some(latest) = versions
+            .into_iter()
+            .filter(|version| !version.files.is_empty())
+            .max_by(|left, right| left.date_published.cmp(&right.date_published))
+        else {
+            continue;
+        };
+        latest_versions.insert(project_id.clone(), latest);
+    }
+
+    latest_versions
+}
+
 fn modrinth_resolution_from_prefetched_hash(
     project: &modrinth::Project,
     version: &modrinth::ProjectVersion,
@@ -2127,6 +2571,31 @@ fn modrinth_resolution_from_prefetched_hash(
             version.version_number.as_str(),
         ),
         resolution_kind: content_resolver::InstalledContentResolutionKind::ExactHash,
+        warning_message: None,
+        update: modrinth_update_from_latest_prefetch(latest, Some(version.id.as_str())),
+    }
+}
+
+fn modrinth_resolution_from_prefetched_managed(
+    project: &modrinth::Project,
+    version: &modrinth::ProjectVersion,
+    latest: Option<&modrinth::ProjectVersion>,
+) -> content_resolver::ResolvedInstalledContent {
+    content_resolver::ResolvedInstalledContent {
+        entry: modprovider::UnifiedContentEntry {
+            id: format!("modrinth:{}", project.project_id),
+            name: project.title.clone(),
+            summary: project.description.trim().to_owned(),
+            content_type: project.project_type.clone(),
+            source: modprovider::ContentSource::Modrinth,
+            project_url: Some(project.project_url.clone()),
+            icon_url: project.icon_url.clone(),
+        },
+        installed_version_id: non_empty_owned_for_update_prefetch(version.id.as_str()),
+        installed_version_label: non_empty_owned_for_update_prefetch(
+            version.version_number.as_str(),
+        ),
+        resolution_kind: content_resolver::InstalledContentResolutionKind::Managed,
         warning_message: None,
         update: modrinth_update_from_latest_prefetch(latest, Some(version.id.as_str())),
     }
@@ -2205,6 +2674,15 @@ fn file_name_matches_for_update_prefetch(left: &str, right: &str) -> bool {
     !left.is_empty() && left.eq_ignore_ascii_case(right)
 }
 
+fn version_contains_file_name_for_update_prefetch(
+    files: &[modrinth::ProjectVersionFile],
+    disk_file_name: &str,
+) -> bool {
+    files
+        .iter()
+        .any(|file| file_name_matches_for_update_prefetch(file.filename.as_str(), disk_file_name))
+}
+
 fn modrinth_loader_slugs_for_update_prefetch(loader: &str) -> Vec<String> {
     match loader.trim().to_ascii_lowercase().as_str() {
         "fabric" => vec!["fabric".to_owned()],
@@ -2281,19 +2759,15 @@ fn poll_content_apply_results(state: &mut InstanceScreenState, instance_root: &P
         match result.status_message {
             Ok(message) => {
                 state.invalidate_installed_content_cache();
-                state.content_lookup_in_flight.clear();
-                state.content_metadata_cache.clear();
-                state.installed_content_entry_ui_cache.clear();
-                clear_content_hash_cache(state, instance_root);
+                refresh_cached_metadata_after_apply(
+                    state,
+                    instance_root,
+                    result.kind,
+                    result.focus_lookup_keys.as_slice(),
+                );
                 state.status_message = Some(message);
             }
             Err(err) => {
-                state
-                    .content_metadata_cache
-                    .remove(result.lookup_key.as_str());
-                state
-                    .installed_content_entry_ui_cache
-                    .remove(result.lookup_key.as_str());
                 state.status_message = Some(format!("Failed to update content: {err}"));
             }
         }
