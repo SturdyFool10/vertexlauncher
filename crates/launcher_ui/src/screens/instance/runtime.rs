@@ -296,6 +296,8 @@ pub(super) fn render_runtime_row(
                                 Some(trimmed.to_owned())
                             }
                         });
+                    let (linux_set_opengl_driver, linux_use_zink_driver) =
+                        super::effective_linux_graphics_settings_for_state(state, config);
                     request_runtime_prepare(
                         state,
                         RuntimePrepareOperation::Launch,
@@ -312,8 +314,8 @@ pub(super) fn render_runtime_row(
                         ),
                         config.download_max_concurrent(),
                         config.parsed_download_speed_limit_bps(),
-                        state.linux_set_opengl_driver,
-                        state.linux_use_zink_driver,
+                        linux_set_opengl_driver,
+                        linux_use_zink_driver,
                         max_memory_mib,
                         extra_jvm_args,
                         state.launch_username.clone(),

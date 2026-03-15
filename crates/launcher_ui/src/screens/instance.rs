@@ -105,6 +105,41 @@ fn instance_screen_state_id(instance_id: &str) -> egui::Id {
     egui::Id::new(("instance_screen_state", instance_id))
 }
 
+#[cfg(target_os = "linux")]
+fn effective_linux_graphics_settings_for_state(
+    state: &InstanceScreenState,
+    config: &Config,
+) -> (bool, bool) {
+    effective_linux_graphics_settings_for_flags(
+        state.linux_set_opengl_driver,
+        state.linux_use_zink_driver,
+        config.linux_set_opengl_driver(),
+        config.linux_use_zink_driver(),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn effective_linux_graphics_settings_for_flags(
+    override_enabled: bool,
+    use_zink_driver: bool,
+    global_set_opengl_driver: bool,
+    global_use_zink_driver: bool,
+) -> (bool, bool) {
+    if override_enabled {
+        (true, use_zink_driver)
+    } else {
+        (global_set_opengl_driver, global_use_zink_driver)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn effective_linux_graphics_settings_for_state(
+    state: &InstanceScreenState,
+    _config: &Config,
+) -> (bool, bool) {
+    (state.linux_set_opengl_driver, state.linux_use_zink_driver)
+}
+
 pub(super) fn handle_escape(ctx: &egui::Context, selected_instance_id: Option<&str>) -> bool {
     let Some(instance_id) = selected_instance_id else {
         return false;
@@ -1951,6 +1986,8 @@ fn render_instance_settings_modal(
                                         &installations_root,
                                         &saved_instance,
                                     );
+                                    let (linux_set_opengl_driver, linux_use_zink_driver) =
+                                        effective_linux_graphics_settings_for_state(state, config);
                                     request_runtime_prepare(
                                         state,
                                         RuntimePrepareOperation::ReinstallProfile,
@@ -1973,8 +2010,8 @@ fn render_instance_settings_modal(
                                         ),
                                         config.download_max_concurrent(),
                                         config.parsed_download_speed_limit_bps(),
-                                        state.linux_set_opengl_driver,
-                                        state.linux_use_zink_driver,
+                                        linux_set_opengl_driver,
+                                        linux_use_zink_driver,
                                         config.default_instance_max_memory_mib(),
                                         None,
                                         None,
@@ -2274,9 +2311,9 @@ fn linux_instance_driver_settings_for_save(
     #[cfg(target_os = "linux")]
     {
         let _ = _existing;
-        return (
-            Some(state.linux_set_opengl_driver),
-            Some(state.linux_use_zink_driver),
+        return linux_instance_driver_override_for_save(
+            state.linux_set_opengl_driver,
+            state.linux_use_zink_driver,
         );
     }
 
@@ -2291,6 +2328,65 @@ fn linux_instance_driver_settings_for_save(
                 )
             })
             .unwrap_or((None, None));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_instance_driver_override_for_save(
+    override_enabled: bool,
+    use_zink_driver: bool,
+) -> (Option<bool>, Option<bool>) {
+    if override_enabled {
+        (Some(true), Some(use_zink_driver))
+    } else {
+        (None, None)
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::{
+        effective_linux_graphics_settings_for_flags, linux_instance_driver_override_for_save,
+    };
+
+    #[test]
+    fn linux_driver_override_is_cleared_when_instance_override_is_disabled() {
+        assert_eq!(
+            linux_instance_driver_override_for_save(false, false),
+            (None, None)
+        );
+        assert_eq!(
+            linux_instance_driver_override_for_save(false, true),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn linux_driver_override_is_saved_when_instance_override_is_enabled() {
+        assert_eq!(
+            linux_instance_driver_override_for_save(true, false),
+            (Some(true), Some(false))
+        );
+        assert_eq!(
+            linux_instance_driver_override_for_save(true, true),
+            (Some(true), Some(true))
+        );
+    }
+
+    #[test]
+    fn effective_linux_graphics_settings_use_global_when_instance_override_is_disabled() {
+        assert_eq!(
+            effective_linux_graphics_settings_for_flags(false, false, true, true),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn effective_linux_graphics_settings_use_instance_zink_when_override_is_enabled() {
+        assert_eq!(
+            effective_linux_graphics_settings_for_flags(true, true, false, false),
+            (true, true)
+        );
     }
 }
 
@@ -2341,7 +2437,7 @@ fn render_platform_specific_instance_settings_section(
                     ui,
                     "Set Linux OpenGL Driver",
                     Some(
-                        "Linux-only. Overrides the launcher-wide Linux OpenGL driver behavior for this instance. This affects all launches for this instance; versions using Vulkan directly should ignore it.",
+                        "Linux-only. When enabled, this instance uses the Zink toggle below instead of the launcher-wide Linux OpenGL driver behavior. When disabled, this instance falls back to the launcher-wide Linux graphics settings. Versions using Vulkan directly should ignore it.",
                     ),
                     &mut state.linux_set_opengl_driver,
                 )
@@ -2357,7 +2453,7 @@ fn render_platform_specific_instance_settings_section(
                     ui,
                     "Use Zink Driver (Experimental)",
                     Some(
-                        "Linux-only. Experimental. When the setting above is enabled, forces Mesa Zink so OpenGL runs over Vulkan for this instance. Disable it to keep Mesa's default OpenGL driver selection. Versions using Vulkan directly should ignore it.",
+                        "Linux-only. Experimental. When the setting above is enabled, this toggle decides whether this instance forces Mesa Zink so OpenGL runs over Vulkan. When the setting above is disabled, the launcher-wide Zink setting is used instead. Versions using Vulkan directly should ignore it.",
                     ),
                     &mut state.linux_use_zink_driver,
                 )

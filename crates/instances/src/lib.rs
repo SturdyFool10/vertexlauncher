@@ -566,6 +566,35 @@ pub fn instance_root_path(installations_root: &Path, instance: &InstanceRecord) 
     installations_root.join(&instance.minecraft_root)
 }
 
+/// Returns whether this instance has an explicit Linux graphics override.
+#[must_use]
+pub fn linux_graphics_override_enabled(instance: &InstanceRecord) -> bool {
+    instance.linux_set_opengl_driver == Some(true)
+}
+
+/// Resolves the effective Linux graphics settings for an instance.
+///
+/// Instance `linux_set_opengl_driver` acts as an override toggle: only
+/// `Some(true)` enables per-instance control. Any other stored value inherits
+/// the launcher-wide settings.
+#[must_use]
+pub fn effective_linux_graphics_settings(
+    instance: &InstanceRecord,
+    global_set_opengl_driver: bool,
+    global_use_zink_driver: bool,
+) -> (bool, bool) {
+    if linux_graphics_override_enabled(instance) {
+        (
+            true,
+            instance
+                .linux_use_zink_driver
+                .unwrap_or(global_use_zink_driver),
+        )
+    } else {
+        (global_set_opengl_driver, global_use_zink_driver)
+    }
+}
+
 /// Returns the path used for persistent instance metadata (`instances.json`).
 ///
 /// Uses `VERTEX_CONFIG_LOCATION/instances.json` when set, otherwise
@@ -607,6 +636,12 @@ fn normalize_instance(instance: &mut InstanceRecord) {
         instance.java_override_enabled,
         instance.java_override_runtime_major,
     );
+    if !linux_graphics_override_enabled(instance) {
+        instance.linux_set_opengl_driver = None;
+        instance.linux_use_zink_driver = None;
+    } else {
+        instance.linux_set_opengl_driver = Some(true);
+    }
     instance.favorite_world_ids = normalize_world_favorites(&instance.favorite_world_ids);
     instance.favorite_server_ids = normalize_world_favorites(&instance.favorite_server_ids);
 
@@ -730,4 +765,63 @@ fn current_time_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        InstanceRecord, effective_linux_graphics_settings, linux_graphics_override_enabled,
+        normalize_instance,
+    };
+
+    #[test]
+    fn linux_graphics_inherit_global_when_override_is_disabled() {
+        let instance = InstanceRecord {
+            linux_set_opengl_driver: None,
+            linux_use_zink_driver: Some(false),
+            ..InstanceRecord::default()
+        };
+        assert!(!linux_graphics_override_enabled(&instance));
+        assert_eq!(
+            effective_linux_graphics_settings(&instance, true, true),
+            (true, true)
+        );
+
+        let legacy_false = InstanceRecord {
+            linux_set_opengl_driver: Some(false),
+            linux_use_zink_driver: Some(false),
+            ..InstanceRecord::default()
+        };
+        assert!(!linux_graphics_override_enabled(&legacy_false));
+        assert_eq!(
+            effective_linux_graphics_settings(&legacy_false, true, true),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn linux_graphics_use_instance_zink_when_override_is_enabled() {
+        let instance = InstanceRecord {
+            linux_set_opengl_driver: Some(true),
+            linux_use_zink_driver: Some(false),
+            ..InstanceRecord::default()
+        };
+        assert!(linux_graphics_override_enabled(&instance));
+        assert_eq!(
+            effective_linux_graphics_settings(&instance, false, true),
+            (true, false)
+        );
+    }
+
+    #[test]
+    fn normalize_clears_legacy_linux_graphics_values_when_override_is_disabled() {
+        let mut instance = InstanceRecord {
+            linux_set_opengl_driver: Some(false),
+            linux_use_zink_driver: Some(true),
+            ..InstanceRecord::default()
+        };
+        normalize_instance(&mut instance);
+        assert_eq!(instance.linux_set_opengl_driver, None);
+        assert_eq!(instance.linux_use_zink_driver, None);
+    }
 }

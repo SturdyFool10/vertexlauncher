@@ -157,6 +157,12 @@ pub(super) struct InstanceScreenState {
 impl InstanceScreenState {
     pub(super) fn from_instance(instance: &instances::InstanceRecord, config: &Config) -> Self {
         let (selected_modloader, custom_modloader) = split_modloader(&instance.modloader);
+        let linux_set_opengl_driver = instances::linux_graphics_override_enabled(instance);
+        let (_, linux_use_zink_driver) = instances::effective_linux_graphics_settings(
+            instance,
+            config.linux_set_opengl_driver(),
+            config.linux_use_zink_driver(),
+        );
         Self {
             running: false,
             status_message: None,
@@ -177,12 +183,8 @@ impl InstanceScreenState {
                 .unwrap_or_else(|| config.default_instance_cli_args().to_owned()),
             java_override_enabled: instance.java_override_enabled,
             java_override_runtime_major: instance.java_override_runtime_major,
-            linux_set_opengl_driver: instance
-                .linux_set_opengl_driver
-                .unwrap_or(config.linux_set_opengl_driver()),
-            linux_use_zink_driver: instance
-                .linux_use_zink_driver
-                .unwrap_or(config.linux_use_zink_driver()),
+            linux_set_opengl_driver,
+            linux_use_zink_driver,
             selected_content_tab: InstalledContentKind::Mods,
             installed_content_page_size: INSTALLED_CONTENT_PAGE_SIZES[1],
             installed_content_page: 1,

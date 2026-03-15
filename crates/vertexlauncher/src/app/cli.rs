@@ -164,6 +164,12 @@ fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
         None,
     )
     .map_err(|err| err.to_string())?;
+    let (linux_set_opengl_driver, linux_use_zink_driver) =
+        instances::effective_linux_graphics_settings(
+            &instance,
+            config.linux_set_opengl_driver(),
+            config.linux_use_zink_driver(),
+        );
     let launch_request = LaunchRequest {
         instance_root: instance_root.clone(),
         game_version: instance.game_version.clone(),
@@ -186,12 +192,8 @@ fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
         auth_user_type: account.user_type.clone(),
         quick_play_singleplayer,
         quick_play_multiplayer,
-        linux_set_opengl_driver: instance
-            .linux_set_opengl_driver
-            .unwrap_or(config.linux_set_opengl_driver()),
-        linux_use_zink_driver: instance
-            .linux_use_zink_driver
-            .unwrap_or(config.linux_use_zink_driver()),
+        linux_set_opengl_driver,
+        linux_use_zink_driver,
     };
     let launch = launch_instance(&launch_request).map_err(|err| err.to_string())?;
     let _ = record_instance_launch_usage(&mut store, instance.id.as_str());

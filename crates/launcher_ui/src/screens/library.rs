@@ -962,12 +962,12 @@ fn request_runtime_launch(
         .as_deref()
         .and_then(normalize_optional)
         .or(default_instance_cli_args);
-    let linux_set_opengl_driver = instance
-        .linux_set_opengl_driver
-        .unwrap_or(global_linux_set_opengl_driver);
-    let linux_use_zink_driver = instance
-        .linux_use_zink_driver
-        .unwrap_or(global_linux_use_zink_driver);
+    let (linux_set_opengl_driver, linux_use_zink_driver) =
+        instances::effective_linux_graphics_settings(
+            instance,
+            global_linux_set_opengl_driver,
+            global_linux_use_zink_driver,
+        );
     let instance_root_display = display_user_path(instance_root.as_path());
     let tab_user_key = player_uuid
         .as_deref()
