@@ -35,7 +35,6 @@ const FAVORITE_STAR_ICON_SIZE: f32 = 14.0;
 const SCREENSHOT_SCAN_INTERVAL: Duration = Duration::from_secs(10);
 const MAX_HOME_SCREENSHOTS: usize = 120;
 const HOME_TAB_HEIGHT: f32 = 38.0;
-const HOME_TAB_MIN_WIDTH: f32 = 190.0;
 const SCREENSHOT_TILE_GAP: f32 = 10.0;
 const SCREENSHOT_VIEWER_MIN_ZOOM: f32 = 1.0;
 const SCREENSHOT_VIEWER_MAX_ZOOM: f32 = 8.0;
@@ -328,14 +327,11 @@ pub fn render(
 
 fn render_home_tab_row(ui: &mut Ui, active_tab: &mut HomeTab) {
     let button_gap = style::SPACE_MD;
-    let available_width = ui.available_width().max(1.0);
-    let button_width = ((available_width - button_gap) / 2.0).clamp(80.0, HOME_TAB_MIN_WIDTH);
-    let leading_space = ((available_width - (button_width * 2.0 + button_gap)) * 0.5).max(0.0);
+    let tab_count = 2.0;
+    let button_width =
+        ((ui.available_width() - button_gap * (tab_count - 1.0)) / tab_count).max(0.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = button_gap;
-        if leading_space > 0.0 {
-            ui.add_space(leading_space);
-        }
         for tab in [HomeTab::InstancesAndWorlds, HomeTab::Screenshots] {
             let selected = *active_tab == tab;
             let button =
@@ -358,7 +354,10 @@ fn render_home_tab_row(ui: &mut Ui, active_tab: &mut HomeTab) {
                     ui.visuals().widgets.inactive.bg_stroke
                 })
                 .corner_radius(egui::CornerRadius::same(10));
-            if ui.add(button).clicked() {
+            if ui
+                .add_sized([button_width, HOME_TAB_HEIGHT], button)
+                .clicked()
+            {
                 *active_tab = tab;
             }
         }

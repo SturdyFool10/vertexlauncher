@@ -78,7 +78,6 @@ const CUSTOM_MODLOADER_INDEX: usize = MODLOADER_OPTIONS.len() - 1;
 const INSTALLED_CONTENT_SCROLLBAR_RESERVE: f32 = 18.0;
 const INSTALLED_CONTENT_PAGE_SIZES: [usize; 4] = [10, 25, 50, 100];
 const INSTANCE_TABS_HEIGHT: f32 = 38.0;
-const INSTANCE_TAB_MAX_WIDTH: f32 = 220.0;
 const INSTANCE_SCREENSHOT_SCAN_INTERVAL: Duration = Duration::from_secs(10);
 const INSTANCE_LOG_SCAN_INTERVAL: Duration = Duration::from_secs(3);
 const INSTANCE_SCREENSHOT_TILE_GAP: f32 = 10.0;
@@ -371,8 +370,8 @@ pub fn render(
 
 fn render_instance_tab_row(ui: &mut Ui, active_tab: &mut InstanceScreenTab) {
     let item_spacing = 8.0;
-    let width =
-        ((ui.available_width() - item_spacing * 2.0) / 3.0).clamp(96.0, INSTANCE_TAB_MAX_WIDTH);
+    let tab_count = InstanceScreenTab::ALL.len() as f32;
+    let width = ((ui.available_width() - item_spacing * (tab_count - 1.0)) / tab_count).max(0.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = item_spacing;
         for tab in InstanceScreenTab::ALL {
@@ -397,7 +396,10 @@ fn render_instance_tab_row(ui: &mut Ui, active_tab: &mut InstanceScreenTab) {
                     ui.visuals().widgets.inactive.bg_stroke
                 })
                 .corner_radius(egui::CornerRadius::same(10));
-            if ui.add(button).clicked() {
+            if ui
+                .add_sized([width, INSTANCE_TABS_HEIGHT], button)
+                .clicked()
+            {
                 *active_tab = tab;
             }
         }

@@ -114,28 +114,39 @@ pub(super) fn render_installed_content_section(
     });
 
     ui.add_space(10.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+    let item_spacing = 6.0;
+    let tab_count = InstalledContentKind::ALL.len() as f32;
+    let tab_width =
+        ((ui.available_width() - item_spacing * (tab_count - 1.0)) / tab_count).max(0.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = item_spacing;
         for tab in InstalledContentKind::ALL {
             let selected = state.selected_content_tab == tab;
-            let tab_style = ButtonOptions {
-                min_size: egui::vec2(120.0, 30.0),
-                text_color: ui.visuals().text_color(),
-                fill: ui.visuals().widgets.inactive.bg_fill,
-                fill_hovered: ui.visuals().widgets.hovered.bg_fill,
-                fill_active: ui.visuals().widgets.active.bg_fill,
-                fill_selected: ui.visuals().selection.bg_fill,
-                stroke: ui.visuals().widgets.inactive.bg_stroke,
-                ..ButtonOptions::default()
-            };
-            if text_ui
-                .selectable_button(
-                    ui,
-                    ("instance_content_tab", instance_id, tab.label()),
-                    tab.label(),
-                    selected,
-                    &tab_style,
-                )
+            let button =
+                egui::Button::new(egui::RichText::new(tab.label()).size(14.0).strong().color(
+                    if selected {
+                        ui.visuals().widgets.active.fg_stroke.color
+                    } else {
+                        ui.visuals().text_color()
+                    },
+                ))
+                .min_size(egui::vec2(tab_width, 30.0))
+                .fill(if selected {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    ui.visuals().widgets.inactive.bg_fill
+                })
+                .stroke(if selected {
+                    ui.visuals().selection.stroke
+                } else {
+                    ui.visuals().widgets.inactive.bg_stroke
+                })
+                .corner_radius(egui::CornerRadius::same(10));
+            if ui
+                .push_id(("instance_content_tab", instance_id, tab.label()), |ui| {
+                    ui.add_sized([tab_width, 30.0], button)
+                })
+                .inner
                 .clicked()
             {
                 state.selected_content_tab = tab;
