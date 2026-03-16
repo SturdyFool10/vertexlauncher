@@ -18,25 +18,32 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
         viewport_size,
         egui::Layout::left_to_right(egui::Align::Min),
         |ui| {
-            ui.add_space(style::SPACE_LG);
-            let inner_width = (ui.available_width() - style::SPACE_LG).max(1.0);
+            ui.add_space(style::SPACE_XL);
+            let inner_width = (ui.available_width() - style::SPACE_XL * 2.0).max(1.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(inner_width, ui.available_height().max(1.0)),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     render_tabs_row(ui, text_ui, &snapshot);
-                    ui.add_space(style::SPACE_SM);
-                    render_log_buffer(
-                        ui,
-                        text_ui,
-                        "console_scroll_area",
-                        lines,
-                        "No log entries yet.",
-                        true,
-                    );
+                    ui.add_space(style::SPACE_MD);
+                    egui::Frame::new()
+                        .fill(ui.visuals().widgets.noninteractive.bg_fill)
+                        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                        .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
+                        .inner_margin(egui::Margin::same(style::SPACE_MD as i8))
+                        .show(ui, |ui| {
+                            render_log_buffer(
+                                ui,
+                                text_ui,
+                                "console_scroll_area",
+                                lines,
+                                "No log entries yet.",
+                                true,
+                            );
+                        });
                 },
             );
-            ui.add_space(style::SPACE_LG);
+            ui.add_space(style::SPACE_XL);
         },
     );
 }

@@ -441,25 +441,35 @@ impl eframe::App for VertexApp {
                     )),
             )
             .show(ctx, |ui| {
-                screen_output = screens::render(
-                    ui,
-                    self.active_screen,
-                    skin_manager_opened,
-                    skin_manager_account_switched,
-                    self.selected_instance_id.as_deref(),
-                    self.auth.display_name(),
-                    active_launch_auth.as_ref(),
-                    self.auth.active_account_owns_minecraft(),
-                    streamer_mode,
-                    &mut self.config,
-                    &mut self.instance_store,
-                    &account_avatars_by_key,
-                    wgpu_target_format,
-                    skin_preview_msaa_samples,
-                    self.fonts.available_ui_fonts(),
-                    self.theme_catalog.themes(),
-                    &settings_info,
-                    &mut self.text_ui,
+                let content_rect = ui
+                    .max_rect()
+                    .shrink2(egui::vec2(ui::style::SPACE_MD, ui::style::SPACE_SM));
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(content_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                    |ui| {
+                        screen_output = screens::render(
+                            ui,
+                            self.active_screen,
+                            skin_manager_opened,
+                            skin_manager_account_switched,
+                            self.selected_instance_id.as_deref(),
+                            self.auth.display_name(),
+                            active_launch_auth.as_ref(),
+                            self.auth.active_account_owns_minecraft(),
+                            streamer_mode,
+                            &mut self.config,
+                            &mut self.instance_store,
+                            &account_avatars_by_key,
+                            wgpu_target_format,
+                            skin_preview_msaa_samples,
+                            self.fonts.available_ui_fonts(),
+                            self.theme_catalog.themes(),
+                            &settings_info,
+                            &mut self.text_ui,
+                        );
+                    },
                 );
             });
         self.last_rendered_screen = Some(self.active_screen);

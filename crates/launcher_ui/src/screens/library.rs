@@ -104,8 +104,9 @@ pub fn render(
         .id_salt("library_instance_tiles_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            ui.add_space(style::SPACE_MD);
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_MD, style::SPACE_MD);
+                ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_XL, style::SPACE_XL);
                 for instance in &instances.instances {
                     let instance_root = instance_root_path(installations_root, instance);
                     let instance_running = is_instance_running(instance_root.as_path());
@@ -271,6 +272,7 @@ pub fn render(
                     }
                 }
             });
+            ui.add_space(style::SPACE_MD);
         });
     render_delete_instance_modal(ui.ctx(), text_ui, &mut state, instances, installations_root);
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
@@ -305,7 +307,7 @@ fn render_instance_tile(
         .fill(tile_fill)
         .stroke(tile_stroke)
         .corner_radius(egui::CornerRadius::same(12))
-        .inner_margin(egui::Margin::same(10));
+        .inner_margin(egui::Margin::same(style::SPACE_XL as i8));
 
     let mut action = RuntimeAction::None;
     frame.show(ui, |ui| {

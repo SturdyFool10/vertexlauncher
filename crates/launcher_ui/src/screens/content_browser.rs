@@ -28,7 +28,10 @@ use crate::app::tokio_runtime;
 use crate::assets;
 use crate::install_activity;
 use crate::notification;
-use crate::ui::components::{remote_tiled_image, text_helpers};
+use crate::ui::{
+    components::{remote_tiled_image, text_helpers},
+    style,
+};
 
 use super::AppScreen;
 
@@ -579,7 +582,7 @@ pub fn render(
             ..LabelOptions::default()
         },
     );
-    ui.add_space(8.0);
+    ui.add_space(style::SPACE_MD);
 
     maybe_start_queued_download(&mut state, instance.name.as_str(), instance_root.as_path());
 
@@ -609,7 +612,7 @@ pub fn render(
         );
     }
 
-    ui.add_space(8.0);
+    ui.add_space(style::SPACE_MD);
     match state.current_view {
         ContentBrowserPage::Browse => {
             let manifest = load_content_manifest(instance_root.as_path());
@@ -662,7 +665,9 @@ pub fn render(
         }
     }
 
+    ui.add_space(style::SPACE_LG);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = style::SPACE_SM;
         let button_style = ButtonOptions {
             text_color: ui.visuals().text_color(),
             fill: ui.visuals().widgets.inactive.bg_fill,
@@ -712,8 +717,9 @@ fn render_controls(
         .fill(ui.visuals().widgets.inactive.bg_fill)
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
         .corner_radius(egui::CornerRadius::same(10))
-        .inner_margin(egui::Margin::same(10));
+        .inner_margin(egui::Margin::same(style::SPACE_XL as i8));
     frame.show(ui, |ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_MD);
         let button_style = ButtonOptions {
             text_color: ui.visuals().text_color(),
             fill: ui.visuals().widgets.inactive.bg_fill,
@@ -723,22 +729,8 @@ fn render_controls(
             stroke: ui.visuals().widgets.inactive.bg_stroke,
             ..ButtonOptions::default()
         };
-        let _ = text_ui.label(
-            ui,
-            ("content_browser_heading", instance_id),
-            "Content Browser",
-            &LabelOptions {
-                font_size: 18.0,
-                line_height: 22.0,
-                weight: 700,
-                color: ui.visuals().text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
-        );
-        ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_MD, style::SPACE_MD);
             let edit = egui::TextEdit::singleline(&mut state.query_input)
                 .hint_text("Search project names, summaries, and tags")
                 .desired_width((ui.available_width() - 460.0).max(160.0));
@@ -808,18 +800,7 @@ fn render_controls(
                 }
             }
         });
-        let _ = text_ui.label(
-            ui,
-            ("content_browser_search_help", instance_id),
-            "Project search uses provider metadata and compatibility facets, not local file names. Use the instance page for exact file-hash identification.",
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
-        );
-
-        ui.add_space(6.0);
+        ui.add_space(style::SPACE_MD);
         let gap = ui.spacing().item_spacing.x;
         let column_width = ((ui.available_width() - (gap * 2.0)) / 3.0).max(140.0);
         ui.columns(3, |cols| {
@@ -927,7 +908,7 @@ fn render_results(
         .fill(ui.visuals().widgets.noninteractive.bg_fill)
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
         .corner_radius(egui::CornerRadius::same(10))
-        .inner_margin(egui::Margin::same(8));
+        .inner_margin(egui::Margin::same(style::SPACE_XL as i8));
     frame.show(ui, |ui| {
         ui.set_min_height(max_height);
         if state.search_in_flight {
@@ -949,12 +930,13 @@ fn render_results(
                     ..LabelOptions::default()
                 },
             );
-            ui.add_space(8.0);
+            ui.add_space(style::SPACE_MD);
         }
         egui::ScrollArea::vertical()
             .id_salt(("content_browser_results_scroll", instance_id))
             .max_height(max_height)
             .show(ui, |ui| {
+                ui.add_space(style::SPACE_XS);
                 if state.results.entries.is_empty() {
                     let empty_message = if state.search_in_flight {
                         "Searching content..."
@@ -1534,6 +1516,7 @@ fn render_detail_page(
                                 installed_label,
                             );
                         }
+                        ui.add_space(style::SPACE_XS);
                     });
                 });
             });

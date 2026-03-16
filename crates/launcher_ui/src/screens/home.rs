@@ -15,7 +15,10 @@ use flate2::read::GzDecoder;
 use instances::{InstanceStore, instance_root_path, set_server_favorite, set_world_favorite};
 use textui::{LabelOptions, TextUi};
 
-use crate::{assets, notification, ui::modal};
+use crate::{
+    assets, notification,
+    ui::{modal, style},
+};
 
 use super::{AppScreen, PendingLaunchIntent, queue_launch_intent};
 
@@ -255,14 +258,6 @@ pub fn render(
         .unwrap_or_default();
     ui.ctx().request_repaint_after(Duration::from_millis(250));
 
-    let mut heading_style = LabelOptions::default();
-    heading_style.font_size = 28.0;
-    heading_style.line_height = 34.0;
-    heading_style.weight = 700;
-    heading_style.color = ui.visuals().text_color();
-    let _ = text_ui.label(ui, "home_heading", "Home", &heading_style);
-    ui.add_space(10.0);
-
     render_home_tab_row(ui, &mut state.active_tab);
     ui.add_space(14.0);
 
@@ -332,9 +327,15 @@ pub fn render(
 }
 
 fn render_home_tab_row(ui: &mut Ui, active_tab: &mut HomeTab) {
-    let button_width = ((ui.available_width() - 8.0) / 2.0).clamp(80.0, HOME_TAB_MIN_WIDTH);
+    let button_gap = style::SPACE_MD;
+    let available_width = ui.available_width().max(1.0);
+    let button_width = ((available_width - button_gap) / 2.0).clamp(80.0, HOME_TAB_MIN_WIDTH);
+    let leading_space = ((available_width - (button_width * 2.0 + button_gap)) * 0.5).max(0.0);
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.spacing_mut().item_spacing.x = button_gap;
+        if leading_space > 0.0 {
+            ui.add_space(leading_space);
+        }
         for tab in [HomeTab::InstancesAndWorlds, HomeTab::Screenshots] {
             let selected = *active_tab == tab;
             let button =
@@ -393,7 +394,7 @@ fn render_screenshot_gallery(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Home
         summary.as_str(),
         &body_style,
     );
-    ui.add_space(8.0);
+    ui.add_space(style::SPACE_SM);
 
     if state.screenshots.is_empty() {
         return;
@@ -419,6 +420,7 @@ fn render_screenshot_gallery(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Home
         .id_salt("home_screenshots_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            ui.add_space(style::SPACE_SM);
             ui.columns(column_count, |columns| {
                 for (column_ui, items) in columns.iter_mut().zip(assignments.iter()) {
                     column_ui.spacing_mut().item_spacing.y = SCREENSHOT_TILE_GAP;

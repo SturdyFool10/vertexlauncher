@@ -265,18 +265,24 @@ fn render_settings_section(
     let mut body_style = style::muted(ui);
     body_style.wrap = true;
 
-    ui.add_space(style::SPACE_LG);
-    ui.separator();
-    ui.add_space(style::SPACE_LG);
-    let _ = text_ui.label(ui, ("settings_heading", heading), heading, &heading_style);
-    let _ = text_ui.label(
-        ui,
-        ("settings_description", heading),
-        description,
-        &body_style,
-    );
-    ui.add_space(style::SPACE_MD);
-    render_body(ui, text_ui);
+    ui.add_space(style::SPACE_XL);
+    egui::Frame::new()
+        .fill(ui.visuals().widgets.noninteractive.bg_fill)
+        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
+        .inner_margin(egui::Margin::same(style::SPACE_XL as i8))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = style::SPACE_MD;
+            let _ = text_ui.label(ui, ("settings_heading", heading), heading, &heading_style);
+            let _ = text_ui.label(
+                ui,
+                ("settings_description", heading),
+                description,
+                &body_style,
+            );
+            ui.add_space(style::SPACE_MD);
+            render_body(ui, text_ui);
+        });
 }
 
 fn render_theme_setting(

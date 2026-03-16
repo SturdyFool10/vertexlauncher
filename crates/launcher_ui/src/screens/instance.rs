@@ -189,14 +189,6 @@ pub fn render(
 ) -> InstanceScreenOutput {
     let mut output = InstanceScreenOutput::default();
     let text_color = ui.visuals().text_color();
-    let heading_style = LabelOptions {
-        font_size: 30.0,
-        line_height: 34.0,
-        weight: 700,
-        color: text_color,
-        wrap: false,
-        ..LabelOptions::default()
-    };
     let body_style = LabelOptions {
         color: text_color,
         wrap: true,
@@ -208,13 +200,6 @@ pub fn render(
     let Some(instance_id) = selected_instance_id else {
         let _ = text_ui.label(
             ui,
-            "instance_screen_empty_heading",
-            "Instance",
-            &heading_style,
-        );
-        ui.add_space(8.0);
-        let _ = text_ui.label(
-            ui,
             "instance_screen_empty_body",
             "Select an instance from the left sidebar or click + to create one.",
             &body_style,
@@ -223,13 +208,6 @@ pub fn render(
     };
 
     let Some(instance_snapshot) = instances.find(instance_id).cloned() else {
-        let _ = text_ui.label(
-            ui,
-            "instance_screen_missing_heading",
-            "Instance",
-            &heading_style,
-        );
-        ui.add_space(8.0);
         let _ = text_ui.label(
             ui,
             "instance_screen_missing_body",

@@ -149,7 +149,7 @@ fn render_contents(
     if render_preview(ui, text_ui, state) {
         state.show_elytra = !state.show_elytra;
     }
-    ui.add_space(style::SPACE_MD);
+    ui.add_space(style::SPACE_LG);
 
     let button_style = neutral_button_style(ui);
 
@@ -167,7 +167,7 @@ fn render_contents(
         }
     });
 
-    ui.add_space(style::SPACE_MD);
+    ui.add_space(style::SPACE_LG);
     let _ = text_ui.label(
         ui,
         "skins_picker_heading",
@@ -5076,85 +5076,67 @@ fn render_cape_grid(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerSt
     }
 
     let available_width = ui.available_width().max(1.0);
+    let tile_gap = egui::vec2(style::SPACE_MD, style::SPACE_MD);
     let tile_width = (max_label_width + 24.0)
         .max(CAPE_TILE_WIDTH_MIN)
         .min(available_width);
-
-    let spacing_x = style::SPACE_XS;
-    let spacing_y = style::SPACE_XS;
-
+    let columns =
+        (((available_width + tile_gap.x) / (tile_width + tile_gap.x)).floor() as usize).max(1);
     let total_items = state.available_capes.len() + 1;
-    let row_width = |item_count: usize| {
-        (item_count as f32 * tile_width) + ((item_count.saturating_sub(1)) as f32 * spacing_x)
-    };
-    let mut columns = 1usize;
-    for candidate in 1..=total_items.max(1) {
-        if row_width(candidate) <= available_width + f32::EPSILON {
-            columns = candidate;
-        } else {
-            break;
-        }
-    }
+    let grid_columns = total_items.min(columns).max(1);
+    let grid_width =
+        (grid_columns as f32 * tile_width) + (grid_columns.saturating_sub(1) as f32 * tile_gap.x);
+    let grid_leading_space = ((available_width - grid_width) * 0.5).max(0.0);
 
     let mut pending_selection = None;
-    let mut row_start = 0usize;
-    while row_start < total_items {
+    for row_start in (0..total_items).step_by(columns) {
         let row_end = (row_start + columns).min(total_items);
-        let row_items = row_end - row_start;
-        let row_leading_space = ((available_width - row_width(row_items)) * 0.5).max(0.0);
-        ui.allocate_ui_with_layout(
-            egui::vec2(available_width, CAPE_TILE_HEIGHT),
-            egui::Layout::left_to_right(egui::Align::Min),
-            |ui| {
-                if row_leading_space > 0.0 {
-                    ui.add_space(row_leading_space);
-                }
-                let mut is_first_in_row = true;
-                for item_index in row_start..row_end {
-                    if !is_first_in_row {
-                        ui.add_space(spacing_x);
-                    }
-                    is_first_in_row = false;
 
-                    if item_index == 0 {
-                        let no_cape_selected = state.pending_cape_id.is_none();
-                        if draw_cape_tile(
-                            ui,
-                            text_ui,
-                            tile_width,
-                            "No Cape",
-                            no_cape_selected,
-                            true,
-                            None,
-                            None,
-                        ) {
-                            pending_selection = Some(None);
-                        }
-                        continue;
-                    }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = tile_gap.x;
+            if grid_leading_space > 0.0 {
+                ui.add_space(grid_leading_space);
+            }
 
-                    let cape = &state.available_capes[item_index - 1];
-                    let selected = state.pending_cape_id.as_deref() == Some(cape.id.as_str());
-                    let preview = cape.texture_bytes.as_deref();
+            for item_index in row_start..row_end {
+                if item_index == 0 {
+                    let no_cape_selected = state.pending_cape_id.is_none();
                     if draw_cape_tile(
                         ui,
                         text_ui,
                         tile_width,
-                        cape.label.as_str(),
-                        selected,
-                        false,
-                        preview,
-                        cape.texture_size,
+                        "No Cape",
+                        no_cape_selected,
+                        true,
+                        None,
+                        None,
                     ) {
-                        pending_selection = Some(Some(cape.id.clone()));
+                        pending_selection = Some(None);
                     }
+                    continue;
                 }
-            },
-        );
-        if row_start + columns < total_items {
-            ui.add_space(spacing_y);
+
+                let cape = &state.available_capes[item_index - 1];
+                let selected = state.pending_cape_id.as_deref() == Some(cape.id.as_str());
+                let preview = cape.texture_bytes.as_deref();
+                if draw_cape_tile(
+                    ui,
+                    text_ui,
+                    tile_width,
+                    cape.label.as_str(),
+                    selected,
+                    false,
+                    preview,
+                    cape.texture_size,
+                ) {
+                    pending_selection = Some(Some(cape.id.clone()));
+                }
+            }
+        });
+
+        if row_end < total_items {
+            ui.add_space(tile_gap.y);
         }
-        row_start = row_end;
     }
 
     if let Some(selection) = pending_selection {
@@ -5174,6 +5156,7 @@ fn draw_cape_tile(
 ) -> bool {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(tile_width, CAPE_TILE_HEIGHT), Sense::click());
+    let tile_rect = rect.shrink2(egui::vec2(style::SPACE_XS * 0.5, style::SPACE_XS * 0.5));
 
     let hover_t = ui
         .ctx()
@@ -5209,7 +5192,7 @@ fn draw_cape_tile(
     };
 
     ui.painter().rect(
-        rect,
+        tile_rect,
         CornerRadius::same(10),
         fill,
         stroke,
@@ -5217,7 +5200,7 @@ fn draw_cape_tile(
     );
     paint_cape_tile_highlight(
         ui,
-        rect,
+        tile_rect,
         response.hover_pos().or(response.interact_pointer_pos()),
         hover_t,
         press_t,
@@ -5225,8 +5208,8 @@ fn draw_cape_tile(
     );
 
     let preview_rect = Rect::from_min_size(
-        egui::pos2(rect.left() + 12.0, rect.top() + 12.0),
-        egui::vec2((tile_width - 24.0).max(0.0), 112.0),
+        egui::pos2(tile_rect.left() + 12.0, tile_rect.top() + 12.0),
+        egui::vec2((tile_rect.width() - 24.0).max(0.0), 112.0),
     );
 
     if is_no_cape {
@@ -5319,8 +5302,8 @@ fn draw_cape_tile(
     }
 
     let label_rect = Rect::from_min_size(
-        Pos2::new(rect.left() + 6.0, rect.bottom() - 44.0),
-        egui::vec2(rect.width() - 12.0, 34.0),
+        Pos2::new(tile_rect.left() + 6.0, tile_rect.bottom() - 44.0),
+        egui::vec2(tile_rect.width() - 12.0, 34.0),
     );
     ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect), |ui| {
         ui.set_clip_rect(label_rect);
