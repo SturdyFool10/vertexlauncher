@@ -201,6 +201,8 @@ where
             display_name: account.minecraft_profile.name.clone(),
         });
 
+        util::wait_for_auth_request_slot("cached_account_token_renewal");
+
         match oauth::refresh_microsoft_token(&agent, client_id, refresh_token).and_then(
             |microsoft_token| {
                 minecraft::complete_minecraft_login(
@@ -286,6 +288,7 @@ pub fn renew_cached_account_token(
         .to_owned();
 
     let agent = util::build_http_agent();
+    util::wait_for_auth_request_slot("single_cached_account_token_renewal");
     let mut renewed = oauth::refresh_microsoft_token(&agent, client_id, refresh_token.as_str())
         .and_then(|microsoft_token| {
             minecraft::complete_minecraft_login(

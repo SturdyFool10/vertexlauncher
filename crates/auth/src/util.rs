@@ -1,4 +1,7 @@
 use std::io::{self, Read};
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
@@ -9,8 +12,37 @@ use sha2::{Digest, Sha256};
 
 use crate::error::AuthError;
 
+const AUTH_REQUEST_MIN_INTERVAL: Duration = Duration::from_secs(2);
+
+fn auth_request_gate() -> &'static Mutex<Option<Instant>> {
+    static GATE: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    GATE.get_or_init(|| Mutex::new(None))
+}
+
 pub(crate) fn build_http_agent() -> ureq::Agent {
     ureq::Agent::new_with_defaults()
+}
+
+pub(crate) fn wait_for_auth_request_slot(operation: &str) {
+    let mut gate = auth_request_gate()
+        .lock()
+        .expect("auth request gate mutex poisoned");
+    let now = Instant::now();
+
+    if let Some(next_allowed_at) = *gate {
+        if now < next_allowed_at {
+            let delay = next_allowed_at.saturating_duration_since(now);
+            tracing::debug!(
+                target: "vertexlauncher/auth/rate_limit",
+                operation,
+                delay_ms = delay.as_millis(),
+                "delaying auth request to avoid upstream rate limits"
+            );
+            thread::sleep(delay);
+        }
+    }
+
+    *gate = Some(Instant::now() + AUTH_REQUEST_MIN_INTERVAL);
 }
 
 pub(crate) fn generate_pkce_verifier() -> String {
@@ -67,5 +99,15 @@ impl UreqResponseExt for ureq::http::Response<ureq::Body> {
         let mut raw = String::new();
         self.body_mut().as_reader().read_to_string(&mut raw)?;
         Ok(raw)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AUTH_REQUEST_MIN_INTERVAL;
+
+    #[test]
+    fn auth_request_min_interval_is_nonzero() {
+        assert!(AUTH_REQUEST_MIN_INTERVAL > std::time::Duration::ZERO);
     }
 }
