@@ -88,6 +88,13 @@ const MAX_INSTANCE_SCREENSHOTS: usize = 120;
 const MAX_INSTANCE_LOG_LINES: usize = 12_000;
 const INSTANCE_SCREENSHOT_COPY_BUTTON_SIZE: f32 = 28.0;
 
+#[derive(Default)]
+struct MemorySliderMaxState {
+    detected_total_mib: Option<u128>,
+    load_complete: bool,
+    rx: Option<mpsc::Receiver<Option<u128>>>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct InstanceScreenshotTileAction {
     open_viewer: bool,
@@ -149,7 +156,10 @@ pub(super) fn handle_escape(ctx: &egui::Context, selected_instance_id: Option<&s
         let Some(mut state) = data.get_temp::<InstanceScreenState>(state_id) else {
             return;
         };
-        if state.pending_delete_screenshot_key.take().is_some() {
+        if state.pending_delete_screenshot_key.is_some() {
+            if !state.delete_screenshot_in_flight {
+                state.pending_delete_screenshot_key = None;
+            }
             data.insert_temp(state_id, state);
             handled = true;
             return;
@@ -223,11 +233,18 @@ pub fn render(
         .unwrap_or_else(|| InstanceScreenState::from_instance(&instance_snapshot, config));
 
     poll_background_tasks(&mut state, config, instances, instance_id);
+    poll_instance_screenshot_scan_results(&mut state);
+    poll_instance_log_scan_results(&mut state);
+    poll_instance_log_load_results(&mut state);
     sync_version_catalog(&mut state, config.include_snapshots_and_betas(), false);
     if state.version_catalog_in_flight
         || !state.modloader_versions_in_flight.is_empty()
         || state.runtime_prepare_in_flight
         || state.content_apply_in_flight
+        || state.screenshot_scan_in_flight
+        || state.delete_screenshot_in_flight
+        || state.log_scan_in_flight
+        || state.log_load_in_flight
     {
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
@@ -236,6 +253,7 @@ pub fn render(
 
     let installations_root = std::path::PathBuf::from(config.minecraft_installations_root());
     let instance_root_path = instances::instance_root_path(&installations_root, &instance_snapshot);
+    poll_instance_screenshot_delete_results(&mut state, instance_root_path.as_path());
     let content_download_policy = DownloadPolicy {
         max_concurrent_downloads: config.download_max_concurrent().max(1),
         max_download_bps: config.parsed_download_speed_limit_bps(),
@@ -320,7 +338,7 @@ pub fn render(
                 .last_screenshot_scan_at
                 .is_none_or(|last| last.elapsed() >= INSTANCE_SCREENSHOT_SCAN_INTERVAL);
             if should_scan {
-                refresh_instance_screenshots(&mut state, instance_root_path.as_path());
+                refresh_instance_screenshots(&mut state, instance_root_path.as_path(), false);
             }
             if state.screenshot_viewer.as_ref().is_some_and(|viewer| {
                 !state.screenshots.iter().any(|screenshot| {
@@ -348,7 +366,7 @@ pub fn render(
                 .last_log_scan_at
                 .is_none_or(|last| last.elapsed() >= INSTANCE_LOG_SCAN_INTERVAL);
             if should_scan {
-                refresh_instance_logs(&mut state, instance_root_path.as_path());
+                refresh_instance_logs(&mut state, instance_root_path.as_path(), false);
             }
             sync_selected_instance_log(&mut state);
             render_instance_logs_tab(ui, text_ui, &mut state);
@@ -430,7 +448,9 @@ fn render_instance_screenshot_gallery(
         "Screenshot Gallery",
         &title_style,
     );
-    let summary = if state.screenshots.is_empty() {
+    let summary = if state.screenshot_scan_in_flight && state.screenshots.is_empty() {
+        "Loading screenshots...".to_owned()
+    } else if state.screenshots.is_empty() {
         "No screenshots found for this instance.".to_owned()
     } else {
         format!(
@@ -636,10 +656,9 @@ fn render_instance_screenshot_viewer_modal(
         state.screenshot_viewer = None;
         return;
     };
-    let viewer_state = state
-        .screenshot_viewer
-        .as_mut()
-        .expect("viewer state exists while rendering instance screenshot viewer");
+    let Some(viewer_state) = state.screenshot_viewer.as_mut() else {
+        return;
+    };
 
     let viewport_rect = ctx.input(|i| i.content_rect());
     let modal_width = (viewport_rect.width() * 0.92).max(320.0);
@@ -896,48 +915,36 @@ fn render_instance_delete_screenshot_modal(
                 let cancel_button = egui::Button::new("Cancel")
                     .min_size(egui::vec2(120.0, 34.0))
                     .corner_radius(egui::CornerRadius::same(8));
-                if ui.add(delete_button).clicked() {
+                if ui
+                    .add_enabled(!state.delete_screenshot_in_flight, delete_button)
+                    .clicked()
+                {
                     delete_requested = true;
                 }
-                if ui.add(cancel_button).clicked() {
+                if ui
+                    .add_enabled(!state.delete_screenshot_in_flight, cancel_button)
+                    .clicked()
+                {
                     cancel_requested = true;
+                }
+                if state.delete_screenshot_in_flight {
+                    ui.spinner();
                 }
             });
         });
 
-    if cancel_requested {
+    if cancel_requested && !state.delete_screenshot_in_flight {
         state.pending_delete_screenshot_key = None;
         return;
     }
 
     if delete_requested {
-        match fs::remove_file(screenshot.path.as_path()) {
-            Ok(()) => {
-                if state
-                    .screenshot_viewer
-                    .as_ref()
-                    .is_some_and(|viewer| viewer.screenshot_key == pending_screenshot_key)
-                {
-                    state.screenshot_viewer = None;
-                }
-                state.pending_delete_screenshot_key = None;
-                refresh_instance_screenshots(state, instance_root);
-                notification::info!(
-                    "instance/screenshots",
-                    "Deleted '{}' from disk.",
-                    screenshot.file_name
-                );
-            }
-            Err(err) => {
-                state.pending_delete_screenshot_key = None;
-                notification::error!(
-                    "instance/screenshots",
-                    "Failed to delete '{}': {}",
-                    screenshot.file_name,
-                    err
-                );
-            }
-        }
+        request_instance_screenshot_delete(
+            state,
+            pending_screenshot_key,
+            screenshot.path.clone(),
+            screenshot.file_name.clone(),
+        );
     }
 }
 
@@ -1162,6 +1169,15 @@ fn render_instance_logs_tab(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Insta
                         &body_style,
                     );
                     ui.add_space(8.0);
+                    if state.log_load_in_flight {
+                        let _ = text_ui.label(
+                            ui,
+                            "instance_logs_loading",
+                            "Loading log contents...",
+                            &body_style,
+                        );
+                        ui.add_space(8.0);
+                    }
                     if let Some(error) = state.loaded_log_error.as_deref() {
                         let _ = text_ui.label(
                             ui,
@@ -1196,9 +1212,139 @@ fn render_instance_logs_tab(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Insta
     });
 }
 
-fn refresh_instance_screenshots(state: &mut InstanceScreenState, instance_root: &Path) {
-    state.screenshots = collect_instance_screenshots(instance_root);
-    state.last_screenshot_scan_at = Some(Instant::now());
+fn ensure_instance_screenshot_scan_channel(state: &mut InstanceScreenState) {
+    if state.screenshot_scan_results_tx.is_some() && state.screenshot_scan_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<(u64, Vec<InstanceScreenshotEntry>)>();
+    state.screenshot_scan_results_tx = Some(tx);
+    state.screenshot_scan_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_instance_screenshot_scan_results(state: &mut InstanceScreenState) {
+    let Some(rx) = state.screenshot_scan_results_rx.as_ref().cloned() else {
+        return;
+    };
+    let Ok(receiver) = rx.lock() else {
+        return;
+    };
+    while let Ok((request_id, screenshots)) = receiver.try_recv() {
+        if request_id != state.screenshot_scan_request_serial {
+            continue;
+        }
+        state.screenshots = screenshots;
+        state.last_screenshot_scan_at = Some(Instant::now());
+        state.screenshot_scan_in_flight = false;
+    }
+}
+
+fn ensure_instance_screenshot_delete_channel(state: &mut InstanceScreenState) {
+    if state.delete_screenshot_results_tx.is_some() && state.delete_screenshot_results_rx.is_some()
+    {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<(String, String, Result<(), String>)>();
+    state.delete_screenshot_results_tx = Some(tx);
+    state.delete_screenshot_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn request_instance_screenshot_delete(
+    state: &mut InstanceScreenState,
+    screenshot_key: String,
+    path: PathBuf,
+    file_name: String,
+) {
+    if state.delete_screenshot_in_flight {
+        return;
+    }
+
+    ensure_instance_screenshot_delete_channel(state);
+    let Some(tx) = state.delete_screenshot_results_tx.as_ref().cloned() else {
+        return;
+    };
+
+    state.delete_screenshot_in_flight = true;
+    let _ = tokio_runtime::spawn(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            fs::remove_file(path.as_path()).map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|err| format!("instance screenshot delete task join error: {err}"))
+        .and_then(|inner| inner);
+        let _ = tx.send((screenshot_key, file_name, result));
+    });
+}
+
+fn poll_instance_screenshot_delete_results(state: &mut InstanceScreenState, instance_root: &Path) {
+    let Some(rx) = state.delete_screenshot_results_rx.as_ref().cloned() else {
+        return;
+    };
+    let Ok(receiver) = rx.lock() else {
+        return;
+    };
+    while let Ok((screenshot_key, file_name, result)) = receiver.try_recv() {
+        state.delete_screenshot_in_flight = false;
+        match result {
+            Ok(()) => {
+                if state
+                    .screenshot_viewer
+                    .as_ref()
+                    .is_some_and(|viewer| viewer.screenshot_key == screenshot_key)
+                {
+                    state.screenshot_viewer = None;
+                }
+                state.pending_delete_screenshot_key = None;
+                refresh_instance_screenshots(state, instance_root, true);
+                notification::info!("instance/screenshots", "Deleted '{}' from disk.", file_name);
+            }
+            Err(err) => {
+                state.pending_delete_screenshot_key = None;
+                notification::error!(
+                    "instance/screenshots",
+                    "Failed to delete '{}': {}",
+                    file_name,
+                    err
+                );
+            }
+        }
+    }
+}
+
+fn refresh_instance_screenshots(
+    state: &mut InstanceScreenState,
+    instance_root: &Path,
+    force: bool,
+) {
+    if state.screenshot_scan_in_flight && !force {
+        return;
+    }
+
+    ensure_instance_screenshot_scan_channel(state);
+    let Some(tx) = state.screenshot_scan_results_tx.as_ref().cloned() else {
+        return;
+    };
+    state.screenshot_scan_request_serial = state.screenshot_scan_request_serial.saturating_add(1);
+    let request_id = state.screenshot_scan_request_serial;
+    state.screenshot_scan_in_flight = true;
+    let instance_root = instance_root.to_path_buf();
+    let _ = tokio_runtime::spawn(async move {
+        let outcome = tokio_runtime::spawn_blocking(move || {
+            collect_instance_screenshots(instance_root.as_path())
+        })
+        .await;
+        match outcome {
+            Ok(screenshots) => {
+                let _ = tx.send((request_id, screenshots));
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "vertexlauncher/instance/screenshots",
+                    error = %error,
+                    "instance screenshot scan task failed to join"
+                );
+            }
+        }
+    });
 }
 
 fn collect_instance_screenshots(instance_root: &Path) -> Vec<InstanceScreenshotEntry> {
@@ -1240,16 +1386,69 @@ fn collect_instance_screenshots(instance_root: &Path) -> Vec<InstanceScreenshotE
     screenshots
 }
 
-fn refresh_instance_logs(state: &mut InstanceScreenState, instance_root: &Path) {
-    state.logs = collect_instance_logs(instance_root);
-    if state
-        .selected_log_path
-        .as_ref()
-        .is_some_and(|selected| !state.logs.iter().any(|entry| entry.path == *selected))
-    {
-        state.selected_log_path = None;
+fn ensure_instance_log_scan_channel(state: &mut InstanceScreenState) {
+    if state.log_scan_results_tx.is_some() && state.log_scan_results_rx.is_some() {
+        return;
     }
-    state.last_log_scan_at = Some(Instant::now());
+    let (tx, rx) = mpsc::channel::<(u64, Vec<InstanceLogEntry>)>();
+    state.log_scan_results_tx = Some(tx);
+    state.log_scan_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_instance_log_scan_results(state: &mut InstanceScreenState) {
+    let Some(rx) = state.log_scan_results_rx.as_ref().cloned() else {
+        return;
+    };
+    let Ok(receiver) = rx.lock() else {
+        return;
+    };
+    while let Ok((request_id, logs)) = receiver.try_recv() {
+        if request_id != state.log_scan_request_serial {
+            continue;
+        }
+        state.logs = logs;
+        if state
+            .selected_log_path
+            .as_ref()
+            .is_some_and(|selected| !state.logs.iter().any(|entry| entry.path == *selected))
+        {
+            state.selected_log_path = None;
+        }
+        state.last_log_scan_at = Some(Instant::now());
+        state.log_scan_in_flight = false;
+    }
+}
+
+fn refresh_instance_logs(state: &mut InstanceScreenState, instance_root: &Path, force: bool) {
+    if state.log_scan_in_flight && !force {
+        return;
+    }
+
+    ensure_instance_log_scan_channel(state);
+    let Some(tx) = state.log_scan_results_tx.as_ref().cloned() else {
+        return;
+    };
+    state.log_scan_request_serial = state.log_scan_request_serial.saturating_add(1);
+    let request_id = state.log_scan_request_serial;
+    state.log_scan_in_flight = true;
+    let instance_root = instance_root.to_path_buf();
+    let _ = tokio_runtime::spawn(async move {
+        let outcome =
+            tokio_runtime::spawn_blocking(move || collect_instance_logs(instance_root.as_path()))
+                .await;
+        match outcome {
+            Ok(logs) => {
+                let _ = tx.send((request_id, logs));
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "vertexlauncher/instance/logs",
+                    error = %error,
+                    "instance log scan task failed to join"
+                );
+            }
+        }
+    });
 }
 
 fn collect_instance_logs(instance_root: &Path) -> Vec<InstanceLogEntry> {
@@ -1292,6 +1491,9 @@ fn sync_selected_instance_log(state: &mut InstanceScreenState) {
         state.loaded_log_error = None;
         state.loaded_log_modified_at_ms = None;
         state.loaded_log_truncated = false;
+        state.log_load_in_flight = false;
+        state.requested_log_load_path = None;
+        state.requested_log_load_modified_at_ms = None;
         return;
     };
     let current_modified = state
@@ -1299,10 +1501,61 @@ fn sync_selected_instance_log(state: &mut InstanceScreenState) {
         .iter()
         .find(|entry| &entry.path == selected_log_path)
         .and_then(|entry| entry.modified_at_ms);
+    if state.log_load_in_flight
+        && state.requested_log_load_path.as_ref() == Some(selected_log_path)
+        && state.requested_log_load_modified_at_ms == current_modified
+    {
+        return;
+    }
     if state.loaded_log_path.as_ref() != Some(selected_log_path)
         || state.loaded_log_modified_at_ms != current_modified
     {
         load_selected_instance_log(state);
+    }
+}
+
+fn ensure_instance_log_load_channel(state: &mut InstanceScreenState) {
+    if state.log_load_results_tx.is_some() && state.log_load_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<(
+        u64,
+        PathBuf,
+        Option<u64>,
+        Result<(Vec<String>, bool), String>,
+    )>();
+    state.log_load_results_tx = Some(tx);
+    state.log_load_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_instance_log_load_results(state: &mut InstanceScreenState) {
+    let Some(rx) = state.log_load_results_rx.as_ref().cloned() else {
+        return;
+    };
+    let Ok(receiver) = rx.lock() else {
+        return;
+    };
+    while let Ok((request_id, path, modified_at_ms, result)) = receiver.try_recv() {
+        if request_id != state.log_load_request_serial {
+            continue;
+        }
+        state.log_load_in_flight = false;
+        state.requested_log_load_path = None;
+        state.requested_log_load_modified_at_ms = None;
+        state.loaded_log_path = Some(path.clone());
+        state.loaded_log_modified_at_ms = modified_at_ms;
+        match result {
+            Ok((lines, truncated)) => {
+                state.loaded_log_lines = lines;
+                state.loaded_log_error = None;
+                state.loaded_log_truncated = truncated;
+            }
+            Err(err) => {
+                state.loaded_log_lines.clear();
+                state.loaded_log_error = Some(err);
+                state.loaded_log_truncated = false;
+            }
+        }
     }
 }
 
@@ -1313,24 +1566,42 @@ fn load_selected_instance_log(state: &mut InstanceScreenState) {
         state.loaded_log_error = None;
         state.loaded_log_modified_at_ms = None;
         state.loaded_log_truncated = false;
+        state.log_load_in_flight = false;
+        state.requested_log_load_path = None;
+        state.requested_log_load_modified_at_ms = None;
         return;
     };
-    match read_instance_log_lines(selected_log_path.as_path()) {
-        Ok((lines, truncated)) => {
-            state.loaded_log_path = Some(selected_log_path.clone());
-            state.loaded_log_modified_at_ms = modified_millis(selected_log_path.as_path());
-            state.loaded_log_lines = lines;
-            state.loaded_log_error = None;
-            state.loaded_log_truncated = truncated;
+
+    ensure_instance_log_load_channel(state);
+    let Some(tx) = state.log_load_results_tx.as_ref().cloned() else {
+        return;
+    };
+    let modified_at_ms = modified_millis(selected_log_path.as_path());
+    state.log_load_request_serial = state.log_load_request_serial.saturating_add(1);
+    let request_id = state.log_load_request_serial;
+    state.log_load_in_flight = true;
+    state.requested_log_load_path = Some(selected_log_path.clone());
+    state.requested_log_load_modified_at_ms = modified_at_ms;
+    let path_for_worker = selected_log_path.clone();
+    let _ = tokio_runtime::spawn(async move {
+        let outcome = tokio_runtime::spawn_blocking(move || {
+            read_instance_log_lines(path_for_worker.as_path())
+        })
+        .await;
+        match outcome {
+            Ok(result) => {
+                let _ = tx.send((request_id, selected_log_path, modified_at_ms, result));
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "vertexlauncher/instance/logs",
+                    error = %error,
+                    path = %selected_log_path.display(),
+                    "instance log load task failed to join"
+                );
+            }
         }
-        Err(err) => {
-            state.loaded_log_path = Some(selected_log_path.clone());
-            state.loaded_log_modified_at_ms = modified_millis(selected_log_path.as_path());
-            state.loaded_log_lines.clear();
-            state.loaded_log_error = Some(err);
-            state.loaded_log_truncated = false;
-        }
-    }
+    });
 }
 
 fn read_instance_log_lines(path: &Path) -> Result<(Vec<String>, bool), String> {
@@ -2040,7 +2311,10 @@ fn render_instance_settings_modal(
                     );
                     ui.add_space(6.0);
 
-                    let memory_slider_max = memory_slider_max_mib();
+                    let (memory_slider_max, memory_slider_pending) = memory_slider_max_mib();
+                    if memory_slider_pending {
+                        ui.ctx().request_repaint_after(Duration::from_millis(50));
+                    }
                     if state.memory_override_enabled {
                         let mut memory_mib = state
                             .memory_override_mib
@@ -2778,14 +3052,53 @@ fn support_catalog_ready(state: &InstanceScreenState) -> bool {
     state.version_catalog_include_snapshots.is_some() && state.version_catalog_error.is_none()
 }
 
-fn memory_slider_max_mib() -> u128 {
-    static CACHED: OnceLock<u128> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        let total_mib = detect_total_memory_mib().unwrap_or(FALLBACK_TOTAL_MEMORY_MIB);
-        total_mib
-            .saturating_sub(RESERVED_SYSTEM_MEMORY_MIB)
-            .max(INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN)
-    })
+fn memory_slider_max_mib() -> (u128, bool) {
+    static CACHED: OnceLock<Mutex<MemorySliderMaxState>> = OnceLock::new();
+    let cache = CACHED.get_or_init(|| Mutex::new(MemorySliderMaxState::default()));
+    let mut total_mib = None;
+    let mut pending = false;
+
+    if let Ok(mut state) = cache.lock() {
+        if !state.load_complete {
+            if let Some(rx) = state.rx.as_ref() {
+                match rx.try_recv() {
+                    Ok(result) => {
+                        state.detected_total_mib = result;
+                        state.load_complete = true;
+                        state.rx = None;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        pending = true;
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        state.load_complete = true;
+                        state.rx = None;
+                    }
+                }
+            }
+
+            if !state.load_complete && state.rx.is_none() {
+                let (tx, rx) = mpsc::channel::<Option<u128>>();
+                state.rx = Some(rx);
+                pending = true;
+                let _ = tokio_runtime::spawn(async move {
+                    let result = tokio_runtime::spawn_blocking(detect_total_memory_mib)
+                        .await
+                        .ok()
+                        .flatten();
+                    let _ = tx.send(result);
+                });
+            }
+        }
+        total_mib = state.detected_total_mib;
+        pending |= !state.load_complete;
+    }
+
+    let max_mib = total_mib
+        .unwrap_or(FALLBACK_TOTAL_MEMORY_MIB)
+        .saturating_sub(RESERVED_SYSTEM_MEMORY_MIB)
+        .max(INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN);
+    (max_mib, pending)
 }
 
 #[cfg(target_os = "linux")]

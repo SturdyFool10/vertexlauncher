@@ -37,6 +37,9 @@ pub struct CreateInstanceState {
     pub selected_modloader: usize,
     pub custom_modloader: String,
     pub error: Option<String>,
+    pub create_in_flight: bool,
+    pub create_results_tx: Option<mpsc::Sender<CreateInstanceTaskResult>>,
+    pub create_results_rx: Option<mpsc::Receiver<CreateInstanceTaskResult>>,
     available_game_versions: Vec<MinecraftVersionEntry>,
     selected_game_version_index: usize,
     loader_support: LoaderSupportIndex,
@@ -54,6 +57,9 @@ pub struct CreateInstanceState {
     modloader_versions_status: Option<String>,
 }
 
+pub type CreateInstanceTaskResult =
+    Result<(instances::InstanceStore, instances::InstanceRecord), String>;
+
 impl Default for CreateInstanceState {
     fn default() -> Self {
         Self {
@@ -65,6 +71,9 @@ impl Default for CreateInstanceState {
             selected_modloader: 0,
             custom_modloader: String::new(),
             error: None,
+            create_in_flight: false,
+            create_results_tx: None,
+            create_results_rx: None,
             available_game_versions: Vec::new(),
             selected_game_version_index: 0,
             loader_support: LoaderSupportIndex::default(),
@@ -522,6 +531,23 @@ pub fn render(
                 );
             }
 
+            if state.create_in_flight {
+                ui.add_space(MODAL_GAP_MD);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    let _ = text_ui.label(
+                        ui,
+                        "instance_create_in_progress",
+                        "Creating instance in the background...",
+                        &LabelOptions {
+                            color: ui.visuals().weak_text_color(),
+                            wrap: true,
+                            ..LabelOptions::default()
+                        },
+                    );
+                });
+            }
+
             ui.add_space(MODAL_GAP_LG);
             ui.separator();
             ui.add_space(MODAL_GAP_LG);
@@ -532,44 +558,60 @@ pub fn render(
             let compact_actions = action_width < 320.0;
 
             if compact_actions {
-                create_clicked = settings_widgets::full_width_button(
-                    text_ui,
-                    ui,
-                    "instance_create_confirm",
-                    "Create instance",
-                    action_width,
-                    true,
-                )
+                create_clicked = ui
+                    .add_enabled_ui(!state.create_in_flight, |ui| {
+                        settings_widgets::full_width_button(
+                            text_ui,
+                            ui,
+                            "instance_create_confirm",
+                            "Create instance",
+                            action_width,
+                            true,
+                        )
+                    })
+                    .inner
                     .clicked();
                 ui.add_space(MODAL_GAP_SM);
-                cancel_clicked = settings_widgets::full_width_button(
-                    text_ui,
-                    ui,
-                    "instance_create_cancel",
-                    "Cancel",
-                    action_width,
-                    false,
-                )
+                cancel_clicked = ui
+                    .add_enabled_ui(!state.create_in_flight, |ui| {
+                        settings_widgets::full_width_button(
+                            text_ui,
+                            ui,
+                            "instance_create_cancel",
+                            "Cancel",
+                            action_width,
+                            false,
+                        )
+                    })
+                    .inner
                     .clicked();
             } else {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    create_clicked = settings_widgets::full_width_button(
-                        text_ui,
-                        ui,
-                        "instance_create_confirm",
-                        "Create instance",
-                        PRIMARY_ACTION_WIDTH,
-                        true,
-                    )
+                    create_clicked = ui
+                        .add_enabled_ui(!state.create_in_flight, |ui| {
+                            settings_widgets::full_width_button(
+                                text_ui,
+                                ui,
+                                "instance_create_confirm",
+                                "Create instance",
+                                PRIMARY_ACTION_WIDTH,
+                                true,
+                            )
+                        })
+                        .inner
                         .clicked();
-                    cancel_clicked = settings_widgets::full_width_button(
-                        text_ui,
-                        ui,
-                        "instance_create_cancel",
-                        "Cancel",
-                        SECONDARY_ACTION_WIDTH,
-                        false,
-                    )
+                    cancel_clicked = ui
+                        .add_enabled_ui(!state.create_in_flight, |ui| {
+                            settings_widgets::full_width_button(
+                                text_ui,
+                                ui,
+                                "instance_create_cancel",
+                                "Cancel",
+                                SECONDARY_ACTION_WIDTH,
+                                false,
+                            )
+                        })
+                        .inner
                         .clicked();
                 });
             }

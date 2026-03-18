@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, mpsc};
 
 use curseforge::Client as CurseForgeClient;
 use eframe::egui;
@@ -9,6 +10,7 @@ use instances::{
     InstanceRecord, InstanceStore, NewInstanceSpec, create_instance, delete_instance,
     instance_root_path,
 };
+use launcher_runtime as tokio_runtime;
 use launcher_ui::{
     ui::style,
     ui::{components::settings_widgets, modal},
@@ -35,6 +37,13 @@ pub struct ImportInstanceState {
     pub launcher_kind_index: usize,
     pub instance_name: String,
     pub error: Option<String>,
+    preview_in_flight: bool,
+    preview_request_serial: u64,
+    preview_results_tx: Option<mpsc::Sender<(u64, Result<ImportPreview, String>)>>,
+    preview_results_rx: Option<Arc<Mutex<mpsc::Receiver<(u64, Result<ImportPreview, String>)>>>>,
+    pub import_in_flight: bool,
+    pub import_results_tx: Option<mpsc::Sender<ImportTaskResult>>,
+    pub import_results_rx: Option<Arc<Mutex<mpsc::Receiver<ImportTaskResult>>>>,
     preview: Option<ImportPreview>,
 }
 
@@ -64,6 +73,45 @@ pub enum ModalAction {
     None,
     Cancel,
     Import(ImportRequest),
+}
+
+pub type ImportTaskResult = Result<(InstanceStore, InstanceRecord), String>;
+
+fn ensure_preview_channel(state: &mut ImportInstanceState) {
+    if state.preview_results_tx.is_some() && state.preview_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<(u64, Result<ImportPreview, String>)>();
+    state.preview_results_tx = Some(tx);
+    state.preview_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_preview_results(state: &mut ImportInstanceState) {
+    let Some(rx) = state.preview_results_rx.as_ref().cloned() else {
+        return;
+    };
+    let Ok(receiver) = rx.lock() else {
+        return;
+    };
+    while let Ok((request_serial, result)) = receiver.try_recv() {
+        if request_serial != state.preview_request_serial {
+            continue;
+        }
+        state.preview_in_flight = false;
+        match result {
+            Ok(preview) => {
+                if state.instance_name.trim().is_empty() {
+                    state.instance_name = preview.detected_name.clone();
+                }
+                state.preview = Some(preview);
+                state.error = None;
+            }
+            Err(err) => {
+                state.preview = None;
+                state.error = Some(err);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -173,6 +221,7 @@ pub fn render(
     text_ui: &mut TextUi,
     state: &mut ImportInstanceState,
 ) -> ModalAction {
+    poll_preview_results(state);
     let mut action = ModalAction::None;
     let viewport_rect = ctx.input(|i| i.content_rect());
     let modal_max_width = (viewport_rect.width() * 0.85).max(1.0);
@@ -189,6 +238,9 @@ pub fn render(
     );
 
     modal::show_scrim(ctx, "import_instance_modal_scrim", viewport_rect);
+    if state.preview_in_flight || state.import_in_flight {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
     egui::Window::new("Import Profile")
         .id(egui::Id::new("import_instance_modal_window"))
         .order(egui::Order::Foreground)
@@ -427,6 +479,24 @@ pub fn render(
                 );
             }
 
+            if state.preview_in_flight {
+                let _ = text_ui.label(
+                    ui,
+                    "instance_import_preview_in_flight",
+                    "Inspecting import source in the background...",
+                    &body_style,
+                );
+            }
+
+            if state.import_in_flight {
+                let _ = text_ui.label(
+                    ui,
+                    "instance_import_in_flight",
+                    "Importing profile in the background...",
+                    &body_style,
+                );
+            }
+
             ui.add_space(MODAL_GAP_LG);
             ui.horizontal(|ui| {
                 let button_style = ButtonOptions {
@@ -439,14 +509,17 @@ pub fn render(
                     stroke: ui.visuals().widgets.inactive.bg_stroke,
                     ..ButtonOptions::default()
                 };
-                if text_ui
-                    .button(ui, "instance_import_cancel", "Cancel", &button_style)
+                if ui
+                    .add_enabled_ui(!state.import_in_flight, |ui| {
+                        text_ui.button(ui, "instance_import_cancel", "Cancel", &button_style)
+                    })
+                    .inner
                     .clicked()
                 {
                     action = ModalAction::Cancel;
                 }
 
-                let import_disabled = match selected_import_mode(state) {
+                let import_disabled = state.import_in_flight || match selected_import_mode(state) {
                     ImportMode::ManifestFile => state.package_path.trim().is_empty(),
                     ImportMode::LauncherDirectory => state.launcher_path.trim().is_empty(),
                 };
@@ -519,7 +592,11 @@ pub fn import_package(
 }
 
 fn load_preview_from_state(state: &mut ImportInstanceState) {
-    let preview_result = match selected_import_mode(state) {
+    ensure_preview_channel(state);
+    let Some(tx) = state.preview_results_tx.as_ref().cloned() else {
+        return;
+    };
+    let request = match selected_import_mode(state) {
         ImportMode::ManifestFile => {
             let path = PathBuf::from(state.package_path.trim());
             if path.as_os_str().is_empty() {
@@ -527,7 +604,7 @@ fn load_preview_from_state(state: &mut ImportInstanceState) {
                 state.error = Some("Choose a .vtmpack or .mrpack file first.".to_owned());
                 return;
             }
-            inspect_package(path.as_path())
+            (path, selected_launcher_hint(state), true)
         }
         ImportMode::LauncherDirectory => {
             let path = PathBuf::from(state.launcher_path.trim());
@@ -536,23 +613,30 @@ fn load_preview_from_state(state: &mut ImportInstanceState) {
                 state.error = Some("Choose an instance folder first.".to_owned());
                 return;
             }
-            inspect_launcher_instance(path.as_path(), selected_launcher_hint(state))
+            (path, selected_launcher_hint(state), false)
         }
     };
 
-    match preview_result {
-        Ok(preview) => {
-            if state.instance_name.trim().is_empty() {
-                state.instance_name = preview.detected_name.clone();
+    state.preview_request_serial = state.preview_request_serial.saturating_add(1);
+    let request_serial = state.preview_request_serial;
+    state.preview_in_flight = true;
+    state.error = None;
+    let _ = tokio_runtime::spawn(async move {
+        let (path, launcher_hint, manifest_mode) = request;
+        let outcome = tokio_runtime::spawn_blocking(move || {
+            if manifest_mode {
+                inspect_package(path.as_path())
+            } else {
+                inspect_launcher_instance(path.as_path(), launcher_hint)
             }
-            state.preview = Some(preview);
-            state.error = None;
-        }
-        Err(err) => {
-            state.preview = None;
-            state.error = Some(err);
-        }
-    }
+        })
+        .await;
+        let result = match outcome {
+            Ok(result) => result,
+            Err(error) => Err(format!("Import preview task join error: {error}")),
+        };
+        let _ = tx.send((request_serial, result));
+    });
 }
 
 fn pick_import_file() -> Option<PathBuf> {

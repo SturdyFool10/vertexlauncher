@@ -1,4 +1,5 @@
 use auth::{CachedAccount, CachedAccountRenewalEvent, CachedAccountsState};
+use launcher_runtime as tokio_runtime;
 use launcher_ui::{notification, privacy};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -250,7 +251,9 @@ impl AuthState {
 
         while self.flow.is_some() {
             let next_event = {
-                let flow = self.flow.as_mut().expect("flow existence already checked");
+                let Some(flow) = self.flow.as_mut() else {
+                    break;
+                };
                 flow.try_recv()
             };
             match next_event {
@@ -328,7 +331,7 @@ impl AuthState {
         self.status = AuthUiStatus::Starting;
 
         let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
+        let _ = tokio_runtime::spawn_blocking(move || {
             run_sign_in_flow(client_id, sender);
         });
 
@@ -579,7 +582,7 @@ impl AuthState {
 
         let (tx, rx) = mpsc::channel::<RenewalResult>();
         let streamer_mode = self.streamer_mode;
-        std::thread::spawn(move || {
+        let _ = tokio_runtime::spawn_blocking(move || {
             let mut failed_account_errors = HashMap::new();
             let mut succeeded_profile_ids = HashSet::new();
             let result = auth::renew_cached_accounts_tokens_with_callback(&client_id, |event| {
@@ -617,7 +620,7 @@ impl AuthState {
             self.accounts_state.active_profile_id.as_deref() == Some(profile_id.as_str());
         let (tx, rx) = mpsc::channel::<RenewalResult>();
         self.failed_account_errors.remove(&profile_id);
-        std::thread::spawn(move || {
+        let _ = tokio_runtime::spawn_blocking(move || {
             let result = auth::renew_cached_account_token(&client_id, profile_id.as_str())
                 .map_err(|err| err.to_string());
             let _ = tx.send(RenewalResult::Single { profile_id, result });
@@ -697,7 +700,7 @@ impl AuthState {
             self.avatar_loads_in_flight.insert(profile_id.clone());
             let tx = self.avatar_result_tx.clone();
             let account = account.clone();
-            std::thread::spawn(move || {
+            let _ = tokio_runtime::spawn_blocking(move || {
                 let result = match auth::resolve_cached_account_avatar(&account) {
                     Ok(avatar_png) => AvatarLoadResult {
                         profile_id,

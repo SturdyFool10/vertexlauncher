@@ -12,6 +12,7 @@ use eframe::egui_wgpu::wgpu::util::DeviceExt as _;
 use eframe::egui_wgpu::{self, wgpu};
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Ui};
 use image::{RgbaImage, imageops::FilterType};
+use launcher_runtime as tokio_runtime;
 use textui::{ButtonOptions, TextUi};
 
 use super::LaunchAuthContext;
@@ -99,12 +100,16 @@ pub fn render(
         state.last_preview_3d_layers_enabled = state.preview_3d_layers_enabled;
     }
     state.poll_worker(ui.ctx());
+    state.poll_pick_skin_result(ui.ctx());
     state.try_consume_open_refresh();
     state.ensure_skin_texture(ui.ctx());
     state.ensure_default_elytra_texture(ui.ctx());
     state.ensure_cape_texture(ui.ctx());
     ui.ctx()
         .request_repaint_after(Duration::from_secs_f32(1.0 / PREVIEW_TARGET_FPS));
+    if state.pick_skin_in_progress {
+        ui.ctx().request_repaint_after(Duration::from_millis(50));
+    }
 
     egui::ScrollArea::vertical()
         .id_salt("skins_screen_scroll")
@@ -175,11 +180,27 @@ fn render_contents(
         &style::section_heading(ui),
     );
 
-    if text_ui
-        .button(ui, "skins_pick_file", "Choose skin image", &button_style)
+    if ui
+        .add_enabled_ui(!state.pick_skin_in_progress, |ui| {
+            text_ui.button(ui, "skins_pick_file", "Choose skin image", &button_style)
+        })
+        .inner
         .clicked()
     {
         state.pick_skin_file();
+    }
+
+    if state.pick_skin_in_progress {
+        ui.add_space(style::SPACE_XS);
+        ui.horizontal(|ui| {
+            ui.spinner();
+            let _ = text_ui.label(
+                ui,
+                "skins_pick_file_loading",
+                "Loading selected skin in the background...",
+                &muted,
+            );
+        });
     }
 
     if let Some(path) = state.pending_skin_path.as_deref() {
@@ -5454,6 +5475,8 @@ struct SkinManagerState {
     save_in_progress: bool,
     refresh_in_progress: bool,
     worker_rx: Option<Arc<Mutex<Receiver<WorkerEvent>>>>,
+    pick_skin_in_progress: bool,
+    pick_skin_results_rx: Option<Arc<Mutex<Receiver<Result<(String, Vec<u8>), String>>>>>,
     wgpu_target_format: Option<wgpu::TextureFormat>,
     preview_msaa_samples: u32,
     preview_aa_mode: SkinPreviewAaMode,
@@ -5510,6 +5533,8 @@ impl Default for SkinManagerState {
             save_in_progress: false,
             refresh_in_progress: false,
             worker_rx: None,
+            pick_skin_in_progress: false,
+            pick_skin_results_rx: None,
             wgpu_target_format: None,
             preview_msaa_samples: 1,
             preview_aa_mode: SkinPreviewAaMode::Msaa,
@@ -5586,6 +5611,8 @@ impl SkinManagerState {
         self.save_in_progress = false;
         self.refresh_in_progress = false;
         self.worker_rx = None;
+        self.pick_skin_in_progress = false;
+        self.pick_skin_results_rx = None;
         self.status_message = None;
         self.show_elytra = false;
         self.active_profile_id = Some(normalized_profile_id.clone());
@@ -5789,6 +5816,39 @@ impl SkinManagerState {
         }
     }
 
+    fn poll_pick_skin_result(&mut self, ctx: &egui::Context) {
+        let Some(rx) = self.pick_skin_results_rx.as_ref().cloned() else {
+            return;
+        };
+
+        let Ok(receiver) = rx.lock() else {
+            return;
+        };
+        let Ok(result) = receiver.try_recv() else {
+            return;
+        };
+
+        self.pick_skin_in_progress = false;
+        self.pick_skin_results_rx = None;
+        match result {
+            Ok((path, bytes)) => {
+                self.pending_skin_png = Some(bytes);
+                self.pending_skin_path = Some(path);
+                self.skin_texture_hash = None;
+                self.skin_sample = None;
+                self.animated_skin_texture = None;
+                self.animated_skin_texture_hash = None;
+                self.animated_skin_sample = None;
+                self.preview_texture = None;
+                self.preview_history = None;
+            }
+            Err(err) => {
+                notification::error!("skin_manager", "{err}");
+            }
+        }
+        ctx.request_repaint();
+    }
+
     fn ensure_skin_texture(&mut self, ctx: &egui::Context) {
         let active_png = self.preview_skin_png();
         let Some(bytes) = active_png else {
@@ -5902,6 +5962,10 @@ impl SkinManagerState {
     }
 
     fn pick_skin_file(&mut self) {
+        if self.pick_skin_in_progress {
+            return;
+        }
+
         let picked = rfd::FileDialog::new()
             .add_filter("PNG", &["png"])
             .set_title("Select Minecraft Skin")
@@ -5911,29 +5975,27 @@ impl SkinManagerState {
             return;
         };
 
-        match std::fs::read(path.as_path()) {
-            Ok(bytes) => {
+        let (tx, rx) = mpsc::channel();
+        self.pick_skin_in_progress = true;
+        self.pick_skin_results_rx = Some(Arc::new(Mutex::new(rx)));
+        let path_for_result = path.display().to_string();
+        let _ = tokio_runtime::spawn(async move {
+            let result = tokio_runtime::spawn_blocking(move || {
+                let bytes = std::fs::read(path.as_path())
+                    .map_err(|err| format!("Failed to read image: {err}"))?;
                 if decode_skin_rgba(&bytes).is_none() {
-                    notification::error!(
-                        "skin_manager",
+                    return Err(
                         "Selected image must be a valid PNG skin (expected 64x64 or 64x32)."
+                            .to_owned(),
                     );
-                    return;
                 }
-                self.pending_skin_png = Some(bytes);
-                self.pending_skin_path = Some(path.display().to_string());
-                self.skin_texture_hash = None;
-                self.skin_sample = None;
-                self.animated_skin_texture = None;
-                self.animated_skin_texture_hash = None;
-                self.animated_skin_sample = None;
-                self.preview_texture = None;
-                self.preview_history = None;
-            }
-            Err(err) => {
-                notification::error!("skin_manager", "Failed to read image: {err}");
-            }
-        }
+                Ok((path_for_result, bytes))
+            })
+            .await
+            .map_err(|err| format!("Skin file load task join error: {err}"))
+            .and_then(|inner| inner);
+            let _ = tx.send(result);
+        });
     }
 
     fn can_save(&self) -> bool {
@@ -5984,7 +6046,7 @@ impl SkinManagerState {
             .active_player_name
             .clone()
             .unwrap_or_else(|| "unknown".to_owned());
-        std::thread::spawn(move || {
+        let _ = tokio_runtime::spawn_blocking(move || {
             let result = std::panic::catch_unwind(|| {
                 fetch_and_cache_profile(profile_id, &token, display_name_for_log.as_str())
             })
@@ -6072,7 +6134,7 @@ impl SkinManagerState {
             .clone()
             .unwrap_or_else(|| "unknown".to_owned());
 
-        std::thread::spawn(move || {
+        let _ = tokio_runtime::spawn_blocking(move || {
             let result = std::panic::catch_unwind(|| -> Result<LoadedProfile, String> {
                 let mut latest_profile: Option<MinecraftProfileState> = None;
                 if let Some(bytes) = pending_skin.as_deref() {

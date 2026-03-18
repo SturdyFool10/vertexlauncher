@@ -426,44 +426,13 @@ pub(super) fn render_installed_content_section(
         });
 
     if let Some((path, lookup_key)) = pending_delete {
-        let delete_result = if path.is_dir() {
-            std::fs::remove_dir_all(path.as_path())
-        } else {
-            std::fs::remove_file(path.as_path())
-        };
-        match delete_result {
-            Ok(()) => {
-                let manifest_update_result =
-                    managed_content::remove_content_manifest_entries_for_path(
-                        instance_root,
-                        path.as_path(),
-                    );
-                state.invalidate_installed_content_cache();
-                state.content_lookup_in_flight.remove(lookup_key.as_str());
-                state
-                    .content_lookup_latest_serial_by_key
-                    .remove(lookup_key.as_str());
-                state
-                    .content_lookup_retry_after_by_key
-                    .remove(lookup_key.as_str());
-                state
-                    .content_lookup_failure_count_by_key
-                    .remove(lookup_key.as_str());
-                state.content_metadata_cache.remove(&lookup_key);
-                state.installed_content_entry_ui_cache.remove(&lookup_key);
-                state.status_message = Some(match manifest_update_result {
-                    Ok(_) => "Removed installed content.".to_owned(),
-                    Err(err) => {
-                        format!(
-                            "Removed installed content, but failed to update the content manifest: {err}"
-                        )
-                    }
-                });
-            }
-            Err(err) => {
-                state.status_message = Some(format!("Failed to remove content: {err}"));
-            }
-        }
+        request_content_delete(
+            state,
+            instance_root,
+            state.selected_content_tab,
+            lookup_key.as_str(),
+            path.as_path(),
+        );
     }
 
     if let Some((lookup_key, version_id, file_path)) = pending_update
@@ -1626,6 +1595,71 @@ fn request_content_update(
     });
 }
 
+fn request_content_delete(
+    state: &mut InstanceScreenState,
+    instance_root: &Path,
+    kind: InstalledContentKind,
+    lookup_key: &str,
+    path: &Path,
+) {
+    let lookup_key = lookup_key.trim();
+    if lookup_key.is_empty() || state.content_apply_in_flight {
+        return;
+    }
+
+    ensure_content_apply_channel(state);
+    let Some(tx) = state.content_apply_results_tx.as_ref().cloned() else {
+        return;
+    };
+
+    let lookup_key = lookup_key.to_owned();
+    let path = path.to_path_buf();
+    let instance_root = instance_root.to_path_buf();
+    let instance_name = state.name_input.clone();
+    let path_display = path.display().to_string();
+
+    state.content_apply_in_flight = true;
+    state.status_message = Some("Removing installed content...".to_owned());
+    tracing::info!(
+        target: CONTENT_UPDATE_LOG_TARGET,
+        instance = %instance_name,
+        lookup_key = %lookup_key,
+        path = %path_display,
+        "starting installed content delete"
+    );
+
+    let _ = tokio_runtime::spawn(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            let delete_result = if path.is_dir() {
+                std::fs::remove_dir_all(path.as_path())
+            } else {
+                std::fs::remove_file(path.as_path())
+            };
+            delete_result.map_err(|err| format!("failed to remove {}: {err}", path.display()))?;
+
+            managed_content::remove_content_manifest_entries_for_path(
+                instance_root.as_path(),
+                path.as_path(),
+            )
+            .map(|_| "Removed installed content.".to_owned())
+            .map_err(|err| {
+                format!(
+                    "removed installed content, but failed to update the content manifest: {err}"
+                )
+            })
+        })
+        .await
+        .map_err(|err| format!("content delete task join error: {err}"))
+        .and_then(|inner| inner);
+
+        let _ = tx.send(ContentApplyResult {
+            kind,
+            focus_lookup_keys: vec![lookup_key],
+            status_message: result,
+        });
+    });
+}
+
 fn request_bulk_content_update(
     state: &mut InstanceScreenState,
     instance_root: &Path,
@@ -2779,7 +2813,7 @@ fn poll_content_apply_results(state: &mut InstanceScreenState, instance_root: &P
                 state.status_message = Some(message);
             }
             Err(err) => {
-                state.status_message = Some(format!("Failed to update content: {err}"));
+                state.status_message = Some(format!("Failed to apply content changes: {err}"));
             }
         }
     }

@@ -411,6 +411,9 @@ struct ContentBrowserState {
     active_download: Option<ActiveContentDownload>,
     download_tx: Option<mpsc::Sender<Result<ContentDownloadOutcome, String>>>,
     download_rx: Option<Arc<Mutex<mpsc::Receiver<Result<ContentDownloadOutcome, String>>>>>,
+    identify_in_flight: bool,
+    identify_tx: Option<mpsc::Sender<(PathBuf, Result<UnifiedContentEntry, String>)>>,
+    identify_rx: Option<Arc<Mutex<mpsc::Receiver<(PathBuf, Result<UnifiedContentEntry, String>)>>>>,
     status_message: Option<String>,
     search_notification_active: bool,
     download_notification_active: bool,
@@ -458,6 +461,9 @@ impl Default for ContentBrowserState {
             active_download: None,
             download_tx: None,
             download_rx: None,
+            identify_in_flight: false,
+            identify_tx: None,
+            identify_rx: None,
             status_message: None,
             search_notification_active: false,
             download_notification_active: false,
@@ -487,10 +493,12 @@ pub fn render(
     poll_detail_versions(&mut state);
     poll_downloads(&mut state);
     poll_version_catalog(&mut state);
+    poll_identify_results(&mut state);
 
     if state.search_in_flight
         || state.detail_versions_in_flight
         || state.download_in_flight
+        || state.identify_in_flight
         || state.version_catalog_in_flight
     {
         ui.ctx()
@@ -765,13 +773,16 @@ fn render_controls(
                 request_search_for_current_filters(state, true);
             }
 
-            if text_ui
-                .button(
-                    ui,
-                    ("content_browser_identify_file_button", instance_id),
-                    "Identify .jar",
-                    &button_style,
-                )
+            if ui
+                .add_enabled_ui(!state.identify_in_flight, |ui| {
+                    text_ui.button(
+                        ui,
+                        ("content_browser_identify_file_button", instance_id),
+                        "Identify .jar",
+                        &button_style,
+                    )
+                })
+                .inner
                 .clicked()
             {
                 if let Some(selected_path) = rfd::FileDialog::new()
@@ -779,24 +790,7 @@ fn render_controls(
                     .add_filter("Minecraft Mod", &["jar"])
                     .pick_file()
                 {
-                    match identify_mod_file_by_hash(selected_path.as_path()) {
-                        Ok(entry) => {
-                            let project_name = entry.name.clone();
-                            request_open_detail_for_content(entry);
-                            apply_pending_external_detail_open(state);
-                            state.status_message = Some(format!(
-                                "Identified {} from {}.",
-                                project_name,
-                                selected_path.display()
-                            ));
-                        }
-                        Err(err) => {
-                            state.status_message = Some(format!(
-                                "Could not identify {}: {err}",
-                                selected_path.display()
-                            ));
-                        }
-                    }
+                    request_identify_file(state, selected_path);
                 }
             }
         });
@@ -2367,6 +2361,91 @@ fn poll_version_catalog(state: &mut ContentBrowserState) {
             }
             Err(err) => {
                 state.version_catalog_error = Some(err);
+            }
+        }
+    }
+}
+
+fn ensure_identify_channel(state: &mut ContentBrowserState) {
+    if state.identify_tx.is_some() && state.identify_rx.is_some() {
+        return;
+    }
+
+    let (tx, rx) = mpsc::channel::<(PathBuf, Result<UnifiedContentEntry, String>)>();
+    state.identify_tx = Some(tx);
+    state.identify_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn request_identify_file(state: &mut ContentBrowserState, selected_path: PathBuf) {
+    if state.identify_in_flight {
+        return;
+    }
+
+    ensure_identify_channel(state);
+    let Some(tx) = state.identify_tx.as_ref().cloned() else {
+        return;
+    };
+
+    state.identify_in_flight = true;
+    state.status_message = Some(format!(
+        "Identifying {} in the background...",
+        selected_path.display()
+    ));
+    let _ = tokio_runtime::spawn(async move {
+        let path_for_result = selected_path.clone();
+        let result = tokio_runtime::spawn_blocking(move || {
+            identify_mod_file_by_hash(selected_path.as_path())
+        })
+        .await
+        .map_err(|err| format!("identify task join error: {err}"))
+        .and_then(|inner| inner);
+        let _ = tx.send((path_for_result, result));
+    });
+}
+
+fn poll_identify_results(state: &mut ContentBrowserState) {
+    let Some(rx) = state.identify_rx.as_ref() else {
+        return;
+    };
+
+    let mut updates = Vec::new();
+    let mut should_reset_channel = false;
+    match rx.lock() {
+        Ok(receiver) => loop {
+            match receiver.try_recv() {
+                Ok(update) => updates.push(update),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    should_reset_channel = true;
+                    break;
+                }
+            }
+        },
+        Err(_) => should_reset_channel = true,
+    }
+
+    if should_reset_channel {
+        state.identify_tx = None;
+        state.identify_rx = None;
+        state.identify_in_flight = false;
+    }
+
+    for (path, result) in updates {
+        state.identify_in_flight = false;
+        match result {
+            Ok(entry) => {
+                let project_name = entry.name.clone();
+                request_open_detail_for_content(entry);
+                apply_pending_external_detail_open(state);
+                state.status_message = Some(format!(
+                    "Identified {} from {}.",
+                    project_name,
+                    path.display()
+                ));
+            }
+            Err(err) => {
+                state.status_message =
+                    Some(format!("Could not identify {}: {err}", path.display()));
             }
         }
     }

@@ -11,3 +11,4 @@ pulldown-cmark = "*"
 syntect = "*"
 skrifa = "*"
 tracing.workspace = true
+launcher_runtime.workspace = true

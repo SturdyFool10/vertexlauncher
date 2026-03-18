@@ -18,7 +18,7 @@ use launcher_ui::{console, install_activity, notification, screens, ui, window_e
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 use textui::TextUi;
@@ -62,12 +62,24 @@ struct VertexApp {
     import_instance_state: import_instance_modal::ImportInstanceState,
     auth: AuthState,
     text_ui: TextUi,
+    config_save_in_flight: bool,
+    pending_config_save: Option<Config>,
+    config_save_results_tx: Option<mpsc::Sender<Result<(), String>>>,
+    config_save_results_rx: Option<mpsc::Receiver<Result<(), String>>>,
+    instance_store_save_in_flight: bool,
+    pending_instance_store_save: Option<InstanceStore>,
+    instance_store_save_results_tx: Option<mpsc::Sender<Result<(), String>>>,
+    instance_store_save_results_rx: Option<mpsc::Receiver<Result<(), String>>>,
     last_frame_end: Option<Instant>,
     last_rendered_screen: Option<screens::AppScreen>,
 }
 
 impl VertexApp {
     fn new(cc: &eframe::CreationContext<'_>, config_state: LoadConfigResult) -> Self {
+        tracing::info!(
+            target: "vertexlauncher/app/startup",
+            "VertexApp::new entered."
+        );
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
         let (
@@ -98,11 +110,24 @@ impl VertexApp {
                 "window_blur",
                 "Window blur is unsupported here and has been disabled. Restart may be required to fully apply the change. {error}"
             );
-            if config_loaded_from_disk && let Err(save_error) = save_config(&config) {
-                notification::warn!(
-                    "config",
-                    "Failed to persist disabled blur setting after unsupported platform check: {save_error}"
-                );
+            if config_loaded_from_disk {
+                let config_to_save = config.clone();
+                let _ = tokio_runtime::spawn(async move {
+                    let result = tokio_runtime::spawn_blocking(move || {
+                        save_config(&config_to_save).map_err(|err| err.to_string())
+                    })
+                    .await
+                    .map_err(|err| {
+                        format!("config save task join error after blur fallback: {err}")
+                    })
+                    .and_then(|inner| inner);
+                    if let Err(save_error) = result {
+                        notification::warn!(
+                            "config",
+                            "Failed to persist disabled blur setting after unsupported platform check: {save_error}"
+                        );
+                    }
+                });
             }
         }
 
@@ -123,6 +148,9 @@ impl VertexApp {
             }
         };
         let streamer_mode_enabled = config.streamer_mode_enabled();
+        if app_metadata::try_settings_info().is_none() {
+            let _ = tokio_runtime::spawn_blocking(app_metadata::preload_settings_info);
+        }
 
         let mut app = Self {
             fonts: FontController::new(config.ui_font_family()),
@@ -143,6 +171,14 @@ impl VertexApp {
             import_instance_state: import_instance_modal::ImportInstanceState::default(),
             auth: AuthState::load(streamer_mode_enabled),
             text_ui,
+            config_save_in_flight: false,
+            pending_config_save: None,
+            config_save_results_tx: None,
+            config_save_results_rx: None,
+            instance_store_save_in_flight: false,
+            pending_instance_store_save: None,
+            instance_store_save_results_tx: None,
+            instance_store_save_results_rx: None,
             last_frame_end: None,
             last_rendered_screen: None,
         };
@@ -226,11 +262,17 @@ impl VertexApp {
             return true;
         }
         if self.show_import_instance_modal {
+            if self.import_instance_state.import_in_flight {
+                return true;
+            }
             self.show_import_instance_modal = false;
             self.import_instance_state.reset();
             return true;
         }
         if self.show_create_instance_modal {
+            if self.create_instance_state.create_in_flight {
+                return true;
+            }
             self.show_create_instance_modal = false;
             self.create_instance_state.reset();
             return true;
@@ -260,10 +302,345 @@ fn sleep_precise(duration: Duration) {
     }
 }
 
+fn ensure_config_save_channel(app: &mut VertexApp) {
+    if app.config_save_results_tx.is_some() && app.config_save_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    app.config_save_results_tx = Some(tx);
+    app.config_save_results_rx = Some(rx);
+}
+
+fn start_pending_config_save(app: &mut VertexApp) {
+    if app.config_save_in_flight {
+        return;
+    }
+    let Some(config) = app.pending_config_save.take() else {
+        return;
+    };
+
+    ensure_config_save_channel(app);
+    let Some(tx) = app.config_save_results_tx.as_ref().cloned() else {
+        app.pending_config_save = Some(config);
+        return;
+    };
+
+    app.config_save_in_flight = true;
+    let _ = tokio_runtime::spawn(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            save_config(&config).map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|err| format!("config save task join error: {err}"))
+        .and_then(|inner| inner);
+        let _ = tx.send(result);
+    });
+}
+
+fn queue_config_save(app: &mut VertexApp) {
+    app.pending_config_save = Some(app.config.clone());
+    start_pending_config_save(app);
+}
+
+fn poll_config_save_results(app: &mut VertexApp) {
+    let mut should_reset_channel = false;
+    let mut saw_result = false;
+    loop {
+        let Some(result) = app.config_save_results_rx.as_ref().map(|rx| rx.try_recv()) else {
+            return;
+        };
+        match result {
+            Ok(result) => {
+                saw_result = true;
+                app.config_save_in_flight = false;
+                if let Err(err) = result {
+                    tracing::error!(
+                        target: "vertexlauncher/app/config",
+                        "Failed to save config: {err}"
+                    );
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                should_reset_channel = true;
+                app.config_save_in_flight = false;
+                break;
+            }
+        }
+    }
+
+    if should_reset_channel {
+        app.config_save_results_tx = None;
+        app.config_save_results_rx = None;
+    }
+    if saw_result || !app.config_save_in_flight {
+        start_pending_config_save(app);
+    }
+}
+
+fn ensure_instance_store_save_channel(app: &mut VertexApp) {
+    if app.instance_store_save_results_tx.is_some() && app.instance_store_save_results_rx.is_some()
+    {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    app.instance_store_save_results_tx = Some(tx);
+    app.instance_store_save_results_rx = Some(rx);
+}
+
+fn start_pending_instance_store_save(app: &mut VertexApp) {
+    if app.instance_store_save_in_flight {
+        return;
+    }
+    let Some(store) = app.pending_instance_store_save.take() else {
+        return;
+    };
+
+    ensure_instance_store_save_channel(app);
+    let Some(tx) = app.instance_store_save_results_tx.as_ref().cloned() else {
+        app.pending_instance_store_save = Some(store);
+        return;
+    };
+
+    app.instance_store_save_in_flight = true;
+    let _ = tokio_runtime::spawn(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            save_instance_store(&store).map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|err| format!("instance store save task join error: {err}"))
+        .and_then(|inner| inner);
+        let _ = tx.send(result);
+    });
+}
+
+fn queue_instance_store_save(app: &mut VertexApp) {
+    app.pending_instance_store_save = Some(app.instance_store.clone());
+    start_pending_instance_store_save(app);
+}
+
+fn poll_instance_store_save_results(app: &mut VertexApp) {
+    let mut should_reset_channel = false;
+    let mut saw_result = false;
+    loop {
+        let Some(result) = app
+            .instance_store_save_results_rx
+            .as_ref()
+            .map(|rx| rx.try_recv())
+        else {
+            return;
+        };
+        match result {
+            Ok(result) => {
+                saw_result = true;
+                app.instance_store_save_in_flight = false;
+                if let Err(err) = result {
+                    tracing::error!(
+                        target: "vertexlauncher/app/instances",
+                        "Failed to save instances: {err}"
+                    );
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                should_reset_channel = true;
+                app.instance_store_save_in_flight = false;
+                break;
+            }
+        }
+    }
+
+    if should_reset_channel {
+        app.instance_store_save_results_tx = None;
+        app.instance_store_save_results_rx = None;
+    }
+    if saw_result || !app.instance_store_save_in_flight {
+        start_pending_instance_store_save(app);
+    }
+}
+
+fn ensure_create_instance_channel(state: &mut create_instance_modal::CreateInstanceState) {
+    if state.create_results_tx.is_some() && state.create_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<create_instance_modal::CreateInstanceTaskResult>();
+    state.create_results_tx = Some(tx);
+    state.create_results_rx = Some(rx);
+}
+
+fn start_create_instance_task(
+    app: &mut VertexApp,
+    draft: create_instance_modal::CreateInstanceDraft,
+) {
+    if app.create_instance_state.create_in_flight {
+        return;
+    }
+
+    ensure_create_instance_channel(&mut app.create_instance_state);
+    let Some(tx) = app
+        .create_instance_state
+        .create_results_tx
+        .as_ref()
+        .cloned()
+    else {
+        return;
+    };
+
+    app.create_instance_state.error = None;
+    app.create_instance_state.create_in_flight = true;
+    let mut store = app.instance_store.clone();
+    let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+    let _ = tokio_runtime::spawn(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            create_instance(
+                &mut store,
+                &installations_root,
+                draft.into_new_instance_spec(),
+            )
+            .map(|instance| (store, instance))
+            .map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|err| format!("create instance task join error: {err}"))
+        .and_then(|inner| inner);
+        let _ = tx.send(result);
+    });
+}
+
+fn poll_create_instance_result(app: &mut VertexApp) {
+    let Some(result) = app
+        .create_instance_state
+        .create_results_rx
+        .as_ref()
+        .map(|rx| rx.try_recv())
+    else {
+        return;
+    };
+    let result = match result {
+        Ok(result) => result,
+        Err(mpsc::TryRecvError::Empty) => return,
+        Err(mpsc::TryRecvError::Disconnected) => {
+            app.create_instance_state.create_results_tx = None;
+            app.create_instance_state.create_results_rx = None;
+            app.create_instance_state.create_in_flight = false;
+            app.create_instance_state.error =
+                Some("Create instance task stopped unexpectedly.".to_owned());
+            return;
+        }
+    };
+
+    app.create_instance_state.create_in_flight = false;
+    match result {
+        Ok((store, instance)) => {
+            let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+            app.instance_store = store;
+            start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
+            app.selected_instance_id = Some(instance.id);
+            app.active_screen = screens::AppScreen::Instance;
+            app.show_create_instance_modal = false;
+            app.create_instance_state.reset();
+            app.refresh_instance_shortcuts();
+        }
+        Err(err) => {
+            app.create_instance_state.error = Some(format!("Failed to create instance: {err}"));
+        }
+    }
+}
+
+fn ensure_import_instance_channel(state: &mut import_instance_modal::ImportInstanceState) {
+    if state.import_results_tx.is_some() && state.import_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<import_instance_modal::ImportTaskResult>();
+    state.import_results_tx = Some(tx);
+    state.import_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn start_import_instance_task(app: &mut VertexApp, request: import_instance_modal::ImportRequest) {
+    if app.import_instance_state.import_in_flight {
+        return;
+    }
+
+    ensure_import_instance_channel(&mut app.import_instance_state);
+    let Some(tx) = app
+        .import_instance_state
+        .import_results_tx
+        .as_ref()
+        .cloned()
+    else {
+        return;
+    };
+
+    app.import_instance_state.error = None;
+    app.import_instance_state.import_in_flight = true;
+    let store = app.instance_store.clone();
+    let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+    let _ = tokio_runtime::spawn(async move {
+        let outcome = tokio_runtime::spawn_blocking(move || {
+            import_package_in_background(store, installations_root, request)
+        })
+        .await;
+        match outcome {
+            Ok(result) => {
+                let _ = tx.send(result);
+            }
+            Err(error) => {
+                let _ = tx.send(Err(format!("Import task join error: {error}")));
+            }
+        }
+    });
+}
+
+fn poll_import_instance_result(app: &mut VertexApp) {
+    let Some(rx) = app
+        .import_instance_state
+        .import_results_rx
+        .as_ref()
+        .cloned()
+    else {
+        return;
+    };
+    let Ok(receiver) = rx.lock() else {
+        return;
+    };
+    let Ok(result) = receiver.try_recv() else {
+        return;
+    };
+
+    app.import_instance_state.import_in_flight = false;
+    match result {
+        Ok((store, instance)) => {
+            let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+            app.instance_store = store;
+            start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
+            app.selected_instance_id = Some(instance.id);
+            app.active_screen = screens::AppScreen::Instance;
+            app.show_import_instance_modal = false;
+            app.import_instance_state.reset();
+            app.refresh_instance_shortcuts();
+        }
+        Err(err) => {
+            app.import_instance_state.error = Some(format!("Failed to import profile: {err}"));
+        }
+    }
+}
+
+fn import_package_in_background(
+    mut store: InstanceStore,
+    installations_root: PathBuf,
+    request: import_instance_modal::ImportRequest,
+) -> Result<(InstanceStore, InstanceRecord), String> {
+    let instance =
+        import_instance_modal::import_package(&mut store, installations_root.as_path(), request)?;
+    Ok((store, instance))
+}
+
 impl eframe::App for VertexApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.apply_frame_limiter();
         self.text_ui.begin_frame(ctx);
+        poll_config_save_results(self);
+        poll_instance_store_save_results(self);
         self.auth.poll();
         console::prune_instance_tabs(&running_instance_roots());
         apply_install_activity_os_feedback(ctx, frame);
@@ -273,6 +650,8 @@ impl eframe::App for VertexApp {
 
         let previous_config = self.config.clone();
         let previous_instance_store = self.instance_store.clone();
+        poll_create_instance_result(self);
+        poll_import_instance_result(self);
         self.sync_theme_from_config();
         self.theme.apply(ctx, self.config.window_blur_enabled());
         self.auth
@@ -413,7 +792,10 @@ impl eframe::App for VertexApp {
         let mut screen_output = screens::ScreenOutput::default();
         let wgpu_target_format = frame.wgpu_render_state().map(|state| state.target_format);
         let skin_preview_msaa_samples = 4;
-        let settings_info = app_metadata::settings_info();
+        if app_metadata::try_settings_info().is_none() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+        let settings_info = app_metadata::try_settings_info().unwrap_or_default();
         let skin_manager_opened = self.active_screen == screens::AppScreen::Skins
             && self.last_rendered_screen != Some(screens::AppScreen::Skins);
         let skin_manager_account_switched =
@@ -498,6 +880,9 @@ impl eframe::App for VertexApp {
         }
 
         if self.show_create_instance_modal {
+            if self.create_instance_state.create_in_flight {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
             match create_instance_modal::render(
                 ctx,
                 &mut self.text_ui,
@@ -510,35 +895,15 @@ impl eframe::App for VertexApp {
                     self.create_instance_state.reset();
                 }
                 create_instance_modal::ModalAction::Create(draft) => {
-                    let installations_root =
-                        PathBuf::from(self.config.minecraft_installations_root());
-                    match create_instance(
-                        &mut self.instance_store,
-                        &installations_root,
-                        draft.into_new_instance_spec(),
-                    ) {
-                        Ok(instance) => {
-                            start_initial_instance_install(
-                                &instance,
-                                installations_root.as_path(),
-                                &self.config,
-                            );
-                            self.selected_instance_id = Some(instance.id);
-                            self.active_screen = screens::AppScreen::Instance;
-                            self.show_create_instance_modal = false;
-                            self.create_instance_state.reset();
-                            self.refresh_instance_shortcuts();
-                        }
-                        Err(err) => {
-                            self.create_instance_state.error =
-                                Some(format!("Failed to create instance: {err}"));
-                        }
-                    }
+                    start_create_instance_task(self, draft);
                 }
             }
         }
 
         if self.show_import_instance_modal {
+            if self.import_instance_state.import_in_flight {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
             match import_instance_modal::render(
                 ctx,
                 &mut self.text_ui,
@@ -550,30 +915,7 @@ impl eframe::App for VertexApp {
                     self.import_instance_state.reset();
                 }
                 import_instance_modal::ModalAction::Import(request) => {
-                    let installations_root =
-                        PathBuf::from(self.config.minecraft_installations_root());
-                    match import_instance_modal::import_package(
-                        &mut self.instance_store,
-                        installations_root.as_path(),
-                        request,
-                    ) {
-                        Ok(instance) => {
-                            start_initial_instance_install(
-                                &instance,
-                                installations_root.as_path(),
-                                &self.config,
-                            );
-                            self.selected_instance_id = Some(instance.id);
-                            self.active_screen = screens::AppScreen::Instance;
-                            self.show_import_instance_modal = false;
-                            self.import_instance_state.reset();
-                            self.refresh_instance_shortcuts();
-                        }
-                        Err(err) => {
-                            self.import_instance_state.error =
-                                Some(format!("Failed to import profile: {err}"));
-                        }
-                    }
+                    start_import_instance_task(self, request);
                 }
             }
         }
@@ -582,9 +924,7 @@ impl eframe::App for VertexApp {
         self.fonts
             .ensure_selected_font_is_available(&mut self.config);
         if self.config != previous_config {
-            if let Err(err) = save_config(&self.config) {
-                tracing::error!(target: "vertexlauncher/app/config", "Failed to save config: {err}");
-            }
+            queue_config_save(self);
             self.fonts
                 .apply_from_config(ctx, &self.config, &mut self.text_ui);
         }
@@ -605,9 +945,7 @@ impl eframe::App for VertexApp {
                 }
             }
             self.refresh_instance_shortcuts();
-            if let Err(err) = save_instance_store(&self.instance_store) {
-                tracing::error!(target: "vertexlauncher/app/instances", "Failed to save instances: {err}");
-            }
+            queue_instance_store_save(self);
         }
 
         ui::top_bar::handle_window_resize(ctx);
@@ -864,19 +1202,33 @@ pub fn run() -> eframe::Result<()> {
     }
     launcher_runtime::init();
     #[cfg(target_os = "macos")]
-    app_icon::apply_macos_dock_icon();
+    let _ = launcher_runtime::spawn_blocking(app_icon::apply_macos_dock_icon);
     let config_state = load_config();
     let startup_config = match &config_state {
         LoadConfigResult::Loaded(config) => config.clone(),
         LoadConfigResult::Missing { .. } => Config::default(),
     };
 
+    tracing::info!(
+        target: "vertexlauncher/app/startup",
+        "Building native window and renderer options."
+    );
     let options = native_options::build(&startup_config);
+    tracing::info!(
+        target: "vertexlauncher/app/startup",
+        "Starting eframe runtime."
+    );
 
     eframe::run_native(
         "Vertex Launcher",
         options,
-        Box::new(move |cc| Ok(Box::new(VertexApp::new(cc, config_state)))),
+        Box::new(move |cc| {
+            tracing::info!(
+                target: "vertexlauncher/app/startup",
+                "Renderer initialized; constructing application state."
+            );
+            Ok(Box::new(VertexApp::new(cc, config_state)))
+        }),
     )
 }
 

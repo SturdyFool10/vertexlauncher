@@ -5,6 +5,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use installation::{is_instance_running, normalize_path_key, stop_running_instance};
+use launcher_runtime as tokio_runtime;
 
 const MAX_CONSOLE_LINES: usize = 4000;
 const DEFAULT_TAB_ID: &str = "vertexlauncher";
@@ -239,7 +240,7 @@ pub fn attach_launch_log(tab_id: &str, instance_root: &str, log_path: &Path) {
     };
     let tab_id = trimmed_tab_id.to_owned();
     let log_path = log_path.to_path_buf();
-    std::thread::spawn(move || {
+    let _ = tokio_runtime::spawn_blocking(move || {
         tail_launch_log_to_tab(
             tab_id.as_str(),
             instance_root_key.as_str(),

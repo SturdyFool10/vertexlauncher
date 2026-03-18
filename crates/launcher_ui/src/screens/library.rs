@@ -51,7 +51,7 @@ pub(super) fn handle_escape(ctx: &egui::Context) -> bool {
         let Some(mut state) = data.get_temp::<LibraryRuntimeState>(state_id) else {
             return;
         };
-        if state.delete_target_instance_id.is_some() {
+        if state.delete_target_instance_id.is_some() && !state.delete_in_flight {
             state.delete_target_instance_id = None;
             state.delete_error = None;
             data.insert_temp(state_id, state);
@@ -82,7 +82,12 @@ pub fn render(
         .unwrap_or_default();
     let pending_launch_intent = peek_launch_intent(ui.ctx());
     poll_runtime_actions(&mut state, config, instances);
-    if !state.pending_launches.is_empty() {
+    poll_delete_instance_results(&mut state, instances);
+    poll_thumbnail_results(&mut state);
+    if !state.pending_launches.is_empty()
+        || state.delete_in_flight
+        || !state.thumbnail_in_flight.is_empty()
+    {
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
 
@@ -165,6 +170,7 @@ pub fn render(
 
                     let action = render_instance_tile(
                         ui,
+                        &mut state,
                         text_ui,
                         instance,
                         runtime_running_for_active_account,
@@ -281,6 +287,7 @@ pub fn render(
 
 fn render_instance_tile(
     ui: &mut Ui,
+    state: &mut LibraryRuntimeState,
     text_ui: &mut TextUi,
     instance: &InstanceRecord,
     runtime_running_for_active_account: bool,
@@ -316,7 +323,7 @@ fn render_instance_tile(
         ui.set_min_height(TILE_HEIGHT);
         ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_SM);
         ui.vertical(|ui| {
-            render_instance_thumbnail(ui, instance);
+            render_instance_thumbnail(ui, state, instance);
 
             let name_style = LabelOptions {
                 font_size: 22.0,
@@ -790,7 +797,7 @@ fn render_delete_instance_modal(
                     ..textui::ButtonOptions::default()
                 };
                 let delete_clicked = ui
-                    .add_enabled_ui(!instance_running, |ui| {
+                    .add_enabled_ui(!instance_running && !state.delete_in_flight, |ui| {
                         text_ui.button(
                             ui,
                             ("library_delete_confirm", instance.id.as_str()),
@@ -812,30 +819,23 @@ fn render_delete_instance_modal(
                     )
                     .clicked();
 
-                if cancel_clicked {
+                if state.delete_in_flight {
+                    ui.add_space(style::SPACE_SM);
+                    ui.spinner();
+                }
+
+                if cancel_clicked && !state.delete_in_flight {
                     state.delete_target_instance_id = None;
                     state.delete_error = None;
                 }
 
                 if delete_clicked {
-                    match delete_instance(instances, instance.id.as_str(), installations_root) {
-                        Ok(deleted) => {
-                            state.pending_launches.remove(deleted.id.as_str());
-                            state.pending_launch_contexts.remove(deleted.id.as_str());
-                            state.status_by_instance.remove(deleted.id.as_str());
-                            state.delete_target_instance_id = None;
-                            state.delete_error = None;
-                            notification::warn!(
-                                "instance_store",
-                                "Deleted instance '{}' and its folder.",
-                                deleted.name
-                            );
-                        }
-                        Err(err) => {
-                            state.delete_error =
-                                Some(format!("Failed to delete instance: {err}"));
-                        }
-                    }
+                    request_instance_delete(
+                        state,
+                        instances.clone(),
+                        instance.id.clone(),
+                        installations_root.to_path_buf(),
+                    );
                 }
             });
         });
@@ -865,6 +865,14 @@ struct LibraryRuntimeState {
     last_handled_launch_intent_nonce: Option<u64>,
     delete_target_instance_id: Option<String>,
     delete_error: Option<String>,
+    delete_in_flight: bool,
+    delete_results_tx: Option<mpsc::Sender<Result<(InstanceStore, InstanceRecord), String>>>,
+    delete_results_rx:
+        Option<Arc<Mutex<mpsc::Receiver<Result<(InstanceStore, InstanceRecord), String>>>>>,
+    thumbnail_results_tx: Option<mpsc::Sender<(String, Option<Arc<[u8]>>)>>,
+    thumbnail_results_rx: Option<Arc<Mutex<mpsc::Receiver<(String, Option<Arc<[u8]>>)>>>>,
+    thumbnail_cache: HashMap<String, Option<Arc<[u8]>>>,
+    thumbnail_in_flight: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1283,7 +1291,186 @@ fn java_runtime_from_major(major: u8) -> Option<JavaRuntimeVersion> {
     }
 }
 
-fn render_instance_thumbnail(ui: &mut Ui, instance: &InstanceRecord) {
+fn ensure_delete_channel(state: &mut LibraryRuntimeState) {
+    if state.delete_results_tx.is_some() && state.delete_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<Result<(InstanceStore, InstanceRecord), String>>();
+    state.delete_results_tx = Some(tx);
+    state.delete_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn request_instance_delete(
+    state: &mut LibraryRuntimeState,
+    mut instances: InstanceStore,
+    instance_id: String,
+    installations_root: PathBuf,
+) {
+    if state.delete_in_flight {
+        return;
+    }
+
+    ensure_delete_channel(state);
+    let Some(tx) = state.delete_results_tx.as_ref().cloned() else {
+        return;
+    };
+
+    state.delete_in_flight = true;
+    state.delete_error = None;
+    let _ = tokio_runtime::spawn(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            delete_instance(
+                &mut instances,
+                instance_id.as_str(),
+                installations_root.as_path(),
+            )
+            .map(|deleted| (instances, deleted))
+            .map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|err| format!("instance delete task join error: {err}"))
+        .and_then(|inner| inner);
+        let _ = tx.send(result);
+    });
+}
+
+fn poll_delete_instance_results(state: &mut LibraryRuntimeState, instances: &mut InstanceStore) {
+    let Some(rx) = state.delete_results_rx.as_ref() else {
+        return;
+    };
+
+    let mut updates = Vec::new();
+    let mut should_reset_channel = false;
+    match rx.lock() {
+        Ok(receiver) => loop {
+            match receiver.try_recv() {
+                Ok(update) => updates.push(update),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    should_reset_channel = true;
+                    break;
+                }
+            }
+        },
+        Err(_) => should_reset_channel = true,
+    }
+
+    if should_reset_channel {
+        state.delete_results_tx = None;
+        state.delete_results_rx = None;
+        state.delete_in_flight = false;
+    }
+
+    for update in updates {
+        state.delete_in_flight = false;
+        match update {
+            Ok((store, deleted)) => {
+                *instances = store;
+                state.pending_launches.remove(deleted.id.as_str());
+                state.pending_launch_contexts.remove(deleted.id.as_str());
+                state.status_by_instance.remove(deleted.id.as_str());
+                state.delete_target_instance_id = None;
+                state.delete_error = None;
+                notification::warn!(
+                    "instance_store",
+                    "Deleted instance '{}' and its folder.",
+                    deleted.name
+                );
+            }
+            Err(err) => {
+                state.delete_error = Some(format!("Failed to delete instance: {err}"));
+            }
+        }
+    }
+}
+
+fn ensure_thumbnail_channel(state: &mut LibraryRuntimeState) {
+    if state.thumbnail_results_tx.is_some() && state.thumbnail_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<(String, Option<Arc<[u8]>>)>();
+    state.thumbnail_results_tx = Some(tx);
+    state.thumbnail_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn thumbnail_cache_key(instance_id: &str, path: &str) -> String {
+    format!("{instance_id}\n{path}")
+}
+
+fn thumbnail_uri(instance_id: &str, path: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    instance_id.hash(&mut hasher);
+    path.hash(&mut hasher);
+    format!(
+        "bytes://library/instance-thumbnail/{:016x}",
+        hasher.finish()
+    )
+}
+
+fn request_instance_thumbnail(state: &mut LibraryRuntimeState, instance_id: &str, path: &str) {
+    let key = thumbnail_cache_key(instance_id, path);
+    if state.thumbnail_in_flight.contains(key.as_str()) {
+        return;
+    }
+
+    ensure_thumbnail_channel(state);
+    let Some(tx) = state.thumbnail_results_tx.as_ref().cloned() else {
+        return;
+    };
+
+    state.thumbnail_in_flight.insert(key.clone());
+    let path = PathBuf::from(path);
+    let _ = tokio_runtime::spawn(async move {
+        let bytes = tokio_runtime::spawn_blocking(move || {
+            std::fs::read(path.as_path())
+                .ok()
+                .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()))
+        })
+        .await
+        .ok()
+        .flatten();
+        let _ = tx.send((key, bytes));
+    });
+}
+
+fn poll_thumbnail_results(state: &mut LibraryRuntimeState) {
+    let Some(rx) = state.thumbnail_results_rx.as_ref() else {
+        return;
+    };
+
+    let mut updates = Vec::new();
+    let mut should_reset_channel = false;
+    match rx.lock() {
+        Ok(receiver) => loop {
+            match receiver.try_recv() {
+                Ok(update) => updates.push(update),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    should_reset_channel = true;
+                    break;
+                }
+            }
+        },
+        Err(_) => should_reset_channel = true,
+    }
+
+    if should_reset_channel {
+        state.thumbnail_results_tx = None;
+        state.thumbnail_results_rx = None;
+        state.thumbnail_in_flight.clear();
+    }
+
+    for (key, bytes) in updates {
+        state.thumbnail_in_flight.remove(key.as_str());
+        state.thumbnail_cache.insert(key, bytes);
+    }
+}
+
+fn render_instance_thumbnail(
+    ui: &mut Ui,
+    state: &mut LibraryRuntimeState,
+    instance: &InstanceRecord,
+) {
     let thumbnail_width = ui.available_width().max(120.0);
     let thumbnail_size = egui::vec2(thumbnail_width, TILE_THUMBNAIL_HEIGHT);
 
@@ -1299,17 +1486,17 @@ fn render_instance_thumbnail(ui: &mut Ui, instance: &InstanceRecord) {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            && let Ok(bytes) = std::fs::read(path)
         {
-            let mut hasher = DefaultHasher::new();
-            instance.id.hash(&mut hasher);
-            path.hash(&mut hasher);
-            let uri = format!(
-                "bytes://library/instance-thumbnail/{:016x}",
-                hasher.finish()
-            );
-            ui.add(egui::Image::from_bytes(uri, bytes).fit_to_exact_size(thumbnail_size));
-            return;
+            let key = thumbnail_cache_key(instance.id.as_str(), path);
+            match state.thumbnail_cache.get(&key).cloned() {
+                Some(Some(bytes)) => {
+                    let uri = thumbnail_uri(instance.id.as_str(), path);
+                    ui.add(egui::Image::from_bytes(uri, bytes).fit_to_exact_size(thumbnail_size));
+                    return;
+                }
+                Some(None) => {}
+                None => request_instance_thumbnail(state, instance.id.as_str(), path),
+            }
         }
 
         let placeholder_size = egui::vec2(42.0, 42.0);

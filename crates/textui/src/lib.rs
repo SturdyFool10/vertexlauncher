@@ -12,6 +12,7 @@ use egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense,
     TextureHandle, TextureOptions, Ui, Vec2,
 };
+use launcher_runtime as tokio_runtime;
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options as MdOptions, Parser, Tag, TagEnd,
 };
@@ -173,20 +174,9 @@ impl TextUi {
 
         let (worker_tx, worker_rx) = mpsc::channel::<AsyncRasterWorkerMessage>();
         let (result_tx, result_rx) = mpsc::channel::<AsyncRasterResponse>();
-        let worker_spawn = std::thread::Builder::new()
-            .name("textui-async-raster-worker".to_owned())
-            .spawn(move || async_raster_worker_loop(worker_rx, result_tx));
-        let (worker_tx, result_rx) = match worker_spawn {
-            Ok(_) => (Some(worker_tx), Some(result_rx)),
-            Err(error) => {
-                warn!(
-                    target: "vertexlauncher/textui",
-                    error = %error,
-                    "failed to spawn textui async raster worker; falling back to synchronous text rasterization"
-                );
-                (None, None)
-            }
-        };
+        let _ =
+            tokio_runtime::spawn_blocking(move || async_raster_worker_loop(worker_rx, result_tx));
+        let (worker_tx, result_rx) = (Some(worker_tx), Some(result_rx));
 
         Self {
             font_system: FontSystem::new(),
@@ -227,8 +217,7 @@ impl TextUi {
             let _ = tx.send(AsyncRasterWorkerMessage::RegisterFont(bytes.clone()));
         }
         self.font_system.db_mut().load_font_data(bytes);
-        self.textures.clear();
-        self.input_states.clear();
+        self.invalidate_text_caches(true);
     }
 
     /// Renders an asynchronously rasterized label.
@@ -283,6 +272,7 @@ impl TextUi {
             .map(f32::to_bits)
             .unwrap_or(0)
             .hash(&mut hasher);
+        self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
         let texture_id = ui.make_persistent_id(id_source).with("textui_code");
 
@@ -356,7 +346,7 @@ impl TextUi {
         self.ui_font_family = family;
         self.ui_font_size_scale = size_scale;
         self.ui_font_weight = clamped_weight;
-        self.textures.clear();
+        self.invalidate_text_caches(false);
     }
 
     /// Enables/disables OpenType features and updates active tag selection.
@@ -398,7 +388,7 @@ impl TextUi {
         self.open_type_features_enabled = enabled;
         self.open_type_features_to_enable = normalized_csv;
         self.open_type_features = active_features;
-        self.textures.clear();
+        self.invalidate_text_caches(false);
     }
 
     fn resolve_family_candidate(&self, family_candidates: &[&str]) -> Option<String> {
@@ -556,6 +546,7 @@ impl TextUi {
             .map(f32::to_bits)
             .unwrap_or(0)
             .hash(&mut hasher);
+        self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
         let texture_id = ui.make_persistent_id(id_source).with("textui_label");
         if let Some((texture, size_points)) = self.get_cached_texture(texture_id, fingerprint) {
@@ -684,6 +675,7 @@ impl TextUi {
                 options.text_color.hash(&mut hasher);
                 response.hovered().hash(&mut hasher);
                 response.is_pointer_button_down_on().hash(&mut hasher);
+                self.hash_typography(&mut hasher);
                 hasher.finish()
             },
             raster.image,
@@ -751,6 +743,7 @@ impl TextUi {
                 options.text.font_size.to_bits().hash(&mut hasher);
                 options.text.line_height.to_bits().hash(&mut hasher);
                 options.text.color.hash(&mut hasher);
+                self.hash_typography(&mut hasher);
                 hasher.finish()
             },
             raster.image,
@@ -794,6 +787,7 @@ impl TextUi {
             .map(f32::to_bits)
             .unwrap_or(0)
             .hash(&mut hasher);
+        self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
         let texture_id = ui.make_persistent_id(id_source).with("textui_code");
         if let Some((texture, size_points)) = self.get_cached_texture(texture_id, fingerprint) {
@@ -1551,6 +1545,23 @@ impl TextUi {
             self.async_raster.rx = None;
             self.async_raster.pending.clear();
         }
+    }
+
+    fn invalidate_text_caches(&mut self, clear_input_states: bool) {
+        self.textures.clear();
+        self.async_raster.cache.clear();
+        self.async_raster.pending.clear();
+        if clear_input_states {
+            self.input_states.clear();
+        }
+    }
+
+    fn hash_typography<H: Hasher>(&self, state: &mut H) {
+        self.ui_font_family.hash(state);
+        self.ui_font_size_scale.to_bits().hash(state);
+        self.ui_font_weight.hash(state);
+        self.open_type_features_enabled.hash(state);
+        self.open_type_features_to_enable.hash(state);
     }
 
     fn get_or_queue_async_plain_raster(

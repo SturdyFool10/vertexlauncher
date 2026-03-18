@@ -1,9 +1,10 @@
+use launcher_runtime as tokio_runtime;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
+    mpsc,
 };
-use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const SINGLE_INSTANCE_PORT: u16 = 38457;
@@ -22,15 +23,15 @@ pub enum SingleInstanceError {
 pub struct SingleInstanceGuard {
     endpoint: SocketAddrV4,
     stop_requested: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
+    completion_rx: Option<mpsc::Receiver<()>>,
 }
 
 impl Drop for SingleInstanceGuard {
     fn drop(&mut self) {
         self.stop_requested.store(true, Ordering::SeqCst);
         let _ = send_probe(self.endpoint, HELLO_MESSAGE);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        if let Some(completion_rx) = self.completion_rx.take() {
+            let _ = completion_rx.recv_timeout(PROBE_TIMEOUT);
         }
     }
 }
@@ -43,7 +44,7 @@ pub fn acquire_single_instance() -> Result<SingleInstanceGuard, SingleInstanceEr
             if existing_instance_responded(endpoint)? {
                 return Err(SingleInstanceError::AlreadyRunning);
             }
-            thread::sleep(RETRY_DELAY);
+            std::thread::sleep(RETRY_DELAY);
             let socket = UdpSocket::bind(endpoint).map_err(|retry_err| {
                 SingleInstanceError::Unavailable(format!(
                     "single-instance IPC endpoint {} remained unavailable after probe: {retry_err}",
@@ -65,19 +66,15 @@ fn start_responder(
 ) -> Result<SingleInstanceGuard, SingleInstanceError> {
     let stop_requested = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop_requested);
-    let worker = thread::Builder::new()
-        .name("vertex-single-instance".to_owned())
-        .spawn(move || run_responder(socket, worker_stop))
-        .map_err(|err| {
-            SingleInstanceError::Unavailable(format!(
-                "failed to start single-instance IPC worker for {}: {err}",
-                endpoint
-            ))
-        })?;
+    let (completion_tx, completion_rx) = mpsc::channel::<()>();
+    let _ = tokio_runtime::spawn_blocking(move || {
+        run_responder(socket, worker_stop);
+        let _ = completion_tx.send(());
+    });
     Ok(SingleInstanceGuard {
         endpoint,
         stop_requested,
-        worker: Some(worker),
+        completion_rx: Some(completion_rx),
     })
 }
 

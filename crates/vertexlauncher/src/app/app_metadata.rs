@@ -11,11 +11,17 @@ struct GraphicsInfo {
 static BASE_SETTINGS_INFO: OnceLock<SettingsInfo> = OnceLock::new();
 static GRAPHICS_INFO: OnceLock<GraphicsInfo> = OnceLock::new();
 
-pub fn settings_info() -> SettingsInfo {
-    let mut info = BASE_SETTINGS_INFO
-        .get_or_init(build_base_settings_info)
-        .clone();
+pub fn try_settings_info() -> Option<SettingsInfo> {
+    let mut info = BASE_SETTINGS_INFO.get()?.clone();
+    apply_graphics_overrides(&mut info);
+    Some(info)
+}
 
+pub fn preload_settings_info() {
+    let _ = BASE_SETTINGS_INFO.get_or_init(build_base_settings_info);
+}
+
+fn apply_graphics_overrides(info: &mut SettingsInfo) {
     if let Some(graphics) = GRAPHICS_INFO.get() {
         if !graphics.gpu.is_empty() {
             info.gpu = graphics.gpu.clone();
@@ -30,8 +36,6 @@ pub fn settings_info() -> SettingsInfo {
             (name, version) => format!("{name} {version}"),
         };
     }
-
-    info
 }
 
 pub fn record_graphics_adapter(gpu: &str, driver_name: &str, driver_version: &str) {
