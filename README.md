@@ -1,3 +1,5 @@
+Come to our Discord: [![Discord](https://img.shields.io/discord/1480105103414530190?label=Discord%20Members&logo=discord)](https://discord.gg/EJGUFeuGrN)
+
 # Vertex Launcher
 
 Native Minecraft launcher written in Rust.
