@@ -56,6 +56,8 @@ Basic native builds:
 cargo build --release
 ```
 
+Linux release binaries should not be built on a rolling distro with plain `cargo build`, because that will inherit the host glibc baseline. The release scripts use `cargo zigbuild` for Linux x86-64 and default to a glibc `2.17` floor. Override it with `VERTEX_LINUX_GLIBC_VERSION=<version>` if you need a newer minimum.
+
 Windows MSVC example:
 
 ```sh
@@ -103,6 +105,7 @@ Staged artifacts are written to `target/release` as:
 ## Cross-Build Notes
 
 - Windows cross-builds use `cargo xwin` with the `clang` backend and scrub host-specific compiler flags.
+- Linux x86-64 release builds use `cargo zigbuild` with a glibc floor of `2.17` by default, so release binaries do not inherit the builder's host glibc version.
 - Linux ARM64 release builds use a cross sysroot path. The current helper script can assemble that sysroot for release builds.
 - macOS ARM64 release builds require a usable Apple SDK. The scripts detect `SDKROOT`, `DEVELOPER_DIR`, `xcrun`, and `~/.local/share/macos-sdk/MacOSX*.sdk`.
 

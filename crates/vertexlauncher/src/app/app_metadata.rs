@@ -50,14 +50,14 @@ pub fn record_graphics_adapter(gpu: &str, driver_name: &str, driver_version: &st
 
 fn build_base_settings_info() -> SettingsInfo {
     let version = env!("VERTEX_APP_VERSION");
-    let commit_hash = env!("VERTEX_GIT_COMMIT_HASH");
+    let revision = env!("VERTEX_GIT_REVISION");
 
     SettingsInfo {
         cpu: platform::detect_cpu_name(),
         gpu: "Unknown".to_owned(),
         memory: platform::detect_total_memory(),
         graphics_driver: "Unknown".to_owned(),
-        app_version: format!("{version} ({commit_hash})"),
+        app_version: format!("{version} ({revision})"),
     }
 }
 

@@ -5,6 +5,7 @@ $repoRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
 
 $package = "vertexlauncher"
 $releaseDir = Join-Path $repoRoot "target/release"
+$linuxGlibcVersion = if ($env:VERTEX_LINUX_GLIBC_VERSION) { $env:VERTEX_LINUX_GLIBC_VERSION } else { "2.17" }
 $crossEnvVars = @("CFLAGS", "CXXFLAGS", "LDFLAGS", "CC", "CXX", "AR", "RANLIB", "RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS")
 $stagedArtifacts = @(
     "vertexlauncher-windowsx86-64.exe",
@@ -25,7 +26,7 @@ $windowsTargets = @(
     @{ Target = "aarch64-pc-windows-msvc"; Platform = "windows"; Arch = "arm64"; Extension = ".exe"; Builder = "xwin" }
 )
 $linuxTargets = @(
-    @{ Target = "x86_64-unknown-linux-gnu"; Platform = "linux"; Arch = "x86-64"; Extension = ""; Builder = "cargo" },
+    @{ Target = "x86_64-unknown-linux-gnu"; Platform = "linux"; Arch = "x86-64"; Extension = ""; Builder = "zigbuild" },
     @{ Target = "aarch64-unknown-linux-gnu"; Platform = "linux"; Arch = "arm64"; Extension = ""; Builder = "zigbuild" }
 )
 $macosTargets = @(
@@ -56,11 +57,16 @@ function Get-StagedArtifactPath {
 
 function Get-BuiltArtifactPath {
     param(
-        [Parameter(Mandatory = $true)][string]$Target,
+        [Parameter(Mandatory = $true)]$Spec,
         [Parameter(Mandatory = $true)][string]$Extension
     )
 
-    Join-Path $repoRoot (Join-Path "target/$Target/release" "$package$Extension")
+    $target = $Spec.Target
+    if ($Spec.Target -eq "x86_64-unknown-linux-gnu") {
+        $target = "$($Spec.Target).$linuxGlibcVersion"
+    }
+
+    Join-Path $repoRoot (Join-Path "target/$target/release" "$package$Extension")
 }
 
 function Clear-StagedArtifacts {
@@ -127,6 +133,10 @@ function Invoke-BuildCommand {
         }
         "zigbuild" {
             $savedSdkRoot = $env:SDKROOT
+            $buildTarget = $Spec.Target
+            if ($Spec.Target -eq "x86_64-unknown-linux-gnu") {
+                $buildTarget = "$($Spec.Target).$linuxGlibcVersion"
+            }
             if ($Spec.Target -eq "aarch64-apple-darwin") {
                 $sdkRoot = Resolve-MacOsSdkPath
                 if ($sdkRoot) {
@@ -135,7 +145,7 @@ function Invoke-BuildCommand {
             }
 
             try {
-                & cargo zigbuild --release --target $Spec.Target -p $package
+                & cargo zigbuild --release --target $buildTarget -p $package
             }
             finally {
                 if ($null -eq $savedSdkRoot) {
@@ -199,7 +209,7 @@ function Build-And-StageArtifact {
 
     Invoke-BuildCommand -Spec $Spec
 
-    $builtArtifact = Get-BuiltArtifactPath -Target $Spec.Target -Extension $Spec.Extension
+    $builtArtifact = Get-BuiltArtifactPath -Spec $Spec -Extension $Spec.Extension
     $stagedArtifact = Get-StagedArtifactPath -Platform $Spec.Platform -Arch $Spec.Arch -Extension $Spec.Extension
 
     if (-not (Test-Path -LiteralPath $builtArtifact -PathType Leaf)) {

@@ -5,6 +5,10 @@ set -g repo_root (path resolve $script_dir/..)
 
 set -g package vertexlauncher
 set -g release_dir $repo_root/target/release
+set -g linux_glibc_version 2.17
+if set -q VERTEX_LINUX_GLIBC_VERSION
+    set -g linux_glibc_version $VERTEX_LINUX_GLIBC_VERSION
+end
 set -g windows_targets x86_64-pc-windows-msvc aarch64-pc-windows-msvc
 set -g linux_targets x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
 set -g macos_targets aarch64-apple-darwin
@@ -126,10 +130,16 @@ end
 function build_linux_target
     set -l target $argv[1]
     set -l arch $argv[2]
-    set -l source_path $repo_root/target/$target/release/$package
+    set -l build_target $target
     set -l staged_path (artifact_name linux $arch "")
 
     echo "Building Linux $arch release binary..."
+    if test $target = x86_64-unknown-linux-gnu
+        set build_target $target.$linux_glibc_version
+    end
+
+    set -l source_path $repo_root/target/$build_target/release/$package
+
     if test $target = aarch64-unknown-linux-gnu
         if test -x $repo_root/scripts/build-linux-arm64-container.sh
             if not command -sq podman
@@ -154,7 +164,7 @@ function build_linux_target
 
     if test $target = x86_64-unknown-linux-gnu
         env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CC -u CXX -u AR -u RANLIB -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
-            cargo build --release --target $target -p $package
+            cargo zigbuild --release --target $build_target -p $package
     else
         env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CC -u CXX -u AR -u RANLIB -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
             cargo zigbuild --release --target $target -p $package

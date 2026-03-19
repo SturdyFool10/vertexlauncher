@@ -18,16 +18,16 @@ fn main() {
 
 fn emit_version_metadata() {
     let package_version =
-        env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.6-Alpha".to_owned());
+        env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.7-Alpha".to_owned());
     let display_version = format_display_version(&package_version);
     println!("cargo:rustc-env=VERTEX_APP_VERSION={display_version}");
 
-    if let Some(git_dir) = locate_git_dir() {
-        emit_git_rerun_rules(&git_dir);
+    if let Some(repo_root) = locate_repo_root() {
+        emit_repo_rerun_rules(&repo_root);
     }
 
-    let commit_hash = git_commit_hash().unwrap_or_else(|| "unknown".to_owned());
-    println!("cargo:rustc-env=VERTEX_GIT_COMMIT_HASH={commit_hash}");
+    let revision = git_revision().unwrap_or_else(|| "unknown".to_owned());
+    println!("cargo:rustc-env=VERTEX_GIT_REVISION={revision}");
 }
 
 fn format_display_version(package_version: &str) -> String {
@@ -52,9 +52,12 @@ fn format_display_version(package_version: &str) -> String {
     format!("{major}.{minor}.{patch}{channel}")
 }
 
-fn locate_git_dir() -> Option<PathBuf> {
+fn locate_repo_root() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
-    let repo_root = manifest_dir.parent()?.parent()?;
+    Some(manifest_dir.parent()?.parent()?.to_path_buf())
+}
+
+fn locate_git_dir(repo_root: &Path) -> Option<PathBuf> {
     let git_path = repo_root.join(".git");
 
     if git_path.is_dir() {
@@ -66,11 +69,22 @@ fn locate_git_dir() -> Option<PathBuf> {
     Some(repo_root.join(relative))
 }
 
-fn emit_git_rerun_rules(git_dir: &Path) {
-    let head_path = git_dir.join("HEAD");
-    println!("cargo:rerun-if-changed={}", head_path.display());
+fn emit_repo_rerun_rules(repo_root: &Path) {
+    if let Some(git_dir) = locate_git_dir(repo_root) {
+        emit_git_rerun_rules(repo_root, &git_dir);
+    }
 
-    if let Ok(head_contents) = fs::read_to_string(&head_path) {
+    for path in git_snapshot_paths(repo_root) {
+        println!("cargo:rerun-if-changed={}", repo_root.join(path).display());
+    }
+}
+
+fn emit_git_rerun_rules(repo_root: &Path, git_dir: &Path) {
+    println!("cargo:rerun-if-changed={}", repo_root.join(".gitignore").display());
+    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+    println!("cargo:rerun-if-changed={}", git_dir.join("index").display());
+
+    if let Ok(head_contents) = fs::read_to_string(git_dir.join("HEAD")) {
         if let Some(reference) = head_contents.trim().strip_prefix("ref: ") {
             println!(
                 "cargo:rerun-if-changed={}",
@@ -80,20 +94,121 @@ fn emit_git_rerun_rules(git_dir: &Path) {
     }
 }
 
-fn git_commit_hash() -> Option<String> {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
+fn git_revision() -> Option<String> {
+    let repo_root = locate_repo_root()?;
+
+    if git_worktree_clean(&repo_root)? {
+        return git_output(&repo_root, &["rev-parse", "--short=8", "HEAD"]);
+    }
+
+    let tree_hash = git_current_tree_hash(&repo_root)?;
+    Some(format!("tree-{}", shorten_hash(&tree_hash)))
+}
+
+fn git_worktree_clean(repo_root: &Path) -> Option<bool> {
     let output = Command::new("git")
-        .args(["rev-parse", "--short=8", "HEAD"])
-        .current_dir(manifest_dir)
+        .args(["status", "--porcelain", "--untracked-files=normal"])
+        .current_dir(repo_root)
         .output()
         .ok()?;
 
-    if output.status.success() {
-        let hash = String::from_utf8(output.stdout).ok()?;
-        Some(hash.trim().to_owned())
-    } else {
-        None
+    if !output.status.success() {
+        return None;
     }
+
+    Some(output.stdout.is_empty())
+}
+
+fn git_current_tree_hash(repo_root: &Path) -> Option<String> {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").ok()?);
+    let temp_index = out_dir.join("vertexlauncher-build-snapshot.index");
+    if temp_index.exists() {
+        fs::remove_file(&temp_index).ok()?;
+    }
+
+    let add_status = Command::new("git")
+        .args(["add", "-A", "."])
+        .env("GIT_INDEX_FILE", &temp_index)
+        .current_dir(repo_root)
+        .status()
+        .ok()?;
+    if !add_status.success() {
+        let _ = fs::remove_file(&temp_index);
+        return None;
+    }
+
+    let tree_hash = git_output_with_env(
+        repo_root,
+        &["write-tree"],
+        &[("GIT_INDEX_FILE", temp_index.as_os_str())],
+    );
+
+    let _ = fs::remove_file(&temp_index);
+    tree_hash
+}
+
+fn git_snapshot_paths(repo_root: &Path) -> Vec<PathBuf> {
+    let mut paths = git_path_list(repo_root, &["ls-files", "-z"]).unwrap_or_default();
+    for path in git_path_list(
+        repo_root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    )
+    .unwrap_or_default()
+    {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+
+    paths
+}
+
+fn git_path_list(repo_root: &Path, args: &[&str]) -> Option<Vec<PathBuf>> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(
+        output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| PathBuf::from(String::from_utf8_lossy(entry).into_owned()))
+            .collect(),
+    )
+}
+
+fn git_output(repo_root: &Path, args: &[&str]) -> Option<String> {
+    git_output_with_env(repo_root, args, &[])
+}
+
+fn git_output_with_env(
+    repo_root: &Path,
+    args: &[&str],
+    envs: &[(&str, &std::ffi::OsStr)],
+) -> Option<String> {
+    let mut command = Command::new("git");
+    command.args(args).current_dir(repo_root);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(String::from_utf8(output.stdout).ok()?.trim().to_owned())
+}
+
+fn shorten_hash(hash: &str) -> &str {
+    let end = hash.len().min(8);
+    &hash[..end]
 }
 
 #[cfg(target_os = "windows")]
