@@ -15,6 +15,12 @@ podman run --rm \
     set -euo pipefail
     export DEBIAN_FRONTEND=noninteractive
 
+    normalize_glibc_version() {
+      local value="$1"
+      value="${value#GLIBC_}"
+      printf "%s\n" "${value}"
+    }
+
     echo "[linux-x86_64] installing native build dependencies..."
     apt-get update >/dev/null
     apt-get install -y --no-install-recommends \
@@ -54,7 +60,10 @@ podman run --rm \
     echo "[linux-x86_64] highest required glibc: ${glibc_floor}"
 
     if [ -n "${MAX_GLIBC_VERSION}" ]; then
-      if [ "$(printf "%s\n%s\n" "${MAX_GLIBC_VERSION}" "${glibc_floor}" | sort -V | tail -n 1)" != "${MAX_GLIBC_VERSION}" ]; then
+      normalized_max_glibc="$(normalize_glibc_version "${MAX_GLIBC_VERSION}")"
+      normalized_glibc_floor="$(normalize_glibc_version "${glibc_floor}")"
+
+      if [ "$(printf "%s\n%s\n" "${normalized_max_glibc}" "${normalized_glibc_floor}" | sort -V | tail -n 1)" != "${normalized_max_glibc}" ]; then
         echo "[linux-x86_64] glibc floor ${glibc_floor} exceeds allowed maximum ${MAX_GLIBC_VERSION}" >&2
         exit 1
       fi
