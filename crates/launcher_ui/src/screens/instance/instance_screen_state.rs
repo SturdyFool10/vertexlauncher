@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Instant;
 
+use crate::ui::components::lazy_image_bytes::LazyImageBytes;
 use config::Config;
 use content_resolver::{InstalledContentHashCache, InstalledContentKind, ResolvedInstalledContent};
 use installation::{
@@ -46,7 +47,6 @@ impl InstanceScreenTab {
 pub(super) struct InstanceScreenshotEntry {
     pub(super) path: PathBuf,
     pub(super) file_name: String,
-    pub(super) bytes: Arc<[u8]>,
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) modified_at_ms: Option<u64>,
@@ -143,6 +143,7 @@ pub(super) struct InstanceScreenState {
         Option<mpsc::Sender<(u64, Vec<InstanceScreenshotEntry>)>>,
     pub(super) screenshot_scan_results_rx:
         Option<Arc<Mutex<mpsc::Receiver<(u64, Vec<InstanceScreenshotEntry>)>>>>,
+    pub(super) screenshot_images: LazyImageBytes,
     pub(super) screenshot_viewer: Option<InstanceScreenshotViewerState>,
     pub(super) pending_delete_screenshot_key: Option<String>,
     pub(super) delete_screenshot_in_flight: bool,
@@ -275,6 +276,7 @@ impl InstanceScreenState {
             screenshot_scan_request_serial: 0,
             screenshot_scan_results_tx: None,
             screenshot_scan_results_rx: None,
+            screenshot_images: LazyImageBytes::default(),
             screenshot_viewer: None,
             pending_delete_screenshot_key: None,
             delete_screenshot_in_flight: false,

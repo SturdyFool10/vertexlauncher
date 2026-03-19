@@ -21,7 +21,10 @@ use textui::{
 
 use crate::{
     assets, notification,
-    ui::{modal, style},
+    ui::{
+        components::lazy_image_bytes::{LazyImageBytes, LazyImageBytesStatus},
+        modal, style,
+    },
 };
 
 use super::{AppScreen, PendingLaunchIntent, queue_launch_intent};
@@ -40,6 +43,7 @@ const SCREENSHOT_SCAN_INTERVAL: Duration = Duration::from_secs(10);
 const MAX_HOME_SCREENSHOTS: usize = 120;
 const HOME_TAB_HEIGHT: f32 = 38.0;
 const SCREENSHOT_TILE_GAP: f32 = 10.0;
+const SCREENSHOT_PRELOAD_VIEWPORTS: f32 = 0.75;
 const SCREENSHOT_VIEWER_MIN_ZOOM: f32 = 1.0;
 const SCREENSHOT_VIEWER_MAX_ZOOM: f32 = 8.0;
 const SCREENSHOT_VIEWER_ZOOM_STEP: f32 = 0.2;
@@ -83,6 +87,7 @@ struct HomeState {
     scanned_screenshot_instance_count: usize,
     screenshot_scan_pending: bool,
     latest_requested_screenshot_scan_id: u64,
+    screenshot_images: LazyImageBytes,
     screenshot_viewer: Option<ScreenshotViewerState>,
     pending_delete_screenshot_key: Option<String>,
     delete_screenshot_in_flight: bool,
@@ -183,7 +188,6 @@ struct ScreenshotEntry {
     instance_name: String,
     path: PathBuf,
     file_name: String,
-    bytes: Arc<[u8]>,
     width: u32,
     height: u32,
     modified_at_ms: Option<u64>,
@@ -554,6 +558,7 @@ pub fn render(
         .data_mut(|data| data.get_temp::<HomeState>(state_id))
         .unwrap_or_default();
     ui.ctx().request_repaint_after(Duration::from_millis(250));
+    let screenshot_images_updated = state.screenshot_images.poll();
 
     render_home_tab_row(ui, &mut state.active_tab);
     ui.add_space(14.0);
@@ -590,6 +595,10 @@ pub fn render(
             if requested_rescan {
                 refresh_home_state(&mut state, instances, config, true);
             }
+
+            let mut retained_image_keys = HashSet::new();
+            retain_home_viewer_image(&mut state, &mut retained_image_keys);
+            state.screenshot_images.retain_loaded(&retained_image_keys);
         }
         HomeTab::Screenshots => {
             poll_delete_screenshot_results(&mut state, instances, config);
@@ -624,8 +633,18 @@ pub fn render(
             {
                 state.pending_delete_screenshot_key = None;
             }
-            render_screenshot_gallery(ui, text_ui, &mut state);
+            let mut retained_image_keys = HashSet::new();
+            render_screenshot_gallery(ui, text_ui, &mut state, &mut retained_image_keys);
+            retain_home_viewer_image(&mut state, &mut retained_image_keys);
+            state.screenshot_images.retain_loaded(&retained_image_keys);
         }
+    }
+
+    if screenshot_images_updated
+        || (state.screenshot_images.has_in_flight()
+            && (state.active_tab == HomeTab::Screenshots || state.screenshot_viewer.is_some()))
+    {
+        ui.ctx().request_repaint_after(Duration::from_millis(50));
     }
 
     render_screenshot_viewer_modal(ui.ctx(), text_ui, &mut state);
@@ -673,7 +692,12 @@ fn render_home_tab_row(ui: &mut Ui, active_tab: &mut HomeTab) {
     });
 }
 
-fn render_screenshot_gallery(ui: &mut Ui, text_ui: &mut TextUi, state: &mut HomeState) {
+fn render_screenshot_gallery(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    state: &mut HomeState,
+    retained_image_keys: &mut HashSet<String>,
+) {
     let title_style = style::heading(ui, 18.0, 24.0);
     let body_style = style::muted(ui);
     let _ = text_ui.label(ui, "home_screenshots_title", "Screenshots", &title_style);
@@ -723,17 +747,22 @@ fn render_screenshot_gallery(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Home
             ui.columns(column_count, |columns| {
                 for (column_ui, items) in columns.iter_mut().zip(assignments.iter()) {
                     column_ui.spacing_mut().item_spacing.y = SCREENSHOT_TILE_GAP;
+                    let preload_rect = screenshot_preload_rect(column_ui);
                     for &(index, tile_height) in items {
+                        let screenshot = state.screenshots[index].clone();
                         let action = render_screenshot_tile(
                             column_ui,
-                            &state.screenshots[index],
+                            &mut state.screenshot_images,
+                            &screenshot,
                             tile_height,
+                            preload_rect,
+                            retained_image_keys,
                         );
                         if action.open_viewer {
-                            open_screenshot_key = Some(state.screenshots[index].key());
+                            open_screenshot_key = Some(screenshot.key());
                         }
                         if action.request_delete {
-                            delete_screenshot_key = Some(state.screenshots[index].key());
+                            delete_screenshot_key = Some(screenshot.key());
                         }
                     }
                 }
@@ -781,24 +810,50 @@ fn screenshot_tile_height(screenshot: &ScreenshotEntry, column_width: f32, _inde
 
 fn render_screenshot_tile(
     ui: &mut Ui,
+    screenshot_images: &mut LazyImageBytes,
     screenshot: &ScreenshotEntry,
     tile_height: f32,
+    preload_rect: egui::Rect,
+    retained_image_keys: &mut HashSet<String>,
 ) -> ScreenshotTileAction {
     let width = ui.available_width().max(1.0);
     let tile_size = egui::vec2(width, tile_height);
     let (rect, _) = ui.allocate_exact_size(tile_size, egui::Sense::hover());
-    let image_response = ui.put(
+    let mut image_response = ui.interact(
         rect,
-        egui::Image::from_bytes(screenshot.uri(), Arc::clone(&screenshot.bytes))
+        ui.id().with(("home_screenshot_tile", screenshot.key())),
+        egui::Sense::click(),
+    );
+    let image_key = screenshot.uri();
+    let should_preload = rect_intersects(rect, preload_rect);
+    let image_status = if should_preload {
+        retained_image_keys.insert(image_key.clone());
+        screenshot_images.request(image_key.clone(), screenshot.path.clone())
+    } else {
+        screenshot_images.status(image_key.as_str())
+    };
+    let image_bytes = screenshot_images.bytes(image_key.as_str());
+    if let Some(bytes) = image_bytes.as_ref() {
+        egui::Image::from_bytes(image_key, Arc::clone(bytes))
             .fit_to_exact_size(rect.size())
             .corner_radius(egui::CornerRadius::same(14))
-            .sense(egui::Sense::click()),
-    );
-    let tile_hovered = ui.rect_contains_pointer(rect);
+            .paint_at(ui, rect);
+    } else {
+        paint_screenshot_tile_placeholder(ui, rect, image_status);
+    }
+
+    let tile_hovered = image_response.hovered();
     let mut overlay_clicked = false;
     let mut action = ScreenshotTileAction::default();
     if tile_hovered {
-        match render_screenshot_overlay_action(ui, rect, "home_gallery", screenshot) {
+        match render_screenshot_overlay_action(
+            ui,
+            rect,
+            "home_gallery",
+            screenshot,
+            image_bytes.as_deref(),
+            image_status == LazyImageBytesStatus::Loading,
+        ) {
             Some(ScreenshotOverlayAction::Copy) => {
                 overlay_clicked = true;
             }
@@ -839,16 +894,77 @@ fn render_screenshot_tile(
         Color32::WHITE,
     );
 
-    action.open_viewer = image_response
-        .on_hover_text(format!(
-            "{}\n{}\n{}",
-            screenshot.instance_name,
-            screenshot.file_name,
-            screenshot.path.display()
-        ))
-        .clicked()
-        && !overlay_clicked;
+    image_response = image_response.on_hover_text(format!(
+        "{}\n{}\n{}",
+        screenshot.instance_name,
+        screenshot.file_name,
+        screenshot.path.display()
+    ));
+    action.open_viewer = image_response.clicked() && !overlay_clicked;
     action
+}
+
+fn screenshot_preload_rect(ui: &Ui) -> egui::Rect {
+    let clip_rect = ui.clip_rect();
+    let margin = (clip_rect.height() * SCREENSHOT_PRELOAD_VIEWPORTS).max(220.0);
+    egui::Rect::from_min_max(
+        egui::pos2(clip_rect.min.x, clip_rect.min.y - margin),
+        egui::pos2(clip_rect.max.x, clip_rect.max.y + margin),
+    )
+}
+
+fn rect_intersects(left: egui::Rect, right: egui::Rect) -> bool {
+    left.min.x <= right.max.x
+        && left.max.x >= right.min.x
+        && left.min.y <= right.max.y
+        && left.max.y >= right.min.y
+}
+
+fn paint_screenshot_tile_placeholder(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    image_status: LazyImageBytesStatus,
+) {
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(14),
+        ui.visuals().widgets.inactive.bg_fill,
+    );
+    let label = match image_status {
+        LazyImageBytesStatus::Loading => "Loading...",
+        LazyImageBytesStatus::Failed => "Failed to load",
+        LazyImageBytesStatus::Ready | LazyImageBytesStatus::Unrequested => "Waiting...",
+    };
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::TextStyle::Button.resolve(ui.style()),
+        ui.visuals().weak_text_color(),
+    );
+}
+
+fn retain_home_viewer_image(state: &mut HomeState, retained_image_keys: &mut HashSet<String>) {
+    let Some(viewer_key) = state
+        .screenshot_viewer
+        .as_ref()
+        .map(|viewer| viewer.screenshot_key.as_str())
+    else {
+        return;
+    };
+    let Some(screenshot) = state
+        .screenshots
+        .iter()
+        .find(|entry| entry.key() == viewer_key)
+        .cloned()
+    else {
+        return;
+    };
+    let image_key = screenshot.uri();
+    retained_image_keys.insert(image_key.clone());
+    state
+        .screenshot_images
+        .request(image_key, screenshot.path.clone());
 }
 
 fn render_screenshot_viewer_modal(
@@ -875,6 +991,11 @@ fn render_screenshot_viewer_modal(
     let Some(viewer_state) = state.screenshot_viewer.as_mut() else {
         return;
     };
+    let image_key = screenshot.uri();
+    let image_status = state
+        .screenshot_images
+        .request(image_key.clone(), screenshot.path.clone());
+    let image_bytes = state.screenshot_images.bytes(image_key.as_str());
 
     let viewport_rect = ctx.input(|i| i.content_rect());
     let modal_width = (viewport_rect.width() * 0.92).max(320.0);
@@ -939,11 +1060,15 @@ fn render_screenshot_viewer_modal(
                     if ui.button("Delete").clicked() {
                         delete_requested = true;
                     }
-                    if ui.button("Copy").clicked() {
+                    if ui
+                        .add_enabled(image_bytes.is_some(), egui::Button::new("Copy"))
+                        .clicked()
+                        && let Some(bytes) = image_bytes.as_deref()
+                    {
                         copy_screenshot_to_clipboard(
                             ui.ctx(),
                             screenshot.file_name.as_str(),
-                            screenshot.bytes.as_ref(),
+                            bytes,
                         );
                     }
                     if ui.button("Reset").clicked() {
@@ -989,11 +1114,31 @@ fn render_screenshot_viewer_modal(
                 ui.ctx().request_repaint();
             }
 
-            egui::Image::from_bytes(screenshot.uri(), Arc::clone(&screenshot.bytes))
-                .fit_to_exact_size(image_rect.size())
-                .maintain_aspect_ratio(false)
-                .uv(viewer_uv_rect(viewer_state))
-                .paint_at(ui, image_rect);
+            if let Some(bytes) = image_bytes.as_ref() {
+                egui::Image::from_bytes(image_key, Arc::clone(bytes))
+                    .fit_to_exact_size(image_rect.size())
+                    .maintain_aspect_ratio(false)
+                    .uv(viewer_uv_rect(viewer_state))
+                    .paint_at(ui, image_rect);
+            } else {
+                ui.painter().rect_filled(
+                    image_rect,
+                    egui::CornerRadius::same(12),
+                    ui.visuals().widgets.inactive.bg_fill,
+                );
+                let label = if image_status == LazyImageBytesStatus::Failed {
+                    "Failed to load screenshot"
+                } else {
+                    "Loading screenshot..."
+                };
+                ui.painter().text(
+                    image_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::TextStyle::Button.resolve(ui.style()),
+                    ui.visuals().weak_text_color(),
+                );
+            }
             ui.painter().rect_stroke(
                 image_rect,
                 egui::CornerRadius::same(12),
@@ -1149,6 +1294,8 @@ fn render_screenshot_overlay_action(
     tile_rect: egui::Rect,
     scope: &str,
     screenshot: &ScreenshotEntry,
+    copy_bytes: Option<&[u8]>,
+    copy_loading: bool,
 ) -> Option<ScreenshotOverlayAction> {
     let screenshot_key = screenshot.key();
     if render_screenshot_overlay_button(
@@ -1159,14 +1306,18 @@ fn render_screenshot_overlay_action(
         "home_screenshot_copy_button",
         assets::COPY_SVG,
         ui.visuals().text_color(),
-        "Copy image to clipboard",
+        if copy_loading {
+            "Image is still loading"
+        } else {
+            "Copy image to clipboard"
+        },
         8.0,
+        copy_bytes.is_some(),
     ) {
-        copy_screenshot_to_clipboard(
-            ui.ctx(),
-            screenshot.file_name.as_str(),
-            screenshot.bytes.as_ref(),
-        );
+        let Some(bytes) = copy_bytes else {
+            return None;
+        };
+        copy_screenshot_to_clipboard(ui.ctx(), screenshot.file_name.as_str(), bytes);
         return Some(ScreenshotOverlayAction::Copy);
     }
     if render_screenshot_overlay_button(
@@ -1179,6 +1330,7 @@ fn render_screenshot_overlay_action(
         ui.visuals().error_fg_color,
         "Delete screenshot",
         8.0 + SCREENSHOT_COPY_BUTTON_SIZE + 6.0,
+        true,
     ) {
         return Some(ScreenshotOverlayAction::Delete);
     }
@@ -1195,6 +1347,7 @@ fn render_screenshot_overlay_button(
     icon_color: Color32,
     tooltip: &str,
     x_offset: f32,
+    enabled: bool,
 ) -> bool {
     let button_rect = egui::Rect::from_min_size(
         tile_rect.min + egui::vec2(x_offset, 8.0),
@@ -1211,7 +1364,11 @@ fn render_screenshot_overlay_button(
     let response = ui.interact(
         button_rect,
         ui.id().with((id_source, scope, screenshot_key)),
-        egui::Sense::click(),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
     );
     let fill = if response.is_pointer_button_down_on() {
         ui.visuals().widgets.active.bg_fill
@@ -1231,6 +1388,11 @@ fn render_screenshot_overlay_button(
     let icon_rect = egui::Rect::from_center_size(button_rect.center(), egui::vec2(14.0, 14.0));
     egui::Image::from_bytes(uri, themed_svg)
         .fit_to_exact_size(icon_rect.size())
+        .tint(if enabled {
+            Color32::WHITE
+        } else {
+            Color32::from_white_alpha(120)
+        })
         .paint_at(ui, icon_rect);
     let clicked = response.clicked();
     let _ = response.on_hover_text(tooltip);
@@ -2208,14 +2370,10 @@ fn collect_screenshots_from_request(request: &ScreenshotScanRequest) -> Vec<Scre
         if width == 0 || height == 0 {
             continue;
         }
-        let Ok(bytes) = fs::read(candidate.path.as_path()) else {
-            continue;
-        };
         screenshots.push(ScreenshotEntry {
             instance_name: candidate.instance_name,
             path: candidate.path,
             file_name: candidate.file_name,
-            bytes: bytes.into(),
             width,
             height,
             modified_at_ms: candidate.modified_at_ms,
