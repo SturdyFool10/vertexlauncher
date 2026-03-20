@@ -38,6 +38,9 @@ podman run --rm \
     echo "[linux-x86_64] installing native build dependencies..."
     apt-get update >/dev/null
     apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      build-essential \
       pkg-config \
       libglib2.0-dev \
       libgtk-3-dev \
