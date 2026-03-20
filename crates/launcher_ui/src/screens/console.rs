@@ -39,6 +39,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                                 lines,
                                 "No log entries yet.",
                                 true,
+                                snapshot.text_redraw_generation,
                             );
                         });
                 },
@@ -55,12 +56,14 @@ pub(crate) fn render_log_buffer(
     lines: &[String],
     empty_message: &str,
     stick_to_bottom: bool,
+    text_redraw_generation: u64,
 ) {
     let viewport_height = ui.available_height().max(1.0);
-    let base_id = ui.make_persistent_id(id_source);
+    let scroll_area_id = ui.make_persistent_id((&id_source, "scroll_area"));
+    let text_base_id = ui.make_persistent_id((&id_source, "text", text_redraw_generation));
     ui.set_min_height(viewport_height);
     egui::ScrollArea::both()
-        .id_salt(base_id.with("scroll_area"))
+        .id_salt(scroll_area_id)
         .auto_shrink([false, false])
         .max_height(viewport_height)
         .stick_to_bottom(stick_to_bottom)
@@ -68,7 +71,7 @@ pub(crate) fn render_log_buffer(
             if lines.is_empty() {
                 let mut empty_style = style::muted(ui);
                 empty_style.wrap = false;
-                let _ = text_ui.label(ui, (base_id, "empty"), empty_message, &empty_style);
+                let _ = text_ui.label(ui, (text_base_id, "empty"), empty_message, &empty_style);
                 let _ = ui.allocate_exact_size(
                     egui::vec2(1.0, (viewport_height - 24.0).max(1.0)),
                     egui::Sense::hover(),
@@ -86,7 +89,7 @@ pub(crate) fn render_log_buffer(
                 if matches!(resolved_level, Some(LogLevel::Error | LogLevel::Fatal)) {
                     line_style.weight = 700;
                 }
-                render_tiled_console_line(ui, text_ui, (base_id, index), line, &line_style);
+                render_tiled_console_line(ui, text_ui, (text_base_id, index), line, &line_style);
             }
         });
 }

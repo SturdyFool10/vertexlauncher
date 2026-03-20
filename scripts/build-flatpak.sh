@@ -96,6 +96,22 @@ find_source_binary() {
   return 1
 }
 
+ensure_release_source_binary() {
+  local source_binary="$1"
+
+  case "${source_binary}" in
+    "${REPO_ROOT}/target/"*/release/"${APP_COMMAND}" \
+    | "${REPO_ROOT}/target/release/${APP_COMMAND}" \
+    | "${REPO_ROOT}/target/release/${APP_COMMAND}-linux"*)
+      return 0
+      ;;
+  esac
+
+  echo "Flatpak packaging only accepts release binaries from target/*/release or target/release." >&2
+  echo "Refusing source path: ${source_binary}" >&2
+  exit 1
+}
+
 require_source_binary() {
   local requested_arch="$1"
   local source_binary=""
@@ -106,6 +122,7 @@ require_source_binary() {
     exit 1
   fi
 
+  ensure_release_source_binary "${source_binary}"
   printf "%s\n" "${source_binary}"
 }
 

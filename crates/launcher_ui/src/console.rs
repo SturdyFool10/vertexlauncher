@@ -27,6 +27,7 @@ pub struct ConsoleSnapshot {
     pub tabs: Vec<ConsoleTabSnapshot>,
     pub active_tab_id: String,
     pub active_lines: Vec<String>,
+    pub text_redraw_generation: u64,
 }
 
 #[derive(Debug)]
@@ -44,6 +45,7 @@ struct ConsoleTab {
 struct ConsoleState {
     tabs: Vec<ConsoleTab>,
     active_tab_id: String,
+    text_redraw_generation: u64,
 }
 
 static CONSOLE_STATE: OnceLock<Mutex<ConsoleState>> = OnceLock::new();
@@ -61,8 +63,23 @@ fn store() -> &'static Mutex<ConsoleState> {
                 lines: VecDeque::new(),
             }],
             active_tab_id: DEFAULT_TAB_ID.to_owned(),
+            text_redraw_generation: 0,
         })
     })
+}
+
+pub fn mark_text_for_redraw() {
+    let Ok(mut state) = store().lock() else {
+        return;
+    };
+    state.text_redraw_generation = state.text_redraw_generation.saturating_add(1);
+}
+
+pub fn text_redraw_generation() -> u64 {
+    let Ok(state) = store().lock() else {
+        return 0;
+    };
+    state.text_redraw_generation
 }
 
 pub fn push_line(line: impl Into<String>) {
@@ -404,6 +421,7 @@ pub fn snapshot() -> ConsoleSnapshot {
             }],
             active_tab_id: DEFAULT_TAB_ID.to_owned(),
             active_lines: Vec::new(),
+            text_redraw_generation: 0,
         };
     };
 
@@ -427,6 +445,7 @@ pub fn snapshot() -> ConsoleSnapshot {
         tabs,
         active_tab_id: state.active_tab_id.clone(),
         active_lines,
+        text_redraw_generation: state.text_redraw_generation,
     }
 }
 

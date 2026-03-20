@@ -274,6 +274,22 @@ run_tool() {
   fi
 }
 
+ensure_release_source_binary() {
+  local source_binary="$1"
+
+  case "${source_binary}" in
+    "${REPO_ROOT}/target/"*/release/"${PACKAGE}" \
+    | "${REPO_ROOT}/target/release/${PACKAGE}" \
+    | "${REPO_ROOT}/target/release/${PACKAGE}-linux"*)
+      return 0
+      ;;
+  esac
+
+  echo "AppImage packaging only accepts release binaries from target/*/release or target/release." >&2
+  echo "Refusing source path: ${source_binary}" >&2
+  exit 1
+}
+
 is_blacklisted_bundle_library() {
   local library_name="$1"
 
@@ -434,6 +450,7 @@ if [[ ! -f "${source_binary}" ]]; then
   echo "Missing built Linux binary: ${source_binary}" >&2
   exit 1
 fi
+ensure_release_source_binary "${source_binary}"
 
 if [[ ! -f "${DESKTOP_FILE}" ]]; then
   echo "Missing desktop file: ${DESKTOP_FILE}" >&2

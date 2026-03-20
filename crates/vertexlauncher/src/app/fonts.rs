@@ -1,6 +1,7 @@
 use config::{Config, DropdownSettingId, UiFontFamily};
 use eframe::egui;
 use fontloader::{FontCatalog, FontSpec, Slant, Stretch, Weight};
+use launcher_ui::console;
 use std::hash::{Hash, Hasher};
 use textui::TextUi;
 
@@ -130,6 +131,14 @@ impl FontController {
             open_type_features_enabled: config.open_type_features_enabled(),
             open_type_features_to_enable: config.open_type_features_to_enable().to_owned(),
         };
+        let open_type_features_changed =
+            self.applied_text_signature
+                .as_ref()
+                .is_some_and(|previous| {
+                    previous.open_type_features_enabled != desired_text.open_type_features_enabled
+                        || previous.open_type_features_to_enable
+                            != desired_text.open_type_features_to_enable
+                });
 
         if self.applied_text_signature == Some(desired_text.clone()) {
             return;
@@ -143,6 +152,10 @@ impl FontController {
             &family_candidates,
         );
         self.applied_text_signature = Some(desired_text);
+        if open_type_features_changed {
+            console::mark_text_for_redraw();
+            ctx.request_repaint();
+        }
     }
 }
 

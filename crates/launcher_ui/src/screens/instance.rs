@@ -1331,6 +1331,7 @@ fn render_instance_logs_tab(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Insta
                         &state.loaded_log_lines,
                         "Log is empty.",
                         false,
+                        crate::console::text_redraw_generation(),
                     );
                 } else {
                     let _ = text_ui.label(
