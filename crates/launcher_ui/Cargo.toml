@@ -24,7 +24,6 @@ raw-window-handle = "*"
 tracing.workspace = true
 auth.workspace = true
 image.workspace = true
-rfd = "*"
 bytemuck = { version = "*", features = ["derive"] }
 ureq.workspace = true
 flate2 = "*"
@@ -33,10 +32,14 @@ tar = "*"
 xz2 = "*"
 vtmpack.workspace = true
 
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = "*"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "*", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+rfd = { version = "*", default-features = false, features = ["gtk3"] }
 x11-dl = "*"
 wayland-backend = { version = "*", features = ["client_system"] }
 wayland-client = "*"

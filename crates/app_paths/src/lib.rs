@@ -155,7 +155,10 @@ mod tests {
 
     impl Drop for EnvReset {
         fn drop(&mut self) {
-            restore_env("VERTEX_CONFIG_LOCATION", self.vertex_config_location.as_ref());
+            restore_env(
+                "VERTEX_CONFIG_LOCATION",
+                self.vertex_config_location.as_ref(),
+            );
             restore_env("APPIMAGE", self.appimage.as_ref());
         }
     }
@@ -177,10 +180,7 @@ mod tests {
             std::env::set_var("APPIMAGE", "/opt/Vertex/VertexLauncher.AppImage");
         }
 
-        assert_eq!(
-            portable_root(),
-            Some(PathBuf::from("/tmp/vertex-portable"))
-        );
+        assert_eq!(portable_root(), Some(PathBuf::from("/tmp/vertex-portable")));
     }
 
     #[test]

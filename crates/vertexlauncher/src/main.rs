@@ -60,6 +60,11 @@ fn main() -> eframe::Result<()> {
 
 fn report_startup_message(message: impl Into<String>, level: rfd::MessageLevel) {
     let message = message.into();
+    match level {
+        rfd::MessageLevel::Info => tracing::info!("{message}"),
+        rfd::MessageLevel::Warning => tracing::warn!("{message}"),
+        rfd::MessageLevel::Error => tracing::error!("{message}"),
+    }
     eprintln!("{message}");
     let _ = rfd::MessageDialog::new()
         .set_title("Vertex Launcher")

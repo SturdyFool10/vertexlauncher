@@ -5467,6 +5467,7 @@ struct SkinManagerState {
     base_skin_png: Option<Vec<u8>>,
     pending_skin_png: Option<Vec<u8>>,
     pending_skin_path: Option<String>,
+    initial_variant: MinecraftSkinVariant,
     pending_variant: MinecraftSkinVariant,
     available_capes: Vec<CapeChoice>,
     initial_cape_id: Option<String>,
@@ -5525,6 +5526,7 @@ impl Default for SkinManagerState {
             base_skin_png: None,
             pending_skin_png: None,
             pending_skin_path: None,
+            initial_variant: MinecraftSkinVariant::Classic,
             pending_variant: MinecraftSkinVariant::Classic,
             available_capes: Vec::new(),
             initial_cape_id: None,
@@ -5622,6 +5624,7 @@ impl SkinManagerState {
         self.base_skin_png = None;
         self.pending_skin_png = None;
         self.pending_skin_path = None;
+        self.initial_variant = MinecraftSkinVariant::Classic;
         self.pending_variant = MinecraftSkinVariant::Classic;
         self.available_capes.clear();
         self.initial_cape_id = None;
@@ -5672,6 +5675,7 @@ impl SkinManagerState {
 
         // Do not trust cached equipped skin/cape state; always load current equip from Mojang.
         self.base_skin_png = None;
+        self.initial_variant = MinecraftSkinVariant::Classic;
         self.pending_variant = MinecraftSkinVariant::Classic;
         self.pending_skin_png = None;
         self.pending_skin_path = None;
@@ -5748,6 +5752,7 @@ impl SkinManagerState {
                                 }
                                 // Keep in-progress edits intact when a late refresh arrives.
                                 if self.pending_skin_png.is_some()
+                                    || self.pending_variant != self.initial_variant
                                     || self.pending_cape_id != self.initial_cape_id
                                 {
                                 } else {
@@ -6004,7 +6009,9 @@ impl SkinManagerState {
             .as_deref()
             .map(str::trim)
             .is_some_and(|token| !token.is_empty())
-            && (self.pending_skin_png.is_some() || self.pending_cape_id != self.initial_cape_id)
+            && (self.pending_skin_png.is_some()
+                || self.pending_variant != self.initial_variant
+                || self.pending_cape_id != self.initial_cape_id)
     }
 
     fn start_refresh(&mut self) {
@@ -6118,13 +6125,15 @@ impl SkinManagerState {
 
         self.save_in_progress = true;
         let pending_skin = self.pending_skin_png.clone();
+        let base_skin = self.base_skin_png.clone();
         let pending_variant = self.pending_variant;
+        let initial_variant = self.initial_variant;
         let pending_cape = self.pending_cape_id.clone();
         let initial_cape = self.initial_cape_id.clone();
         tracing::info!(
             target: "vertexlauncher/skins",
             display_name = self.active_player_name.as_deref().unwrap_or("unknown"),
-            has_skin_change = pending_skin.is_some(),
+            has_skin_change = pending_skin.is_some() || pending_variant != initial_variant,
             skin_variant = pending_variant.as_api_str(),
             cape_changed = pending_cape != initial_cape,
             cape_selected = pending_cape.is_some(),
@@ -6140,12 +6149,17 @@ impl SkinManagerState {
 
         let task = tokio_runtime::spawn_blocking(move || -> Result<LoadedProfile, String> {
             let mut latest_profile: Option<MinecraftProfileState> = None;
-            if let Some(bytes) = pending_skin.as_deref() {
+            let skin_bytes_to_upload = pending_skin
+                .as_deref()
+                .or(base_skin.as_deref())
+                .filter(|_| pending_skin.is_some() || pending_variant != initial_variant);
+            if let Some(bytes) = skin_bytes_to_upload {
                 tracing::info!(
                     target: "vertexlauncher/skins",
                     display_name = display_name_for_log.as_str(),
                     png_bytes = bytes.len(),
                     variant = pending_variant.as_api_str(),
+                    reused_existing_skin = pending_skin.is_none(),
                     "Uploading skin to Mojang profile API."
                 );
                 latest_profile = Some(
@@ -6229,6 +6243,7 @@ impl SkinManagerState {
         self.base_skin_png = profile.active_skin_png;
         self.pending_skin_png = None;
         self.pending_skin_path = None;
+        self.initial_variant = profile.skin_variant;
         self.pending_variant = profile.skin_variant;
         self.available_capes = profile.capes;
         self.initial_cape_id = profile.active_cape_id.clone();

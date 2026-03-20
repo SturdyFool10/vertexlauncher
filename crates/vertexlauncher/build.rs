@@ -80,7 +80,10 @@ fn emit_repo_rerun_rules(repo_root: &Path) {
 }
 
 fn emit_git_rerun_rules(repo_root: &Path, git_dir: &Path) {
-    println!("cargo:rerun-if-changed={}", repo_root.join(".gitignore").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        repo_root.join(".gitignore").display()
+    );
     println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
     println!("cargo:rerun-if-changed={}", git_dir.join("index").display());
 

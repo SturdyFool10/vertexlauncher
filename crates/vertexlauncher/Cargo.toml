@@ -27,7 +27,6 @@ serde_json.workspace = true
 toml.workspace = true
 modrinth.workspace = true
 curseforge.workspace = true
-rfd = "*"
 image.workspace = true
 flate2 = "*"
 ureq.workspace = true
@@ -36,6 +35,9 @@ xz2 = "*"
 vtmpack.workspace = true
 zip = { version = "*", default-features = false, features = ["deflate"] }
 
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = "*"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 wry = "*"
 tao = "*"
@@ -43,6 +45,7 @@ raw-window-handle = "*"
 windows = { version = "*", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_SystemInformation", "Win32_UI_Shell"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+rfd = { version = "*", default-features = false, features = ["gtk3"] }
 wry = "*"
 tao = "*"
 
