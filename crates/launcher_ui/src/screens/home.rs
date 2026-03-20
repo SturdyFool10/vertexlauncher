@@ -229,6 +229,18 @@ enum ScreenshotOverlayAction {
     Delete,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ScreenshotOverlayResult {
+    action: Option<ScreenshotOverlayAction>,
+    contains_pointer: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ScreenshotOverlayButtonResult {
+    clicked: bool,
+    contains_pointer: bool,
+}
+
 #[derive(Debug, Clone)]
 struct ScreenshotCandidate {
     instance_name: String,
@@ -842,18 +854,25 @@ fn render_screenshot_tile(
         paint_screenshot_tile_placeholder(ui, rect, image_status);
     }
 
-    let tile_hovered = image_response.hovered();
+    let tile_contains_pointer = ui_pointer_over_rect(ui, rect);
+    let overlay_memory_id = image_response.id.with("home_screenshot_overlay_active");
+    let overlay_was_active = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<bool>(overlay_memory_id))
+        .unwrap_or(false);
     let mut overlay_clicked = false;
     let mut action = ScreenshotTileAction::default();
-    if tile_hovered {
-        match render_screenshot_overlay_action(
+    let mut overlay_result = ScreenshotOverlayResult::default();
+    if tile_contains_pointer || overlay_was_active {
+        overlay_result = render_screenshot_overlay_action(
             ui,
             rect,
             "home_gallery",
             screenshot,
             image_bytes.as_deref(),
             image_status == LazyImageBytesStatus::Loading,
-        ) {
+        );
+        match overlay_result.action {
             Some(ScreenshotOverlayAction::Copy) => {
                 overlay_clicked = true;
             }
@@ -864,7 +883,10 @@ fn render_screenshot_tile(
             None => {}
         }
     }
-    let stroke = if tile_hovered {
+    let overlay_active = tile_contains_pointer || overlay_result.contains_pointer;
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(overlay_memory_id, overlay_active));
+    let stroke = if overlay_active {
         ui.visuals().widgets.hovered.bg_stroke
     } else {
         ui.visuals().widgets.inactive.bg_stroke
@@ -918,6 +940,16 @@ fn rect_intersects(left: egui::Rect, right: egui::Rect) -> bool {
         && left.max.x >= right.min.x
         && left.min.y <= right.max.y
         && left.max.y >= right.min.y
+}
+
+fn ui_pointer_over_rect(ui: &Ui, rect: egui::Rect) -> bool {
+    ui.input(|input| {
+        input
+            .pointer
+            .interact_pos()
+            .or_else(|| input.pointer.hover_pos())
+            .is_some_and(|pointer_pos| rect.contains(pointer_pos))
+    })
 }
 
 fn paint_screenshot_tile_placeholder(
@@ -1296,9 +1328,10 @@ fn render_screenshot_overlay_action(
     screenshot: &ScreenshotEntry,
     copy_bytes: Option<&[u8]>,
     copy_loading: bool,
-) -> Option<ScreenshotOverlayAction> {
+) -> ScreenshotOverlayResult {
     let screenshot_key = screenshot.key();
-    if render_screenshot_overlay_button(
+    let mut result = ScreenshotOverlayResult::default();
+    let copy_result = render_screenshot_overlay_button(
         ui,
         tile_rect,
         scope,
@@ -1313,14 +1346,17 @@ fn render_screenshot_overlay_action(
         },
         8.0,
         copy_bytes.is_some(),
-    ) {
+    );
+    result.contains_pointer |= copy_result.contains_pointer;
+    if copy_result.clicked {
         let Some(bytes) = copy_bytes else {
-            return None;
+            return result;
         };
         copy_screenshot_to_clipboard(ui.ctx(), screenshot.file_name.as_str(), bytes);
-        return Some(ScreenshotOverlayAction::Copy);
+        result.action = Some(ScreenshotOverlayAction::Copy);
+        return result;
     }
-    if render_screenshot_overlay_button(
+    let delete_result = render_screenshot_overlay_button(
         ui,
         tile_rect,
         scope,
@@ -1331,10 +1367,12 @@ fn render_screenshot_overlay_action(
         "Delete screenshot",
         8.0 + SCREENSHOT_COPY_BUTTON_SIZE + 6.0,
         true,
-    ) {
-        return Some(ScreenshotOverlayAction::Delete);
+    );
+    result.contains_pointer |= delete_result.contains_pointer;
+    if delete_result.clicked {
+        result.action = Some(ScreenshotOverlayAction::Delete);
     }
-    None
+    result
 }
 
 fn render_screenshot_overlay_button(
@@ -1348,7 +1386,7 @@ fn render_screenshot_overlay_button(
     tooltip: &str,
     x_offset: f32,
     enabled: bool,
-) -> bool {
+) -> ScreenshotOverlayButtonResult {
     let button_rect = egui::Rect::from_min_size(
         tile_rect.min + egui::vec2(x_offset, 8.0),
         egui::vec2(SCREENSHOT_COPY_BUTTON_SIZE, SCREENSHOT_COPY_BUTTON_SIZE),
@@ -1370,9 +1408,11 @@ fn render_screenshot_overlay_button(
             egui::Sense::hover()
         },
     );
-    let fill = if response.is_pointer_button_down_on() {
+    let button_contains_pointer = ui_pointer_over_rect(ui, button_rect);
+    let button_pressed = button_contains_pointer && ui.input(|input| input.pointer.primary_down());
+    let fill = if response.is_pointer_button_down_on() || button_pressed {
         ui.visuals().widgets.active.bg_fill
-    } else if response.hovered() {
+    } else if button_contains_pointer {
         ui.visuals().widgets.hovered.bg_fill
     } else {
         Color32::from_rgba_premultiplied(12, 16, 24, 210)
@@ -1395,8 +1435,22 @@ fn render_screenshot_overlay_button(
         })
         .paint_at(ui, icon_rect);
     let clicked = response.clicked();
-    let _ = response.on_hover_text(tooltip);
-    clicked
+    if button_contains_pointer {
+        let _ = egui::Tooltip::always_open(
+            ui.ctx().clone(),
+            ui.layer_id(),
+            response.id.with("tooltip"),
+            egui::PopupAnchor::Pointer,
+        )
+        .gap(12.0)
+        .show(|ui| {
+            ui.label(tooltip);
+        });
+    }
+    ScreenshotOverlayButtonResult {
+        clicked,
+        contains_pointer: button_contains_pointer || response.is_pointer_button_down_on(),
+    }
 }
 
 fn copy_screenshot_to_clipboard(ctx: &egui::Context, label: &str, bytes: &[u8]) {
