@@ -5,7 +5,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[WINDOWS] target windows arm64",
@@ -13,7 +13,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[WINDOWS] target linux x86_64",
@@ -21,7 +21,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[WINDOWS] target linux arm64",
@@ -29,7 +29,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[WINDOWS] target macos arm64",
@@ -37,7 +37,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[LINUX] target windows x86_64",
@@ -45,7 +45,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[LINUX] target windows arm64",
@@ -53,7 +53,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[LINUX] target linux x86_64",
@@ -61,7 +61,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[LINUX] target linux arm64",
@@ -69,7 +69,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[LINUX] target macos arm64",
@@ -77,7 +77,39 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
+  },
+  {
+    "label": "[LINUX] appimage x86_64",
+    "command": "env VERTEX_APPIMAGE_ARCH=x86_64 bash scripts/build-appimage.sh",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "allow_concurrent_runs": false,
+    "use_new_terminal": false,
+  },
+  {
+    "label": "[LINUX] appimage arm64",
+    "command": "env VERTEX_APPIMAGE_ARCH=aarch64 bash scripts/build-appimage.sh",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "allow_concurrent_runs": false,
+    "use_new_terminal": false,
+  },
+  {
+    "label": "[LINUX] flatpak x86_64",
+    "command": "env VERTEX_FLATPAK_ARCHES=x86_64 bash scripts/build-flatpak.sh",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "allow_concurrent_runs": false,
+    "use_new_terminal": false,
+  },
+  {
+    "label": "[LINUX] flatpak arm64",
+    "command": "env VERTEX_FLATPAK_ARCHES=aarch64 bash scripts/build-flatpak.sh",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "allow_concurrent_runs": false,
+    "use_new_terminal": false,
   },
   {
     "label": "[WINDOWS] compile all",
@@ -85,7 +117,7 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
+    "use_new_terminal": false,
   },
   {
     "label": "[LINUX] compile all",
@@ -93,6 +125,6 @@
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
-    "use_new_terminal": false
-  }
+    "use_new_terminal": false,
+  },
 ]
