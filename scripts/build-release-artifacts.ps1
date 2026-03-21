@@ -78,6 +78,23 @@ function Resolve-RequestedTargets {
     return $requestedTargets
 }
 
+function Validate-RequestedTargets {
+    param(
+        [Parameter(Mandatory = $true)]$AllSpecs,
+        [Parameter(Mandatory = $true)][string[]]$RequestedTargets
+    )
+
+    if ($RequestedTargets.Count -eq 0) {
+        return
+    }
+
+    $knownTargets = @($AllSpecs | ForEach-Object { $_.Target })
+    $unknownTargets = @($RequestedTargets | Where-Object { $knownTargets -notcontains $_ })
+    if ($unknownTargets.Count -gt 0) {
+        throw "Unsupported target filter(s): $($unknownTargets -join ', ')"
+    }
+}
+
 function Filter-TargetSpecs {
     param(
         [Parameter(Mandatory = $true)]$Specs,
@@ -88,14 +105,7 @@ function Filter-TargetSpecs {
         return @($Specs)
     }
 
-    $filtered = @($Specs | Where-Object { $RequestedTargets -contains $_.Target })
-    $knownTargets = @($Specs | ForEach-Object { $_.Target })
-    $unknownTargets = @($RequestedTargets | Where-Object { $knownTargets -notcontains $_ })
-    if ($unknownTargets.Count -gt 0) {
-        throw "Unsupported target filter(s): $($unknownTargets -join ', ')"
-    }
-
-    return $filtered
+    return @($Specs | Where-Object { $RequestedTargets -contains $_.Target })
 }
 
 function Require-CargoSubcommand {
@@ -601,6 +611,8 @@ function Build-AppImageArtifacts {
 Push-Location $repoRoot
 try {
     $requestedTargets = Resolve-RequestedTargets
+    $allTargets = @($windowsTargets + $linuxTargets + $macosTargets)
+    Validate-RequestedTargets -AllSpecs $allTargets -RequestedTargets $requestedTargets
     $selectedWindowsTargets = Filter-TargetSpecs -Specs $windowsTargets -RequestedTargets $requestedTargets
     $selectedLinuxTargets = Filter-TargetSpecs -Specs $linuxTargets -RequestedTargets $requestedTargets
     $selectedMacosTargets = Filter-TargetSpecs -Specs $macosTargets -RequestedTargets $requestedTargets

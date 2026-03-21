@@ -70,7 +70,7 @@ pub(crate) fn detect_total_memory() -> String {
         };
 
         return unsafe {
-            if GlobalMemoryStatusEx(&mut memory_status).is_ok() {
+            if GlobalMemoryStatusEx(&mut memory_status).as_bool() {
                 format_memory_from_bytes(memory_status.ullTotalPhys)
             } else {
                 "Unknown".to_owned()
