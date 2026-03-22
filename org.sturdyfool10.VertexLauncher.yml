@@ -1,0 +1,79 @@
+app-id: org.sturdyfool10.VertexLauncher
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-nightly
+command: vertexlauncher
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=ipc
+  - --share=network
+  - --filesystem=xdg-run/gvfs
+
+build-options:
+  extension-tag: "24.08"
+  append-path: /usr/lib/sdk/rust-nightly/bin
+  env:
+    CARGO_HOME: /run/build/vertexlauncher/cargo
+    PKG_CONFIG_PATH: /app/lib/pkgconfig:/app/share/pkgconfig:/usr/lib/pkgconfig
+    LD_LIBRARY_PATH: /app/lib
+
+modules:
+  - name: legacy-compat-libs
+    buildsystem: simple
+    build-commands:
+      # 1. Extract the .debs
+      - ar x libsoup.deb && tar xf data.tar.* -C /app
+      - ar x libsoup-dev.deb && tar xf data.tar.* -C /app
+      - ar x libjscore.deb && tar xf data.tar.* -C /app
+      - ar x libjscore-dev.deb && tar xf data.tar.* -C /app
+
+      # 2. MOVE files from Ubuntu's nested path to Flatpak's standard path
+      # This moves /app/usr/lib/x86_64-linux-gnu/* to /app/lib/
+      - mkdir -p /app/lib /app/include
+      - cp -r /app/usr/lib/x86_64-linux-gnu/* /app/lib/
+      - cp -r /app/usr/include/* /app/include/
+
+      # 3. Cleanup
+      - rm -rf /app/usr
+      - rm *.deb data.tar.* control.tar.* debian-binary
+    sources:
+      # Libsoup 2.4 (Security Update v2.74.2-3ubuntu0.6)
+      - type: file
+        url: http://archive.ubuntu.com/ubuntu/pool/main/libs/libsoup2.4/libsoup2.4-1_2.74.2-3ubuntu0.6_amd64.deb
+        sha256: a66cd9ff6e880e90534b7561fd72e005ad31dbab2e26c1d19c2d32bb5738aa5f
+        dest-filename: libsoup.deb
+
+      - type: file
+        url: http://archive.ubuntu.com/ubuntu/pool/main/libs/libsoup2.4/libsoup2.4-dev_2.74.2-3ubuntu0.6_amd64.deb
+        sha256: 7d75cdc6783515635350560c5be0d41060c715db3df078e1b8bf0f731e7b936d
+        dest-filename: libsoup-dev.deb
+
+      # JavaScriptCore 4.0 (Security Update v2.50.4)
+      - type: file
+        url: http://archive.ubuntu.com/ubuntu/pool/main/w/webkit2gtk/libjavascriptcoregtk-4.0-18_2.50.4-0ubuntu0.22.04.1_amd64.deb
+        sha256: 68aafd3f6d0a560276875e6275713dc5f55e8cda570f9e33d38d94ba4906ce5e
+        dest-filename: libjscore.deb
+
+      - type: file
+        url: http://archive.ubuntu.com/ubuntu/pool/main/w/webkit2gtk/libjavascriptcoregtk-4.0-dev_2.50.4-0ubuntu0.22.04.1_amd64.deb
+        sha256: bd1d489c6e44fabdc3d72c3d57541e774e631f1daeede4b4918ff3fe9e7705eb
+        dest-filename: libjscore-dev.deb
+
+  - name: vertexlauncher
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - cargo build --release
+      - install -Dm755 target/release/vertexlauncher -t /app/bin/
+      - install -Dm644 data/org.sturdyfool10.VertexLauncher.desktop -t /app/share/applications/
+      - install -Dm644 data/org.sturdyfool10.VertexLauncher.metainfo.xml -t /app/share/metainfo/
+    sources:
+      - type: dir
+        path: .

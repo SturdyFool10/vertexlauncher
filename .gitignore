@@ -18,3 +18,7 @@ instances.json
 /flatpak/.generated-*.yaml
 /flatpak/vendor
 /target/release/io.github.SturdyFool10.VertexLauncher*.flatpak
+.venv-flatpak/
+.flatpak-builder/
+build-dir/
+data/
