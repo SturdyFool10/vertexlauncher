@@ -40,12 +40,12 @@ sudo apt-get install -y --no-install-recommends \
   libpango1.0-dev \
   libatk1.0-dev \
   libcairo2-dev \
-  libsoup2.4-dev \
-  libwebkit2gtk-4.0-dev \
+  webkit2gtk-4.1-dev \
+  libwebkit2gtk-4.1-dev \
   libjavascriptcoregtk-4.0-dev
 ```
 
-If your distro has dropped `libsoup2.4` / `webkit2gtk-4.0`, use the containerized Linux release scripts or Flatpak instead of a host-native build.
+If your distro has dropped `webkit2gtk-4.1` / `webkit2gtk-4.1`, use the containerized Linux release scripts or Flatpak instead of a host-native build.
 
 Basic native builds:
 
@@ -55,7 +55,7 @@ cargo build --release
 
 Linux release binaries should not be built on a rolling distro with plain `cargo build`, because that will inherit the host glibc baseline and the host GTK/WebKit stack. The x86-64 release scripts build Linux in a CentOS 7 container so the binary is linked against a `glibc 2.17` baseline instead of your rolling host.
 
-The current Linux UI stack still depends on distro WebKitGTK/GTK libraries, so the final glibc floor is constrained by those packages. To preserve the embedded Microsoft sign-in webview while restoring a `glibc 2.17` floor on x86-64, the launcher is pinned to the last `wry` line that still uses `libsoup2.4` with WebKitGTK 4.0, and the Linux container scripts target CentOS 7 where that WebKitGTK stack is still available. That upstream `wry` line currently needs a one-line compatibility patch against the modern `webkit2gtk` Rust bindings, so native Linux builds should run `bash scripts/patch-wry-source.sh` once before `cargo build`. The containerized Linux/AppImage helpers run that patch step automatically. The x86-64 container helper prints the highest required glibc symbol version after each build and now defaults to enforcing `VERTEX_MAX_GLIBC_VERSION=2.17`.
+The current Linux UI stack still depends on distro WebKitGTK/GTK libraries, so the final glibc floor is constrained by those packages. To preserve the embedded Microsoft sign-in webview while restoring a `glibc 2.17` floor on x86-64, the launcher is pinned to the last `wry` line that still uses `webkit2gtk-4.1` with WebKitGTK 4.0, and the Linux container scripts target CentOS 7 where that WebKitGTK stack is still available. That upstream `wry` line currently needs a one-line compatibility patch against the modern `webkit2gtk` Rust bindings, so native Linux builds should run `bash scripts/patch-wry-source.sh` once before `cargo build`. The containerized Linux/AppImage helpers run that patch step automatically. The x86-64 container helper prints the highest required glibc symbol version after each build and now defaults to enforcing `VERTEX_MAX_GLIBC_VERSION=2.17`.
 
 If you want the portable Linux deliverables instead of a host-linked binary, use the dedicated helper:
 

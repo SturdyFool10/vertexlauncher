@@ -16,7 +16,7 @@ use tao::event::StartCause;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use tao::event::{Event, WindowEvent};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-use tao::event_loop::{ControlFlow, EventLoop};
+use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use tao::platform::run_return::EventLoopExtRunReturn;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -264,7 +264,16 @@ fn run_webview_window_attempt(
             // Additionally scan some common parent directories for any
             // directories that start with `webkit2gtk-` to catch new
             // versions (e.g. webkit2gtk-4.1) or vendor-specific layouts.
-            for base in ["/usr/libexec", "/usr/lib", "/usr/lib64", "/app/libexec", "/app/lib", "/app/lib64"].iter() {
+            for base in [
+                "/usr/libexec",
+                "/usr/lib",
+                "/usr/lib64",
+                "/app/libexec",
+                "/app/lib",
+                "/app/lib64",
+            ]
+            .iter()
+            {
                 if let Ok(entries) = std::fs::read_dir(base) {
                     for entry in entries.flatten() {
                         let path = entry.path();
@@ -304,7 +313,7 @@ fn run_webview_window_attempt(
             }
         }
     }
-    let mut event_loop = EventLoop::<UserEvent>::with_user_event();
+    let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let result = Arc::new(Mutex::new(None::<AttemptOutcome>));
     let result_for_nav = Arc::clone(&result);
