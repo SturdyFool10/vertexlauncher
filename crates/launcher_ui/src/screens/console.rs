@@ -1,9 +1,17 @@
-use std::hash::Hash;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use egui::{Color32, Stroke, Ui};
 use textui::{ButtonOptions, InputOptions, RichTextSpan, RichTextStyle, TextUi};
 
 use crate::{console, ui::style};
+
+#[derive(Clone, Debug, Default)]
+struct LogSpanCache {
+    content_stamp: u64,
+    spans: Vec<RichTextSpan>,
+}
+
 
 pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
     let snapshot = console::snapshot();
@@ -58,7 +66,9 @@ pub(crate) fn render_log_buffer(
 ) {
     let viewport_height = ui.available_height().max(1.0);
     let text_base_id = ui.make_persistent_id((&id_source, "text"));
+
     ui.set_min_height(viewport_height);
+
     if lines.is_empty() {
         let mut empty_style = style::muted(ui);
         empty_style.wrap = false;
@@ -70,16 +80,121 @@ pub(crate) fn render_log_buffer(
         return;
     }
 
-    let viewer_options = log_viewer_options(ui, viewport_height);
-    let spans = build_log_spans(ui, lines);
-    let _ = text_ui.multiline_rich_viewer(
-        ui,
-        (text_base_id, "viewer"),
-        &spans,
-        &viewer_options,
-        stick_to_bottom,
-        false,
-    );
+    render_virtualized_log_lines(ui, text_ui, text_base_id, lines, stick_to_bottom);
+}
+
+
+
+
+// VIRTUALIZED_LOG_VIEWER_PATCH
+#[derive(Clone, Debug, Default)]
+struct VirtualLogViewerState {
+    max_line_width: f32,
+}
+
+fn virtual_log_line_options(ui: &Ui, level: Option<LogLevel>) -> textui::LabelOptions {
+    let mut style = style::body(ui);
+    style.wrap = false;
+    style.color = color_for_level(ui, level);
+    style.weight = if matches!(level, Some(LogLevel::Error | LogLevel::Fatal)) {
+        700
+    } else {
+        400
+    };
+    style
+}
+
+fn warm_log_parse_context(lines: &[String], first_visible_line: usize) -> LogParseContext {
+    const LOOKBACK_LINES: usize = 64;
+
+    let start = first_visible_line.saturating_sub(LOOKBACK_LINES);
+    let mut context = LogParseContext::default();
+
+    for line in &lines[start..first_visible_line] {
+        let _ = resolve_log_level(line, &mut context);
+    }
+
+    context
+}
+
+fn render_virtualized_log_lines(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    text_base_id: egui::Id,
+    lines: &[String],
+    stick_to_bottom: bool,
+) {
+    let body_style = style::body(ui);
+    let row_height = body_style.line_height.max(1.0);
+    let state_id = ui.make_persistent_id((text_base_id, "virtual_log_state"));
+
+    let mut viewer_state = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<VirtualLogViewerState>(state_id).unwrap_or_default());
+
+    egui::ScrollArea::both()
+        .id_salt((text_base_id, "virtual_log_scroll"))
+        .auto_shrink([false, false])
+        .stick_to_bottom(stick_to_bottom)
+        .show_viewport(ui, |ui, viewport| {
+            let total_rows = lines.len();
+            let visible_rows = ((viewport.height() / row_height).ceil() as usize).max(1);
+            let overscan = visible_rows.max(8);
+
+            let first_row = ((viewport.min.y / row_height).floor().max(0.0) as usize)
+                .min(total_rows.saturating_sub(1));
+            let last_row = (first_row + visible_rows + overscan).min(total_rows);
+
+            let top_space = first_row as f32 * row_height;
+            let bottom_space = total_rows.saturating_sub(last_row) as f32 * row_height;
+
+            let mut parse_context = warm_log_parse_context(lines, first_row);
+
+            ui.set_min_width(viewer_state.max_line_width.max(viewport.width()).max(1.0));
+            ui.add_space(top_space);
+
+            for (offset, line) in lines[first_row..last_row].iter().enumerate() {
+                let line_index = first_row + offset;
+                let level = resolve_log_level(line, &mut parse_context);
+                let options = virtual_log_line_options(ui, level);
+                let spans = [RichTextSpan {
+                    text: line.clone(),
+                    style: RichTextStyle {
+                        color: options.color,
+                        monospace: options.monospace,
+                        italic: options.italic,
+                        weight: options.weight,
+                    },
+                }];
+
+                let texture = text_ui.prepare_rich_text_texture(
+                    ui.ctx(),
+                    (text_base_id, "virtual_line", line_index),
+                    &spans,
+                    &options,
+                    None,
+                );
+
+                viewer_state.max_line_width = viewer_state
+                    .max_line_width
+                    .max(texture.size_points.x.ceil().max(1.0));
+
+                let desired_width = viewer_state.max_line_width.max(viewport.width()).max(1.0);
+                let desired_height = row_height.max(texture.size_points.y);
+
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(desired_width, desired_height),
+                    egui::Sense::hover(),
+                );
+
+                let text_rect = egui::Rect::from_min_size(rect.min, texture.size_points);
+                texture.paint(ui, text_rect);
+            }
+
+            ui.add_space(bottom_space);
+        });
+
+    ui.ctx().data_mut(|data| data.insert_temp(state_id, viewer_state));
 }
 
 fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::ConsoleSnapshot) {
@@ -161,6 +276,41 @@ fn color_for_level(ui: &Ui, level: Option<LogLevel>) -> egui::Color32 {
         Some(LogLevel::Debug | LogLevel::Trace) => ui.visuals().weak_text_color(),
         None => ui.visuals().text_color(),
     }
+}
+
+
+fn log_visuals_fingerprint(ui: &Ui) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    color_for_level(ui, Some(LogLevel::Trace)).hash(&mut hasher);
+    color_for_level(ui, Some(LogLevel::Debug)).hash(&mut hasher);
+    color_for_level(ui, Some(LogLevel::Info)).hash(&mut hasher);
+    color_for_level(ui, Some(LogLevel::Warn)).hash(&mut hasher);
+    color_for_level(ui, Some(LogLevel::Error)).hash(&mut hasher);
+    color_for_level(ui, Some(LogLevel::Fatal)).hash(&mut hasher);
+    hasher.finish()
+}
+
+fn compute_log_content_stamp(
+    lines: &[String],
+    text_redraw_generation: u64,
+    visuals_fingerprint: u64,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    visuals_fingerprint.hash(&mut hasher);
+
+    if text_redraw_generation != 0 {
+        text_redraw_generation.hash(&mut hasher);
+        return hasher.finish();
+    }
+
+    lines.len().hash(&mut hasher);
+    if let Some(first) = lines.first() {
+        first.hash(&mut hasher);
+    }
+    if let Some(last) = lines.last() {
+        last.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 fn log_viewer_options(ui: &Ui, viewport_height: f32) -> InputOptions {

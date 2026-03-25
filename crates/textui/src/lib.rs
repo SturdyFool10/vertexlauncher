@@ -58,6 +58,22 @@ fn snap_width_to_bin(width_points: f32, scale: f32) -> f32 {
     (snapped_px / scale).max(1.0)
 }
 
+/// Snap a paint rect to the physical device-pixel grid so already-antialiased
+/// glyph textures are not blurred again by fractional placement.
+#[inline]
+fn snap_rect_to_pixel_grid(rect: Rect, pixels_per_point: f32) -> Rect {
+    if !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
+        return rect;
+    }
+
+    let snap = |value: f32| (value * pixels_per_point).round() / pixels_per_point;
+
+    Rect::from_min_max(
+        Pos2::new(snap(rect.min.x), snap(rect.min.y)),
+        Pos2::new(snap(rect.max.x), snap(rect.max.y)),
+    )
+}
+
 /// A rasterized text texture with helpers for all paint scenarios.
 ///
 /// Obtain via [`TextUi::prepare_label_texture`] or
@@ -79,6 +95,7 @@ pub struct TextTextureHandle {
 impl TextTextureHandle {
     /// Paint the texture in `rect` with no tint (white = pass-through).
     pub fn paint(&self, ui: &Ui, rect: Rect) {
+        let rect = snap_rect_to_pixel_grid(rect, ui.ctx().pixels_per_point());
         ui.painter().image(
             self.texture.id(),
             rect,
@@ -89,6 +106,7 @@ impl TextTextureHandle {
 
     /// Paint with a tint multiplier.  `Color32::WHITE` = unmodified.
     pub fn paint_tinted(&self, ui: &Ui, rect: Rect, tint: Color32) {
+        let rect = snap_rect_to_pixel_grid(rect, ui.ctx().pixels_per_point());
         ui.painter().image(
             self.texture.id(),
             rect,
@@ -99,11 +117,14 @@ impl TextTextureHandle {
 
     /// Paint a UV sub-region with a tint.  Full UV = `Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0,1.0))`.
     pub fn paint_uv(&self, ui: &Ui, rect: Rect, uv: Rect, tint: Color32) {
+        let rect = snap_rect_to_pixel_grid(rect, ui.ctx().pixels_per_point());
         ui.painter().image(self.texture.id(), rect, uv, tint);
     }
 
     /// Paint on a specific egui `Painter` (e.g. a layer painter for overlays).
     pub fn paint_on(&self, painter: &egui::Painter, rect: Rect, tint: Color32) {
+        let pixels_per_point = painter.ctx().pixels_per_point();
+        let rect = snap_rect_to_pixel_grid(rect, pixels_per_point);
         painter.image(
             self.texture.id(),
             rect,
