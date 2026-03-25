@@ -1,22 +1,26 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
-use egui::{Color32, Stroke, Ui};
-use textui::{ButtonOptions, InputOptions, RichTextSpan, RichTextStyle, TextUi};
+use egui::{Color32, CornerRadius, KeyboardShortcut, Margin, Modifiers, Ui, pos2, vec2};
+use textui::{ButtonOptions, RichTextSpan, RichTextStyle, TextUi};
 
-use crate::{console, ui::style};
+use crate::{
+    console,
+    ui::{context_menu, style},
+};
 
-#[derive(Clone, Debug, Default)]
-struct LogSpanCache {
-    content_stamp: u64,
-    spans: Vec<RichTextSpan>,
+const ACTION_COPY_SELECTION: &str = "copy_selection";
+const ACTION_CLEAR_SELECTION: &str = "clear_selection";
+const ACTION_COPY_LINE: &str = "copy_line";
+
+
+fn log_console_context_menu(message: impl AsRef<str>) {
+    eprintln!("[console_context_menu] {}", message.as_ref());
 }
-
 
 pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
     let snapshot = console::snapshot();
     let lines = &snapshot.active_lines;
-    let viewport_size = egui::vec2(
+    let viewport_size = vec2(
         ui.available_width().max(1.0),
         ui.available_height().max(1.0),
     );
@@ -27,7 +31,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
             ui.add_space(style::SPACE_XL);
             let inner_width = (ui.available_width() - style::SPACE_XL * 2.0).max(1.0);
             ui.allocate_ui_with_layout(
-                egui::vec2(inner_width, ui.available_height().max(1.0)),
+                vec2(inner_width, ui.available_height().max(1.0)),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     render_tabs_row(ui, text_ui, &snapshot);
@@ -35,8 +39,8 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                     egui::Frame::new()
                         .fill(ui.visuals().widgets.noninteractive.bg_fill)
                         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-                        .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
-                        .inner_margin(egui::Margin::same(style::SPACE_MD as i8))
+                        .corner_radius(CornerRadius::same(style::CORNER_RADIUS_MD))
+                        .inner_margin(Margin::same(style::SPACE_MD as i8))
                         .show(ui, |ui| {
                             render_log_buffer(
                                 ui,
@@ -74,7 +78,7 @@ pub(crate) fn render_log_buffer(
         empty_style.wrap = false;
         let _ = text_ui.label(ui, (text_base_id, "empty"), empty_message, &empty_style);
         let _ = ui.allocate_exact_size(
-            egui::vec2(1.0, (viewport_height - 24.0).max(1.0)),
+            vec2(1.0, (viewport_height - 24.0).max(1.0)),
             egui::Sense::hover(),
         );
         return;
@@ -83,25 +87,65 @@ pub(crate) fn render_log_buffer(
     render_virtualized_log_lines(ui, text_ui, text_base_id, lines, stick_to_bottom);
 }
 
-
-
-
-// VIRTUALIZED_LOG_VIEWER_PATCH
 #[derive(Clone, Debug, Default)]
 struct VirtualLogViewerState {
     max_line_width: f32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+struct LogSelectionCursor {
+    line: usize,
+    char_index: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+struct LogSelectionState {
+    anchor: Option<LogSelectionCursor>,
+    head: Option<LogSelectionCursor>,
+    dragging: bool,
+}
+
+impl LogSelectionState {
+    fn normalized(&self) -> Option<(LogSelectionCursor, LogSelectionCursor)> {
+        let anchor = self.anchor?;
+        let head = self.head.unwrap_or(anchor);
+        if anchor <= head {
+            Some((anchor, head))
+        } else {
+            Some((head, anchor))
+        }
+    }
+
+    fn has_selection(&self) -> bool {
+        matches!(self.normalized(), Some((start, end)) if start != end)
+    }
+
+    fn clear(&mut self) {
+        self.anchor = None;
+        self.head = None;
+        self.dragging = false;
+    }
+}
+
+#[derive(Clone)]
+struct VisibleLogRowHit {
+    line_index: usize,
+    rect: egui::Rect,
+    text_rect: egui::Rect,
+    galley: std::sync::Arc<egui::Galley>,
+    line_len_chars: usize,
+}
+
 fn virtual_log_line_options(ui: &Ui, level: Option<LogLevel>) -> textui::LabelOptions {
-    let mut style = style::body(ui);
-    style.wrap = false;
-    style.color = color_for_level(ui, level);
-    style.weight = if matches!(level, Some(LogLevel::Error | LogLevel::Fatal)) {
+    let mut options = style::body(ui);
+    options.wrap = false;
+    options.color = color_for_level(ui, level);
+    options.weight = if matches!(level, Some(LogLevel::Error | LogLevel::Fatal)) {
         700
     } else {
         400
     };
-    style
+    options
 }
 
 fn warm_log_parse_context(lines: &[String], first_visible_line: usize) -> LogParseContext {
@@ -117,6 +161,183 @@ fn warm_log_parse_context(lines: &[String], first_visible_line: usize) -> LogPar
     context
 }
 
+fn log_char_count(text: &str) -> usize {
+    text.chars().count()
+}
+
+fn log_char_to_byte_index(text: &str, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+
+    text.char_indices()
+        .nth(char_index)
+        .map(|(byte_index, _)| byte_index)
+        .unwrap_or(text.len())
+}
+
+fn slice_log_chars(text: &str, start: usize, end: usize) -> &str {
+    let start = start.min(log_char_count(text));
+    let end = end.min(log_char_count(text));
+    let start_byte = log_char_to_byte_index(text, start);
+    let end_byte = log_char_to_byte_index(text, end);
+    &text[start_byte..end_byte]
+}
+
+fn selected_log_text(lines: &[String], selection: &LogSelectionState) -> Option<String> {
+    let (start, end) = selection.normalized()?;
+    if start == end {
+        return None;
+    }
+
+    let mut out = String::new();
+
+    for line_index in start.line..=end.line {
+        let line = lines.get(line_index)?;
+        let line_chars = log_char_count(line);
+
+        let from = if line_index == start.line {
+            start.char_index.min(line_chars)
+        } else {
+            0
+        };
+
+        let to = if line_index == end.line {
+            end.char_index.min(line_chars)
+        } else {
+            line_chars
+        };
+
+        if to > from {
+            out.push_str(slice_log_chars(line, from, to));
+        }
+
+        if line_index != end.line {
+            out.push('\n');
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn selection_fill_color(ui: &Ui) -> egui::Color32 {
+    ui.visuals().selection.bg_fill.linear_multiply(0.55)
+}
+
+fn galley_font_id(options: &textui::LabelOptions) -> egui::FontId {
+    if options.monospace {
+        egui::FontId::monospace(options.font_size)
+    } else {
+        egui::FontId::proportional(options.font_size)
+    }
+}
+
+fn row_contains_text(row: &VisibleLogRowHit, pointer_pos: egui::Pos2) -> bool {
+    row.line_len_chars > 0 && row.text_rect.contains(pointer_pos)
+}
+
+fn clamp_log_cursor_to_row(
+    row: &VisibleLogRowHit,
+    pointer_pos: egui::Pos2,
+) -> LogSelectionCursor {
+    let local_x = (pointer_pos.x - row.rect.min.x).clamp(0.0, row.rect.width().max(0.0));
+    let local_y = (pointer_pos.y - row.rect.min.y).clamp(0.0, row.rect.height().max(0.0));
+    let cursor = row.galley.cursor_from_pos(vec2(local_x, local_y));
+    LogSelectionCursor {
+        line: row.line_index,
+        char_index: cursor.index.min(row.line_len_chars),
+    }
+}
+
+fn cursor_from_visible_rows(
+    rows: &[VisibleLogRowHit],
+    pointer_pos: egui::Pos2,
+) -> Option<LogSelectionCursor> {
+    let first = rows.first()?;
+    let last = rows.last()?;
+
+    if let Some(row) = rows.iter().find(|row| row.rect.contains(pointer_pos)) {
+        return Some(clamp_log_cursor_to_row(row, pointer_pos));
+    }
+
+    if pointer_pos.y <= first.rect.min.y {
+        return Some(clamp_log_cursor_to_row(
+            first,
+            pos2(pointer_pos.x, first.rect.center().y),
+        ));
+    }
+
+    if pointer_pos.y >= last.rect.max.y {
+        return Some(clamp_log_cursor_to_row(
+            last,
+            pos2(pointer_pos.x, last.rect.center().y),
+        ));
+    }
+
+    let nearest = rows
+        .iter()
+        .min_by(|a, b| {
+            let da = (a.rect.center().y - pointer_pos.y).abs();
+            let db = (b.rect.center().y - pointer_pos.y).abs();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })?;
+
+    Some(clamp_log_cursor_to_row(nearest, pointer_pos))
+}
+
+fn paint_log_selection_for_line(
+    ui: &Ui,
+    rect: egui::Rect,
+    galley: &egui::Galley,
+    line_text: &str,
+    line_index: usize,
+    selection: &LogSelectionState,
+) {
+    let Some((start, end)) = selection.normalized() else {
+        return;
+    };
+
+    if line_index < start.line || line_index > end.line {
+        return;
+    }
+
+    let line_chars = log_char_count(line_text);
+    let from = if line_index == start.line {
+        start.char_index.min(line_chars)
+    } else {
+        0
+    };
+    let to = if line_index == end.line {
+        end.char_index.min(line_chars)
+    } else {
+        line_chars
+    };
+
+    if to <= from {
+        return;
+    }
+
+    let start_cursor = egui::text::CCursor::new(from);
+    let end_cursor = egui::text::CCursor::new(to);
+    let start_pos = galley.pos_from_cursor(start_cursor);
+    let end_pos = galley.pos_from_cursor(end_cursor);
+
+    let min_x = rect.min.x + start_pos.min.x.min(end_pos.min.x);
+    let max_x = rect.min.x + start_pos.max.x.max(end_pos.max.x);
+
+    let selection_rect = egui::Rect::from_min_max(
+        pos2(min_x, rect.min.y),
+        pos2(max_x.max(min_x + 1.0), rect.max.y),
+    );
+
+    ui.painter()
+        .rect_filled(selection_rect, 0.0, selection_fill_color(ui));
+}
+
 fn render_virtualized_log_lines(
     ui: &mut Ui,
     text_ui: &mut TextUi,
@@ -127,10 +348,45 @@ fn render_virtualized_log_lines(
     let body_style = style::body(ui);
     let row_height = body_style.line_height.max(1.0);
     let state_id = ui.make_persistent_id((text_base_id, "virtual_log_state"));
+    let selection_id = ui.make_persistent_id((text_base_id, "virtual_log_selection"));
+    let viewport_id = ui.make_persistent_id((text_base_id, "virtual_log_viewport"));
+    let menu_source_id = ui.make_persistent_id((text_base_id, "context_menu_source"));
+    let menu_line_id = ui.make_persistent_id((text_base_id, "context_menu_line"));
 
     let mut viewer_state = ui
         .ctx()
         .data_mut(|data| data.get_temp::<VirtualLogViewerState>(state_id).unwrap_or_default());
+    let mut selection_state = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<LogSelectionState>(selection_id).unwrap_or_default());
+
+    if let Some(action) = context_menu::take_invocation(ui.ctx(), menu_source_id) {
+        log_console_context_menu(format!("received invocation action={}", action));
+        match action.as_str() {
+            ACTION_COPY_SELECTION => {
+                if let Some(text) = selected_log_text(lines, &selection_state) {
+                    ui.ctx().copy_text(text);
+                }
+            }
+            ACTION_CLEAR_SELECTION => {
+                selection_state.clear();
+            }
+            ACTION_COPY_LINE => {
+                let maybe_line_index = ui
+                    .ctx()
+                    .data_mut(|data| data.get_temp::<Option<usize>>(menu_line_id))
+                    .flatten();
+                if let Some(line_index) = maybe_line_index {
+                    if let Some(line) = lines.get(line_index) {
+                        ui.ctx().copy_text(line.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut clear_selection = false;
 
     egui::ScrollArea::both()
         .id_salt((text_base_id, "virtual_log_scroll"))
@@ -149,6 +405,12 @@ fn render_virtualized_log_lines(
             let bottom_space = total_rows.saturating_sub(last_row) as f32 * row_height;
 
             let mut parse_context = warm_log_parse_context(lines, first_row);
+            let mut row_hits: Vec<VisibleLogRowHit> =
+                Vec::with_capacity(last_row.saturating_sub(first_row));
+
+            let clip_rect = ui.clip_rect();
+            let viewport_response =
+                ui.interact(clip_rect, viewport_id, egui::Sense::click_and_drag());
 
             ui.set_min_width(viewer_state.max_line_width.max(viewport.width()).max(1.0));
             ui.add_space(top_space);
@@ -182,19 +444,155 @@ fn render_virtualized_log_lines(
                 let desired_width = viewer_state.max_line_width.max(viewport.width()).max(1.0);
                 let desired_height = row_height.max(texture.size_points.y);
 
+                let galley = ui.painter().layout_no_wrap(
+                    line.clone(),
+                    galley_font_id(&options),
+                    Color32::TRANSPARENT,
+                );
+
                 let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(desired_width, desired_height),
+                    vec2(desired_width, desired_height),
                     egui::Sense::hover(),
                 );
 
                 let text_rect = egui::Rect::from_min_size(rect.min, texture.size_points);
+
+                row_hits.push(VisibleLogRowHit {
+                    line_index,
+                    rect,
+                    text_rect,
+                    galley: galley.clone(),
+                    line_len_chars: log_char_count(line),
+                });
+
+                paint_log_selection_for_line(ui, rect, &galley, line, line_index, &selection_state);
                 texture.paint(ui, text_rect);
+            }
+
+            let mut current_hovered_line: Option<usize> = None;
+            if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                if let Some(row) = row_hits.iter().find(|row| row_contains_text(row, pointer_pos)) {
+                    current_hovered_line = Some(row.line_index);
+                    ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Text);
+                }
+            }
+
+            if viewport_response.secondary_clicked() {
+                viewport_response.request_focus();
+                let latest_pos = ui.input(|i| i.pointer.latest_pos());
+                let interact_pos = ui.input(|i| i.pointer.interact_pos());
+                let press_origin = ui.input(|i| i.pointer.press_origin());
+                let anchor_pos = latest_pos.or(interact_pos).or(press_origin);
+
+                log_console_context_menu(format!(
+                    "secondary_clicked hovered_line={:?} selection_active={} latest_pos={:?} interact_pos={:?} press_origin={:?} clip_rect={:?}",
+                    current_hovered_line,
+                    selection_state.has_selection(),
+                    latest_pos,
+                    interact_pos,
+                    press_origin,
+                    clip_rect,
+                ));
+
+                if let Some(anchor_pos) = anchor_pos {
+                    let selection_active = selection_state.has_selection();
+
+                    let items = if selection_active {
+                        vec![
+                            context_menu::ContextMenuItem::new(ACTION_COPY_SELECTION, "Copy selection"),
+                            context_menu::ContextMenuItem::new(ACTION_CLEAR_SELECTION, "Clear selection"),
+                        ]
+                    } else if let Some(line_index) = current_hovered_line {
+                        ui.ctx().data_mut(|data| data.insert_temp(menu_line_id, Some(line_index)));
+                        vec![context_menu::ContextMenuItem::new(ACTION_COPY_LINE, "Copy line")]
+                    } else {
+                        Vec::new()
+                    };
+
+                    log_console_context_menu(format!(
+                        "requesting menu anchor=({:.1}, {:.1}) item_count={}",
+                        anchor_pos.x,
+                        anchor_pos.y,
+                        items.len(),
+                    ));
+
+                    if !items.is_empty() {
+                        context_menu::request(
+                            ui.ctx(),
+                            context_menu::ContextMenuRequest::new(
+                                menu_source_id,
+                                anchor_pos,
+                                items,
+                            ),
+                        );
+                    }
+                } else {
+                    log_console_context_menu("secondary_clicked but no pointer position was available");
+                }
+            }
+
+            if viewport_response.clicked() {
+                viewport_response.request_focus();
+                if let Some(pointer_pos) = viewport_response.interact_pointer_pos() {
+                    if let Some(cursor) = cursor_from_visible_rows(&row_hits, pointer_pos) {
+                        selection_state.anchor = Some(cursor);
+                        selection_state.head = Some(cursor);
+                        selection_state.dragging = false;
+                    } else {
+                        clear_selection = true;
+                    }
+                } else {
+                    clear_selection = true;
+                }
+            }
+
+            if viewport_response.drag_started() {
+                viewport_response.request_focus();
+                if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                    if let Some(cursor) = cursor_from_visible_rows(&row_hits, pointer_pos) {
+                        selection_state.anchor = Some(cursor);
+                        selection_state.head = Some(cursor);
+                        selection_state.dragging = true;
+                    }
+                }
+            }
+
+            if selection_state.dragging && ui.input(|i| i.pointer.primary_down()) {
+                if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                    if let Some(cursor) = cursor_from_visible_rows(&row_hits, pointer_pos) {
+                        selection_state.head = Some(cursor);
+                    }
+                }
+            }
+
+            if selection_state.dragging && !ui.input(|i| i.pointer.primary_down()) {
+                selection_state.dragging = false;
             }
 
             ui.add_space(bottom_space);
         });
 
-    ui.ctx().data_mut(|data| data.insert_temp(state_id, viewer_state));
+    if clear_selection {
+        selection_state.clear();
+    }
+
+    let console_has_focus = ui.memory(|mem| mem.has_focus(viewport_id));
+    let copy_requested = selection_state.has_selection()
+        && console_has_focus
+        && ui.input_mut(|i| {
+            i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::C))
+        });
+
+    if copy_requested {
+        if let Some(text) = selected_log_text(lines, &selection_state) {
+            ui.ctx().copy_text(text);
+        }
+    }
+
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(state_id, viewer_state);
+        data.insert_temp(selection_id, selection_state);
+    });
 }
 
 fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::ConsoleSnapshot) {
@@ -203,7 +601,7 @@ fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::Consol
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_SM);
+                ui.spacing_mut().item_spacing = vec2(style::SPACE_SM, style::SPACE_SM);
                 for tab in &snapshot.tabs {
                     let selected = tab.id == snapshot.active_tab_id;
                     let fill = if selected {
@@ -219,8 +617,8 @@ fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::Consol
                     egui::Frame::new()
                         .fill(fill)
                         .stroke(stroke)
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .inner_margin(egui::Margin::symmetric(8, 4))
+                        .corner_radius(CornerRadius::same(8))
+                        .inner_margin(Margin::symmetric(8, 4))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = style::SPACE_XS;
@@ -239,9 +637,9 @@ fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::Consol
 
                                 if tab.can_close {
                                     let close_style = ButtonOptions {
-                                        min_size: egui::vec2(26.0, 26.0),
+                                        min_size: vec2(26.0, 26.0),
                                         corner_radius: style::CORNER_RADIUS_SM,
-                                        padding: egui::vec2(0.0, 0.0),
+                                        padding: vec2(0.0, 0.0),
                                         text_color: ui.visuals().text_color(),
                                         fill: ui.visuals().widgets.inactive.weak_bg_fill,
                                         fill_hovered: ui.visuals().widgets.hovered.weak_bg_fill,
@@ -276,97 +674,6 @@ fn color_for_level(ui: &Ui, level: Option<LogLevel>) -> egui::Color32 {
         Some(LogLevel::Debug | LogLevel::Trace) => ui.visuals().weak_text_color(),
         None => ui.visuals().text_color(),
     }
-}
-
-
-fn log_visuals_fingerprint(ui: &Ui) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    color_for_level(ui, Some(LogLevel::Trace)).hash(&mut hasher);
-    color_for_level(ui, Some(LogLevel::Debug)).hash(&mut hasher);
-    color_for_level(ui, Some(LogLevel::Info)).hash(&mut hasher);
-    color_for_level(ui, Some(LogLevel::Warn)).hash(&mut hasher);
-    color_for_level(ui, Some(LogLevel::Error)).hash(&mut hasher);
-    color_for_level(ui, Some(LogLevel::Fatal)).hash(&mut hasher);
-    hasher.finish()
-}
-
-fn compute_log_content_stamp(
-    lines: &[String],
-    text_redraw_generation: u64,
-    visuals_fingerprint: u64,
-) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    visuals_fingerprint.hash(&mut hasher);
-
-    if text_redraw_generation != 0 {
-        text_redraw_generation.hash(&mut hasher);
-        return hasher.finish();
-    }
-
-    lines.len().hash(&mut hasher);
-    if let Some(first) = lines.first() {
-        first.hash(&mut hasher);
-    }
-    if let Some(last) = lines.last() {
-        last.hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-fn log_viewer_options(ui: &Ui, viewport_height: f32) -> InputOptions {
-    let body_style = style::body(ui);
-    let selection = ui.visuals().selection;
-    InputOptions {
-        font_size: body_style.font_size,
-        line_height: body_style.line_height,
-        text_color: body_style.color,
-        cursor_color: ui.visuals().text_cursor.stroke.color,
-        selection_color: Color32::from_rgba_premultiplied(
-            selection.bg_fill.r(),
-            selection.bg_fill.g(),
-            selection.bg_fill.b(),
-            110,
-        ),
-        selected_text_color: selection.stroke.color,
-        background_color: Color32::TRANSPARENT,
-        background_color_hovered: Some(Color32::TRANSPARENT),
-        background_color_focused: Some(Color32::TRANSPARENT),
-        stroke: Stroke::NONE,
-        stroke_hovered: Some(Stroke::NONE),
-        stroke_focused: Some(Stroke::NONE),
-        corner_radius: 0,
-        padding: egui::Vec2::ZERO,
-        monospace: false,
-        min_width: 1.0,
-        desired_width: Some(ui.available_width().max(1.0)),
-        desired_rows: ((viewport_height / body_style.line_height).ceil() as usize).max(1),
-    }
-}
-
-fn build_log_spans(ui: &Ui, lines: &[String]) -> Vec<RichTextSpan> {
-    let mut context = LogParseContext::default();
-    let mut spans = Vec::with_capacity(lines.len());
-    for (index, line) in lines.iter().enumerate() {
-        let level = resolve_log_level(line, &mut context);
-        let mut text = line.clone();
-        if index + 1 < lines.len() {
-            text.push('\n');
-        }
-        spans.push(RichTextSpan {
-            text,
-            style: RichTextStyle {
-                color: color_for_level(ui, level),
-                monospace: false,
-                italic: false,
-                weight: if matches!(level, Some(LogLevel::Error | LogLevel::Fatal)) {
-                    700
-                } else {
-                    400
-                },
-            },
-        });
-    }
-    spans
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -440,9 +747,6 @@ fn is_stacktrace_continuation_line(trimmed: &str) -> bool {
 }
 
 fn parse_minecraft_log_level(line: &str) -> Option<LogLevel> {
-    // Vanilla/Forge-like game logs usually look like:
-    // [20:29:39] [main/WARN]: ...
-    // [20:29:39] [Render thread/INFO] [pkg.Logger/]: ...
     if !line.starts_with('[') {
         return None;
     }
@@ -467,7 +771,6 @@ fn parse_minecraft_log_level(line: &str) -> Option<LogLevel> {
         return Some(level);
     }
 
-    // User requested Minecraft logs default to INFO when level token is absent/unrecognized.
     Some(LogLevel::Info)
 }
 
@@ -504,7 +807,6 @@ fn parse_level_token(token: &str) -> Option<LogLevel> {
 }
 
 fn looks_like_minecraft_timestamp(value: &str) -> bool {
-    // Typical game output uses HH:mm:ss
     let mut parts = value.split(':');
     let Some(hours) = parts.next() else {
         return false;

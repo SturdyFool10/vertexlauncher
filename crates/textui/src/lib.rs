@@ -704,19 +704,28 @@ impl TextUi {
         options.weight.hash(&mut hasher);
         options.italic.hash(&mut hasher);
         options.color.hash(&mut hasher);
-        binned_width.map(f32::to_bits).unwrap_or(0).hash(&mut hasher);
+        binned_width
+            .map(f32::to_bits)
+            .unwrap_or(0)
+            .hash(&mut hasher);
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
 
         let texture_id = egui::Id::new(id_source).with("textui_prepare_label");
         if let Some((texture, size_points)) = self.get_cached_texture(texture_id, fingerprint) {
-            return TextTextureHandle { texture, size_points };
+            return TextTextureHandle {
+                texture,
+                size_points,
+            };
         }
 
         let raster = self.rasterize_plain_text(text, options, binned_width, scale);
         let size_points = raster.size_points;
         let texture = self.update_texture(ctx, texture_id, fingerprint, raster.image, size_points);
-        TextTextureHandle { texture, size_points }
+        TextTextureHandle {
+            texture,
+            size_points,
+        }
     }
 
     /// Returns (or freshly rasterizes) a cached texture for rich (multi-style) text.
@@ -745,19 +754,28 @@ impl TextUi {
         options.font_size.to_bits().hash(&mut hasher);
         options.line_height.to_bits().hash(&mut hasher);
         options.wrap.hash(&mut hasher);
-        binned_width.map(f32::to_bits).unwrap_or(0).hash(&mut hasher);
+        binned_width
+            .map(f32::to_bits)
+            .unwrap_or(0)
+            .hash(&mut hasher);
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
 
         let texture_id = egui::Id::new(id_source).with("textui_prepare_rich");
         if let Some((texture, size_points)) = self.get_cached_texture(texture_id, fingerprint) {
-            return TextTextureHandle { texture, size_points };
+            return TextTextureHandle {
+                texture,
+                size_points,
+            };
         }
 
         let raster = self.rasterize_rich_text(spans, options, binned_width, scale);
         let size_points = raster.size_points;
         let texture = self.update_texture(ctx, texture_id, fingerprint, raster.image, size_points);
-        TextTextureHandle { texture, size_points }
+        TextTextureHandle {
+            texture,
+            size_points,
+        }
     }
 
     fn label_impl(
@@ -903,13 +921,8 @@ impl TextUi {
             } else {
                 let raster = self.rasterize_plain_text(text, &label_style, None, scale);
                 let sz = raster.size_points;
-                let tex = self.update_texture(
-                    ui.ctx(),
-                    text_tex_id,
-                    text_fingerprint,
-                    raster.image,
-                    sz,
-                );
+                let tex =
+                    self.update_texture(ui.ctx(), text_tex_id, text_fingerprint, raster.image, sz);
                 (sz, tex)
             };
 
@@ -976,20 +989,30 @@ impl TextUi {
             options.text.font_size.to_bits().hash(&mut hasher);
             options.text.line_height.to_bits().hash(&mut hasher);
             options.text.color.hash(&mut hasher);
-            width_points_opt.map(f32::to_bits).unwrap_or(0).hash(&mut hasher);
+            width_points_opt
+                .map(f32::to_bits)
+                .unwrap_or(0)
+                .hash(&mut hasher);
             self.hash_typography(&mut hasher);
             hasher.finish()
         };
 
-        let (texture, raster_size) =
-            if let Some((tex, sz)) = self.get_cached_texture(tooltip_tex_id, tooltip_fingerprint) {
-                (tex, sz)
-            } else {
-                let raster = self.rasterize_plain_text(text, &options.text, width_points_opt, scale);
-                let sz = raster.size_points;
-                let tex = self.update_texture(ui.ctx(), tooltip_tex_id, tooltip_fingerprint, raster.image, sz);
-                (tex, sz)
-            };
+        let (texture, raster_size) = if let Some((tex, sz)) =
+            self.get_cached_texture(tooltip_tex_id, tooltip_fingerprint)
+        {
+            (tex, sz)
+        } else {
+            let raster = self.rasterize_plain_text(text, &options.text, width_points_opt, scale);
+            let sz = raster.size_points;
+            let tex = self.update_texture(
+                ui.ctx(),
+                tooltip_tex_id,
+                tooltip_fingerprint,
+                raster.image,
+                sz,
+            );
+            (tex, sz)
+        };
 
         let size = raster_size + options.padding * 2.0;
         let mut rect = Rect::from_min_size(pointer + options.offset, size);
@@ -1166,12 +1189,14 @@ impl TextUi {
                 cached.clone()
             } else {
                 let b = parse_markdown_blocks(markdown);
-                self.markdown_cache.insert(cache_id, (md_fingerprint, b.clone()));
+                self.markdown_cache
+                    .insert(cache_id, (md_fingerprint, b.clone()));
                 b
             }
         } else {
             let b = parse_markdown_blocks(markdown);
-            self.markdown_cache.insert(cache_id, (md_fingerprint, b.clone()));
+            self.markdown_cache
+                .insert(cache_id, (md_fingerprint, b.clone()));
             b
         };
 

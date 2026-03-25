@@ -1,4 +1,5 @@
 pub mod components;
+pub mod context_menu;
 pub mod modal;
 pub mod motion;
 pub mod sidebar;

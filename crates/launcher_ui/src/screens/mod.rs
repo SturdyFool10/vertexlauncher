@@ -7,7 +7,7 @@ use egui::Ui;
 use instances::InstanceStore;
 use textui::TextUi;
 
-use crate::ui::theme::Theme;
+use crate::ui::{context_menu, theme::Theme};
 
 mod console;
 mod content_browser;
@@ -106,12 +106,13 @@ pub fn handle_escape(
     screen: AppScreen,
     selected_instance_id: Option<&str>,
 ) -> bool {
-    match screen {
+    let output = match screen {
         AppScreen::Home => home::handle_escape(ctx),
         AppScreen::Library => library::handle_escape(ctx),
         AppScreen::Instance => instance::handle_escape(ctx, selected_instance_id),
         _ => false,
-    }
+    };
+    output
 }
 
 pub fn render(
@@ -149,7 +150,8 @@ pub fn render(
         (!config.curseforge_api_key().trim().is_empty())
             .then(|| config.curseforge_api_key().to_owned()),
     );
-    match screen {
+
+    let output = match screen {
         AppScreen::Home => {
             let output = home::render(ui, text_ui, instances, config, streamer_mode);
             ScreenOutput {
@@ -254,5 +256,8 @@ pub fn render(
                 selected_instance_id: None,
             }
         }
-    }
+    };
+
+    context_menu::show(ui.ctx());
+    output
 }

@@ -111,7 +111,9 @@ fn truncate_prepared_single_line_text_with_ellipsis(
 
     // Measure estimate; then probe one step up/down to find the correct cut.
     let est_width = if estimate > 0 {
-        text_ui.measure_text_size(ui, &candidate(estimate), label_options).x
+        text_ui
+            .measure_text_size(ui, &candidate(estimate), label_options)
+            .x
     } else {
         f32::MAX
     };
@@ -122,7 +124,9 @@ fn truncate_prepared_single_line_text_with_ellipsis(
         // Try to extend one char at a time (usually 0–2 steps)
         let mut n = estimate + 1;
         while n <= len {
-            let w = text_ui.measure_text_size(ui, &candidate(n), label_options).x;
+            let w = text_ui
+                .measure_text_size(ui, &candidate(n), label_options)
+                .x;
             if w > max_width {
                 break;
             }
@@ -136,7 +140,9 @@ fn truncate_prepared_single_line_text_with_ellipsis(
             if n == 0 {
                 break;
             }
-            let w = text_ui.measure_text_size(ui, &candidate(n), label_options).x;
+            let w = text_ui
+                .measure_text_size(ui, &candidate(n), label_options)
+                .x;
             if w <= max_width {
                 best = n;
                 break;
