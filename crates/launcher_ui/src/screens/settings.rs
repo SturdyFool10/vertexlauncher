@@ -1,7 +1,7 @@
 use config::{
     Config, DOWNLOAD_CONCURRENCY_MAX, DOWNLOAD_CONCURRENCY_MIN, DropdownSettingId, FloatSettingId,
     INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP, IntSettingId,
-    JavaRuntimeVersion, SkinPreviewAaMode, UiFontFamily, parse_bitrate_to_bps,
+    JavaRuntimeVersion, SkinPreviewAaMode, SvgAaMode, UiFontFamily, parse_bitrate_to_bps,
 };
 use egui::Ui;
 use installation::purge_cache as purge_installation_cache;
@@ -63,6 +63,7 @@ fn render_settings_contents(
             render_theme_setting(ui, text_ui, config, available_themes);
             render_ui_font_settings(ui, text_ui, config, available_ui_fonts);
             render_skin_preview_setting(ui, text_ui, config);
+            render_svg_aa_setting(ui, text_ui, config);
             render_window_blur_setting(ui, text_ui, config);
             render_selected_toggles(
                 ui,
@@ -379,6 +380,30 @@ fn render_ui_font_settings(
     });
 
     render_selected_int_settings(ui, text_ui, config, &[IntSettingId::UiFontWeight]);
+}
+
+fn render_svg_aa_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let mut selected = SvgAaMode::ALL
+        .iter()
+        .position(|mode| *mode == config.svg_aa_mode())
+        .unwrap_or(0);
+    let labels: Vec<&str> = SvgAaMode::ALL.iter().map(|mode| mode.label()).collect();
+
+    let response = settings_widgets::dropdown_row(
+        text_ui,
+        ui,
+        "svg_aa_mode",
+        "SVG Anti-Aliasing",
+        Some("Controls supersampled SVG rasterization for launcher icons. Changes apply immediately."),
+        &mut selected,
+        &labels,
+    );
+
+    if response.changed() {
+        if let Some(next) = SvgAaMode::ALL.get(selected).copied() {
+            config.set_svg_aa_mode(next);
+        }
+    }
 }
 
 fn render_skin_preview_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {

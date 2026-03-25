@@ -24,6 +24,7 @@ raw-window-handle.workspace = true
 tracing.workspace = true
 auth.workspace = true
 image.workspace = true
+resvg = "*"
 bytemuck = { version = "*", features = ["derive"] }
 ureq.workspace = true
 flate2 = "*"

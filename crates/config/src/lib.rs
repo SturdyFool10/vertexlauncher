@@ -70,6 +70,43 @@ impl SkinPreviewAaMode {
     }
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SvgAaMode {
+    Off,
+    Balanced,
+    Crisp,
+    Ultra,
+}
+
+impl SvgAaMode {
+    pub const ALL: [SvgAaMode; 4] = [
+        SvgAaMode::Balanced,
+        SvgAaMode::Crisp,
+        SvgAaMode::Ultra,
+        SvgAaMode::Off,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            SvgAaMode::Off => "Off",
+            SvgAaMode::Balanced => "Balanced (SSAA 2x)",
+            SvgAaMode::Crisp => "Crisp (SSAA 3x)",
+            SvgAaMode::Ultra => "Ultra (SSAA 4x)",
+        }
+    }
+
+    pub const fn supersample_scale(self) -> u32 {
+        match self {
+            SvgAaMode::Off => 1,
+            SvgAaMode::Balanced => 2,
+            SvgAaMode::Crisp => 3,
+            SvgAaMode::Ultra => 4,
+        }
+    }
+}
+
 /// File format choice for config creation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfigFormat {
@@ -614,6 +651,7 @@ pub struct Config {
     notification_expiry_bars_empty_left: bool,
     ui_font_family: UiFontFamily,
     skin_preview_aa_mode: SkinPreviewAaMode,
+    svg_aa_mode: SvgAaMode,
     skin_preview_msaa_samples: i32,
     skin_preview_motion_blur_enabled: bool,
     skin_preview_motion_blur_amount: f32,
@@ -674,6 +712,16 @@ impl Config {
     /// Sets skin preview anti-aliasing mode.
     pub fn set_skin_preview_aa_mode(&mut self, mode: SkinPreviewAaMode) {
         self.skin_preview_aa_mode = mode;
+    }
+
+    /// Returns configured SVG rasterization anti-aliasing mode.
+    pub fn svg_aa_mode(&self) -> SvgAaMode {
+        self.svg_aa_mode
+    }
+
+    /// Sets SVG rasterization anti-aliasing mode.
+    pub fn set_svg_aa_mode(&mut self, mode: SvgAaMode) {
+        self.svg_aa_mode = mode;
     }
 
     pub fn skin_preview_msaa_samples(&self) -> i32 {
@@ -1002,6 +1050,7 @@ impl Config {
             notification_expiry_bars_empty_left,
             ui_font_family: _,
             skin_preview_aa_mode: _,
+            svg_aa_mode: _,
             skin_preview_msaa_samples: _,
             skin_preview_motion_blur_enabled: _,
             skin_preview_motion_blur_amount: _,
@@ -1093,6 +1142,7 @@ impl Config {
             notification_expiry_bars_empty_left: _,
             ui_font_family,
             skin_preview_aa_mode: _,
+            svg_aa_mode: _,
             skin_preview_msaa_samples: _,
             skin_preview_motion_blur_enabled: _,
             skin_preview_motion_blur_amount: _,
@@ -1138,6 +1188,7 @@ impl Config {
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
             skin_preview_aa_mode: _,
+            svg_aa_mode: _,
             skin_preview_msaa_samples: _,
             skin_preview_motion_blur_enabled: _,
             skin_preview_motion_blur_amount,
@@ -1191,6 +1242,7 @@ impl Config {
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
             skin_preview_aa_mode: _,
+            svg_aa_mode: _,
             skin_preview_motion_blur_enabled: _,
             skin_preview_motion_blur_amount: _,
             skin_preview_motion_blur_shutter_frames: _,
@@ -1245,6 +1297,7 @@ impl Config {
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
             skin_preview_aa_mode: _,
+            svg_aa_mode: _,
             skin_preview_msaa_samples: _,
             skin_preview_motion_blur_enabled: _,
             skin_preview_motion_blur_amount: _,
@@ -1310,6 +1363,7 @@ impl Default for Config {
             notification_expiry_bars_empty_left: false,
             ui_font_family: UiFontFamily::included_default(),
             skin_preview_aa_mode: SkinPreviewAaMode::Fxaa,
+            svg_aa_mode: SvgAaMode::Balanced,
             skin_preview_msaa_samples: 4,
             skin_preview_motion_blur_enabled: false,
             skin_preview_motion_blur_amount: 0.15,

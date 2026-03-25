@@ -1,6 +1,8 @@
-use egui::{Button, Color32, Image, Response, Stroke, Ui, vec2};
+use config::SvgAaMode;
+use egui::{Button, Color32, ColorImage, Image, Response, Stroke, TextureHandle, Ui, vec2};
+use image::{RgbaImage, imageops::FilterType};
 
-use crate::ui::motion;
+use crate::ui::{motion, svg_aa};
 
 pub fn svg(
     ui: &mut Ui,
@@ -20,7 +22,11 @@ pub fn svg(
     );
     let button_size = ui.available_width().min(max_button_width).max(1.0);
     let icon_size = (button_size - 8.0).clamp(10.0, button_size);
-    let icon = Image::from_bytes(uri, themed_svg).fit_to_exact_size(vec2(icon_size, icon_size));
+    let aa_mode = svg_aa::get_svg_aa_mode();
+    let icon = rasterized_svg_image(ui, icon_id, &themed_svg, text_color, icon_size, aa_mode)
+        .unwrap_or_else(|| {
+            Image::from_bytes(uri, themed_svg.clone()).fit_to_exact_size(vec2(icon_size, icon_size))
+        });
 
     const CORNER_RADIUS_DEFAULT: f32 = 10.0;
     const CORNER_RADIUS_SELECTED: f32 = 5.0;
@@ -80,6 +86,80 @@ pub fn svg(
         }
     }
     response
+}
+
+fn rasterized_svg_image(
+    ui: &mut Ui,
+    icon_id: &str,
+    svg_bytes: &[u8],
+    text_color: Color32,
+    icon_size: f32,
+    aa_mode: config::SvgAaMode,
+) -> Option<Image<'static>> {
+    let edge = icon_size.max(1.0).round() as u32;
+    let cache_id = ui.make_persistent_id((
+        "svg_raster_cache",
+        icon_id,
+        edge,
+        text_color.r(),
+        text_color.g(),
+        text_color.b(),
+        aa_mode,
+    ));
+
+    let texture = if let Some(texture) = ui.ctx().data_mut(|d| d.get_temp::<TextureHandle>(cache_id)) {
+        texture
+    } else {
+        let texture_name = format!(
+            "vertex-svg-raster-{icon_id}-{edge}-{:02x}{:02x}{:02x}-{:?}",
+            text_color.r(),
+            text_color.g(),
+            text_color.b(),
+            aa_mode
+        );
+        let texture = rasterize_svg_texture(ui, &texture_name, svg_bytes, edge, aa_mode)?;
+        ui.ctx().data_mut(|d| d.insert_temp(cache_id, texture.clone()));
+        texture
+    };
+
+    Some(Image::new((texture.id(), vec2(icon_size, icon_size))))
+}
+
+fn rasterize_svg_texture(
+    ui: &Ui,
+    texture_name: &str,
+    svg_bytes: &[u8],
+    edge: u32,
+    aa_mode: config::SvgAaMode,
+) -> Option<TextureHandle> {
+    let scale = aa_mode.supersample_scale().max(1);
+    let raster_edge = edge.saturating_mul(scale);
+    let options = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_data(svg_bytes, &options).ok()?;
+    let svg_size = tree.size();
+    let sx = raster_edge as f32 / svg_size.width();
+    let sy = raster_edge as f32 / svg_size.height();
+    let transform = resvg::tiny_skia::Transform::from_scale(sx, sy);
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(raster_edge, raster_edge)?;
+    let mut pixmap_mut = pixmap.as_mut();
+    resvg::render(&tree, transform, &mut pixmap_mut);
+
+    let rgba = RgbaImage::from_raw(raster_edge, raster_edge, pixmap.data().to_vec())?;
+    let final_rgba = if scale > 1 {
+        image::imageops::resize(&rgba, edge, edge, FilterType::CatmullRom)
+    } else {
+        rgba
+    };
+    let color_image = ColorImage::from_rgba_premultiplied(
+        [edge as usize, edge as usize],
+        final_rgba.as_raw(),
+    );
+
+    Some(ui.ctx().load_texture(
+        texture_name.to_owned(),
+        color_image,
+        egui::TextureOptions::LINEAR,
+    ))
 }
 
 fn apply_text_color(svg_bytes: &[u8], color: Color32) -> Vec<u8> {

@@ -10,16 +10,21 @@ use installation::{
     running_instance_roots,
 };
 use instances::{
-    InstanceRecord, InstanceStore, create_instance, instance_root_path, load_store,
-    save_store as save_instance_store,
+    InstanceRecord, InstanceStore, create_instance, delete_instance as delete_instance_record,
+    instance_root_path, load_store, save_store as save_instance_store,
 };
 use launcher_runtime as tokio_runtime;
-use launcher_ui::{console, install_activity, notification, screens, ui, window_effects};
+use launcher_ui::{
+    console, install_activity, notification, screens, ui, window_effects,
+    ui::instance_context_menu::InstanceContextAction,
+};
+use launcher_ui::ui::svg_aa;
 use std::{
     any::Any,
     collections::HashMap,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     path::{Path, PathBuf},
+    process::Command,
     sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
@@ -351,6 +356,8 @@ impl VertexApp {
             );
         }
 
+        svg_aa::set_svg_aa_mode(self.config.svg_aa_mode());
+
         let sidebar_output = ui::sidebar::render(
             ctx,
             self.active_screen,
@@ -364,6 +371,22 @@ impl VertexApp {
         if let Some(instance_id) = sidebar_output.selected_profile_id {
             self.selected_instance_id = Some(instance_id);
             self.active_screen = screens::AppScreen::Instance;
+        }
+        for (instance_id, action) in sidebar_output.instance_context_actions {
+            match action {
+                InstanceContextAction::OpenInstance => {
+                    self.selected_instance_id = Some(instance_id);
+                    self.active_screen = screens::AppScreen::Instance;
+                }
+                InstanceContextAction::OpenFolder => {
+                    self.open_instance_folder(&instance_id);
+                }
+                InstanceContextAction::Delete => {
+            self.selected_instance_id = Some(instance_id.clone());
+            self.active_screen = screens::AppScreen::Library;
+            screens::request_delete_instance(ctx, &instance_id);
+        }
+            }
         }
         if sidebar_output.create_instance_clicked {
             self.show_create_instance_modal = true;
@@ -583,6 +606,39 @@ impl VertexApp {
             .collect();
     }
 
+    fn open_instance_folder(&mut self, instance_id: &str) {
+        let Some(instance) = self.instance_store.find(instance_id).cloned() else {
+            notification::error!(
+                "instance_context_menu",
+                "Could not find the selected instance to open its folder."
+            );
+            return;
+        };
+
+        let installations_root = PathBuf::from(self.config.minecraft_installations_root());
+        let instance_root = instance_root_path(installations_root.as_path(), &instance);
+        if let Err(err) = open_path_in_file_manager(&instance_root) {
+            notification::error!(
+                "instance_context_menu",
+                "Failed to open instance folder: {err}"
+            );
+        }
+    }
+
+    fn delete_instance_from_sidebar(&mut self, instance_id: &str) {
+        let installations_root = PathBuf::from(self.config.minecraft_installations_root());
+        if let Err(err) = delete_instance_record(
+            &mut self.instance_store,
+            instance_id,
+            installations_root.as_path(),
+        ) {
+            notification::error!(
+                "instance_context_menu",
+                "Failed to delete instance: {err}"
+            );
+        }
+    }
+
     fn apply_frame_limiter(&mut self) {
         if !self.config.frame_limiter_enabled() {
             self.last_frame_end = None;
@@ -636,6 +692,26 @@ impl VertexApp {
             self.selected_instance_id.as_deref(),
         )
     }
+}
+
+fn open_path_in_file_manager(path: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open").arg(path).spawn()?;
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer").arg(path).spawn()?;
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(path).spawn()?;
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    Ok(())
 }
 
 fn sleep_precise(duration: Duration) {
