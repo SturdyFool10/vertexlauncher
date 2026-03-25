@@ -335,6 +335,7 @@ pub enum ToggleSettingId {
     SnapshotsAndBetasEnabled,
     ForceJava21Minimum,
     FrameLimiterEnabled,
+    DiscordRichPresenceEnabled,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -416,6 +417,13 @@ impl ToggleSettingId {
                 label: "Enable Frame Limiter",
                 info_tooltip: Some(
                     "Caps launcher rendering FPS to reduce power usage and heat. Applied immediately.",
+                ),
+            },
+            ToggleSettingId::DiscordRichPresenceEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::DiscordRichPresenceEnabled,
+                label: "Enable Discord Rich Presence",
+                info_tooltip: Some(
+                    "Shows the instance currently being played and an elapsed session timer in Discord while the launcher owns presence for that session.",
                 ),
             },
         }
@@ -614,6 +622,7 @@ pub struct Config {
     skin_preview_fresh_format_enabled: bool,
     skin_preview_3d_layers_enabled: bool,
     frame_limiter_enabled: bool,
+    discord_rich_presence_enabled: bool,
     frame_limit_fps: i32,
     ui_font_size: f32,
     ui_font_weight: i32,
@@ -645,6 +654,11 @@ impl Config {
 
     pub fn streamer_mode_enabled(&self) -> bool {
         self.streamer_mode_enabled
+    }
+
+    /// Returns whether launcher-owned Discord Rich Presence is enabled.
+    pub fn discord_rich_presence_enabled(&self) -> bool {
+        self.discord_rich_presence_enabled
     }
 
     /// Returns currently selected UI font family.
@@ -1000,6 +1014,7 @@ impl Config {
             include_snapshots_and_betas,
             force_java_21_minimum,
             frame_limiter_enabled,
+            discord_rich_presence_enabled,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
             minecraft_installations_root: _,
@@ -1054,6 +1069,10 @@ impl Config {
             ToggleSettingId::FrameLimiterEnabled.spec(),
             frame_limiter_enabled,
         );
+        visit(
+            ToggleSettingId::DiscordRichPresenceEnabled.spec(),
+            discord_rich_presence_enabled,
+        );
     }
 
     /// Visits each dropdown setting with mutable access to its backing value.
@@ -1086,6 +1105,7 @@ impl Config {
             include_snapshots_and_betas: _,
             force_java_21_minimum: _,
             frame_limiter_enabled: _,
+            discord_rich_presence_enabled: _,
             frame_limit_fps: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
@@ -1129,6 +1149,7 @@ impl Config {
             include_snapshots_and_betas: _,
             force_java_21_minimum: _,
             frame_limiter_enabled: _,
+            discord_rich_presence_enabled: _,
             frame_limit_fps: _,
             skin_preview_motion_blur_sample_count: _,
             default_instance_max_memory_mib: _,
@@ -1179,6 +1200,7 @@ impl Config {
             ui_font_size: _,
             ui_font_weight,
             frame_limiter_enabled: _,
+            discord_rich_presence_enabled: _,
             frame_limit_fps,
             skin_preview_motion_blur_sample_count,
             include_snapshots_and_betas: _,
@@ -1233,6 +1255,7 @@ impl Config {
             ui_font_size: _,
             ui_font_weight: _,
             frame_limiter_enabled: _,
+            discord_rich_presence_enabled: _,
             frame_limit_fps: _,
             include_snapshots_and_betas: _,
             force_java_21_minimum: _,
@@ -1295,6 +1318,7 @@ impl Default for Config {
             skin_preview_fresh_format_enabled: false,
             skin_preview_3d_layers_enabled: false,
             frame_limiter_enabled: false,
+            discord_rich_presence_enabled: true,
             frame_limit_fps: 120,
             ui_font_size: 18.0,
             ui_font_weight: 400,

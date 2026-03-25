@@ -26,6 +26,7 @@ use std::{
 use textui::TextUi;
 
 use self::auth_state::{AuthState, REPAINT_INTERVAL};
+use self::discord_presence::DiscordPresenceManager;
 use self::config_format_modal::ModalAction;
 use self::fonts::FontController;
 
@@ -35,6 +36,7 @@ mod auth_state;
 mod cli;
 mod config_format_modal;
 mod create_instance_modal;
+mod discord_presence;
 mod fonts;
 mod import_instance_modal;
 mod native_options;
@@ -95,6 +97,7 @@ struct VertexApp {
     pending_instance_store_save: Option<InstanceStore>,
     instance_store_save_results_tx: Option<mpsc::Sender<Result<(), String>>>,
     instance_store_save_results_rx: Option<mpsc::Receiver<Result<(), String>>>,
+    discord_presence: DiscordPresenceManager,
     last_frame_end: Option<Instant>,
     last_rendered_screen: Option<screens::AppScreen>,
 }
@@ -201,6 +204,7 @@ impl VertexApp {
             pending_instance_store_save: None,
             instance_store_save_results_tx: None,
             instance_store_save_results_rx: None,
+            discord_presence: DiscordPresenceManager::default(),
             last_frame_end: None,
             last_rendered_screen: None,
         };
@@ -369,35 +373,6 @@ impl VertexApp {
             self.show_import_instance_modal = true;
             self.import_instance_state.error = None;
         }
-        for (instance_id, action) in sidebar_output.instance_context_actions {
-            match action {
-                ui::instance_context_menu::InstanceContextAction::OpenInstance => {
-                    self.selected_instance_id = Some(instance_id);
-                    self.active_screen = screens::AppScreen::Instance;
-                }
-                ui::instance_context_menu::InstanceContextAction::OpenFolder => {
-                    if let Some(instance) = self
-                        .instance_store
-                        .instances
-                        .iter()
-                        .find(|instance| instance.id == instance_id)
-                    {
-                        let instance_root =
-                            instance_root_path(std::path::Path::new(self.config.minecraft_installations_root()), instance);
-                        if let Err(err) = launcher_ui::desktop::open_in_file_manager(instance_root.as_path()) {
-                            notification::error!(
-                                "instance_store",
-                                "Failed to open instance folder for '{}': {err}",
-                                instance.name
-                            );
-                        }
-                    }
-                }
-                ui::instance_context_menu::InstanceContextAction::Delete => {
-                    screens::request_delete_instance(ctx, instance_id);
-                }
-            }
-        }
 
         let mut screen_output = screens::ScreenOutput::default();
         let wgpu_target_format = frame.wgpu_render_state().map(|state| state.target_format);
@@ -472,9 +447,6 @@ impl VertexApp {
         }
         if let Some(instance_id) = screen_output.selected_instance_id {
             self.selected_instance_id = Some(instance_id);
-        }
-        if let Some(instance_id) = screen_output.delete_requested_instance_id {
-            screens::request_delete_instance(ctx, instance_id);
         }
         if let Some(requested_screen) = screen_output.requested_screen {
             self.active_screen = requested_screen;
@@ -561,6 +533,12 @@ impl VertexApp {
             self.refresh_instance_shortcuts();
             queue_instance_store_save(self);
         }
+
+        self.discord_presence.update(
+            &self.config,
+            &self.instance_store,
+            Path::new(self.config.minecraft_installations_root()),
+        );
 
         ui::top_bar::handle_window_resize(ctx);
     }

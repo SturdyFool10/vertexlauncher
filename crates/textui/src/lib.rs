@@ -1022,6 +1022,11 @@ impl TextUi {
             rect = rect.translate(egui::vec2(0.0, delta));
         }
 
+        // Keep the tooltip background and its rasterized text on the physical pixel grid.
+        // Without this, tiny cursor-position changes can move the textured glyphs onto
+        // fractional coordinates, which makes the same cached tooltip look fuzzy.
+        rect = snap_rect_to_pixel_grid(rect, scale);
+
         let layer_id = egui::LayerId::new(
             egui::Order::Tooltip,
             ui.make_persistent_id(&id_source).with("tooltip_layer"),
@@ -1041,7 +1046,10 @@ impl TextUi {
             );
         }
 
-        let text_rect = Rect::from_min_size(rect.min + options.padding, raster_size);
+        let text_rect = snap_rect_to_pixel_grid(
+            Rect::from_min_size(rect.min + options.padding, raster_size),
+            scale,
+        );
         painter.image(
             texture.id(),
             text_rect,

@@ -2444,6 +2444,15 @@ fn render_instance_settings_modal(
                         Some("Leave blank to use launcher instance default JVM args."),
                         &mut state.cli_args_input,
                     );
+                    let _ = settings_widgets::toggle_row(
+                        text_ui,
+                        ui,
+                        "This modpack has a rich presence mod",
+                        Some("When enabled, Vertex clears its own Discord Rich Presence for this instance after launch so the mod inside Minecraft can take over."),
+                        &mut state.discord_rich_presence_mod_installed,
+                    );
+                    ui.add_space(8.0);
+
                     ui.add_space(8.0);
 
                     let _ = settings_widgets::toggle_row(
@@ -2553,6 +2562,7 @@ fn render_instance_settings_modal(
                                 java_override_runtime_major,
                                 linux_set_opengl_driver,
                                 linux_use_zink_driver,
+                                state.discord_rich_presence_mod_installed,
                             ) {
                                 Ok(()) => {
                                     instances_changed = true;

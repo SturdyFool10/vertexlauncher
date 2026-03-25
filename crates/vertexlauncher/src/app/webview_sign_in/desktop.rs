@@ -16,7 +16,7 @@ use tao::event::StartCause;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use tao::event::{Event, WindowEvent};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use tao::platform::run_return::EventLoopExtRunReturn;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]

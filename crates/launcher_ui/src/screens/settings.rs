@@ -87,6 +87,21 @@ fn render_settings_contents(
     render_settings_section(
         ui,
         text_ui,
+        "Social & Presence",
+        "Discord integration and launcher-owned activity reporting.",
+        |ui, text_ui| {
+            render_selected_toggles(
+                ui,
+                text_ui,
+                config,
+                &[config::ToggleSettingId::DiscordRichPresenceEnabled],
+            );
+        },
+    );
+
+    render_settings_section(
+        ui,
+        text_ui,
         "Graphics & Performance",
         "GPU, skin preview rendering, frame pacing, and download throughput behavior.",
         |ui, text_ui| {

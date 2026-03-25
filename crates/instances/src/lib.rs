@@ -89,6 +89,7 @@ pub struct InstanceRecord {
     pub java_override_runtime_major: Option<u8>,
     pub linux_set_opengl_driver: Option<bool>,
     pub linux_use_zink_driver: Option<bool>,
+    pub discord_rich_presence_mod_installed: bool,
     pub launch_count: u64,
     pub last_launched_at_ms: Option<u64>,
     pub favorite_world_ids: Vec<String>,
@@ -112,6 +113,7 @@ impl Default for InstanceRecord {
             java_override_runtime_major: None,
             linux_set_opengl_driver: None,
             linux_use_zink_driver: None,
+            discord_rich_presence_mod_installed: false,
             launch_count: 0,
             last_launched_at_ms: None,
             favorite_world_ids: Vec::new(),
@@ -293,6 +295,7 @@ pub fn create_instance(
         java_override_runtime_major: None,
         linux_set_opengl_driver: None,
         linux_use_zink_driver: None,
+        discord_rich_presence_mod_installed: false,
         launch_count: 0,
         last_launched_at_ms: None,
         favorite_world_ids: Vec::new(),
@@ -358,6 +361,7 @@ pub fn set_instance_settings(
     java_override_runtime_major: Option<u8>,
     linux_set_opengl_driver: Option<bool>,
     linux_use_zink_driver: Option<bool>,
+    discord_rich_presence_mod_installed: bool,
 ) -> Result<(), InstanceError> {
     let instance = store
         .find_mut(id)
@@ -369,6 +373,7 @@ pub fn set_instance_settings(
         normalize_java_override(java_override_enabled, java_override_runtime_major);
     instance.linux_set_opengl_driver = linux_set_opengl_driver;
     instance.linux_use_zink_driver = linux_use_zink_driver;
+    instance.discord_rich_presence_mod_installed = discord_rich_presence_mod_installed;
     tracing::debug!(
         target: "vertexlauncher/instances",
         id,
@@ -378,6 +383,7 @@ pub fn set_instance_settings(
         java_override_runtime_major = ?instance.java_override_runtime_major,
         linux_set_opengl_driver = ?instance.linux_set_opengl_driver,
         linux_use_zink_driver = ?instance.linux_use_zink_driver,
+        discord_rich_presence_mod_installed = instance.discord_rich_presence_mod_installed,
         "updated instance runtime settings"
     );
     Ok(())
