@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use egui::{Color32, CornerRadius, KeyboardShortcut, Margin, Modifiers, Ui, pos2, vec2};
+use egui::{Color32, CornerRadius, Margin, Ui, pos2, vec2};
 use textui::{ButtonOptions, RichTextSpan, RichTextStyle, TextUi};
 
 use crate::{
@@ -387,6 +387,7 @@ fn render_virtualized_log_lines(
     }
 
     let mut clear_selection = false;
+    let mut viewport_has_focus = false;
 
     egui::ScrollArea::both()
         .id_salt((text_base_id, "virtual_log_scroll"))
@@ -411,6 +412,7 @@ fn render_virtualized_log_lines(
             let clip_rect = ui.clip_rect();
             let viewport_response =
                 ui.interact(clip_rect, viewport_id, egui::Sense::click_and_drag());
+            viewport_has_focus = viewport_response.has_focus();
 
             ui.set_min_width(viewer_state.max_line_width.max(viewport.width()).max(1.0));
             ui.add_space(top_space);
@@ -479,6 +481,7 @@ fn render_virtualized_log_lines(
 
             if viewport_response.secondary_clicked() {
                 viewport_response.request_focus();
+                viewport_has_focus = true;
                 let latest_pos = ui.input(|i| i.pointer.latest_pos());
                 let interact_pos = ui.input(|i| i.pointer.interact_pos());
                 let press_origin = ui.input(|i| i.pointer.press_origin());
@@ -533,6 +536,7 @@ fn render_virtualized_log_lines(
 
             if viewport_response.clicked() {
                 viewport_response.request_focus();
+                viewport_has_focus = true;
                 if let Some(pointer_pos) = viewport_response.interact_pointer_pos() {
                     if let Some(cursor) = cursor_from_visible_rows(&row_hits, pointer_pos) {
                         selection_state.anchor = Some(cursor);
@@ -548,6 +552,7 @@ fn render_virtualized_log_lines(
 
             if viewport_response.drag_started() {
                 viewport_response.request_focus();
+                viewport_has_focus = true;
                 if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
                     if let Some(cursor) = cursor_from_visible_rows(&row_hits, pointer_pos) {
                         selection_state.anchor = Some(cursor);
@@ -576,12 +581,10 @@ fn render_virtualized_log_lines(
         selection_state.clear();
     }
 
-    let console_has_focus = ui.memory(|mem| mem.has_focus(viewport_id));
-    let copy_requested = selection_state.has_selection()
-        && console_has_focus
-        && ui.input_mut(|i| {
-            i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::C))
-        });
+    let copy_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
+    let copy_requested = viewport_has_focus
+        && selection_state.has_selection()
+        && ui.input_mut(|i| i.consume_shortcut(&copy_shortcut));
 
     if copy_requested {
         if let Some(text) = selected_log_text(lines, &selection_state) {
