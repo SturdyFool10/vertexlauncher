@@ -125,15 +125,32 @@ separate-locales: false
 
 finish-args:
   - --share=network
-  - --share=ipc
-  - --socket=wayland
-  - --socket=fallback-x11
-  - --socket=pulseaudio
-  - --device=dri
-  - --filesystem=home
-  - --talk-name=org.freedesktop.secrets
-  - --env=GDK_BACKEND=wayland,x11
 
+  - --share=ipc
+
+  - --socket=wayland
+
+  - --socket=fallback-x11
+
+  - --socket=pulseaudio
+
+  - --device=dri
+
+  - --filesystem=home
+
+  - --filesystem=xdg-config/vertexlauncher
+
+  - --filesystem=xdg-data/vertexlauncher
+
+  - --filesystem=xdg-cache/vertexlauncher
+
+  - --filesystem=xdg-config/vertex-launcher
+
+  - --filesystem=xdg-run/gvfs
+
+  - --talk-name=org.freedesktop.secrets
+
+  - --env=GDK_BACKEND=wayland,x11
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   extension-tag: "${RUST_EXT_TAG}"

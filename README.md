@@ -105,7 +105,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release-artifacts.ps1
 
 Linux users who want a sandboxed portable package can use the Flatpak bundle. Vertex now packages Flatpak around the same CentOS 7-built Linux AppDir used for AppImage, so the launcher ELF staged into the bundle is checked against a `GLIBC_2.17` ceiling before Flatpak export. The Flatpak still runs against its selected runtime at launch time, but the packaged launcher binary itself stays aligned with the Linux `glibc 2.17+` target.
 
-The Flatpak manifest grants home-directory filesystem access so the launcher can detect and import existing Minecraft / Modrinth / launcher install folders by path instead of being limited to its sandbox-private storage. It also exposes both Wayland and X11 sockets and sets `GDK_BACKEND=wayland,x11`, so the launcher prefers Wayland when available while still allowing Minecraft clients and Java mods to fall back to X11 when needed.
+The Flatpak manifest grants home-directory filesystem access so the launcher can detect and import existing Minecraft / Modrinth / launcher install folders by path instead of being limited to its sandbox-private storage. It also explicitly grants access to the native Linux Vertex storage roots used in code: `~/.config/vertexlauncher`, `~/.local/share/vertexlauncher`, `~/.cache/vertexlauncher`, plus the legacy config root `~/.config/vertex-launcher`. It also exposes both Wayland and X11 sockets and sets `GDK_BACKEND=wayland,x11`, so the launcher prefers Wayland when available while still allowing Minecraft clients and Java mods to fall back to X11 when needed.
 
 To build the Flatpak bundle automatically:
 

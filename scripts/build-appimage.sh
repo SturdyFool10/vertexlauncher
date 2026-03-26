@@ -412,7 +412,18 @@ patch_binary_path_literal() {
   local old_value="$2"
   local new_value="$3"
 
-  python - "$binary_path" "$old_value" "$new_value" <<'PY'
+  local pybin="${PYTHON:-}"
+  if [[ -z "${pybin}" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      pybin="$(command -v python3)"
+    elif command -v python >/dev/null 2>&1; then
+      pybin="$(command -v python)"
+    else
+      echo "Missing python3/python for patch_binary_path_literal" >&2
+      return 1
+    fi
+  fi
+  "${pybin}" - "$binary_path" "$old_value" "$new_value" <<'PY'
 import sys
 
 binary_path = sys.argv[1]
@@ -448,13 +459,13 @@ bundle_runtime_support_assets() {
   local helper_file=""
 
   webkit_helper_dir="$(find_first_existing_path \
-    /usr/libexec/webkit2gtk-4.0 \
-    /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0 \
-    /usr/lib/aarch64-linux-gnu/webkit2gtk-4.0 || true)"
+    /usr/libexec/webkit2gtk-4.1 \
+    /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1 \
+    /usr/lib/aarch64-linux-gnu/webkit2gtk-4.1 || true)"
   webkit_bundle_dir="$(find_first_existing_path \
-    /usr/lib64/webkit2gtk-4.0 \
-    /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0 \
-    /usr/lib/aarch64-linux-gnu/webkit2gtk-4.0 || true)"
+    /usr/lib64/webkit2gtk-4.1 \
+    /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1 \
+    /usr/lib/aarch64-linux-gnu/webkit2gtk-4.1 || true)"
   gdk_pixbuf_dir="$(find_first_existing_path \
     /usr/lib64/gdk-pixbuf-2.0/2.10.0 \
     /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0 \
@@ -465,10 +476,10 @@ bundle_runtime_support_assets() {
     /usr/lib/aarch64-linux-gnu/gtk-3.0/3.0.0 || true)"
 
   if [[ -n "${webkit_helper_dir}" ]]; then
-    copy_tree_contents_if_present "${webkit_helper_dir}" "${appdir}/usr/libexec/webkit2gtk-4.0"
+    copy_tree_contents_if_present "${webkit_helper_dir}" "${appdir}/usr/libexec/webkit2gtk-4.1"
   fi
   if [[ -n "${webkit_bundle_dir}" ]]; then
-    copy_tree_contents_if_present "${webkit_bundle_dir}" "${appdir}/usr/lib64/webkit2gtk-4.0"
+    copy_tree_contents_if_present "${webkit_bundle_dir}" "${appdir}/usr/lib64/webkit2gtk-4.1"
   fi
   if [[ -n "${gdk_pixbuf_dir}" ]]; then
     copy_tree_contents_if_present "${gdk_pixbuf_dir}" "${appdir}/usr/lib64/gdk-pixbuf-2.0/2.10.0"
@@ -484,13 +495,13 @@ bundle_runtime_support_assets() {
   fi
 
   for helper_file in \
-    "${appdir}/usr/libexec/webkit2gtk-4.0/WebKitNetworkProcess" \
-    "${appdir}/usr/libexec/webkit2gtk-4.0/WebKitPluginProcess" \
-    "${appdir}/usr/libexec/webkit2gtk-4.0/WebKitWebProcess" \
-    "${appdir}/usr/libexec/webkit2gtk-4.0/jsc" \
-    "${appdir}/usr/lib64/webkit2gtk-4.0/injected-bundle/libwebkit2gtkinjectedbundle.so"
+    "${appdir}/usr/libexec/webkit2gtk-4.1/WebKitNetworkProcess" \
+    "${appdir}/usr/libexec/webkit2gtk-4.1/WebKitPluginProcess" \
+    "${appdir}/usr/libexec/webkit2gtk-4.1/WebKitWebProcess" \
+    "${appdir}/usr/libexec/webkit2gtk-4.1/jsc" \
+    "${appdir}/usr/lib64/webkit2gtk-4.1/injected-bundle/libwebkit2gtkinjectedbundle.so"
   do
-    set_rpath_if_elf "${helper_file}" '$ORIGIN/../../lib:$ORIGIN/../../lib64/webkit2gtk-4.0'
+    set_rpath_if_elf "${helper_file}" '$ORIGIN/../../lib:$ORIGIN/../../lib64/webkit2gtk-4.1'
   done
 
   if [[ -d "${appdir}/usr/lib64/gdk-pixbuf-2.0/2.10.0/loaders" ]]; then
@@ -504,6 +515,30 @@ bundle_runtime_support_assets() {
       set_rpath_if_elf "${helper_file}" '$ORIGIN/../../../../lib'
     done < <(find "${appdir}/usr/lib64/gtk-3.0/3.0.0/immodules" -type f -print0)
   fi
+
+  local arch_lib_webkit_dir=""
+  if [[ -d "${appdir}/usr/libexec/webkit2gtk-4.1" ]]; then
+    arch_lib_webkit_dir="${appdir}/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1"
+    mkdir -p "${arch_lib_webkit_dir}"
+    cp -a "${appdir}/usr/libexec/webkit2gtk-4.1/." "${arch_lib_webkit_dir}/"
+    mkdir -p "${appdir}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1"
+    cp -a "${appdir}/usr/libexec/webkit2gtk-4.1/." "${appdir}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1/"
+  fi
+
+  if [[ -d "${appdir}/usr/lib64/webkit2gtk-4.1/injected-bundle" ]]; then
+    mkdir -p "${appdir}/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/injected-bundle"
+    cp -a "${appdir}/usr/lib64/webkit2gtk-4.1/injected-bundle/." "${appdir}/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/injected-bundle/"
+    mkdir -p "${appdir}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1/injected-bundle"
+    cp -a "${appdir}/usr/lib64/webkit2gtk-4.1/injected-bundle/." "${appdir}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1/injected-bundle/"
+  fi
+
+  local patch_target=""
+  for patch_target in     "${appdir}/usr/bin/vertexlauncher"     "${appdir}/usr/lib/libwebkit2gtk-4.1.so.0"     "${appdir}/usr/lib/libjavascriptcoregtk-4.1.so.0"     "${appdir}/usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0"     "${appdir}/usr/lib/x86_64-linux-gnu/libjavascriptcoregtk-4.1.so.0"     "${appdir}/usr/lib/aarch64-linux-gnu/libwebkit2gtk-4.1.so.0"     "${appdir}/usr/lib/aarch64-linux-gnu/libjavascriptcoregtk-4.1.so.0"
+  do
+    [[ -f "${patch_target}" ]] || continue
+    patch_binary_path_literal "${patch_target}" "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1" "/tmp/webkit2gtk-4.1"
+    patch_binary_path_literal "${patch_target}" "/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1" "/tmp/webkit2gtk-4.1"
+  done
 
   #-----------------------------------------------------------------------
   # Copy GLib GIO modules into the bundle so that networking functions
@@ -586,10 +621,10 @@ bundle_runtime_support_assets() {
 
   if [[ -f "${appdir}/usr/lib/libwebkit2gtk-4.0.so.37" ]]; then
     patch_binary_path_literal "${appdir}/usr/lib/libwebkit2gtk-4.0.so.37" \
-      "/usr/libexec/webkit2gtk-4.0" \
+      "/usr/libexec/webkit2gtk-4.1" \
       "libexec/webkit2gtk-4.0"
     patch_binary_path_literal "${appdir}/usr/lib/libwebkit2gtk-4.0.so.37" \
-      "/usr/lib64/webkit2gtk-4.0/injected-bundle/" \
+      "/usr/lib64/webkit2gtk-4.1/injected-bundle/" \
       "lib64/webkit2gtk-4.0/injected-bundle/"
   fi
 }
@@ -706,6 +741,7 @@ appdir_root="${REPO_ROOT}/target/appimage/${requested_arch}"
 appdir="${appdir_root}/AppDir"
 icon_path="${appdir_root}/${APP_ID}.svg"
 output_path="${REPO_ROOT}/target/release/vertexlauncher-linux${stage_arch}.AppImage"
+tmp_output_path="${output_path}.tmp.$$"
 
 rm -rf "${appdir_root}"
 mkdir -p "${appdir}/usr/bin" "${appdir}/usr/share/applications" "${appdir}/usr/share/icons/hicolor/scalable/apps"
@@ -748,7 +784,9 @@ if (( prepare_only )); then
   exit 0
 fi
 
-ARCH="${requested_arch}" run_tool "${appimagetool_tool}" "${appdir}" "${output_path}"
+rm -f "${tmp_output_path}"
+ARCH="${requested_arch}" run_tool "${appimagetool_tool}" "${appdir}" "${tmp_output_path}"
+mv -f "${tmp_output_path}" "${output_path}"
 
 echo "AppImage artifact ready:"
 echo "  ${output_path}"

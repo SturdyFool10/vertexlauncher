@@ -20,6 +20,16 @@ if [[ ! -f "${SOURCE_BINARY}" ]]; then
 fi
 
 declare -A MOUNTED_DIRS=()
+echo "[appimage] arm64 container dependency preflight..."
+podman run --rm --arch=arm64 "${CONTAINER_IMAGE}" bash -lc '
+set -e
+echo "glib-2.0: $(pkg-config --modversion glib-2.0)"
+echo "webkit2gtk-4.1: $(pkg-config --modversion webkit2gtk-4.1)"
+echo "javascriptcoregtk-4.1: $(pkg-config --modversion javascriptcoregtk-4.1)"
+echo "libsoup-2.4: $(pkg-config --modversion libsoup-2.4)"
+pkg-config --exists "glib-2.0 >= 2.70"
+'
+
 PODMAN_ARGS=(
   run
   --rm

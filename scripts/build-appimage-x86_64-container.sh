@@ -20,6 +20,16 @@ CONTAINER_IMAGE="${CONTAINER_IMAGE:-$(ensure_podman_image \
 mkdir -p "${WORK_ROOT}" "${CARGO_HOME_DIR}" "${RUSTUP_HOME_DIR}"
 
 declare -A MOUNTED_DIRS=()
+echo "[appimage] container dependency preflight..."
+podman run --rm --arch=amd64 "${CONTAINER_IMAGE}" bash -lc '
+set -e
+echo "glib-2.0: $(pkg-config --modversion glib-2.0)"
+echo "webkit2gtk-4.1: $(pkg-config --modversion webkit2gtk-4.1)"
+echo "javascriptcoregtk-4.1: $(pkg-config --modversion javascriptcoregtk-4.1)"
+echo "libsoup-2.4: $(pkg-config --modversion libsoup-2.4)"
+pkg-config --exists "glib-2.0 >= 2.70"
+'
+
 PODMAN_ARGS=(
   run
   --rm
@@ -36,9 +46,10 @@ PODMAN_ARGS=(
   # libsoup and other development packages in the container.  Without
   # PKG_CONFIG_PATH and the *_ALLOW_SYSTEM_* flags `soup2‑sys` fails to
   # locate libsoup even though it is installed.
-  -e PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/share/pkgconfig
+  -e PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
   -e PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
   -e PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
+  -e PKG_CONFIG_LIBDIR=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
 )
 
 mount_external_tool() {

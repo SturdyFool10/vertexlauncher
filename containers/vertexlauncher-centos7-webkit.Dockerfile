@@ -1,47 +1,5 @@
-ARG BASE_IMAGE=docker.io/library/centos:7
-FROM ${BASE_IMAGE}
+FROM ubuntu:22.04
 
-RUN repo_prefix="" \
-    && if [ "$(uname -m)" = "aarch64" ]; then repo_prefix="altarch/"; fi \
-    && rm -f /etc/yum.repos.d/*.repo \
-    && cat >/etc/yum.repos.d/CentOS-Vault.repo <<EOF
-[base]
-name=CentOS-7 - Base
-baseurl=http://vault.centos.org/${repo_prefix}7.9.2009/os/\$basearch/
-gpgcheck=0
-enabled=1
-[updates]
-name=CentOS-7 - Updates
-baseurl=http://vault.centos.org/${repo_prefix}7.9.2009/updates/\$basearch/
-gpgcheck=0
-enabled=1
-[extras]
-name=CentOS-7 - Extras
-baseurl=http://vault.centos.org/${repo_prefix}7.9.2009/extras/\$basearch/
-gpgcheck=0
-enabled=1
-EOF
+ENV DEBIAN_FRONTEND=noninteractive
 
-RUN yum -y install \
-      ca-certificates \
-      curl \
-      gcc \
-      gcc-c++ \
-      make \
-      pkgconfig \
-      patchelf \
-      file \
-      desktop-file-utils \
-      glib2-devel \
-      gtk3-devel \
-      gdk-pixbuf2-devel \
-      pango-devel \
-      atk-devel \
-      cairo-devel \
-      dbus-devel \
-      libsoup-devel \
-      webkitgtk4-devel \
-      webkitgtk4-jsc-devel \
-      binutils >/dev/null \
-    && yum clean all \
-    && rm -rf /var/cache/yum
+RUN apt-get update  && apt-get install -y --no-install-recommends   ca-certificates   curl   build-essential   pkg-config   patchelf   file   desktop-file-utils   binutils   libglib2.0-dev   libgtk-3-dev   libgdk-pixbuf-2.0-dev   libpango1.0-dev   libatk1.0-dev   libcairo2-dev   libdbus-1-dev   libsoup2.4-dev   libwebkit2gtk-4.1-dev   libjavascriptcoregtk-4.1-dev  && rm -rf /var/lib/apt/lists/*

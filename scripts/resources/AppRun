@@ -2,4 +2,136 @@
 set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+export APPDIR="${HERE}"
+export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib64:${HERE}/usr/lib/x86_64-linux-gnu:${HERE}/usr/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
+export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas"
+
+for gio_dir in \
+    "${HERE}/usr/lib/gio/modules" \
+    "${HERE}/usr/lib64/gio/modules" \
+    "${HERE}/usr/lib/x86_64-linux-gnu/gio/modules" \
+    "${HERE}/usr/lib/aarch64-linux-gnu/gio/modules"
+do
+    if [[ -d "${gio_dir}" ]]; then
+        export GIO_MODULE_DIR="${gio_dir}"
+        break
+    fi
+done
+
+export GTK_PATH="${HERE}/usr/lib/gtk-3.0:${HERE}/usr/lib64/gtk-3.0:${HERE}/usr/lib/x86_64-linux-gnu/gtk-3.0:${HERE}/usr/lib/aarch64-linux-gnu/gtk-3.0"
+
+for pixbuf_dir in \
+    "${HERE}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders" \
+    "${HERE}/usr/lib64/gdk-pixbuf-2.0/2.10.0/loaders" \
+    "${HERE}/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders" \
+    "${HERE}/usr/lib/aarch64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders"
+do
+    if [[ -d "${pixbuf_dir}" ]]; then
+        export GDK_PIXBUF_MODULEDIR="${pixbuf_dir}"
+        break
+    fi
+done
+
+for pixbuf_cache in \
+    "${HERE}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache" \
+    "${HERE}/usr/lib64/gdk-pixbuf-2.0/2.10.0/loaders.cache" \
+    "${HERE}/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache" \
+    "${HERE}/usr/lib/aarch64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+do
+    if [[ -f "${pixbuf_cache}" ]]; then
+        export GDK_PIXBUF_MODULE_FILE="${pixbuf_cache}"
+        break
+    fi
+done
+
+WEBKIT_HELPER_DIR=""
+for candidate in \
+    "${HERE}/usr/libexec/webkit2gtk-4.1" \
+    "${HERE}/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1" \
+    "${HERE}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1" \
+    "${HERE}/usr/lib64/webkit2gtk-4.1" \
+    "${HERE}/usr/libexec/webkit2gtk-4.0" \
+    "${HERE}/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0" \
+    "${HERE}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.0" \
+    "${HERE}/usr/lib64/webkit2gtk-4.0"
+do
+    if [[ -x "${candidate}/WebKitNetworkProcess" ]]; then
+        WEBKIT_HELPER_DIR="${candidate}"
+        export WEBKIT_EXEC_PATH="${candidate}"
+        break
+    fi
+done
+
+WEBKIT_BUNDLE_DIR=""
+for candidate in \
+    "${HERE}/usr/lib/webkit2gtk-4.1/injected-bundle" \
+    "${HERE}/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/injected-bundle" \
+    "${HERE}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1/injected-bundle" \
+    "${HERE}/usr/lib64/webkit2gtk-4.1/injected-bundle" \
+    "${HERE}/usr/lib/webkit2gtk-4.0/injected-bundle" \
+    "${HERE}/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/injected-bundle" \
+    "${HERE}/usr/lib/aarch64-linux-gnu/webkit2gtk-4.0/injected-bundle" \
+    "${HERE}/usr/lib64/webkit2gtk-4.0/injected-bundle"
+do
+    if [[ -d "${candidate}" ]]; then
+        WEBKIT_BUNDLE_DIR="${candidate}"
+        export WEBKIT_INJECTED_BUNDLE_PATH="${candidate}"
+        break
+    fi
+done
+
+TMP_WEBKIT_ROOT="/tmp/webkit2gtk-4.1"
+
+prepare_tmp_webkit_bridge() {
+    local target="$1"
+
+    if [[ -L "${target}" ]]; then
+        rm -f "${target}" || true
+    fi
+
+    if [[ -e "${target}" && ! -d "${target}" ]]; then
+        rm -f "${target}" || true
+    fi
+
+    if [[ -e "${target}" && ! -w "${target}" ]]; then
+        echo "Vertex AppImage cannot refresh ${target} as the current user." >&2
+        echo "A previous sudo run likely left it owned by root." >&2
+        echo "Run once: sudo rm -rf ${target}" >&2
+        return 1
+    fi
+
+    mkdir -p "${target}"
+    rm -f "${target}/WebKitNetworkProcess" \
+          "${target}/WebKitWebProcess" \
+          "${target}/WebKitPluginProcess" \
+          "${target}/jsc"
+    rm -rf "${target}/injected-bundle"
+    return 0
+}
+
+if [[ -n "${WEBKIT_HELPER_DIR}" ]]; then
+    prepare_tmp_webkit_bridge "${TMP_WEBKIT_ROOT}"
+
+    ln -s "${WEBKIT_HELPER_DIR}/WebKitNetworkProcess" "${TMP_WEBKIT_ROOT}/WebKitNetworkProcess"
+
+    if [[ -e "${WEBKIT_HELPER_DIR}/WebKitWebProcess" ]]; then
+        ln -s "${WEBKIT_HELPER_DIR}/WebKitWebProcess" "${TMP_WEBKIT_ROOT}/WebKitWebProcess"
+    fi
+
+    if [[ -e "${WEBKIT_HELPER_DIR}/WebKitPluginProcess" ]]; then
+        ln -s "${WEBKIT_HELPER_DIR}/WebKitPluginProcess" "${TMP_WEBKIT_ROOT}/WebKitPluginProcess"
+    fi
+
+    if [[ -e "${WEBKIT_HELPER_DIR}/jsc" ]]; then
+        ln -s "${WEBKIT_HELPER_DIR}/jsc" "${TMP_WEBKIT_ROOT}/jsc"
+    fi
+fi
+
+if [[ -n "${WEBKIT_BUNDLE_DIR}" ]]; then
+    mkdir -p "${TMP_WEBKIT_ROOT}"
+    ln -s "${WEBKIT_BUNDLE_DIR}" "${TMP_WEBKIT_ROOT}/injected-bundle"
+fi
+
 exec "${HERE}/usr/bin/vertexlauncher" "$@"
