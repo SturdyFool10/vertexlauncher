@@ -1,6 +1,6 @@
 use egui::{
-    pos2, vec2, Align2, Area, Color32, Context, CornerRadius, CursorIcon, FontId, Id, Key, Order,
-    Pos2, Rect, Sense,
+    Align2, Area, Color32, Context, CornerRadius, CursorIcon, FontId, Id, Key, Order, Pos2, Rect,
+    Sense, pos2, vec2,
 };
 
 use crate::ui::{motion, style};
@@ -119,10 +119,14 @@ fn resolved_anchor_pos(ctx: &Context, requested: Pos2) -> Pos2 {
         fallback.unwrap_or(content_rect.center())
     };
     pos2(
-        pos.x
-            .clamp(content_rect.left() + MENU_MARGIN, content_rect.right() - MENU_MARGIN),
-        pos.y
-            .clamp(content_rect.top() + MENU_MARGIN, content_rect.bottom() - MENU_MARGIN),
+        pos.x.clamp(
+            content_rect.left() + MENU_MARGIN,
+            content_rect.right() - MENU_MARGIN,
+        ),
+        pos.y.clamp(
+            content_rect.top() + MENU_MARGIN,
+            content_rect.bottom() - MENU_MARGIN,
+        ),
     )
 }
 
@@ -250,8 +254,8 @@ pub fn show(ctx: &Context) {
             0.0
         };
 
-    let visible_max_height = (screen_rect.height() - MENU_MARGIN * 2.0)
-        .max(MENU_ITEM_HEIGHT + MENU_PADDING * 2.0);
+    let visible_max_height =
+        (screen_rect.height() - MENU_MARGIN * 2.0).max(MENU_ITEM_HEIGHT + MENU_PADDING * 2.0);
     let max_height = menu_max_height(screen_rect).min(visible_max_height);
 
     let full_content_height = request.items.len() as f32 * MENU_ITEM_HEIGHT;
@@ -302,23 +306,19 @@ pub fn show(ctx: &Context) {
     let stroke = visuals.widgets.noninteractive.bg_stroke;
     let hover_fill = opaque(visuals.widgets.hovered.weak_bg_fill);
     let active_fill = opaque(visuals.widgets.active.weak_bg_fill);
-    let danger_hover_fill = Color32::from_rgba_unmultiplied(
-        danger_color.r(),
-        danger_color.g(),
-        danger_color.b(),
-        26,
-    );
-    let danger_active_fill = Color32::from_rgba_unmultiplied(
-        danger_color.r(),
-        danger_color.g(),
-        danger_color.b(),
-        44,
-    );
+    let danger_hover_fill =
+        Color32::from_rgba_unmultiplied(danger_color.r(), danger_color.g(), danger_color.b(), 26);
+    let danger_active_fill =
+        Color32::from_rgba_unmultiplied(danger_color.r(), danger_color.g(), danger_color.b(), 44);
     let shadow_color = Color32::from_black_alpha((56.0 * eased) as u8);
     let corner_radius = CornerRadius::same(style::CORNER_RADIUS_MD);
 
     if target_open
-        && ctx.input(|i| i.pointer.hover_pos().is_some_and(|pos| final_frame_rect.contains(pos)))
+        && ctx.input(|i| {
+            i.pointer
+                .hover_pos()
+                .is_some_and(|pos| final_frame_rect.contains(pos))
+        })
     {
         ctx.set_cursor_icon(CursorIcon::Default);
     }
@@ -416,10 +416,7 @@ pub fn show(ctx: &Context) {
 
                             if let Some(icon_svg) = item.icon_svg.as_ref() {
                                 let icon_rect = Rect::from_min_size(
-                                    pos2(
-                                        icon_left,
-                                        item_rect.center().y - shared_icon_width * 0.5,
-                                    ),
+                                    pos2(icon_left, item_rect.center().y - shared_icon_width * 0.5),
                                     vec2(shared_icon_width, shared_icon_width),
                                 );
                                 let icon = egui::Image::from_bytes(

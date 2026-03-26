@@ -17,7 +17,8 @@ pub fn render(
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = style::SPACE_SM;
         for screen in AppScreen::FIXED_NAV {
-            let selected = active_screen == screen;
+            let selected = active_screen == screen
+                || (active_screen == AppScreen::DiscoverDetail && screen == AppScreen::Discover);
             let (icon_id, icon_bytes) = icon_for_screen(screen);
             let response = ui
                 .allocate_ui_with_layout(
@@ -47,6 +48,7 @@ fn icon_for_screen(screen: AppScreen) -> (&'static str, &'static [u8]) {
         AppScreen::Home => ("home", assets::HOME_SVG),
         AppScreen::Library => ("library", assets::LIBRARY_SVG),
         AppScreen::Discover => ("discover", assets::DISCOVER_SVG),
+        AppScreen::DiscoverDetail => ("discover", assets::DISCOVER_SVG),
         AppScreen::ContentBrowser => ("content_browser", assets::SHOPPING_CART_SVG),
         AppScreen::Skins => ("skin_selector", assets::SKIN_SELECTOR_SVG),
         AppScreen::Settings => ("settings", assets::SETTINGS_SVG),

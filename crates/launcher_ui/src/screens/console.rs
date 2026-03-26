@@ -12,7 +12,6 @@ const ACTION_COPY_SELECTION: &str = "copy_selection";
 const ACTION_CLEAR_SELECTION: &str = "clear_selection";
 const ACTION_COPY_LINE: &str = "copy_line";
 
-
 fn log_console_context_menu(message: impl AsRef<str>) {
     eprintln!("[console_context_menu] {}", message.as_ref());
 }
@@ -217,11 +216,7 @@ fn selected_log_text(lines: &[String], selection: &LogSelectionState) -> Option<
         }
     }
 
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn selection_fill_color(ui: &Ui) -> egui::Color32 {
@@ -240,10 +235,7 @@ fn row_contains_text(row: &VisibleLogRowHit, pointer_pos: egui::Pos2) -> bool {
     row.line_len_chars > 0 && row.text_rect.contains(pointer_pos)
 }
 
-fn clamp_log_cursor_to_row(
-    row: &VisibleLogRowHit,
-    pointer_pos: egui::Pos2,
-) -> LogSelectionCursor {
+fn clamp_log_cursor_to_row(row: &VisibleLogRowHit, pointer_pos: egui::Pos2) -> LogSelectionCursor {
     let local_x = (pointer_pos.x - row.rect.min.x).clamp(0.0, row.rect.width().max(0.0));
     let local_y = (pointer_pos.y - row.rect.min.y).clamp(0.0, row.rect.height().max(0.0));
     let cursor = row.galley.cursor_from_pos(vec2(local_x, local_y));
@@ -278,13 +270,11 @@ fn cursor_from_visible_rows(
         ));
     }
 
-    let nearest = rows
-        .iter()
-        .min_by(|a, b| {
-            let da = (a.rect.center().y - pointer_pos.y).abs();
-            let db = (b.rect.center().y - pointer_pos.y).abs();
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        })?;
+    let nearest = rows.iter().min_by(|a, b| {
+        let da = (a.rect.center().y - pointer_pos.y).abs();
+        let db = (b.rect.center().y - pointer_pos.y).abs();
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    })?;
 
     Some(clamp_log_cursor_to_row(nearest, pointer_pos))
 }
@@ -353,12 +343,14 @@ fn render_virtualized_log_lines(
     let menu_source_id = ui.make_persistent_id((text_base_id, "context_menu_source"));
     let menu_line_id = ui.make_persistent_id((text_base_id, "context_menu_line"));
 
-    let mut viewer_state = ui
-        .ctx()
-        .data_mut(|data| data.get_temp::<VirtualLogViewerState>(state_id).unwrap_or_default());
-    let mut selection_state = ui
-        .ctx()
-        .data_mut(|data| data.get_temp::<LogSelectionState>(selection_id).unwrap_or_default());
+    let mut viewer_state = ui.ctx().data_mut(|data| {
+        data.get_temp::<VirtualLogViewerState>(state_id)
+            .unwrap_or_default()
+    });
+    let mut selection_state = ui.ctx().data_mut(|data| {
+        data.get_temp::<LogSelectionState>(selection_id)
+            .unwrap_or_default()
+    });
 
     if let Some(action) = context_menu::take_invocation(ui.ctx(), menu_source_id) {
         log_console_context_menu(format!("received invocation action={}", action));

@@ -426,6 +426,7 @@ fn managed_content_metadata(
     loader: &str,
 ) -> Option<ResolvedInstalledContent> {
     let identity = managed_identity?;
+    let suppress_updates = identity.pack_managed;
 
     match identity.source {
         ContentSource::Modrinth => {
@@ -451,14 +452,18 @@ fn managed_content_metadata(
                 installed_version_label: non_empty_owned(version.version_number.as_str()),
                 resolution_kind: InstalledContentResolutionKind::Managed,
                 warning_message: None,
-                update: resolve_managed_modrinth_update(
-                    &modrinth,
-                    project_id,
-                    kind,
-                    game_version,
-                    loader,
-                    Some(version_id),
-                ),
+                update: if suppress_updates {
+                    None
+                } else {
+                    resolve_managed_modrinth_update(
+                        &modrinth,
+                        project_id,
+                        kind,
+                        game_version,
+                        loader,
+                        Some(version_id),
+                    )
+                },
             })
         }
         ContentSource::CurseForge => {
@@ -487,14 +492,18 @@ fn managed_content_metadata(
                 installed_version_label: non_empty_owned(file.display_name.as_str()),
                 resolution_kind: InstalledContentResolutionKind::Managed,
                 warning_message: None,
-                update: resolve_managed_curseforge_update(
-                    &curseforge,
-                    &project,
-                    version_id,
-                    kind,
-                    game_version,
-                    loader,
-                ),
+                update: if suppress_updates {
+                    None
+                } else {
+                    resolve_managed_curseforge_update(
+                        &curseforge,
+                        &project,
+                        version_id,
+                        kind,
+                        game_version,
+                        loader,
+                    )
+                },
             })
         }
     }

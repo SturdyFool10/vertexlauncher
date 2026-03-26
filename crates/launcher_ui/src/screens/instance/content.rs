@@ -2309,6 +2309,9 @@ fn prefetch_managed_modrinth_updates(
         let Some(identity) = file.managed_identity.as_ref() else {
             continue;
         };
+        if identity.pack_managed {
+            continue;
+        }
         if identity.source != modprovider::ContentSource::Modrinth {
             continue;
         }
@@ -2417,6 +2420,9 @@ fn prefetch_managed_curseforge_updates(
         let Some(identity) = file.managed_identity.as_ref() else {
             continue;
         };
+        if identity.pack_managed {
+            continue;
+        }
         if identity.source != modprovider::ContentSource::CurseForge {
             continue;
         }

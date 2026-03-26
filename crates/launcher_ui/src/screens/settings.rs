@@ -394,7 +394,9 @@ fn render_svg_aa_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config)
         ui,
         "svg_aa_mode",
         "SVG Anti-Aliasing",
-        Some("Controls supersampled SVG rasterization for launcher icons. Changes apply immediately."),
+        Some(
+            "Controls supersampled SVG rasterization for launcher icons. Changes apply immediately.",
+        ),
         &mut selected,
         &labels,
     );

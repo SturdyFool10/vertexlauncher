@@ -1,5 +1,6 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Read as _;
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -11,6 +12,8 @@ const DEFAULT_USER_AGENT: &str =
     "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
 const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);
 const DEFAULT_MIN_REQUEST_SPACING: Duration = Duration::from_millis(500);
+const DOWNLOAD_URL_LOOKUP_MAX_ATTEMPTS: usize = 3;
+const DOWNLOAD_URL_LOOKUP_RETRY_BASE_DELAY: Duration = Duration::from_millis(750);
 pub const MINECRAFT_GAME_ID: u32 = 432;
 static API_KEY_OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
@@ -36,6 +39,21 @@ fn api_key_override_store() -> &'static Mutex<Option<String>> {
 fn rate_limit_store() -> &'static Mutex<RateLimitState> {
     static STORE: OnceLock<Mutex<RateLimitState>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(RateLimitState::new()))
+}
+
+fn project_cache() -> &'static Mutex<HashMap<u64, Project>> {
+    static STORE: OnceLock<Mutex<HashMap<u64, Project>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn file_cache() -> &'static Mutex<HashMap<u64, File>> {
+    static STORE: OnceLock<Mutex<HashMap<u64, File>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn download_url_cache() -> &'static Mutex<HashMap<(u64, u64), Option<String>>> {
+    static STORE: OnceLock<Mutex<HashMap<(u64, u64), Option<String>>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Errors returned by CurseForge API requests.
@@ -119,8 +137,43 @@ pub struct File {
     pub file_date: String,
     pub download_count: u64,
     pub download_url: Option<String>,
+    pub hashes: Vec<FileHash>,
     pub dependencies: Vec<FileDependency>,
     pub game_versions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileHash {
+    pub algo: u32,
+    pub value: String,
+}
+
+impl File {
+    #[must_use]
+    pub fn sha1_hash(&self) -> Option<&str> {
+        self.hashes
+            .iter()
+            .find(|hash| hash.algo == 1)
+            .or_else(|| {
+                self.hashes
+                    .iter()
+                    .find(|hash| hash.value.len() == 40 && hash.value.is_ascii())
+            })
+            .map(|hash| hash.value.as_str())
+    }
+
+    #[must_use]
+    pub fn sha512_hash(&self) -> Option<&str> {
+        self.hashes
+            .iter()
+            .find(|hash| hash.algo == 4)
+            .or_else(|| {
+                self.hashes
+                    .iter()
+                    .find(|hash| hash.value.len() == 128 && hash.value.is_ascii())
+            })
+            .map(|hash| hash.value.as_str())
+    }
 }
 
 /// Dependency relationship declared by a CurseForge file.
@@ -302,6 +355,12 @@ impl Client {
 
     /// Fetches a project by project ID.
     pub fn get_mod(&self, project_id: u64) -> Result<Project, CurseForgeError> {
+        if let Ok(cache) = project_cache().lock()
+            && let Some(project) = cache.get(&project_id)
+        {
+            return Ok(project.clone());
+        }
+
         debug!(
             target: "vertexlauncher/curseforge",
             project_id,
@@ -309,7 +368,9 @@ impl Client {
         );
         let path = format!("/v1/mods/{project_id}");
         let response: DataResponse<ModRecord> = self.get_json(path.as_str(), &[])?;
-        Ok(response.data.into_project())
+        let project = response.data.into_project();
+        cache_projects(std::slice::from_ref(&project));
+        Ok(project)
     }
 
     /// Fetches multiple projects by ID in one request.
@@ -319,22 +380,42 @@ impl Client {
             return Ok(Vec::new());
         }
 
+        let (mut cached, missing) = take_cached_projects(project_ids.as_slice());
+        if missing.is_empty() {
+            cached.sort_by_key(|project| {
+                project_ids
+                    .iter()
+                    .position(|id| *id == project.id)
+                    .unwrap_or(usize::MAX)
+            });
+            return Ok(cached);
+        }
+
         debug!(
             target: "vertexlauncher/curseforge",
-            projects = project_ids.len(),
+            projects = missing.len(),
             "fetching CurseForge projects in batch"
         );
         let response: DataResponse<Vec<ModRecord>> = self.post_json(
             "/v1/mods",
             &ModIdsRequest {
-                mod_ids: project_ids.as_slice(),
+                mod_ids: missing.as_slice(),
             },
         )?;
-        Ok(response
+        let fetched = response
             .data
             .into_iter()
             .map(ModRecord::into_project)
-            .collect())
+            .collect::<Vec<_>>();
+        cache_projects(fetched.as_slice());
+        cached.extend(fetched);
+        cached.sort_by_key(|project| {
+            project_ids
+                .iter()
+                .position(|id| *id == project.id)
+                .unwrap_or(usize::MAX)
+        });
+        Ok(cached)
     }
 
     /// Lists files for a project, optionally filtered by compatibility.
@@ -369,11 +450,13 @@ impl Client {
         let path = format!("/v1/mods/{project_id}/files");
         let response: DataResponse<Vec<FileRecord>> =
             self.get_json(path.as_str(), &query_params)?;
-        Ok(response
+        let files = response
             .data
             .into_iter()
             .map(FileRecord::into_file)
-            .collect())
+            .collect::<Vec<_>>();
+        cache_files(files.as_slice());
+        Ok(files)
     }
 
     /// Fetches multiple files by ID in one request.
@@ -383,22 +466,108 @@ impl Client {
             return Ok(Vec::new());
         }
 
+        let (mut cached, missing) = take_cached_files(file_ids.as_slice());
+        if missing.is_empty() {
+            cached.sort_by_key(|file| {
+                file_ids
+                    .iter()
+                    .position(|id| *id == file.id)
+                    .unwrap_or(usize::MAX)
+            });
+            return Ok(cached);
+        }
+
         debug!(
             target: "vertexlauncher/curseforge",
-            files = file_ids.len(),
+            files = missing.len(),
             "fetching CurseForge files in batch"
         );
         let response: DataResponse<Vec<FileRecord>> = self.post_json(
             "/v1/mods/files",
             &FileIdsRequest {
-                file_ids: file_ids.as_slice(),
+                file_ids: missing.as_slice(),
             },
         )?;
-        Ok(response
+        let fetched = response
             .data
             .into_iter()
             .map(FileRecord::into_file)
-            .collect())
+            .collect::<Vec<_>>();
+        cache_files(fetched.as_slice());
+        cached.extend(fetched);
+        cached.sort_by_key(|file| {
+            file_ids
+                .iter()
+                .position(|id| *id == file.id)
+                .unwrap_or(usize::MAX)
+        });
+        Ok(cached)
+    }
+
+    /// Resolves a file's direct download URL.
+    pub fn get_mod_file_download_url(
+        &self,
+        project_id: u64,
+        file_id: u64,
+    ) -> Result<Option<String>, CurseForgeError> {
+        if let Ok(cache) = download_url_cache().lock()
+            && let Some(url) = cache.get(&(project_id, file_id))
+        {
+            return Ok(url.clone());
+        }
+        if let Ok(cache) = file_cache().lock()
+            && let Some(file) = cache.get(&file_id)
+            && let Some(url) = file.download_url.clone()
+        {
+            if let Ok(mut url_cache) = download_url_cache().lock() {
+                url_cache.insert((project_id, file_id), Some(url.clone()));
+            }
+            return Ok(Some(url));
+        }
+
+        debug!(
+            target: "vertexlauncher/curseforge",
+            project_id,
+            file_id,
+            "fetching CurseForge file download URL"
+        );
+        let path = format!("/v1/mods/{project_id}/files/{file_id}/download-url");
+        let mut last_error = None;
+        let mut url = None;
+        for attempt in 1..=DOWNLOAD_URL_LOOKUP_MAX_ATTEMPTS {
+            match self.get_json::<DataResponse<String>>(path.as_str(), &[]) {
+                Ok(response) => {
+                    url = non_empty(Some(response.data.as_str())).map(str::to_owned);
+                    break;
+                }
+                Err(err) if should_retry_download_url_lookup(&err, attempt) => {
+                    warn!(
+                        target: "vertexlauncher/curseforge",
+                        project_id,
+                        file_id,
+                        attempt,
+                        max_attempts = DOWNLOAD_URL_LOOKUP_MAX_ATTEMPTS,
+                        error = %err,
+                        "CurseForge download URL lookup failed; retrying"
+                    );
+                    last_error = Some(err);
+                    thread::sleep(download_url_lookup_retry_delay(attempt));
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        if let Some(err) = last_error
+            && url.is_none()
+        {
+            return Err(err);
+        }
+        if let Ok(mut cache) = download_url_cache().lock() {
+            cache.insert((project_id, file_id), url.clone());
+        }
+        if let Some(url) = url.clone() {
+            update_cached_file_download_url(file_id, url);
+        }
+        Ok(url)
     }
 
     /// Executes a GET request and deserializes the JSON body.
@@ -597,6 +766,78 @@ pub fn set_api_key_override(api_key: Option<String>) {
     }
 }
 
+fn take_cached_projects(project_ids: &[u64]) -> (Vec<Project>, Vec<u64>) {
+    let Ok(cache) = project_cache().lock() else {
+        return (Vec::new(), project_ids.to_vec());
+    };
+    let mut cached = Vec::new();
+    let mut missing = Vec::new();
+    for &project_id in project_ids {
+        if let Some(project) = cache.get(&project_id) {
+            cached.push(project.clone());
+        } else {
+            missing.push(project_id);
+        }
+    }
+    (cached, missing)
+}
+
+fn cache_projects(projects: &[Project]) {
+    if let Ok(mut cache) = project_cache().lock() {
+        for project in projects {
+            cache.insert(project.id, project.clone());
+        }
+    }
+}
+
+fn take_cached_files(file_ids: &[u64]) -> (Vec<File>, Vec<u64>) {
+    let Ok(cache) = file_cache().lock() else {
+        return (Vec::new(), file_ids.to_vec());
+    };
+    let mut cached = Vec::new();
+    let mut missing = Vec::new();
+    for &file_id in file_ids {
+        if let Some(file) = cache.get(&file_id) {
+            cached.push(file.clone());
+        } else {
+            missing.push(file_id);
+        }
+    }
+    (cached, missing)
+}
+
+fn cache_files(files: &[File]) {
+    if let Ok(mut cache) = file_cache().lock() {
+        for file in files {
+            cache.insert(file.id, file.clone());
+        }
+    }
+}
+
+fn update_cached_file_download_url(file_id: u64, download_url: String) {
+    if let Ok(mut cache) = file_cache().lock()
+        && let Some(file) = cache.get_mut(&file_id)
+    {
+        file.download_url = Some(download_url);
+    }
+}
+
+fn should_retry_download_url_lookup(err: &CurseForgeError, attempt: usize) -> bool {
+    if attempt >= DOWNLOAD_URL_LOOKUP_MAX_ATTEMPTS {
+        return false;
+    }
+    match err {
+        CurseForgeError::Transport(_) | CurseForgeError::Read(_) => true,
+        CurseForgeError::HttpStatus { status, .. } => matches!(status, 403 | 429 | 500..=599),
+        CurseForgeError::MissingApiKey | CurseForgeError::Json(_) => false,
+    }
+}
+
+fn download_url_lookup_retry_delay(attempt: usize) -> Duration {
+    let factor = attempt.saturating_sub(1) as u32;
+    DOWNLOAD_URL_LOOKUP_RETRY_BASE_DELAY.saturating_mul(2u32.saturating_pow(factor))
+}
+
 fn parse_retry_after_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
     headers
         .get("retry-after")
@@ -732,6 +973,8 @@ struct FileRecord {
     download_count: Option<f64>,
     download_url: Option<String>,
     #[serde(default)]
+    hashes: Vec<FileHashRecord>,
+    #[serde(default)]
     dependencies: Vec<FileDependencyRecord>,
     #[serde(default)]
     game_versions: Vec<String>,
@@ -746,6 +989,14 @@ impl FileRecord {
             file_date: self.file_date,
             download_count: self.download_count.unwrap_or(0.0).max(0.0).round() as u64,
             download_url: self.download_url,
+            hashes: self
+                .hashes
+                .into_iter()
+                .map(|hash| FileHash {
+                    algo: hash.algo,
+                    value: hash.value,
+                })
+                .collect(),
             dependencies: self
                 .dependencies
                 .into_iter()
@@ -764,6 +1015,14 @@ impl FileRecord {
 struct FileDependencyRecord {
     mod_id: u64,
     relation_type: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileHashRecord {
+    algo: u32,
+    #[serde(default)]
+    value: String,
 }
 
 fn non_empty(value: Option<&str>) -> Option<&str> {

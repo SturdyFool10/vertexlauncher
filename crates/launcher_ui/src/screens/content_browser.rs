@@ -19,7 +19,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, mpsc},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use textui::{LabelOptions, TextUi, normalize_inline_whitespace};
 
@@ -34,6 +34,8 @@ use super::AppScreen;
 const CONTENT_SEARCH_PER_PROVIDER_LIMIT: u32 = 35;
 const CONTENT_DOWNLOAD_REQUIRED_DEPENDENCY_RELATION_TYPE: u32 = 3;
 const DEFAULT_DISCOVERY_QUERY_MOD: &str = "mod";
+const MODRINTH_DOWNLOAD_MIN_SPACING: Duration = Duration::from_millis(250);
+const CURSEFORGE_DOWNLOAD_MIN_SPACING: Duration = Duration::from_millis(500);
 const DEFAULT_DISCOVERY_QUERY_RESOURCE_PACK: &str = "resource pack";
 const DEFAULT_DISCOVERY_QUERY_SHADER: &str = "shader";
 const DEFAULT_DISCOVERY_QUERY_DATA_PACK: &str = "data pack";
@@ -3801,6 +3803,7 @@ fn apply_content_install_request_with_prefetched_downloads(
             && existing.selected_version_id.as_deref() == Some(root_download.version_id.as_str())
         {
             if let Some(record) = manifest.projects.get_mut(existing_project_key.as_str()) {
+                record.pack_managed = false;
                 record.explicitly_installed = true;
             }
             for path in additional_cleanup_paths {
@@ -4041,6 +4044,7 @@ fn install_project_recursive(
                 selected_source: Some(resolved.source),
                 selected_version_id: Some(resolved.version_id.clone()),
                 selected_version_name: Some(resolved.version_name.clone()),
+                pack_managed: false,
                 explicitly_installed,
                 direct_dependencies: Vec::new(),
             },
@@ -4832,6 +4836,7 @@ fn normalized_filename(name: &str, url: &str) -> String {
 }
 
 fn download_file(url: &str, destination: &Path) -> Result<(), String> {
+    throttle_download_url(url);
     let response = ureq::get(url)
         .call()
         .map_err(|err| format!("download request failed for {url}: {err}"))?;
@@ -4846,6 +4851,51 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
     file.write_all(&bytes)
         .map_err(|err| format!("failed to write {:?}: {err}", destination))?;
     Ok(())
+}
+
+fn throttle_download_url(url: &str) {
+    let Some(spacing) = download_spacing_for_url(url) else {
+        return;
+    };
+    let lock = download_throttle_store(url);
+    let Ok(mut next_allowed) = lock.lock() else {
+        return;
+    };
+    let now = Instant::now();
+    if *next_allowed > now {
+        thread::sleep(next_allowed.saturating_duration_since(now));
+    }
+    *next_allowed = Instant::now() + spacing;
+}
+
+fn download_spacing_for_url(url: &str) -> Option<Duration> {
+    let host = url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.split('/').next())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if host.contains("modrinth.com") {
+        Some(MODRINTH_DOWNLOAD_MIN_SPACING)
+    } else if host.contains("curseforge.com") || host.contains("forgecdn.net") {
+        Some(CURSEFORGE_DOWNLOAD_MIN_SPACING)
+    } else {
+        None
+    }
+}
+
+fn download_throttle_store(url: &str) -> &'static Mutex<Instant> {
+    static MODRINTH: OnceLock<Mutex<Instant>> = OnceLock::new();
+    static CURSEFORGE: OnceLock<Mutex<Instant>> = OnceLock::new();
+    let host = url
+        .split_once("://")
+        .and_then(|(_, rest)| rest.split('/').next())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if host.contains("modrinth.com") {
+        MODRINTH.get_or_init(|| Mutex::new(Instant::now()))
+    } else {
+        CURSEFORGE.get_or_init(|| Mutex::new(Instant::now()))
+    }
 }
 
 #[cfg(test)]
@@ -4956,6 +5006,7 @@ mod tests {
                 selected_source: None,
                 selected_version_id: None,
                 selected_version_name: None,
+                pack_managed: false,
                 explicitly_installed: true,
                 direct_dependencies: Vec::new(),
             },
@@ -5018,6 +5069,7 @@ mod tests {
                 selected_source: Some(ManagedContentSource::Modrinth),
                 selected_version_id: Some("version-2".to_owned()),
                 selected_version_name: Some("2.0".to_owned()),
+                pack_managed: false,
                 explicitly_installed: true,
                 direct_dependencies: Vec::new(),
             },

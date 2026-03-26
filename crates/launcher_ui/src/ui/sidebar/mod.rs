@@ -3,8 +3,8 @@ use textui::{ButtonOptions, TextUi};
 
 use crate::assets;
 use crate::screens::AppScreen;
-use crate::ui::instance_context_menu::InstanceContextAction;
 use crate::ui::components::icon_button;
+use crate::ui::instance_context_menu::InstanceContextAction;
 use crate::ui::style;
 
 mod app_nav;
@@ -19,6 +19,7 @@ struct SidebarLayout {
 pub struct ProfileShortcut {
     pub id: String,
     pub name: String,
+    pub thumbnail_path: Option<String>,
 }
 
 #[derive(Debug, Default)]

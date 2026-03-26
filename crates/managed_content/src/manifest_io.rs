@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
-use crate::{CONTENT_MANIFEST_FILE_NAME, ContentInstallManifest, InstalledContentIdentity};
+use crate::{
+    CONTENT_MANIFEST_FILE_NAME, ContentInstallManifest, InstalledContentIdentity,
+    MODPACK_STATE_FILE_NAME, ModpackInstallState,
+};
 
 #[must_use]
 pub fn content_manifest_path(instance_root: &Path) -> PathBuf {
@@ -70,6 +73,53 @@ pub fn save_content_manifest(
 }
 
 #[must_use]
+pub fn modpack_install_state_path(instance_root: &Path) -> PathBuf {
+    instance_root.join(MODPACK_STATE_FILE_NAME)
+}
+
+#[must_use]
+pub fn load_modpack_install_state(instance_root: &Path) -> Option<ModpackInstallState> {
+    let path = modpack_install_state_path(instance_root);
+    let raw = std::fs::read_to_string(path.as_path()).ok()?;
+    let mut state = toml::from_str::<ModpackInstallState>(raw.as_str()).ok()?;
+    normalize_content_manifest(instance_root, &mut state.base_manifest);
+    Some(state)
+}
+
+pub fn save_modpack_install_state(
+    instance_root: &Path,
+    state: &ModpackInstallState,
+) -> Result<(), String> {
+    let mut normalized = state.clone();
+    normalize_content_manifest(instance_root, &mut normalized.base_manifest);
+    let path = modpack_install_state_path(instance_root);
+    if normalized.format.trim().is_empty() || normalized.version_id.trim().is_empty() {
+        return remove_modpack_install_state(instance_root);
+    }
+    let raw = toml::to_string_pretty(&normalized)
+        .map_err(|err| format!("failed to serialize modpack install state: {err}"))?;
+    std::fs::write(path.as_path(), raw).map_err(|err| {
+        format!(
+            "failed to write modpack install state {}: {err}",
+            path.display()
+        )
+    })
+}
+
+pub fn remove_modpack_install_state(instance_root: &Path) -> Result<(), String> {
+    let path = modpack_install_state_path(instance_root);
+    if path.exists() {
+        std::fs::remove_file(path.as_path()).map_err(|err| {
+            format!(
+                "failed to remove modpack install state {}: {err}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+#[must_use]
 pub fn load_managed_content_identities(
     instance_root: &Path,
 ) -> HashMap<String, InstalledContentIdentity> {
@@ -84,6 +134,7 @@ pub fn load_managed_content_identities(
                 InstalledContentIdentity {
                     name: project.name,
                     file_path: project.file_path,
+                    pack_managed: project.pack_managed,
                     source: source.into(),
                     modrinth_project_id: project.modrinth_project_id,
                     curseforge_project_id: project.curseforge_project_id,
@@ -221,6 +272,7 @@ mod tests {
                 selected_source: Some(ManagedContentSource::Modrinth),
                 selected_version_id: Some("abc123".to_owned()),
                 selected_version_name: Some("1.0.0".to_owned()),
+                pack_managed: false,
                 explicitly_installed: true,
                 direct_dependencies: Vec::new(),
             },
@@ -259,6 +311,7 @@ mod tests {
                 selected_source: Some(ManagedContentSource::Modrinth),
                 selected_version_id: Some("abc123".to_owned()),
                 selected_version_name: Some("1.0.0".to_owned()),
+                pack_managed: false,
                 explicitly_installed: true,
                 direct_dependencies: Vec::new(),
             },
@@ -275,6 +328,7 @@ mod tests {
                 selected_source: Some(ManagedContentSource::Modrinth),
                 selected_version_id: Some("def456".to_owned()),
                 selected_version_name: Some("2.0.0".to_owned()),
+                pack_managed: false,
                 explicitly_installed: true,
                 direct_dependencies: Vec::new(),
             },
@@ -333,6 +387,7 @@ mod tests {
                 selected_source: Some(ManagedContentSource::Modrinth),
                 selected_version_id: Some("root".to_owned()),
                 selected_version_name: Some("1.0.0".to_owned()),
+                pack_managed: false,
                 explicitly_installed: true,
                 direct_dependencies: vec!["mod::core".to_owned()],
             },
@@ -349,6 +404,7 @@ mod tests {
                 selected_source: Some(ManagedContentSource::Modrinth),
                 selected_version_id: Some("dep".to_owned()),
                 selected_version_name: Some("1.0.0".to_owned()),
+                pack_managed: false,
                 explicitly_installed: false,
                 direct_dependencies: Vec::new(),
             },

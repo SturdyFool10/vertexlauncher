@@ -64,12 +64,7 @@ pub fn items(include_delete: bool) -> Vec<ContextMenuItem> {
     items
 }
 
-pub fn request_for_instance(
-    ctx: &Context,
-    source_id: Id,
-    anchor_pos: Pos2,
-    include_delete: bool,
-) {
+pub fn request_for_instance(ctx: &Context, source_id: Id, anchor_pos: Pos2, include_delete: bool) {
     context_menu::request(
         ctx,
         ContextMenuRequest::new(source_id, anchor_pos, items(include_delete)),

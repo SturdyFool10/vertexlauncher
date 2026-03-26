@@ -90,6 +90,10 @@ struct HomeState {
     screenshot_scan_pending: bool,
     latest_requested_screenshot_scan_id: u64,
     screenshot_images: LazyImageBytes,
+    instance_thumbnail_results_tx: Option<mpsc::Sender<(String, Option<Arc<[u8]>>)>>,
+    instance_thumbnail_results_rx: Option<Arc<Mutex<mpsc::Receiver<(String, Option<Arc<[u8]>>)>>>>,
+    instance_thumbnail_cache: HashMap<String, Option<Arc<[u8]>>>,
+    instance_thumbnail_in_flight: HashSet<String>,
     screenshot_viewer: Option<ScreenshotViewerState>,
     pending_delete_screenshot_key: Option<String>,
     delete_screenshot_in_flight: bool,
@@ -581,6 +585,7 @@ pub fn render(
         HomeTab::InstancesAndWorlds => {
             poll_home_activity_results(&mut state);
             poll_server_ping_results(&mut state);
+            poll_instance_thumbnail_results(&mut state);
             let should_scan = state
                 .last_scan_at
                 .is_none_or(|last| last.elapsed() >= HOME_SCAN_INTERVAL)
@@ -592,9 +597,12 @@ pub fn render(
             if state.activity_scan_pending || !state.server_ping_in_flight.is_empty() {
                 ui.ctx().request_repaint_after(Duration::from_millis(50));
             }
+            if !state.instance_thumbnail_in_flight.is_empty() {
+                ui.ctx().request_repaint_after(Duration::from_millis(50));
+            }
 
             let mut requested_rescan = false;
-            render_instance_usage(ui, text_ui, instances, config, &mut output);
+            render_instance_usage(ui, text_ui, instances, config, &mut state, &mut output);
             ui.add_space(12.0);
             render_activity_feed(
                 ui,
@@ -1524,6 +1532,7 @@ fn render_instance_usage(
     text_ui: &mut TextUi,
     instances: &InstanceStore,
     config: &Config,
+    state: &mut HomeState,
     output: &mut HomeOutput,
 ) {
     let mut title_style = LabelOptions::default();
@@ -1562,6 +1571,25 @@ fn render_instance_usage(
         .max_height(max_height)
         .show(ui, |ui| {
             for (index, instance) in items.iter().enumerate() {
+                let thumbnail_png = instance
+                    .thumbnail_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .and_then(|path| {
+                        let key = instance_thumbnail_cache_key(instance.id.as_str(), path);
+                        match state.instance_thumbnail_cache.get(&key).cloned() {
+                            Some(bytes) => bytes,
+                            None => {
+                                request_instance_thumbnail(
+                                    state,
+                                    instance.id.as_str(),
+                                    path.to_owned(),
+                                );
+                                None
+                            }
+                        }
+                    });
                 let row_response = render_clickable_entry_row(
                     ui,
                     ("home_instance_row", index),
@@ -1570,7 +1598,7 @@ fn render_instance_usage(
                         render_entry_thumbnail(
                             ui,
                             ("home_instance_thumb", index),
-                            None,
+                            thumbnail_png.as_deref(),
                             assets::LIBRARY_SVG,
                             40.0,
                             18.0,
@@ -1606,7 +1634,8 @@ fn render_instance_usage(
                         });
                     },
                 );
-                let context_id = ui.make_persistent_id(("home_instance_context", instance.id.as_str()));
+                let context_id =
+                    ui.make_persistent_id(("home_instance_context", instance.id.as_str()));
 
                 if row_response.clicked() {
                     queue_launch_intent(
@@ -1636,7 +1665,9 @@ fn render_instance_usage(
                             open_home_instance(output, instance.id.as_str());
                         }
                         InstanceContextAction::OpenFolder => {
-                            if let Err(err) = open_home_instance_folder(instance.id.as_str(), instances, config) {
+                            if let Err(err) =
+                                open_home_instance_folder(instance.id.as_str(), instances, config)
+                            {
                                 notification::emit_replace(
                                     notification::Severity::Error,
                                     format!("home-instance-folder-{}", instance.id),
@@ -1654,6 +1685,74 @@ fn render_instance_usage(
                 ui.add_space(3.0);
             }
         });
+}
+
+fn ensure_instance_thumbnail_channel(state: &mut HomeState) {
+    if state.instance_thumbnail_results_tx.is_some()
+        && state.instance_thumbnail_results_rx.is_some()
+    {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<(String, Option<Arc<[u8]>>)>();
+    state.instance_thumbnail_results_tx = Some(tx);
+    state.instance_thumbnail_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn instance_thumbnail_cache_key(instance_id: &str, path: &str) -> String {
+    format!("{instance_id}\n{path}")
+}
+
+fn request_instance_thumbnail(state: &mut HomeState, instance_id: &str, path: String) {
+    let key = instance_thumbnail_cache_key(instance_id, path.as_str());
+    if state.instance_thumbnail_in_flight.contains(key.as_str()) {
+        return;
+    }
+    ensure_instance_thumbnail_channel(state);
+    let Some(tx) = state.instance_thumbnail_results_tx.as_ref().cloned() else {
+        return;
+    };
+    state.instance_thumbnail_in_flight.insert(key.clone());
+    let _ = tokio_runtime::spawn_detached(async move {
+        let bytes = tokio_runtime::spawn_blocking(move || {
+            std::fs::read(path.as_str())
+                .ok()
+                .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()))
+        })
+        .await
+        .ok()
+        .flatten();
+        let _ = tx.send((key, bytes));
+    });
+}
+
+fn poll_instance_thumbnail_results(state: &mut HomeState) {
+    let Some(rx) = state.instance_thumbnail_results_rx.as_ref() else {
+        return;
+    };
+    let mut updates = Vec::new();
+    let mut should_reset_channel = false;
+    match rx.lock() {
+        Ok(receiver) => loop {
+            match receiver.try_recv() {
+                Ok(update) => updates.push(update),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    should_reset_channel = true;
+                    break;
+                }
+            }
+        },
+        Err(_) => should_reset_channel = true,
+    }
+    if should_reset_channel {
+        state.instance_thumbnail_results_tx = None;
+        state.instance_thumbnail_results_rx = None;
+        state.instance_thumbnail_in_flight.clear();
+    }
+    for (key, bytes) in updates {
+        state.instance_thumbnail_in_flight.remove(key.as_str());
+        state.instance_thumbnail_cache.insert(key, bytes);
+    }
 }
 
 fn render_activity_feed(
@@ -2184,7 +2283,14 @@ fn render_entry_thumbnail(
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             id_source.hash(&mut hasher);
             let uri = format!("bytes://home/entry-thumb/{}.png", hasher.finish());
-            ui.add(egui::Image::from_bytes(uri, png.to_vec()).fit_to_exact_size(rect.size()));
+            let image_size = (height - 4.0).max(1.0).min(width - 4.0).max(1.0);
+            let image_rect =
+                egui::Rect::from_center_size(rect.center(), egui::vec2(image_size, image_size));
+            ui.put(
+                image_rect,
+                egui::Image::from_bytes(uri, png.to_vec())
+                    .fit_to_exact_size(egui::vec2(image_size, image_size)),
+            );
         } else {
             ui.with_layout(Layout::top_down(egui::Align::Center), |ui| {
                 ui.add_space(((height - ENTRY_ICON_SIZE) * 0.5).max(0.0));
@@ -3274,9 +3380,16 @@ fn format_time_ago(timestamp_ms: Option<u64>, now_ms: u64) -> String {
     format!("{days}d ago")
 }
 
-
-fn open_home_instance_folder(instance_id: &str, instances: &InstanceStore, config: &Config) -> Result<(), String> {
-    let Some(instance) = instances.instances.iter().find(|instance| instance.id == instance_id) else {
+fn open_home_instance_folder(
+    instance_id: &str,
+    instances: &InstanceStore,
+    config: &Config,
+) -> Result<(), String> {
+    let Some(instance) = instances
+        .instances
+        .iter()
+        .find(|instance| instance.id == instance_id)
+    else {
         return Err(format!("unknown instance id: {instance_id}"));
     };
     let root = instance_root_path(Path::new(config.minecraft_installations_root()), instance);

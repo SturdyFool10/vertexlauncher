@@ -13,6 +13,7 @@ use textui::{LabelOptions, TextUi};
 use crate::{
     app::tokio_runtime,
     assets,
+    screens::AppScreen,
     ui::{components::remote_tiled_image, style},
 };
 
@@ -45,6 +46,19 @@ pub struct DiscoverState {
         Option<Arc<Mutex<mpsc::Receiver<Result<Vec<MinecraftVersionEntry>, String>>>>>,
     search_results_tx: Option<mpsc::Sender<DiscoverSearchResult>>,
     search_results_rx: Option<Arc<Mutex<mpsc::Receiver<DiscoverSearchResult>>>>,
+    detail_entry: Option<DiscoverEntry>,
+    detail_selected_source: Option<DiscoverSource>,
+    detail_versions: Vec<DiscoverVersionEntry>,
+    detail_versions_error: Option<String>,
+    detail_versions_in_flight: bool,
+    detail_version_request_serial: u64,
+    detail_version_results_tx: Option<mpsc::Sender<DiscoverVersionsResult>>,
+    detail_version_results_rx: Option<Arc<Mutex<mpsc::Receiver<DiscoverVersionsResult>>>>,
+    install_in_flight: bool,
+    install_message: Option<String>,
+    install_completed_steps: usize,
+    install_total_steps: usize,
+    install_error: Option<String>,
 }
 
 impl Default for DiscoverState {
@@ -71,8 +85,88 @@ impl Default for DiscoverState {
             version_catalog_rx: None,
             search_results_tx: None,
             search_results_rx: None,
+            detail_entry: None,
+            detail_selected_source: None,
+            detail_versions: Vec::new(),
+            detail_versions_error: None,
+            detail_versions_in_flight: false,
+            detail_version_request_serial: 0,
+            detail_version_results_tx: None,
+            detail_version_results_rx: None,
+            install_in_flight: false,
+            install_message: None,
+            install_completed_steps: 0,
+            install_total_steps: 0,
+            install_error: None,
         }
     }
+}
+
+impl DiscoverState {
+    pub fn begin_install(&mut self, message: impl Into<String>) {
+        self.install_in_flight = true;
+        self.install_error = None;
+        self.install_message = Some(message.into());
+        self.install_completed_steps = 0;
+        self.install_total_steps = 0;
+    }
+
+    pub fn apply_install_progress(
+        &mut self,
+        message: impl Into<String>,
+        completed_steps: usize,
+        total_steps: usize,
+    ) {
+        self.install_in_flight = true;
+        self.install_error = None;
+        self.install_message = Some(message.into());
+        self.install_completed_steps = completed_steps;
+        self.install_total_steps = total_steps;
+    }
+
+    pub fn finish_install(&mut self, result: Result<String, String>) {
+        self.install_in_flight = false;
+        match result {
+            Ok(message) => {
+                self.install_error = None;
+                self.install_message = Some(message);
+            }
+            Err(error) => {
+                self.install_error = Some(error);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DiscoverOutput {
+    pub requested_screen: Option<AppScreen>,
+    pub install_requested: Option<DiscoverInstallRequest>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoverInstallRequest {
+    pub instance_name: String,
+    pub project_summary: Option<String>,
+    pub icon_url: Option<String>,
+    pub version_name: String,
+    pub source: DiscoverInstallSource,
+}
+
+#[derive(Debug, Clone)]
+pub enum DiscoverInstallSource {
+    Modrinth {
+        project_id: String,
+        version_id: String,
+        file_url: String,
+        file_name: String,
+    },
+    CurseForge {
+        project_id: u64,
+        file_id: u64,
+        file_name: String,
+        download_url: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -219,6 +313,7 @@ struct DiscoverEntry {
     icon_url: Option<String>,
     primary_url: Option<String>,
     sources: Vec<DiscoverSource>,
+    provider_refs: Vec<DiscoverProviderRef>,
     popularity_score: Option<u64>,
     updated_at: Option<String>,
     relevance_rank: u32,
@@ -226,6 +321,7 @@ struct DiscoverEntry {
 
 #[derive(Clone, Debug)]
 struct DiscoverProviderEntry {
+    project_ref: DiscoverProjectRef,
     name: String,
     summary: String,
     author: Option<String>,
@@ -237,21 +333,71 @@ struct DiscoverProviderEntry {
     relevance_rank: u32,
 }
 
-pub fn render(ui: &mut Ui, text_ui: &mut TextUi, state: &mut DiscoverState) {
+#[derive(Clone, Debug)]
+struct DiscoverProviderRef {
+    source: DiscoverSource,
+    project_ref: DiscoverProjectRef,
+    primary_url: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum DiscoverProjectRef {
+    Modrinth { project_id: String },
+    CurseForge { project_id: u64 },
+}
+
+#[derive(Clone, Debug)]
+struct DiscoverVersionsResult {
+    request_serial: u64,
+    versions: Result<Vec<DiscoverVersionEntry>, String>,
+}
+
+#[derive(Clone, Debug)]
+struct DiscoverVersionEntry {
+    source: DiscoverSource,
+    version_id: String,
+    version_name: String,
+    published_at: Option<String>,
+    file_name: String,
+    file_url: Option<String>,
+    game_versions: Vec<String>,
+    loaders: Vec<String>,
+    download_count: Option<u64>,
+}
+
+pub fn render(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    state: &mut DiscoverState,
+    detail_mode: bool,
+) -> DiscoverOutput {
     let full_width = ui.available_width().max(1.0);
     let full_height = ui.available_height().max(1.0);
+    let mut output = DiscoverOutput::default();
     ui.horizontal(|ui| {
         ui.add_space(style::SPACE_XS);
         ui.allocate_ui_with_layout(
             egui::vec2((full_width - style::SPACE_XS * 2.0).max(1.0), full_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| render_discover_content(ui, text_ui, state),
+            |ui| {
+                output = if detail_mode {
+                    render_discover_detail_content(ui, text_ui, state)
+                } else {
+                    render_discover_browse_content(ui, text_ui, state)
+                };
+            },
         );
         ui.add_space(style::SPACE_XS);
     });
+    output
 }
 
-fn render_discover_content(ui: &mut Ui, text_ui: &mut TextUi, state: &mut DiscoverState) {
+fn render_discover_browse_content(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    state: &mut DiscoverState,
+) -> DiscoverOutput {
+    let mut output = DiscoverOutput::default();
     poll_version_catalog(state);
     request_version_catalog(state);
     poll_search_results(state);
@@ -402,7 +548,10 @@ fn render_discover_content(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Discov
                 );
                 return;
             }
-            render_masonry_tiles(ui, text_ui, state.entries.as_slice());
+            if let Some(entry) = render_masonry_tiles(ui, text_ui, state.entries.as_slice()) {
+                open_detail_page(state, &entry);
+                output.requested_screen = Some(AppScreen::DiscoverDetail);
+            }
             let content_bottom = ui.min_rect().bottom();
             should_load_more = state.has_more_results
                 && !state.search_in_flight
@@ -412,9 +561,347 @@ fn render_discover_content(ui: &mut Ui, text_ui: &mut TextUi, state: &mut Discov
     if should_load_more {
         request_search(state, false, SearchMode::Append);
     }
+    output
 }
 
-fn render_masonry_tiles(ui: &mut Ui, text_ui: &mut TextUi, entries: &[DiscoverEntry]) {
+fn render_discover_detail_content(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    state: &mut DiscoverState,
+) -> DiscoverOutput {
+    let mut output = DiscoverOutput::default();
+    poll_detail_versions(state);
+    request_detail_versions(state);
+    if state.detail_versions_in_flight || state.install_in_flight {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
+
+    let Some(entry) = state.detail_entry.clone() else {
+        let _ = text_ui.label(
+            ui,
+            "discover_detail_missing",
+            "No modpack selected.",
+            &style::muted(ui),
+        );
+        return output;
+    };
+
+    let muted_style = style::muted(ui);
+    let heading_style = LabelOptions {
+        font_size: 24.0,
+        line_height: 28.0,
+        weight: 700,
+        color: ui.visuals().text_color(),
+        wrap: true,
+        ..LabelOptions::default()
+    };
+    let body_style = style::body(ui);
+    let selected_source = selected_detail_source(state, &entry);
+    let previous_selected_source = state.detail_selected_source;
+
+    ui.horizontal(|ui| {
+        if text_ui
+            .button(
+                ui,
+                "discover_detail_back",
+                "Back to Discover",
+                &style::neutral_button(ui),
+            )
+            .clicked()
+        {
+            output.requested_screen = Some(AppScreen::Discover);
+        }
+
+        if entry.provider_refs.len() > 1 {
+            ui.add_space(style::SPACE_SM);
+            sized_combo_box(
+                ui,
+                "discover_detail_source",
+                180.0,
+                selected_source.label(),
+                |ui| {
+                    for provider in &entry.provider_refs {
+                        ui.selectable_value(
+                            &mut state.detail_selected_source,
+                            Some(provider.source),
+                            provider.source.label(),
+                        );
+                    }
+                },
+            );
+        }
+    });
+    if state.detail_selected_source != previous_selected_source {
+        state.detail_versions.clear();
+        state.detail_versions_error = None;
+        state.detail_versions_in_flight = false;
+    }
+    ui.add_space(style::SPACE_MD);
+
+    egui::Frame::new()
+        .fill(ui.visuals().faint_bg_color)
+        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
+        .inner_margin(egui::Margin::same(style::SPACE_MD as i8))
+        .show(ui, |ui| {
+            let preview_height = 180.0;
+            if let Some(icon_url) = entry.icon_url.as_deref() {
+                remote_tiled_image::show(
+                    ui,
+                    icon_url,
+                    egui::vec2(ui.available_width(), preview_height),
+                    ("discover_detail_image", entry.dedupe_key.as_str()),
+                    assets::DISCOVER_SVG,
+                );
+            }
+            ui.add_space(style::SPACE_MD);
+            let _ = text_ui.label(
+                ui,
+                ("discover_detail_title", entry.dedupe_key.as_str()),
+                entry.name.as_str(),
+                &heading_style,
+            );
+            if let Some(author) = entry.author.as_deref() {
+                let _ = text_ui.label(
+                    ui,
+                    ("discover_detail_author", entry.dedupe_key.as_str()),
+                    &format!("by {author}"),
+                    &muted_style,
+                );
+            }
+            ui.add_space(style::SPACE_SM);
+            let _ = text_ui.label(
+                ui,
+                ("discover_detail_summary", entry.dedupe_key.as_str()),
+                entry.summary.as_str(),
+                &body_style,
+            );
+            if let Some(url) = selected_detail_provider_ref(&entry, selected_source)
+                .and_then(|provider| provider.primary_url.as_deref())
+            {
+                ui.add_space(style::SPACE_SM);
+                ui.hyperlink_to("Open project page", url);
+            }
+        });
+
+    if let Some(error) = state.install_error.as_deref() {
+        ui.add_space(style::SPACE_SM);
+        let _ = text_ui.label(
+            ui,
+            "discover_detail_install_error",
+            error,
+            &LabelOptions {
+                color: ui.visuals().error_fg_color,
+                wrap: true,
+                ..LabelOptions::default()
+            },
+        );
+    }
+    if state.install_in_flight {
+        ui.add_space(style::SPACE_SM);
+        ui.horizontal(|ui| {
+            ui.spinner();
+            let _ = text_ui.label(
+                ui,
+                "discover_detail_install_progress",
+                state
+                    .install_message
+                    .as_deref()
+                    .unwrap_or("Installing modpack..."),
+                &muted_style,
+            );
+        });
+        if state.install_total_steps > 0 {
+            ui.add(
+                egui::ProgressBar::new(
+                    state.install_completed_steps as f32 / state.install_total_steps as f32,
+                )
+                .show_percentage(),
+            );
+        }
+    }
+
+    ui.add_space(style::SPACE_MD);
+    let versions_height = ui.available_height().max(1.0);
+    egui::ScrollArea::vertical()
+        .id_salt("discover_detail_versions_scroll")
+        .auto_shrink([false, false])
+        .max_height(versions_height)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(1.0));
+            if state.detail_versions_in_flight {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    let _ = text_ui.label(
+                        ui,
+                        "discover_detail_versions_loading",
+                        "Loading modpack versions...",
+                        &muted_style,
+                    );
+                });
+                return;
+            }
+            if let Some(error) = state.detail_versions_error.as_deref() {
+                let _ = text_ui.label(
+                    ui,
+                    "discover_detail_versions_error",
+                    error,
+                    &LabelOptions {
+                        color: ui.visuals().error_fg_color,
+                        wrap: true,
+                        ..LabelOptions::default()
+                    },
+                );
+                return;
+            }
+
+            for version in &state.detail_versions {
+                let row_width = ui.available_width().max(1.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(row_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        egui::Frame::new()
+                            .fill(ui.visuals().window_fill)
+                            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                            .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
+                            .inner_margin(egui::Margin::same(style::SPACE_MD as i8))
+                            .show(ui, |ui| {
+                                let row_width = ui.available_width().max(1.0);
+                                let action_width = 150.0;
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(
+                                            (row_width - action_width - style::SPACE_MD).max(1.0),
+                                            0.0,
+                                        ),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            let _ = text_ui.label(
+                                                ui,
+                                                (
+                                                    "discover_detail_version_name",
+                                                    version.version_id.as_str(),
+                                                ),
+                                                version.version_name.as_str(),
+                                                &LabelOptions {
+                                                    font_size: 18.0,
+                                                    line_height: 22.0,
+                                                    weight: 700,
+                                                    color: ui.visuals().text_color(),
+                                                    wrap: true,
+                                                    ..LabelOptions::default()
+                                                },
+                                            );
+                                            if let Some(published_at) =
+                                                version.published_at.as_deref()
+                                            {
+                                                let _ = text_ui.label(
+                                                    ui,
+                                                    (
+                                                        "discover_detail_version_date",
+                                                        version.version_id.as_str(),
+                                                    ),
+                                                    &format!(
+                                                        "Published: {}",
+                                                        format_short_date(published_at)
+                                                    ),
+                                                    &muted_style,
+                                                );
+                                            }
+                                            if !version.loaders.is_empty() {
+                                                let _ = text_ui.label(
+                                                    ui,
+                                                    (
+                                                        "discover_detail_version_loaders",
+                                                        version.version_id.as_str(),
+                                                    ),
+                                                    &format!(
+                                                        "Loaders: {}",
+                                                        version.loaders.join(", ")
+                                                    ),
+                                                    &muted_style,
+                                                );
+                                            }
+                                            if !version.game_versions.is_empty() {
+                                                let preview = version
+                                                    .game_versions
+                                                    .iter()
+                                                    .take(4)
+                                                    .cloned()
+                                                    .collect::<Vec<_>>()
+                                                    .join(", ");
+                                                let _ = text_ui.label(
+                                                    ui,
+                                                    (
+                                                        "discover_detail_version_game_versions",
+                                                        version.version_id.as_str(),
+                                                    ),
+                                                    &format!("Game versions: {preview}"),
+                                                    &muted_style,
+                                                );
+                                            }
+                                            if let Some(download_count) = version.download_count {
+                                                let _ = text_ui.label(
+                                                    ui,
+                                                    (
+                                                        "discover_detail_version_downloads",
+                                                        version.version_id.as_str(),
+                                                    ),
+                                                    &format!(
+                                                        "Downloads: {}",
+                                                        format_compact_number(download_count)
+                                                    ),
+                                                    &muted_style,
+                                                );
+                                            }
+                                        },
+                                    );
+                                    ui.add_space(style::SPACE_MD);
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(action_width, 0.0),
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let install_enabled = !state.install_in_flight;
+                                            let response = ui.add_enabled(
+                                                install_enabled,
+                                                egui::Button::new("Create Instance").min_size(
+                                                    egui::vec2(action_width, style::CONTROL_HEIGHT),
+                                                ),
+                                            );
+                                            if response.clicked()
+                                                && let Some(request) =
+                                                    build_install_request(&entry, version)
+                                            {
+                                                state.install_in_flight = true;
+                                                state.install_error = None;
+                                                state.install_message = Some(format!(
+                                                    "Preparing {}...",
+                                                    version.version_name
+                                                ));
+                                                state.install_completed_steps = 0;
+                                                state.install_total_steps = 0;
+                                                output.install_requested = Some(request);
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                    },
+                );
+                ui.add_space(style::SPACE_SM);
+            }
+        });
+
+    output
+}
+
+fn render_masonry_tiles(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    entries: &[DiscoverEntry],
+) -> Option<DiscoverEntry> {
     let content_width = ui.available_width().max(DISCOVER_CARD_MIN_WIDTH);
     let mut column_count = 1usize;
     for candidate in 1..=4usize {
@@ -443,6 +930,7 @@ fn render_masonry_tiles(ui: &mut Ui, text_ui: &mut TextUi, entries: &[DiscoverEn
         heights[target_column] += estimated_height + DISCOVER_CARD_GAP;
     }
 
+    let mut opened_entry = None;
     ui.allocate_ui_with_layout(
         egui::vec2(content_width, 0.0),
         egui::Layout::left_to_right(egui::Align::Min),
@@ -455,7 +943,9 @@ fn render_masonry_tiles(ui: &mut Ui, text_ui: &mut TextUi, entries: &[DiscoverEn
                     |ui| {
                         ui.set_width(column_width);
                         for (row_index, entry_index) in column_entries.iter().enumerate() {
-                            render_discover_tile(ui, text_ui, &entries[*entry_index]);
+                            if render_discover_tile(ui, text_ui, &entries[*entry_index]) {
+                                opened_entry = Some(entries[*entry_index].clone());
+                            }
                             if row_index + 1 < column_entries.len() {
                                 ui.add_space(DISCOVER_CARD_GAP);
                             }
@@ -465,9 +955,10 @@ fn render_masonry_tiles(ui: &mut Ui, text_ui: &mut TextUi, entries: &[DiscoverEn
             }
         },
     );
+    opened_entry
 }
 
-fn render_discover_tile(ui: &mut Ui, text_ui: &mut TextUi, entry: &DiscoverEntry) {
+fn render_discover_tile(ui: &mut Ui, text_ui: &mut TextUi, entry: &DiscoverEntry) -> bool {
     let heading_style = LabelOptions {
         font_size: 20.0,
         line_height: 24.0,
@@ -481,12 +972,13 @@ fn render_discover_tile(ui: &mut Ui, text_ui: &mut TextUi, entry: &DiscoverEntry
     let badge_fill = ui.visuals().widgets.inactive.weak_bg_fill;
     let badge_stroke = ui.visuals().widgets.inactive.bg_stroke;
 
-    egui::Frame::new()
+    let response = egui::Frame::new()
         .fill(ui.visuals().window_fill)
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
         .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
         .inner_margin(egui::Margin::same(style::SPACE_MD as i8))
         .show(ui, |ui| {
+            let mut page_link_clicked = false;
             if let Some(icon_url) = entry.icon_url.as_deref() {
                 remote_tiled_image::show(
                     ui,
@@ -581,9 +1073,16 @@ fn render_discover_tile(ui: &mut Ui, text_ui: &mut TextUi, entry: &DiscoverEntry
             }
             if let Some(url) = entry.primary_url.as_deref() {
                 ui.add_space(style::SPACE_XS);
-                ui.hyperlink_to("Open project page", url);
+                page_link_clicked = ui.hyperlink_to("Open project page", url).clicked();
             }
+            page_link_clicked
         });
+    let interaction = ui.interact(
+        response.response.rect,
+        ui.make_persistent_id(("discover_tile_click", entry.dedupe_key.as_str())),
+        egui::Sense::click(),
+    );
+    interaction.clicked() && !response.inner
 }
 
 fn ensure_search_channel(state: &mut DiscoverState) {
@@ -720,6 +1219,9 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
                 provider_result_count += entries.len();
                 provider_entries.extend(entries.into_iter().enumerate().map(|(index, entry)| {
                     DiscoverProviderEntry {
+                        project_ref: DiscoverProjectRef::Modrinth {
+                            project_id: entry.project_id,
+                        },
                         name: entry.title,
                         summary: entry.description,
                         author: entry.author,
@@ -757,6 +1259,9 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
                             provider_result_count += entries.len();
                             provider_entries.extend(entries.into_iter().enumerate().map(
                                 |(index, entry)| DiscoverProviderEntry {
+                                    project_ref: DiscoverProjectRef::CurseForge {
+                                        project_id: entry.id,
+                                    },
                                     name: entry.name,
                                     summary: entry.summary,
                                     author: None,
@@ -813,6 +1318,34 @@ fn build_snapshot_entries(
                 if existing.primary_url.is_none() {
                     existing.primary_url = entry.primary_url.clone();
                 }
+                if !existing.provider_refs.iter().any(|provider| {
+                    provider.source == entry.source
+                        && match (&provider.project_ref, &entry.project_ref) {
+                            (
+                                DiscoverProjectRef::Modrinth {
+                                    project_id: left_project_id,
+                                },
+                                DiscoverProjectRef::Modrinth {
+                                    project_id: right_project_id,
+                                },
+                            ) => left_project_id == right_project_id,
+                            (
+                                DiscoverProjectRef::CurseForge {
+                                    project_id: left_project_id,
+                                },
+                                DiscoverProjectRef::CurseForge {
+                                    project_id: right_project_id,
+                                },
+                            ) => left_project_id == right_project_id,
+                            _ => false,
+                        }
+                }) {
+                    existing.provider_refs.push(DiscoverProviderRef {
+                        source: entry.source,
+                        project_ref: entry.project_ref.clone(),
+                        primary_url: entry.primary_url.clone(),
+                    });
+                }
                 existing.popularity_score =
                     match (existing.popularity_score, entry.popularity_score) {
                         (Some(left), Some(right)) => Some(left.max(right)),
@@ -823,6 +1356,7 @@ fn build_snapshot_entries(
                 existing.relevance_rank = existing.relevance_rank.min(entry.relevance_rank);
             }
             None => {
+                let primary_url = entry.primary_url.clone();
                 deduped.insert(
                     dedupe_key.clone(),
                     DiscoverEntry {
@@ -831,8 +1365,13 @@ fn build_snapshot_entries(
                         summary: entry.summary,
                         author: entry.author,
                         icon_url: entry.icon_url,
-                        primary_url: entry.primary_url,
+                        primary_url: primary_url.clone(),
                         sources: vec![entry.source],
+                        provider_refs: vec![DiscoverProviderRef {
+                            source: entry.source,
+                            project_ref: entry.project_ref,
+                            primary_url,
+                        }],
                         popularity_score: entry.popularity_score,
                         updated_at: entry.updated_at,
                         relevance_rank: entry.relevance_rank,
@@ -1056,6 +1595,249 @@ fn apply_search_snapshot(
     }
     state.warnings = snapshot.warnings;
     state.has_more_results = snapshot.has_more;
+}
+
+fn open_detail_page(state: &mut DiscoverState, entry: &DiscoverEntry) {
+    let same_entry = state
+        .detail_entry
+        .as_ref()
+        .is_some_and(|current| current.dedupe_key == entry.dedupe_key);
+    if !same_entry {
+        state.detail_entry = Some(entry.clone());
+        state.detail_selected_source = entry.provider_refs.first().map(|provider| provider.source);
+        state.detail_versions.clear();
+        state.detail_versions_error = None;
+        state.detail_versions_in_flight = false;
+        state.detail_version_request_serial = 0;
+        state.install_in_flight = false;
+        state.install_message = None;
+        state.install_error = None;
+        state.install_completed_steps = 0;
+        state.install_total_steps = 0;
+    }
+}
+
+fn selected_detail_source(state: &DiscoverState, entry: &DiscoverEntry) -> DiscoverSource {
+    state
+        .detail_selected_source
+        .filter(|source| {
+            entry
+                .provider_refs
+                .iter()
+                .any(|provider| provider.source == *source)
+        })
+        .or_else(|| entry.provider_refs.first().map(|provider| provider.source))
+        .unwrap_or(DiscoverSource::Modrinth)
+}
+
+fn selected_detail_provider_ref<'a>(
+    entry: &'a DiscoverEntry,
+    selected_source: DiscoverSource,
+) -> Option<&'a DiscoverProviderRef> {
+    entry
+        .provider_refs
+        .iter()
+        .find(|provider| provider.source == selected_source)
+}
+
+fn build_install_request(
+    entry: &DiscoverEntry,
+    version: &DiscoverVersionEntry,
+) -> Option<DiscoverInstallRequest> {
+    let provider = selected_provider_for_version(entry, version)?;
+    let source = match (&provider.project_ref, version.source) {
+        (DiscoverProjectRef::Modrinth { project_id }, DiscoverSource::Modrinth) => {
+            DiscoverInstallSource::Modrinth {
+                project_id: project_id.clone(),
+                version_id: version.version_id.clone(),
+                file_url: version.file_url.clone()?,
+                file_name: version.file_name.clone(),
+            }
+        }
+        (DiscoverProjectRef::CurseForge { project_id }, DiscoverSource::CurseForge) => {
+            DiscoverInstallSource::CurseForge {
+                project_id: *project_id,
+                file_id: version.version_id.parse().ok()?,
+                file_name: version.file_name.clone(),
+                download_url: version.file_url.clone(),
+            }
+        }
+        _ => return None,
+    };
+    Some(DiscoverInstallRequest {
+        instance_name: entry.name.clone(),
+        project_summary: non_empty(entry.summary.as_str()),
+        icon_url: entry.icon_url.clone(),
+        version_name: version.version_name.clone(),
+        source,
+    })
+}
+
+fn selected_provider_for_version<'a>(
+    entry: &'a DiscoverEntry,
+    version: &DiscoverVersionEntry,
+) -> Option<&'a DiscoverProviderRef> {
+    entry
+        .provider_refs
+        .iter()
+        .find(|provider| provider.source == version.source)
+}
+
+fn request_detail_versions(state: &mut DiscoverState) {
+    if state.detail_versions_in_flight
+        || !state.detail_versions.is_empty()
+        || state.detail_versions_error.is_some()
+    {
+        return;
+    }
+    let Some(entry) = state.detail_entry.as_ref().cloned() else {
+        return;
+    };
+    let selected_source = selected_detail_source(state, &entry);
+    let Some(provider_ref) = selected_detail_provider_ref(&entry, selected_source).cloned() else {
+        return;
+    };
+
+    ensure_detail_versions_channel(state);
+    let Some(tx) = state.detail_version_results_tx.as_ref().cloned() else {
+        return;
+    };
+
+    state.detail_versions_in_flight = true;
+    state.detail_version_request_serial = state.detail_version_request_serial.saturating_add(1);
+    let request_serial = state.detail_version_request_serial;
+    let loader_filter = state.loader_filter;
+    let game_version_filter = non_empty(state.game_version_filter.as_str());
+    let _ = tokio_runtime::spawn_detached(async move {
+        let versions = tokio_runtime::spawn_blocking(move || {
+            load_detail_versions(
+                &provider_ref,
+                selected_source,
+                loader_filter,
+                game_version_filter.as_deref(),
+            )
+        })
+        .await
+        .map_err(|err| format!("discover version task join error: {err}"))
+        .and_then(|inner| inner);
+        let _ = tx.send(DiscoverVersionsResult {
+            request_serial,
+            versions,
+        });
+    });
+}
+
+fn ensure_detail_versions_channel(state: &mut DiscoverState) {
+    if state.detail_version_results_tx.is_some() && state.detail_version_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<DiscoverVersionsResult>();
+    state.detail_version_results_tx = Some(tx);
+    state.detail_version_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_detail_versions(state: &mut DiscoverState) {
+    let Some(rx) = state.detail_version_results_rx.as_ref().cloned() else {
+        return;
+    };
+    let Ok(receiver) = rx.lock() else {
+        return;
+    };
+    while let Ok(result) = receiver.try_recv() {
+        if result.request_serial != state.detail_version_request_serial {
+            continue;
+        }
+        state.detail_versions_in_flight = false;
+        match result.versions {
+            Ok(versions) => {
+                state.detail_versions = versions;
+                state.detail_versions_error = None;
+            }
+            Err(error) => {
+                state.detail_versions.clear();
+                state.detail_versions_error = Some(error);
+            }
+        }
+    }
+}
+
+fn load_detail_versions(
+    provider_ref: &DiscoverProviderRef,
+    source: DiscoverSource,
+    loader_filter: DiscoverLoaderFilter,
+    game_version_filter: Option<&str>,
+) -> Result<Vec<DiscoverVersionEntry>, String> {
+    match (&provider_ref.project_ref, source) {
+        (DiscoverProjectRef::Modrinth { project_id }, DiscoverSource::Modrinth) => {
+            let loaders = loader_filter
+                .modrinth_slug()
+                .map(|loader| vec![loader.to_owned()])
+                .unwrap_or_default();
+            let game_versions = game_version_filter
+                .map(|version| vec![version.to_owned()])
+                .unwrap_or_default();
+            ModrinthClient::default()
+                .list_project_versions(
+                    project_id.as_str(),
+                    loaders.as_slice(),
+                    game_versions.as_slice(),
+                )
+                .map_err(|err| format!("failed to load Modrinth versions: {err}"))
+                .map(|versions| {
+                    versions
+                        .into_iter()
+                        .filter_map(|version| {
+                            let file = version
+                                .files
+                                .iter()
+                                .find(|file| file.primary)
+                                .or_else(|| version.files.first())?;
+                            Some(DiscoverVersionEntry {
+                                source: DiscoverSource::Modrinth,
+                                version_id: version.id,
+                                version_name: version.version_number,
+                                published_at: non_empty(version.date_published.as_str()),
+                                file_name: file.filename.clone(),
+                                file_url: Some(file.url.clone()),
+                                game_versions: version.game_versions,
+                                loaders: version.loaders,
+                                download_count: Some(version.downloads),
+                            })
+                        })
+                        .collect()
+                })
+        }
+        (DiscoverProjectRef::CurseForge { project_id }, DiscoverSource::CurseForge) => {
+            let client = CurseForgeClient::from_env()
+                .ok_or_else(|| "CurseForge API key missing in settings.".to_owned())?;
+            client
+                .list_mod_files(
+                    *project_id,
+                    game_version_filter,
+                    loader_filter.curseforge_mod_loader_type(),
+                    0,
+                    50,
+                )
+                .map_err(|err| format!("failed to load CurseForge files: {err}"))
+                .map(|files| {
+                    files
+                        .into_iter()
+                        .map(|file| DiscoverVersionEntry {
+                            source: DiscoverSource::CurseForge,
+                            version_id: file.id.to_string(),
+                            version_name: file.display_name,
+                            published_at: non_empty(file.file_date.as_str()),
+                            file_name: file.file_name,
+                            file_url: file.download_url,
+                            game_versions: file.game_versions,
+                            loaders: Vec::new(),
+                            download_count: Some(file.download_count),
+                        })
+                        .collect()
+                })
+        }
+        _ => Ok(Vec::new()),
+    }
 }
 
 fn enabled_provider_count(request: &DiscoverSearchRequest) -> usize {

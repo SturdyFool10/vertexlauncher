@@ -21,7 +21,7 @@ mod settings;
 mod skins;
 
 pub use content_browser::ContentBrowserState;
-pub use discover::DiscoverState;
+pub use discover::{DiscoverInstallRequest, DiscoverInstallSource, DiscoverState};
 pub use library::{render_global_overlays, request_delete_instance};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +29,7 @@ pub enum AppScreen {
     Home,
     Library,
     Discover,
+    DiscoverDetail,
     ContentBrowser,
     Skins,
     Settings,
@@ -53,6 +54,7 @@ impl AppScreen {
             AppScreen::Home => "Home",
             AppScreen::Library => "Library",
             AppScreen::Discover => "Discover",
+            AppScreen::DiscoverDetail => "Discover",
             AppScreen::ContentBrowser => "Content Browser",
             AppScreen::Skins => "Skin Manager",
             AppScreen::Settings => "Settings",
@@ -70,6 +72,7 @@ pub struct ScreenOutput {
     pub requested_screen: Option<AppScreen>,
     pub selected_instance_id: Option<String>,
     pub delete_requested_instance_id: Option<String>,
+    pub discover_install_requested: Option<DiscoverInstallRequest>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +171,7 @@ pub fn render(
                 requested_screen: output.requested_screen,
                 selected_instance_id: output.selected_instance_id,
                 delete_requested_instance_id: output.delete_requested_instance_id,
+                discover_install_requested: None,
             }
         }
         AppScreen::Library => {
@@ -191,6 +195,7 @@ pub fn render(
                 requested_screen: output.requested_screen,
                 selected_instance_id: output.selected_instance_id,
                 delete_requested_instance_id: None,
+                discover_install_requested: None,
             }
         }
         AppScreen::ContentBrowser => {
@@ -208,11 +213,21 @@ pub fn render(
                 requested_screen: output.requested_screen,
                 selected_instance_id: None,
                 delete_requested_instance_id: None,
+                discover_install_requested: None,
             }
         }
-        AppScreen::Discover => {
-            discover::render(ui, text_ui, discover_state);
-            ScreenOutput::default()
+        AppScreen::Discover | AppScreen::DiscoverDetail => {
+            let output = discover::render(
+                ui,
+                text_ui,
+                discover_state,
+                screen == AppScreen::DiscoverDetail,
+            );
+            ScreenOutput {
+                requested_screen: output.requested_screen,
+                discover_install_requested: output.install_requested,
+                ..ScreenOutput::default()
+            }
         }
         AppScreen::Skins => {
             skins::render(
@@ -271,6 +286,7 @@ pub fn render(
                 requested_screen: output.requested_screen,
                 selected_instance_id: None,
                 delete_requested_instance_id: None,
+                discover_install_requested: None,
             }
         }
     };

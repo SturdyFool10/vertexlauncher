@@ -21,8 +21,7 @@ use textui::{LabelOptions, TextUi};
 
 use crate::app::tokio_runtime;
 use crate::{
- desktop,
-    assets, console, notification,
+    assets, console, desktop, notification,
     ui::{modal, style},
 };
 
@@ -252,8 +251,12 @@ pub fn render(
                             state.delete_error = None;
                         }
                         RuntimeAction::OpenFolderRequested => {
-                            if let Err(err) = desktop::open_in_file_manager(instance_root.as_path()) {
-                                state.status_by_instance.insert(instance.id.clone(), format!("Failed to open folder: {err}"));
+                            if let Err(err) = desktop::open_in_file_manager(instance_root.as_path())
+                            {
+                                state.status_by_instance.insert(
+                                    instance.id.clone(),
+                                    format!("Failed to open folder: {err}"),
+                                );
                             }
                         }
                         RuntimeAction::OpenInstanceRequested => {
@@ -327,18 +330,10 @@ fn render_instance_tile(
     launch_disabled_for_missing_ownership: bool,
     running_avatar_png: Option<&[u8]>,
     delete_disabled: bool,
-    selected: bool,
+    _selected: bool,
 ) -> RuntimeAction {
-    let tile_fill = if selected {
-        ui.visuals().selection.bg_fill.gamma_multiply(0.22)
-    } else {
-        ui.visuals().widgets.noninteractive.bg_fill
-    };
-    let tile_stroke = if selected {
-        ui.visuals().selection.stroke
-    } else {
-        ui.visuals().widgets.noninteractive.bg_stroke
-    };
+    let tile_fill = ui.visuals().widgets.noninteractive.bg_fill;
+    let tile_stroke = ui.visuals().widgets.noninteractive.bg_stroke;
 
     let frame = egui::Frame::new()
         .fill(tile_fill)
@@ -348,130 +343,132 @@ fn render_instance_tile(
 
     let mut action = RuntimeAction::None;
 
-    let frame_response = frame.show(ui, |ui| {
-        ui.set_min_width(TILE_WIDTH);
-        ui.set_max_width(TILE_WIDTH);
-        ui.set_min_height(TILE_HEIGHT);
-        ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_SM);
-        ui.vertical(|ui| {
-            render_instance_thumbnail(ui, state, instance);
+    let frame_response = frame
+        .show(ui, |ui| {
+            ui.set_min_width(TILE_WIDTH);
+            ui.set_max_width(TILE_WIDTH);
+            ui.set_min_height(TILE_HEIGHT);
+            ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_SM);
+            ui.vertical(|ui| {
+                render_instance_thumbnail(ui, state, instance);
 
-            let mut name_style = style::heading(ui, 22.0, 28.0);
-            name_style.wrap = true;
-            render_scroll_text_block(
-                ui,
-                ("library_instance_name", instance.id.as_str()),
-                text_ui,
-                instance.name.as_str(),
-                &name_style,
-                TILE_NAME_SCROLL_HEIGHT,
-            );
-            let detail_style = style::body(ui);
+                let mut name_style = style::heading(ui, 22.0, 28.0);
+                name_style.wrap = true;
+                render_scroll_text_block(
+                    ui,
+                    ("library_instance_name", instance.id.as_str()),
+                    text_ui,
+                    instance.name.as_str(),
+                    &name_style,
+                    TILE_NAME_SCROLL_HEIGHT,
+                );
+                let detail_style = style::body(ui);
 
-            let _ = text_ui.label(
-                ui,
-                ("library_instance_version", instance.id.as_str()),
-                &format!("Version: {}", instance.game_version),
-                &detail_style,
-            );
-            let _ = text_ui.label(
-                ui,
-                ("library_instance_modloader", instance.id.as_str()),
-                &format!("Modloader: {}", instance.modloader),
-                &detail_style,
-            );
+                let _ = text_ui.label(
+                    ui,
+                    ("library_instance_version", instance.id.as_str()),
+                    &format!("Version: {}", instance.game_version),
+                    &detail_style,
+                );
+                let _ = text_ui.label(
+                    ui,
+                    ("library_instance_modloader", instance.id.as_str()),
+                    &format!("Modloader: {}", instance.modloader),
+                    &detail_style,
+                );
 
-            let (description, muted) = if let Some(description) = instance
-                .description
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                (description, false)
-            } else {
-                ("No description provided.", true)
-            };
-            let description_style = LabelOptions {
-                color: if muted {
-                    ui.visuals().weak_text_color()
+                let (description, muted) = if let Some(description) = instance
+                    .description
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    (description, false)
                 } else {
-                    ui.visuals().text_color()
-                },
-                wrap: true,
-                ..LabelOptions::default()
-            };
-            render_scroll_text_block(
-                ui,
-                ("library_instance_description", instance.id.as_str()),
-                text_ui,
-                description,
-                &description_style,
-                TILE_DESCRIPTION_SCROLL_HEIGHT,
-            );
-
-            let play_button_height = style::CONTROL_HEIGHT_LG;
-            let remaining_height = (ui.available_height()
-                - play_button_height
-                - style::SPACE_SM
-                - TILE_DELETE_BUTTON_HEIGHT)
-                .max(0.0);
-            if remaining_height > 0.0 {
-                ui.add_space(remaining_height);
-            }
-
-            let button_response = render_runtime_action_button(
-                ui,
-                instance.id.as_str(),
-                runtime_running_for_active_account,
-                launch_disabled,
-                launch_in_flight,
-                running_avatar_png,
-            );
-            if button_response.clicked() {
-                if runtime_running_for_active_account {
-                    action = RuntimeAction::StopRequested;
-                } else if launch_disabled || launch_in_flight {
-                    action = RuntimeAction::None;
-                } else {
-                    action = RuntimeAction::LaunchRequested;
-                }
-            }
-            ui.add_space(style::SPACE_SM);
-            let delete_response =
-                render_delete_instance_button(ui, instance.id.as_str(), delete_disabled);
-            if delete_response.clicked() && !delete_disabled {
-                action = RuntimeAction::DeleteRequested;
-            }
-            if delete_disabled {
-                let reason = if launch_in_flight {
-                    "Wait for launch preparation to finish before deleting this instance."
-                } else {
-                    "Stop the running instance before deleting its folder."
+                    ("No description provided.", true)
                 };
-                let _ = delete_response.on_hover_text(reason);
-            }
+                let description_style = LabelOptions {
+                    color: if muted {
+                        ui.visuals().weak_text_color()
+                    } else {
+                        ui.visuals().text_color()
+                    },
+                    wrap: true,
+                    ..LabelOptions::default()
+                };
+                render_scroll_text_block(
+                    ui,
+                    ("library_instance_description", instance.id.as_str()),
+                    text_ui,
+                    description,
+                    &description_style,
+                    TILE_DESCRIPTION_SCROLL_HEIGHT,
+                );
 
-            let mut muted_style = LabelOptions::default();
-            muted_style.color = ui.visuals().weak_text_color();
-            muted_style.wrap = true;
-            if launch_disabled_for_account {
-                let _ = text_ui.label(
+                let play_button_height = style::CONTROL_HEIGHT_LG;
+                let remaining_height = (ui.available_height()
+                    - play_button_height
+                    - style::SPACE_SM
+                    - TILE_DELETE_BUTTON_HEIGHT)
+                    .max(0.0);
+                if remaining_height > 0.0 {
+                    ui.add_space(remaining_height);
+                }
+
+                let button_response = render_runtime_action_button(
                     ui,
-                    ("library_instance_account_locked", instance.id.as_str()),
-                    "This account is already running another instance.",
-                    &muted_style,
+                    instance.id.as_str(),
+                    runtime_running_for_active_account,
+                    launch_disabled,
+                    launch_in_flight,
+                    running_avatar_png,
                 );
-            }
-            if launch_disabled_for_missing_ownership {
-                let _ = text_ui.label(
-                    ui,
-                    ("library_instance_account_ownership", instance.id.as_str()),
-                    "Sign in with an account that owns Minecraft to launch.",
-                    &muted_style,
-                );
-            }
-        });
-    }).response;
+                if button_response.clicked() {
+                    if runtime_running_for_active_account {
+                        action = RuntimeAction::StopRequested;
+                    } else if launch_disabled || launch_in_flight {
+                        action = RuntimeAction::None;
+                    } else {
+                        action = RuntimeAction::LaunchRequested;
+                    }
+                }
+                ui.add_space(style::SPACE_SM);
+                let delete_response =
+                    render_delete_instance_button(ui, instance.id.as_str(), delete_disabled);
+                if delete_response.clicked() && !delete_disabled {
+                    action = RuntimeAction::DeleteRequested;
+                }
+                if delete_disabled {
+                    let reason = if launch_in_flight {
+                        "Wait for launch preparation to finish before deleting this instance."
+                    } else {
+                        "Stop the running instance before deleting its folder."
+                    };
+                    let _ = delete_response.on_hover_text(reason);
+                }
+
+                let mut muted_style = LabelOptions::default();
+                muted_style.color = ui.visuals().weak_text_color();
+                muted_style.wrap = true;
+                if launch_disabled_for_account {
+                    let _ = text_ui.label(
+                        ui,
+                        ("library_instance_account_locked", instance.id.as_str()),
+                        "This account is already running another instance.",
+                        &muted_style,
+                    );
+                }
+                if launch_disabled_for_missing_ownership {
+                    let _ = text_ui.label(
+                        ui,
+                        ("library_instance_account_ownership", instance.id.as_str()),
+                        "Sign in with an account that owns Minecraft to launch.",
+                        &muted_style,
+                    );
+                }
+            });
+        })
+        .response;
 
     let context_id = ui.make_persistent_id(("library_instance_context", instance.id.as_str()));
     if frame_response.secondary_clicked() {
@@ -1517,6 +1514,7 @@ fn render_instance_thumbnail(
 ) {
     let thumbnail_width = ui.available_width().max(120.0);
     let thumbnail_size = egui::vec2(thumbnail_width, TILE_THUMBNAIL_HEIGHT);
+    let centered_thumbnail_size = egui::vec2(thumbnail_width.min(220.0), TILE_THUMBNAIL_HEIGHT);
 
     let frame = egui::Frame::new()
         .fill(ui.visuals().widgets.inactive.bg_fill)
@@ -1535,7 +1533,14 @@ fn render_instance_thumbnail(
             match state.thumbnail_cache.get(&key).cloned() {
                 Some(Some(bytes)) => {
                     let uri = thumbnail_uri(instance.id.as_str(), path);
-                    ui.add(egui::Image::from_bytes(uri, bytes).fit_to_exact_size(thumbnail_size));
+                    let (rect, _) = ui.allocate_exact_size(thumbnail_size, egui::Sense::hover());
+                    let image_rect =
+                        egui::Rect::from_center_size(rect.center(), centered_thumbnail_size);
+                    ui.put(
+                        image_rect,
+                        egui::Image::from_bytes(uri, bytes)
+                            .fit_to_exact_size(centered_thumbnail_size),
+                    );
                     return;
                 }
                 Some(None) => {}
@@ -1549,7 +1554,7 @@ fn render_instance_thumbnail(
                 "bytes://library/instance-thumbnail-default/{}.svg",
                 instance.id
             ),
-            assets::LIBRARY_SVG,
+            apply_color_to_svg(assets::LIBRARY_SVG, ui.visuals().text_color()),
         )
         .fit_to_exact_size(placeholder_size);
         let (rect, _) = ui.allocate_exact_size(thumbnail_size, egui::Sense::hover());

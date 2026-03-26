@@ -4,9 +4,9 @@ use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use config::Config;
-use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
+use discord_rich_presence::{DiscordIpc, DiscordIpcClient, activity};
 use installation::{display_user_path, running_instance_roots};
-use instances::{instance_root_path, InstanceStore};
+use instances::{InstanceStore, instance_root_path};
 
 const DISCORD_APPLICATION_ID: &str = "1486469547073601627";
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_secs(5);

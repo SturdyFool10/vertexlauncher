@@ -23,6 +23,8 @@ pub struct InstalledContentProject {
     #[serde(default)]
     pub selected_version_name: Option<String>,
     #[serde(default)]
+    pub pack_managed: bool,
+    #[serde(default)]
     pub explicitly_installed: bool,
     #[serde(default)]
     pub direct_dependencies: Vec<String>,
