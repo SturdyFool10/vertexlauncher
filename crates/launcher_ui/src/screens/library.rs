@@ -1071,7 +1071,7 @@ fn request_runtime_launch(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
+        let result = (|| -> Result<RuntimeLaunchOutcome, String> {
             let mut configured_java = None;
             let java_path = if let Some(path) = java_executable
                 .as_deref()
@@ -1129,10 +1129,7 @@ fn request_runtime_launch(
                 resolved_modloader_version: setup.resolved_modloader_version,
                 configured_java,
             })
-        })
-        .await
-        .map_err(|err| format!("runtime launch task join error: {err}"))
-        .and_then(|inner| inner);
+        })();
 
         let _ = tx.send(RuntimeLaunchResult {
             instance_id,
@@ -1359,18 +1356,13 @@ fn request_instance_delete(
     state.delete_in_flight = true;
     state.delete_error = None;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            delete_instance(
-                &mut instances,
-                instance_id.as_str(),
-                installations_root.as_path(),
-            )
-            .map(|deleted| (instances, deleted))
-            .map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("instance delete task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = delete_instance(
+            &mut instances,
+            instance_id.as_str(),
+            installations_root.as_path(),
+        )
+        .map(|deleted| (instances, deleted))
+        .map_err(|err| err.to_string());
         let _ = tx.send(result);
     });
 }
@@ -1462,14 +1454,9 @@ fn request_instance_thumbnail(state: &mut LibraryRuntimeState, instance_id: &str
     state.thumbnail_in_flight.insert(key.clone());
     let path = PathBuf::from(path);
     let _ = tokio_runtime::spawn_detached(async move {
-        let bytes = tokio_runtime::spawn_blocking(move || {
-            std::fs::read(path.as_path())
-                .ok()
-                .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()))
-        })
-        .await
-        .ok()
-        .flatten();
+        let bytes = std::fs::read(path.as_path())
+            .ok()
+            .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()));
         let _ = tx.send((key, bytes));
     });
 }

@@ -1014,10 +1014,7 @@ fn memory_slider_max_mib() -> (u128, bool) {
                 state.rx = Some(rx);
                 pending = true;
                 let _ = tokio_runtime::spawn_detached(async move {
-                    let result = tokio_runtime::spawn_blocking(platform::detect_total_memory_mib)
-                        .await
-                        .ok()
-                        .flatten();
+                    let result = platform::detect_total_memory_mib();
                     let _ = tx.send(result);
                 });
             }

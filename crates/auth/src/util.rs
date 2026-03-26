@@ -68,15 +68,15 @@ pub(crate) fn pkce_challenge(verifier: &str) -> String {
 }
 
 pub(crate) fn generate_random_token(length: usize) -> String {
-    let mut out = Vec::with_capacity(length);
+    let mut out = String::with_capacity(length + 64);
     let mut rng = rand::thread_rng();
     while out.len() < length {
         let mut chunk = [0_u8; 48];
         rng.fill_bytes(&mut chunk);
-        let encoded = URL_SAFE_NO_PAD.encode(chunk);
-        out.extend_from_slice(encoded.as_bytes());
+        out.push_str(&URL_SAFE_NO_PAD.encode(chunk));
     }
-    String::from_utf8_lossy(&out[..length]).to_string()
+    out.truncate(length);
+    out
 }
 
 pub(crate) fn encode_base64(bytes: &[u8]) -> String {

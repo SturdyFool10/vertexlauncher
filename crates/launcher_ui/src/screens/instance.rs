@@ -1426,12 +1426,7 @@ fn request_instance_screenshot_delete(
 
     state.delete_screenshot_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            fs::remove_file(path.as_path()).map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("instance screenshot delete task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = fs::remove_file(path.as_path()).map_err(|err| err.to_string());
         let _ = tx.send((screenshot_key, file_name, result));
     });
 }
@@ -1489,22 +1484,8 @@ fn refresh_instance_screenshots(
     state.screenshot_scan_in_flight = true;
     let instance_root = instance_root.to_path_buf();
     let _ = tokio_runtime::spawn_detached(async move {
-        let outcome = tokio_runtime::spawn_blocking(move || {
-            collect_instance_screenshots(instance_root.as_path())
-        })
-        .await;
-        match outcome {
-            Ok(screenshots) => {
-                let _ = tx.send((request_id, screenshots));
-            }
-            Err(error) => {
-                tracing::warn!(
-                    target: "vertexlauncher/instance/screenshots",
-                    error = %error,
-                    "instance screenshot scan task failed to join"
-                );
-            }
-        }
+        let screenshots = collect_instance_screenshots(instance_root.as_path());
+        let _ = tx.send((request_id, screenshots));
     });
 }
 
@@ -1590,21 +1571,8 @@ fn refresh_instance_logs(state: &mut InstanceScreenState, instance_root: &Path, 
     state.log_scan_in_flight = true;
     let instance_root = instance_root.to_path_buf();
     let _ = tokio_runtime::spawn_detached(async move {
-        let outcome =
-            tokio_runtime::spawn_blocking(move || collect_instance_logs(instance_root.as_path()))
-                .await;
-        match outcome {
-            Ok(logs) => {
-                let _ = tx.send((request_id, logs));
-            }
-            Err(error) => {
-                tracing::warn!(
-                    target: "vertexlauncher/instance/logs",
-                    error = %error,
-                    "instance log scan task failed to join"
-                );
-            }
-        }
+        let logs = collect_instance_logs(instance_root.as_path());
+        let _ = tx.send((request_id, logs));
     });
 }
 
@@ -1741,23 +1709,8 @@ fn load_selected_instance_log(state: &mut InstanceScreenState) {
     state.requested_log_load_modified_at_ms = modified_at_ms;
     let path_for_worker = selected_log_path.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let outcome = tokio_runtime::spawn_blocking(move || {
-            read_instance_log_lines(path_for_worker.as_path())
-        })
-        .await;
-        match outcome {
-            Ok(result) => {
-                let _ = tx.send((request_id, selected_log_path, modified_at_ms, result));
-            }
-            Err(error) => {
-                tracing::warn!(
-                    target: "vertexlauncher/instance/logs",
-                    error = %error,
-                    path = %selected_log_path.display(),
-                    "instance log load task failed to join"
-                );
-            }
-        }
+        let result = read_instance_log_lines(path_for_worker.as_path());
+        let _ = tx.send((request_id, selected_log_path, modified_at_ms, result));
     });
 }
 
@@ -3041,20 +2994,15 @@ fn request_vtmpack_export(
     let instance_name = instance.name.clone();
     let export_path_for_task = output_path.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            export_instance_as_vtmpack_with_progress(
-                &instance,
-                instance_root.as_path(),
-                export_path_for_task.as_path(),
-                &options,
-                |progress| {
-                    let _ = progress_tx.send(progress);
-                },
-            )
-        })
-        .await
-        .map_err(|err| format!("vtmpack export task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = export_instance_as_vtmpack_with_progress(
+            &instance,
+            instance_root.as_path(),
+            export_path_for_task.as_path(),
+            &options,
+            |progress| {
+                let _ = progress_tx.send(progress);
+            },
+        );
         let _ = results_tx.send(VtmpackExportOutcome {
             instance_name,
             output_path,
@@ -4127,11 +4075,7 @@ fn memory_slider_max_mib() -> (u128, bool) {
                 state.rx = Some(rx);
                 pending = true;
                 let _ = tokio_runtime::spawn_detached(async move {
-                    let result =
-                        tokio_runtime::spawn_blocking(screen_platform::detect_total_memory_mib)
-                            .await
-                            .ok()
-                            .flatten();
+                    let result = screen_platform::detect_total_memory_mib();
                     let _ = tx.send(result);
                 });
             }

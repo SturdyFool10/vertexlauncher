@@ -111,14 +111,9 @@ impl LazyImageBytes {
         let key_for_task = key.clone();
         let path_label = path.display().to_string();
         let _ = tokio_runtime::spawn_detached(async move {
-            let result = tokio_runtime::spawn_blocking(move || {
-                fs::read(path.as_path())
-                    .map(Arc::<[u8]>::from)
-                    .map_err(|err| format!("failed to read '{path_label}': {err}"))
-            })
-            .await
-            .map_err(|err| format!("image loader task join failed: {err}"))
-            .and_then(|inner| inner);
+            let result = fs::read(path.as_path())
+                .map(Arc::<[u8]>::from)
+                .map_err(|err| format!("failed to read '{path_label}': {err}"));
             let _ = tx.send((key_for_task, result));
         });
 

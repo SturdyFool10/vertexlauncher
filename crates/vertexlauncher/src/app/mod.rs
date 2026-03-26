@@ -770,12 +770,7 @@ fn disable_window_blur_for_startup(
 
     let config_to_save = config.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            save_config(&config_to_save).map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("config save task join error after {save_context}: {err}"))
-        .and_then(|inner| inner);
+        let result = save_config(&config_to_save).map_err(|err| err.to_string());
         if let Err(save_error) = result {
             notification::warn!(
                 "config",
@@ -810,12 +805,7 @@ fn start_pending_config_save(app: &mut VertexApp) {
 
     app.config_save_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            save_config(&config).map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("config save task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = save_config(&config).map_err(|err| err.to_string());
         let _ = tx.send(result);
     });
 }
@@ -887,12 +877,7 @@ fn start_pending_instance_store_save(app: &mut VertexApp) {
 
     app.instance_store_save_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            save_instance_store(&store).map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("instance store save task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = save_instance_store(&store).map_err(|err| err.to_string());
         let _ = tx.send(result);
     });
 }
@@ -974,18 +959,13 @@ fn start_create_instance_task(
     let mut store = app.instance_store.clone();
     let installations_root = PathBuf::from(app.config.minecraft_installations_root());
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            create_instance(
-                &mut store,
-                &installations_root,
-                draft.into_new_instance_spec(),
-            )
-            .map(|instance| (store, instance))
-            .map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("create instance task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = create_instance(
+            &mut store,
+            &installations_root,
+            draft.into_new_instance_spec(),
+        )
+        .map(|instance| (store, instance))
+        .map_err(|err| err.to_string());
         let _ = tx.send(result);
     });
 }
@@ -1078,18 +1058,8 @@ fn start_import_instance_task(app: &mut VertexApp, request: import_instance_moda
     let store = app.instance_store.clone();
     let installations_root = PathBuf::from(app.config.minecraft_installations_root());
     let _ = tokio_runtime::spawn_detached(async move {
-        let outcome = tokio_runtime::spawn_blocking(move || {
-            import_package_in_background(store, installations_root, request, progress_tx)
-        })
-        .await;
-        match outcome {
-            Ok(result) => {
-                let _ = tx.send(result);
-            }
-            Err(error) => {
-                let _ = tx.send(Err(format!("Import task join error: {error}")));
-            }
-        }
+        let result = import_package_in_background(store, installations_root, request, progress_tx);
+        let _ = tx.send(result);
     });
 }
 
@@ -1186,18 +1156,9 @@ fn start_discover_install_task(app: &mut VertexApp, request: screens::DiscoverIn
     let store = app.instance_store.clone();
     let installations_root = PathBuf::from(app.config.minecraft_installations_root());
     let _ = tokio_runtime::spawn_detached(async move {
-        let outcome = tokio_runtime::spawn_blocking(move || {
-            install_discover_modpack_in_background(store, installations_root, request, progress_tx)
-        })
-        .await;
-        match outcome {
-            Ok(result) => {
-                let _ = tx.send(result);
-            }
-            Err(error) => {
-                let _ = tx.send(Err(format!("Discover install task join error: {error}")));
-            }
-        }
+        let result =
+            install_discover_modpack_in_background(store, installations_root, request, progress_tx);
+        let _ = tx.send(result);
     });
 }
 
@@ -1662,7 +1623,7 @@ fn start_initial_instance_install(
         ));
         let notification_source_for_progress = notification_source.clone();
         let activity_instance_for_progress = activity_instance.clone();
-        let result = tokio_runtime::spawn_blocking(move || {
+        let result: Result<_, String> = (|| {
             let progress_callback: InstallProgressCallback = {
                 let last_emit = Arc::clone(&last_emit);
                 Arc::new(move |progress: InstallProgress| {
@@ -1740,10 +1701,7 @@ fn start_initial_instance_install(
                 Some(progress_callback),
             )
             .map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("initial install task join error: {err}"))
-        .and_then(|inner| inner);
+        })();
 
         match result {
             Ok(setup) => {

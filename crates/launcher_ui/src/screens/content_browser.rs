@@ -2266,10 +2266,7 @@ fn request_detail_versions(state: &mut ContentBrowserState) {
     state.detail_versions_error = None;
     let project_key = entry.dedupe_key.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let versions = tokio_runtime::spawn_blocking(move || fetch_versions_for_entry(&entry))
-            .await
-            .map_err(|err| format!("detail versions join error: {err}"))
-            .and_then(|inner| inner);
+        let versions = fetch_versions_for_entry(&entry);
         let _ = tx.send(DetailVersionsResult {
             project_key,
             versions,
@@ -2292,14 +2289,9 @@ fn request_version_catalog(state: &mut ContentBrowserState) {
 
     state.version_catalog_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            fetch_version_catalog(false)
-                .map(|catalog| catalog.game_versions)
-                .map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("version catalog task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = fetch_version_catalog(false)
+            .map(|catalog| catalog.game_versions)
+            .map_err(|err| err.to_string());
         let _ = tx.send(result);
     });
 }
@@ -2446,12 +2438,7 @@ fn request_identify_file(state: &mut ContentBrowserState, selected_path: PathBuf
     ));
     let _ = tokio_runtime::spawn_detached(async move {
         let path_for_result = selected_path.clone();
-        let result = tokio_runtime::spawn_blocking(move || {
-            identify_mod_file_by_hash(selected_path.as_path())
-        })
-        .await
-        .map_err(|err| format!("identify task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = identify_mod_file_by_hash(selected_path.as_path());
         let _ = tx.send((path_for_result, result));
     });
 }
@@ -2558,20 +2545,13 @@ fn request_search(state: &mut ContentBrowserState, request: BrowserSearchRequest
     let request_for_failure = request.clone();
     let _ = tokio_runtime::spawn_detached(async move {
         let worker_tx = tx.clone();
-        let result =
-            tokio_runtime::spawn_blocking(move || run_search_request(request, worker_tx)).await;
+        let result = run_search_request(request, worker_tx);
         match result {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                let _ = tx.send(SearchUpdate::Failed {
-                    request: request_for_failure,
-                    error: err,
-                });
-            }
+            Ok(()) => {}
             Err(err) => {
                 let _ = tx.send(SearchUpdate::Failed {
                     request: request_for_failure,
-                    error: format!("content browser search join error: {err}"),
+                    error: err,
                 });
             }
         }
@@ -3734,12 +3714,7 @@ fn maybe_start_queued_download(
     let request = next.request.clone();
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            apply_content_install_request(root.as_path(), request)
-        })
-        .await
-        .map_err(|err| format!("content operation join error: {err}"))
-        .and_then(|inner| inner);
+        let result = apply_content_install_request(root.as_path(), request);
         let _ = tx.send(result);
     });
 }

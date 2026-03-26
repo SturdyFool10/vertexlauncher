@@ -1144,16 +1144,11 @@ fn request_search(state: &mut DiscoverState, show_cached_status: bool, mode: Sea
     ));
     let request_for_task = request.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let outcome =
-            tokio_runtime::spawn_blocking(move || perform_search(&request_for_task)).await;
-        let result = match outcome {
-            Ok(snapshot) => Ok(snapshot),
-            Err(error) => Err(format!("discover search task join error: {error}")),
-        };
+        let outcome = Ok(perform_search(&request_for_task));
         let _ = tx.send(DiscoverSearchResult {
             request_serial,
             request,
-            outcome: result,
+            outcome,
         });
     });
 }
@@ -1622,14 +1617,9 @@ fn request_version_catalog(state: &mut DiscoverState) {
 
     state.version_catalog_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            fetch_version_catalog(false)
-                .map(|catalog| catalog.game_versions)
-                .map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("version catalog task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = fetch_version_catalog(false)
+            .map(|catalog| catalog.game_versions)
+            .map_err(|err| err.to_string());
         let _ = tx.send(result);
     });
 }
@@ -1823,17 +1813,12 @@ fn request_detail_versions(state: &mut DiscoverState) {
     let loader_filter = state.loader_filter;
     let game_version_filter = non_empty(state.game_version_filter.as_str());
     let _ = tokio_runtime::spawn_detached(async move {
-        let versions = tokio_runtime::spawn_blocking(move || {
-            load_detail_versions(
-                &provider_ref,
-                selected_source,
-                loader_filter,
-                game_version_filter.as_deref(),
-            )
-        })
-        .await
-        .map_err(|err| format!("discover version task join error: {err}"))
-        .and_then(|inner| inner);
+        let versions = load_detail_versions(
+            &provider_ref,
+            selected_source,
+            loader_filter,
+            game_version_filter.as_deref(),
+        );
         let _ = tx.send(DiscoverVersionsResult {
             request_serial,
             versions,

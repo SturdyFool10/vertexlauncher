@@ -390,8 +390,20 @@ fn render_virtualized_log_lines(
             let visible_rows = ((viewport.height() / row_height).ceil() as usize).max(1);
             let overscan = visible_rows.max(8);
 
-            let first_row = ((viewport.min.y / row_height).floor().max(0.0) as usize)
-                .min(total_rows.saturating_sub(1));
+            // When stick_to_bottom is active and we are at (or past) the computed
+            // bottom offset, pin first_row directly from total_rows instead of
+            // dividing viewport.min.y by row_height.  The viewport offset is derived
+            // from the *previous* frame's content measurement, so floating-point drift
+            // causes it to land just above or just below the true bottom on alternating
+            // frames, which flips first_row by ±1 and produces the visible jitter.
+            let max_scroll_y = (total_rows as f32 * row_height - viewport.height()).max(0.0);
+            let at_bottom = stick_to_bottom && viewport.min.y >= max_scroll_y - row_height;
+            let first_row = if at_bottom {
+                total_rows.saturating_sub(visible_rows)
+            } else {
+                ((viewport.min.y / row_height).floor().max(0.0) as usize)
+                    .min(total_rows.saturating_sub(1))
+            };
             let last_row = (first_row + visible_rows + overscan).min(total_rows);
 
             let top_space = first_row as f32 * row_height;
@@ -436,7 +448,7 @@ fn render_virtualized_log_lines(
                     .max(texture.size_points.x.ceil().max(1.0));
 
                 let desired_width = viewer_state.max_line_width.max(viewport.width()).max(1.0);
-                let desired_height = row_height.max(texture.size_points.y);
+                let desired_height = row_height;
 
                 let galley = ui.painter().layout_no_wrap(
                     line.clone(),

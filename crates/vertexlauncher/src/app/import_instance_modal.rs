@@ -789,17 +789,10 @@ fn load_preview_from_state(state: &mut ImportInstanceState) {
     state.error = None;
     let _ = tokio_runtime::spawn_detached(async move {
         let (path, launcher_hint, manifest_mode) = request;
-        let outcome = tokio_runtime::spawn_blocking(move || {
-            if manifest_mode {
-                inspect_package(path.as_path())
-            } else {
-                inspect_launcher_instance(path.as_path(), launcher_hint)
-            }
-        })
-        .await;
-        let result = match outcome {
-            Ok(result) => result,
-            Err(error) => Err(format!("Import preview task join error: {error}")),
+        let result = if manifest_mode {
+            inspect_package(path.as_path())
+        } else {
+            inspect_launcher_instance(path.as_path(), launcher_hint)
         };
         let _ = tx.send((request_serial, result));
     });

@@ -5986,7 +5986,7 @@ impl SkinManagerState {
         self.pick_skin_results_rx = Some(Arc::new(Mutex::new(rx)));
         let path_for_result = path.display().to_string();
         let _ = tokio_runtime::spawn_detached(async move {
-            let result = tokio_runtime::spawn_blocking(move || {
+            let result: Result<(String, Vec<u8>), String> = (|| {
                 let bytes = std::fs::read(path.as_path())
                     .map_err(|err| format!("Failed to read image: {err}"))?;
                 if decode_skin_rgba(&bytes).is_none() {
@@ -5996,10 +5996,7 @@ impl SkinManagerState {
                     );
                 }
                 Ok((path_for_result, bytes))
-            })
-            .await
-            .map_err(|err| format!("Skin file load task join error: {err}"))
-            .and_then(|inner| inner);
+            })();
             let _ = tx.send(result);
         });
     }
@@ -6054,14 +6051,8 @@ impl SkinManagerState {
             .active_player_name
             .clone()
             .unwrap_or_else(|| "unknown".to_owned());
-        let task = tokio_runtime::spawn_blocking(move || {
-            fetch_and_cache_profile(profile_id, &token, display_name_for_log.as_str())
-        });
         let _ = tokio_runtime::spawn_detached(async move {
-            let result = match task.await {
-                Ok(result) => result,
-                Err(err) => Err(format!("Skin profile refresh task failed: {err}")),
-            };
+            let result = fetch_and_cache_profile(profile_id, &token, display_name_for_log.as_str());
             let _ = tx.send(WorkerEvent::Refreshed(
                 result.map(|loaded| (profile_id_for_result, loaded)),
             ));
@@ -6147,91 +6138,86 @@ impl SkinManagerState {
             .clone()
             .unwrap_or_else(|| "unknown".to_owned());
 
-        let task = tokio_runtime::spawn_blocking(move || -> Result<LoadedProfile, String> {
-            let mut latest_profile: Option<MinecraftProfileState> = None;
-            let skin_bytes_to_upload = pending_skin
-                .as_deref()
-                .or(base_skin.as_deref())
-                .filter(|_| pending_skin.is_some() || pending_variant != initial_variant);
-            if let Some(bytes) = skin_bytes_to_upload {
-                tracing::info!(
-                    target: "vertexlauncher/skins",
-                    display_name = display_name_for_log.as_str(),
-                    png_bytes = bytes.len(),
-                    variant = pending_variant.as_api_str(),
-                    reused_existing_skin = pending_skin.is_none(),
-                    "Uploading skin to Mojang profile API."
-                );
-                latest_profile = Some(
-                    auth::upload_minecraft_skin(&token, bytes, pending_variant)
-                        .map_err(|err| format_auth_error("upload skin", &err))?,
-                );
-                tracing::info!(
-                    target: "vertexlauncher/skins",
-                    display_name = display_name_for_log.as_str(),
-                    "Skin upload completed."
-                );
-            }
-
-            if pending_cape != initial_cape {
-                if let Some(cape_id) = pending_cape.as_deref() {
+        let _ = tokio_runtime::spawn_detached(async move {
+            let result: Result<LoadedProfile, String> = (|| {
+                let mut latest_profile: Option<MinecraftProfileState> = None;
+                let skin_bytes_to_upload = pending_skin
+                    .as_deref()
+                    .or(base_skin.as_deref())
+                    .filter(|_| pending_skin.is_some() || pending_variant != initial_variant);
+                if let Some(bytes) = skin_bytes_to_upload {
                     tracing::info!(
                         target: "vertexlauncher/skins",
                         display_name = display_name_for_log.as_str(),
-                        cape_id_present = !cape_id.is_empty(),
-                        "Setting active cape via Mojang profile API."
+                        png_bytes = bytes.len(),
+                        variant = pending_variant.as_api_str(),
+                        reused_existing_skin = pending_skin.is_none(),
+                        "Uploading skin to Mojang profile API."
                     );
                     latest_profile = Some(
-                        auth::set_active_minecraft_cape(&token, cape_id)
-                            .map_err(|err| format_auth_error("set cape", &err))?,
+                        auth::upload_minecraft_skin(&token, bytes, pending_variant)
+                            .map_err(|err| format_auth_error("upload skin", &err))?,
                     );
                     tracing::info!(
                         target: "vertexlauncher/skins",
                         display_name = display_name_for_log.as_str(),
-                        "Cape activation completed."
-                    );
-                } else {
-                    tracing::info!(
-                        target: "vertexlauncher/skins",
-                        display_name = display_name_for_log.as_str(),
-                        "Clearing active cape via Mojang profile API."
-                    );
-                    latest_profile = Some(
-                        auth::clear_active_minecraft_cape(&token)
-                            .map_err(|err| format_auth_error("clear cape", &err))?,
-                    );
-                    tracing::info!(
-                        target: "vertexlauncher/skins",
-                        display_name = display_name_for_log.as_str(),
-                        "Cape clear completed."
+                        "Skin upload completed."
                     );
                 }
-            }
 
-            if let Some(profile) = latest_profile {
-                tracing::info!(
-                    target: "vertexlauncher/skins",
-                    display_name = display_name_for_log.as_str(),
-                    skins = profile.skins.len(),
-                    capes = profile.capes.len(),
-                    "Using profile payload returned by Mojang mutation endpoint."
-                );
-                update_cached_profile(
-                    profile_id.as_str(),
-                    &profile,
-                    display_name_for_log.as_str(),
-                )?;
-                Ok(LoadedProfile::from_profile(profile))
-            } else {
-                fetch_and_cache_profile(profile_id, &token, display_name_for_log.as_str())
-            }
-        });
+                if pending_cape != initial_cape {
+                    if let Some(cape_id) = pending_cape.as_deref() {
+                        tracing::info!(
+                            target: "vertexlauncher/skins",
+                            display_name = display_name_for_log.as_str(),
+                            cape_id_present = !cape_id.is_empty(),
+                            "Setting active cape via Mojang profile API."
+                        );
+                        latest_profile = Some(
+                            auth::set_active_minecraft_cape(&token, cape_id)
+                                .map_err(|err| format_auth_error("set cape", &err))?,
+                        );
+                        tracing::info!(
+                            target: "vertexlauncher/skins",
+                            display_name = display_name_for_log.as_str(),
+                            "Cape activation completed."
+                        );
+                    } else {
+                        tracing::info!(
+                            target: "vertexlauncher/skins",
+                            display_name = display_name_for_log.as_str(),
+                            "Clearing active cape via Mojang profile API."
+                        );
+                        latest_profile = Some(
+                            auth::clear_active_minecraft_cape(&token)
+                                .map_err(|err| format_auth_error("clear cape", &err))?,
+                        );
+                        tracing::info!(
+                            target: "vertexlauncher/skins",
+                            display_name = display_name_for_log.as_str(),
+                            "Cape clear completed."
+                        );
+                    }
+                }
 
-        let _ = tokio_runtime::spawn_detached(async move {
-            let result = match task.await {
-                Ok(result) => result,
-                Err(err) => Err(format!("Skin save task failed: {err}")),
-            };
+                if let Some(profile) = latest_profile {
+                    tracing::info!(
+                        target: "vertexlauncher/skins",
+                        display_name = display_name_for_log.as_str(),
+                        skins = profile.skins.len(),
+                        capes = profile.capes.len(),
+                        "Using profile payload returned by Mojang mutation endpoint."
+                    );
+                    update_cached_profile(
+                        profile_id.as_str(),
+                        &profile,
+                        display_name_for_log.as_str(),
+                    )?;
+                    Ok(LoadedProfile::from_profile(profile))
+                } else {
+                    fetch_and_cache_profile(profile_id, &token, display_name_for_log.as_str())
+                }
+            })();
             let _ = tx.send(WorkerEvent::Saved(
                 result.map(|loaded| (profile_id_for_result, loaded)),
             ));

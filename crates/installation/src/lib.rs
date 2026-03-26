@@ -3838,6 +3838,13 @@ struct LoaderVersionCatalog {
     versions_by_game_version: BTreeMap<String, Vec<String>>,
 }
 
+impl LoaderVersionCatalog {
+    fn finalize(mut self) -> Self {
+        self.supported_game_versions = self.versions_by_game_version.keys().cloned().collect();
+        self
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct LoaderVersionFetchResult {
     selected_versions: Vec<String>,
@@ -3992,8 +3999,7 @@ fn parse_loader_version_matrix(matrix: &serde_json::Value) -> LoaderVersionCatal
         _ => {}
     }
 
-    catalog.supported_game_versions = catalog.versions_by_game_version.keys().cloned().collect();
-    catalog
+    catalog.finalize()
 }
 
 fn collect_loader_versions_from_entries(
@@ -4022,8 +4028,9 @@ fn collect_loader_versions_from_entries(
 
 fn parse_global_loader_versions(matrix: &serde_json::Value) -> Vec<String> {
     let mut versions = Vec::new();
+    let mut seen = HashSet::new();
     let mut push_unique = |candidate: String| {
-        if !versions.iter().any(|existing| existing == &candidate) {
+        if seen.insert(candidate.clone()) {
             versions.push(candidate);
         }
     };
@@ -4267,8 +4274,7 @@ fn parse_forge_loader_catalog_from_metadata(metadata_xml: &str) -> LoaderVersion
             loader_version.to_owned(),
         );
     }
-    catalog.supported_game_versions = catalog.versions_by_game_version.keys().cloned().collect();
-    catalog
+    catalog.finalize()
 }
 
 fn parse_neoforge_loader_catalog_from_metadata(metadata_xml: &str) -> LoaderVersionCatalog {
@@ -4287,8 +4293,7 @@ fn parse_neoforge_loader_catalog_from_metadata(metadata_xml: &str) -> LoaderVers
             trimmed.to_owned(),
         );
     }
-    catalog.supported_game_versions = catalog.versions_by_game_version.keys().cloned().collect();
-    catalog
+    catalog.finalize()
 }
 
 fn parse_neoforge_versions_from_metadata(metadata_xml: &str) -> HashSet<String> {

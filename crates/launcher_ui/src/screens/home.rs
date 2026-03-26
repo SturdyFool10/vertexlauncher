@@ -41,7 +41,7 @@ const SERVER_PING_ICON_SIZE: f32 = 24.0;
 const FAVORITE_STAR_BUTTON_SIZE: f32 = 20.0;
 const FAVORITE_STAR_ICON_SIZE: f32 = 14.0;
 const SCREENSHOT_SCAN_INTERVAL: Duration = Duration::from_secs(10);
-const MAX_HOME_SCREENSHOTS: usize = 120;
+const SCREENSHOT_PAGE_SIZE: usize = 30;
 const HOME_TAB_HEIGHT: f32 = 38.0;
 const SCREENSHOT_TILE_GAP: f32 = 10.0;
 const SCREENSHOT_PRELOAD_VIEWPORTS: f32 = 0.75;
@@ -88,6 +88,11 @@ struct HomeState {
     last_screenshot_scan_at: Option<Instant>,
     scanned_screenshot_instance_count: usize,
     screenshot_scan_pending: bool,
+    screenshot_scan_ready: bool,
+    screenshot_tasks_total: usize,
+    screenshot_tasks_done: usize,
+    screenshot_candidates: Vec<ScreenshotCandidate>,
+    screenshot_loaded_count: usize,
     latest_requested_screenshot_scan_id: u64,
     screenshot_images: LazyImageBytes,
     instance_thumbnail_results_tx: Option<mpsc::Sender<(String, Option<Arc<[u8]>>)>>,
@@ -267,16 +272,19 @@ struct ScreenshotScanInstance {
     screenshots_dir: PathBuf,
 }
 
-#[derive(Debug, Clone)]
-struct ScreenshotScanResult {
-    request_id: u64,
-    scanned_instance_count: usize,
-    screenshots: Vec<ScreenshotEntry>,
+enum ScreenshotScanMessage {
+    /// Sent by each per-file task the moment image dimensions are validated.
+    EntryLoaded {
+        request_id: u64,
+        entry: ScreenshotEntry,
+    },
+    /// Sent by each per-file task when it finishes, whether or not it produced an entry.
+    TaskDone { request_id: u64 },
 }
 
 struct ScreenshotResultChannel {
-    tx: mpsc::Sender<ScreenshotScanResult>,
-    rx: mpsc::Receiver<ScreenshotScanResult>,
+    tx: mpsc::Sender<ScreenshotScanMessage>,
+    rx: mpsc::Receiver<ScreenshotScanMessage>,
 }
 
 struct HomeActivityResultChannel {
@@ -336,7 +344,7 @@ fn home_activity_results() -> &'static Mutex<HomeActivityResultChannel> {
 
 fn screenshot_results() -> &'static Mutex<ScreenshotResultChannel> {
     SCREENSHOT_RESULTS.get_or_init(|| {
-        let (result_tx, result_rx) = mpsc::channel::<ScreenshotScanResult>();
+        let (result_tx, result_rx) = mpsc::channel::<ScreenshotScanMessage>();
         Mutex::new(ScreenshotResultChannel {
             rx: result_rx,
             tx: result_tx,
@@ -421,14 +429,92 @@ fn poll_screenshot_results(state: &mut HomeState) {
         return;
     };
 
-    while let Ok(result) = channel.rx.try_recv() {
-        if result.request_id != state.latest_requested_screenshot_scan_id {
-            continue;
+    let mut messages = Vec::new();
+    while let Ok(msg) = channel.rx.try_recv() {
+        messages.push(msg);
+    }
+    drop(channel);
+
+    let mut any_entries = false;
+    for msg in messages {
+        match msg {
+            ScreenshotScanMessage::EntryLoaded { request_id, entry } => {
+                if request_id != state.latest_requested_screenshot_scan_id {
+                    continue;
+                }
+                state.screenshots.push(entry);
+                any_entries = true;
+            }
+            ScreenshotScanMessage::TaskDone { request_id } => {
+                if request_id != state.latest_requested_screenshot_scan_id {
+                    continue;
+                }
+                state.screenshot_tasks_done += 1;
+                let all_pages_spawned =
+                    state.screenshot_loaded_count >= state.screenshot_candidates.len();
+                if state.screenshot_scan_ready
+                    && all_pages_spawned
+                    && state.screenshot_tasks_done >= state.screenshot_tasks_total
+                {
+                    state.screenshot_scan_pending = false;
+                    state.last_screenshot_scan_at = Some(Instant::now());
+                }
+            }
         }
-        state.screenshots = result.screenshots;
-        state.scanned_screenshot_instance_count = result.scanned_instance_count;
-        state.last_screenshot_scan_at = Some(Instant::now());
-        state.screenshot_scan_pending = false;
+    }
+
+    // Sort once per poll cycle rather than after every individual entry.
+    if any_entries {
+        state.screenshots.sort_by(|a, b| {
+            b.modified_at_ms
+                .unwrap_or(0)
+                .cmp(&a.modified_at_ms.unwrap_or(0))
+                .then_with(|| a.file_name.cmp(&b.file_name))
+        });
+    }
+}
+
+fn spawn_screenshot_load_page(state: &mut HomeState, request_id: u64, page_size: usize) {
+    let start = state.screenshot_loaded_count;
+    let end = (start + page_size).min(state.screenshot_candidates.len());
+    if start >= end {
+        return;
+    }
+
+    let Ok(channel) = screenshot_results().lock() else {
+        return;
+    };
+    let result_tx = channel.tx.clone();
+    drop(channel);
+
+    let page: Vec<ScreenshotCandidate> = state.screenshot_candidates[start..end].to_vec();
+    state.screenshot_loaded_count = end;
+    state.screenshot_tasks_total += page.len();
+
+    for candidate in page {
+        let tx = result_tx.clone();
+        let _ = tokio_runtime::spawn(async move {
+            let entry = (|| {
+                let Ok((width, height)) = image::image_dimensions(&candidate.path) else {
+                    return None;
+                };
+                if width == 0 || height == 0 {
+                    return None;
+                }
+                Some(ScreenshotEntry {
+                    instance_name: candidate.instance_name,
+                    path: candidate.path,
+                    file_name: candidate.file_name,
+                    width,
+                    height,
+                    modified_at_ms: candidate.modified_at_ms,
+                })
+            })();
+            if let Some(entry) = entry {
+                let _ = tx.send(ScreenshotScanMessage::EntryLoaded { request_id, entry });
+            }
+            let _ = tx.send(ScreenshotScanMessage::TaskDone { request_id });
+        });
     }
 }
 
@@ -470,12 +556,7 @@ fn request_screenshot_delete(
 
     state.delete_screenshot_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            fs::remove_file(path.as_path()).map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("screenshot delete task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = fs::remove_file(path.as_path()).map_err(|err| err.to_string());
         let _ = tx.send((screenshot_key, file_name, result));
     });
 }
@@ -723,15 +804,18 @@ fn render_screenshot_gallery(
     let title_style = style::heading(ui, 18.0, 24.0);
     let body_style = style::muted(ui);
     let _ = text_ui.label(ui, "home_screenshots_title", "Screenshots", &title_style);
+    let total_candidates = state.screenshot_candidates.len();
+    let loaded_count = state.screenshots.len();
     let summary = if state.screenshot_scan_pending && state.screenshots.is_empty() {
-        "Loading recent screenshots...".to_owned()
+        "Loading screenshots...".to_owned()
     } else if state.screenshots.is_empty() {
         "No screenshots found in any instance.".to_owned()
-    } else {
+    } else if state.screenshot_loaded_count < total_candidates {
         format!(
-            "{} recent screenshots across your instances.",
-            state.screenshots.len()
+            "Showing {loaded_count} of {total_candidates} screenshots — scroll down to load more."
         )
+    } else {
+        format!("{loaded_count} screenshots across your instances.")
     };
     let _ = text_ui.label(
         ui,
@@ -761,7 +845,7 @@ fn render_screenshot_gallery(
 
     let mut open_screenshot_key = None;
     let mut delete_screenshot_key = None;
-    egui::ScrollArea::vertical()
+    let scroll_output = egui::ScrollArea::vertical()
         .id_salt("home_screenshots_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -790,6 +874,18 @@ fn render_screenshot_gallery(
                 }
             });
         });
+
+    // Trigger next page when the user scrolls near the bottom.
+    let has_more = state.screenshot_loaded_count < state.screenshot_candidates.len();
+    if has_more {
+        let visible_height = scroll_output.inner_rect.height();
+        let near_bottom = scroll_output.state.offset.y + visible_height
+            >= scroll_output.content_size.y - visible_height;
+        if near_bottom {
+            let request_id = state.latest_requested_screenshot_scan_id;
+            spawn_screenshot_load_page(state, request_id, SCREENSHOT_PAGE_SIZE);
+        }
+    }
 
     if let Some(screenshot_key) = open_screenshot_key {
         state.screenshot_viewer = Some(ScreenshotViewerState {
@@ -1713,14 +1809,9 @@ fn request_instance_thumbnail(state: &mut HomeState, instance_id: &str, path: St
     };
     state.instance_thumbnail_in_flight.insert(key.clone());
     let _ = tokio_runtime::spawn_detached(async move {
-        let bytes = tokio_runtime::spawn_blocking(move || {
-            std::fs::read(path.as_str())
-                .ok()
-                .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()))
-        })
-        .await
-        .ok()
-        .flatten();
+        let bytes = std::fs::read(path.as_str())
+            .ok()
+            .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()));
         let _ = tx.send((key, bytes));
     });
 }
@@ -2453,26 +2544,13 @@ fn refresh_home_state(
     state.activity_scan_pending = true;
     let _ = tokio_runtime::spawn_detached(async move {
         let scanned_instance_count = request.scanned_instance_count;
-        let outcome = tokio_runtime::spawn_blocking(move || HomeActivityScanResult {
+        let result = HomeActivityScanResult {
             request_id,
             scanned_instance_count,
             worlds: collect_worlds_from_request(&request),
             servers: collect_servers_from_request(&request),
-        })
-        .await;
-
-        match outcome {
-            Ok(result) => {
-                let _ = result_tx.send(result);
-            }
-            Err(error) => {
-                tracing::warn!(
-                    target: "vertexlauncher/home/activity",
-                    error = %error,
-                    "home activity scan task failed to join"
-                );
-            }
-        }
+        };
+        let _ = result_tx.send(result);
     });
 }
 
@@ -2488,50 +2566,34 @@ fn refresh_screenshot_state(
 
     let request_id = state.latest_requested_screenshot_scan_id.saturating_add(1);
     let request = build_screenshot_scan_request(instances, config);
-    let Ok(channel) = screenshot_results().lock() else {
-        return;
-    };
-    let result_tx = channel.tx.clone();
-    drop(channel);
 
     state.latest_requested_screenshot_scan_id = request_id;
     state.screenshot_scan_pending = true;
-    let scanned_instance_count = request.scanned_instance_count;
-    let _ = tokio_runtime::spawn_detached(async move {
-        let outcome = tokio_runtime::spawn_blocking(move || {
-            let screenshots = collect_screenshots_from_request(&request);
-            ScreenshotScanResult {
-                request_id,
-                scanned_instance_count,
-                screenshots,
-            }
-        })
-        .await;
+    state.screenshot_scan_ready = true;
+    state.screenshot_tasks_total = 0;
+    state.screenshot_tasks_done = 0;
+    state.screenshots.clear();
 
-        match outcome {
-            Ok(result) => {
-                let _ = result_tx.send(result);
-            }
-            Err(error) => {
-                tracing::warn!(
-                    target: "vertexlauncher/home/screenshots",
-                    error = %error,
-                    "screenshot loader task failed to join; returning empty result"
-                );
-                let _ = result_tx.send(ScreenshotScanResult {
-                    request_id,
-                    scanned_instance_count,
-                    screenshots: Vec::new(),
-                });
-            }
-        }
-    });
+    // Directory listing reads only file names and mtimes — no file content.
+    // Doing it synchronously avoids a full frame of latency before dimension
+    // tasks can be spawned.
+    let candidates = collect_screenshot_candidates(&request);
+    state.scanned_screenshot_instance_count = request.scanned_instance_count;
+    state.screenshot_candidates = candidates;
+    state.screenshot_loaded_count = 0;
+
+    if state.screenshot_candidates.is_empty() {
+        state.screenshot_scan_pending = false;
+        state.last_screenshot_scan_at = Some(Instant::now());
+    } else {
+        spawn_screenshot_load_page(state, request_id, SCREENSHOT_PAGE_SIZE);
+    }
 }
 
-fn collect_screenshots_from_request(request: &ScreenshotScanRequest) -> Vec<ScreenshotEntry> {
+fn collect_screenshot_candidates(request: &ScreenshotScanRequest) -> Vec<ScreenshotCandidate> {
     let mut candidates = Vec::new();
     for instance in &request.instances {
-        let Ok(entries) = fs::read_dir(instance.screenshots_dir.as_path()) else {
+        let Ok(entries) = fs::read_dir(&instance.screenshots_dir) else {
             continue;
         };
         for entry in entries.flatten() {
@@ -2548,33 +2610,13 @@ fn collect_screenshots_from_request(request: &ScreenshotScanRequest) -> Vec<Scre
             });
         }
     }
-
     candidates.sort_by(|a, b| {
         b.modified_at_ms
             .unwrap_or(0)
             .cmp(&a.modified_at_ms.unwrap_or(0))
             .then_with(|| a.file_name.cmp(&b.file_name))
     });
-    candidates.truncate(MAX_HOME_SCREENSHOTS);
-
-    let mut screenshots = Vec::new();
-    for candidate in candidates {
-        let Ok((width, height)) = image::image_dimensions(candidate.path.as_path()) else {
-            continue;
-        };
-        if width == 0 || height == 0 {
-            continue;
-        }
-        screenshots.push(ScreenshotEntry {
-            instance_name: candidate.instance_name,
-            path: candidate.path,
-            file_name: candidate.file_name,
-            width,
-            height,
-            modified_at_ms: candidate.modified_at_ms,
-        });
-    }
-    screenshots
+    candidates
 }
 
 fn is_supported_screenshot_path(path: &Path) -> bool {
@@ -2720,28 +2762,7 @@ fn queue_server_pings(state: &mut HomeState) {
         let worker_address = address.clone();
         let result_tx = result_tx.clone();
         let _ = tokio_runtime::spawn_detached(async move {
-            let ping_outcome = tokio_runtime::spawn_blocking(move || {
-                query_server_snapshot(worker_address.as_str())
-            })
-            .await;
-            let snapshot = match ping_outcome {
-                Ok(snapshot) => snapshot,
-                Err(error) => {
-                    tracing::warn!(
-                        target: "vertexlauncher/home/server_ping",
-                        error = %error,
-                        address = address.as_str(),
-                        "server ping task failed to join"
-                    );
-                    ServerPingSnapshot {
-                        status: ServerPingStatus::Unknown,
-                        motd: None,
-                        players_online: None,
-                        players_max: None,
-                        checked_at: Instant::now(),
-                    }
-                }
-            };
+            let snapshot = query_server_snapshot(worker_address.as_str());
             let _ = result_tx.send(ServerPingResult { address, snapshot });
         });
     }

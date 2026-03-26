@@ -137,12 +137,7 @@ pub fn show(
                 let url_owned = normalized_url.to_owned();
                 let _ = tokio_runtime::spawn_detached(async move {
                     let url_for_worker = url_owned.clone();
-                    let result = tokio_runtime::spawn_blocking(move || {
-                        fetch_and_tile_remote_image(url_for_worker.as_str())
-                    })
-                    .await
-                    .map_err(|err| format!("remote icon worker join failed: {err}"))
-                    .and_then(|inner| inner);
+                    let result = fetch_and_tile_remote_image(url_for_worker.as_str());
                     let _ = tx.send((url_owned, result));
                 });
             }

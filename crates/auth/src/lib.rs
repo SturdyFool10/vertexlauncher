@@ -100,9 +100,10 @@ pub fn start_device_code_login_with_handle(
     let (sender, receiver) = mpsc::channel();
     let sender_for_task = sender.clone();
 
-    // Run the blocking device-code polling flow on the runtime's blocking pool
+    // Run the blocking device-code polling flow on a dedicated thread
     // so UI threads stay responsive.
-    handle.spawn_blocking(move || {
+    let _ = handle;
+    std::thread::spawn(move || {
         if let Err(err) = device_code::run_device_code_login(client_id, &sender_for_task) {
             let _ = sender_for_task.send(LoginEvent::Failed(err.to_string()));
         }

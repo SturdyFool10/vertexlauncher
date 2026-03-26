@@ -670,13 +670,8 @@ pub(super) fn sync_version_catalog(
     state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            fetch_version_catalog_with_refresh(include_snapshots_and_betas, force_refresh)
-                .map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("version catalog task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = fetch_version_catalog_with_refresh(include_snapshots_and_betas, force_refresh)
+            .map_err(|err| err.to_string());
         let _ = tx.send((include_snapshots_and_betas, result));
     });
 }
@@ -841,13 +836,9 @@ pub(super) fn request_modloader_versions(
     let loader = loader_label.to_owned();
     let game = game_version.to_owned();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
+        let result =
             fetch_loader_versions_for_game(loader.as_str(), game.as_str(), force_refresh)
-                .map_err(|err| err.to_string())
-        })
-        .await
-        .map_err(|err| format!("background task join error: {err}"))
-        .and_then(|inner| inner);
+                .map_err(|err| err.to_string());
         let _ = tx.send((key, result));
     });
 }
@@ -1158,7 +1149,7 @@ pub(super) fn request_runtime_prepare(
         let progress_callback: InstallProgressCallback = Arc::new(move |event| {
             let _ = progress_tx.send(event);
         });
-        let result = tokio_runtime::spawn_blocking(move || {
+        let result: Result<RuntimePrepareOutcome, String> = (|| {
             let mut configured_java = None;
             let java_path = if let Some(path) = java_executable_for_task
                 .as_deref()
@@ -1225,10 +1216,7 @@ pub(super) fn request_runtime_prepare(
                 configured_java,
                 launch,
             })
-        })
-        .await
-        .map_err(|err| format!("runtime prepare task join error: {err}"))
-        .and_then(|inner| inner);
+        })();
         let _ = tx.send((game_version_for_result, instance_root_display, result));
         let _ = progress_tx_done.send(InstallProgress {
             stage: InstallStage::Complete,

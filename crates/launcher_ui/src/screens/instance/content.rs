@@ -1165,39 +1165,14 @@ fn request_content_metadata_lookup_batch(
     let hash_cache = state.content_hash_cache.clone().unwrap_or_default();
     let game_version = game_version.trim().to_owned();
     let loader = loader.trim().to_owned();
-    let work_items_for_failure = work_items.clone();
-
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = match tokio_runtime::spawn_blocking(move || {
-            resolve_installed_content_lookup_batch(
-                work_items.as_slice(),
-                kind,
-                game_version.as_str(),
-                loader.as_str(),
-                hash_cache,
-            )
-        })
-        .await
-        {
-            Ok(result) => result,
-            Err(err) => {
-                tracing::warn!(
-                    target: "vertexlauncher/ui/instance",
-                    "Installed content lookup batch task failed: {err}"
-                );
-                ContentLookupResult {
-                    results: work_items_for_failure
-                        .into_iter()
-                        .map(|(request_serial, file)| ContentLookupResultEntry {
-                            request_serial,
-                            lookup_key: file.lookup_key,
-                            resolution: None,
-                        })
-                        .collect(),
-                    hash_cache_updates: Vec::new(),
-                }
-            }
-        };
+        let result = resolve_installed_content_lookup_batch(
+            work_items.as_slice(),
+            kind,
+            game_version.as_str(),
+            loader.as_str(),
+            hash_cache,
+        );
         let _ = tx.send(result);
     });
 
@@ -1545,19 +1520,14 @@ fn request_content_update(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            crate::screens::content_browser::update_installed_content_to_version(
-                instance_root.as_path(),
-                &entry,
-                installed_file_path.as_path(),
-                version_id.as_str(),
-                game_version.as_str(),
-                loader_label.as_str(),
-            )
-        })
-        .await
-        .map_err(|err| format!("content update task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = crate::screens::content_browser::update_installed_content_to_version(
+            instance_root.as_path(),
+            &entry,
+            installed_file_path.as_path(),
+            version_id.as_str(),
+            game_version.as_str(),
+            loader_label.as_str(),
+        );
         match &result {
             Ok(message) => tracing::info!(
                 target: CONTENT_UPDATE_LOG_TARGET,
@@ -1617,7 +1587,7 @@ fn request_content_delete(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
+        let result = (|| -> Result<String, String> {
             let delete_result = if path.is_dir() {
                 std::fs::remove_dir_all(path.as_path())
             } else {
@@ -1635,10 +1605,7 @@ fn request_content_delete(
                     "removed installed content, but failed to update the content manifest: {err}"
                 )
             })
-        })
-        .await
-        .map_err(|err| format!("content delete task join error: {err}"))
-        .and_then(|inner| inner);
+        })();
 
         let _ = tx.send(ContentApplyResult {
             kind,
@@ -1694,19 +1661,14 @@ fn request_bulk_content_update(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
-            update_all_installed_content(
-                instance_root.as_path(),
-                kind,
-                game_version.as_str(),
-                loader_label.as_str(),
-                &download_policy,
-                Some(&progress),
-            )
-        })
-        .await
-        .map_err(|err| format!("bulk content update task join error: {err}"))
-        .and_then(|inner| inner);
+        let result = update_all_installed_content(
+            instance_root.as_path(),
+            kind,
+            game_version.as_str(),
+            loader_label.as_str(),
+            &download_policy,
+            Some(&progress),
+        );
         if result.is_ok() {
             install_activity::set_status(
                 instance_name.as_str(),
