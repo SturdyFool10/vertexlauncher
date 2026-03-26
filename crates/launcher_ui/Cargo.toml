@@ -9,6 +9,7 @@ eframe.workspace = true
 egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+directories.workspace = true
 content_resolver.workspace = true
 config.workspace = true
 instances.workspace = true
@@ -32,6 +33,7 @@ base64.workspace = true
 tar = "*"
 xz2 = "*"
 vtmpack.workspace = true
+zip = { version = "*", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd = "*"

@@ -6,6 +6,7 @@ use content_resolver::{
     InstalledContentFile, InstalledContentHashCache, InstalledContentKind,
     InstalledContentResolver, ResolveInstalledContentRequest,
 };
+use directories::UserDirs;
 use egui::Ui;
 use flate2::read::GzDecoder;
 use installation::{
@@ -20,11 +21,11 @@ use instances::{
 };
 use managed_content::load_managed_content_identities;
 use std::{
-    collections::{HashMap, HashSet, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashMap, HashSet, hash_map::DefaultHasher},
     ffi::OsStr,
     fs,
     hash::{Hash, Hasher},
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, mpsc},
     time::{Duration, Instant},
@@ -69,7 +70,8 @@ use installed_entry_render_result::InstalledEntryRenderResult;
 pub use instance_screen_output::InstanceScreenOutput;
 use instance_screen_state::{
     InstalledContentEntryUiCache, InstanceLogEntry, InstanceScreenState, InstanceScreenTab,
-    InstanceScreenshotEntry, InstanceScreenshotViewerState, VtmpackExportOutcome,
+    InstanceScreenshotEntry, InstanceScreenshotViewerState, ServerExportOutcome,
+    VtmpackExportOutcome,
 };
 use platform::{
     effective_linux_graphics_settings_for_state, linux_instance_driver_settings_for_save,
@@ -165,6 +167,14 @@ pub(super) fn handle_escape(ctx: &egui::Context, selected_instance_id: Option<&s
             handled = true;
             return;
         }
+        if state.show_export_server_modal {
+            if !state.export_server_in_flight {
+                state.show_export_server_modal = false;
+            }
+            data.insert_temp(state_id, state);
+            handled = true;
+            return;
+        }
         if state.show_settings_modal {
             state.show_settings_modal = false;
             data.insert_temp(state_id, state);
@@ -219,6 +229,8 @@ pub fn render(
     poll_background_tasks(&mut state, config, instances, instance_id);
     poll_vtmpack_export_progress(&mut state);
     poll_vtmpack_export_results(&mut state);
+    poll_server_export_progress(&mut state);
+    poll_server_export_results(&mut state);
     poll_instance_screenshot_scan_results(&mut state);
     poll_instance_log_scan_results(&mut state);
     poll_instance_log_load_results(&mut state);
@@ -233,6 +245,7 @@ pub fn render(
         || state.log_scan_in_flight
         || state.log_load_in_flight
         || state.export_vtmpack_in_flight
+        || state.export_server_in_flight
     {
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
@@ -298,6 +311,14 @@ pub fn render(
         config,
     );
     render_export_vtmpack_modal(
+        ui.ctx(),
+        text_ui,
+        instance_id,
+        &mut state,
+        instances,
+        config,
+    );
+    render_export_server_modal(
         ui.ctx(),
         text_ui,
         instance_id,
@@ -2649,6 +2670,18 @@ fn render_instance_settings_modal(
                     {
                         state.show_export_vtmpack_modal = true;
                     }
+                    ui.add_space(6.0);
+                    if text_ui
+                        .button(
+                            ui,
+                            ("instance_export_server_zip", instance_id),
+                            "Auto-generate server zip...",
+                            &refresh_style,
+                        )
+                        .clicked()
+                    {
+                        state.show_export_server_modal = true;
+                    }
                     ui.add_space(8.0);
 
                     ui.horizontal(|ui| {
@@ -3115,6 +3148,860 @@ fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
         state.export_vtmpack_results_tx = None;
         state.export_vtmpack_results_rx = None;
     }
+}
+
+fn default_server_root_entry_selected(entry: &str) -> bool {
+    matches!(
+        entry,
+        "mods"
+            | "config"
+            | "defaultconfigs"
+            | "kubejs"
+            | "scripts"
+            | "serverconfig"
+            | "libraries"
+            | "versions"
+    )
+}
+
+fn sync_server_export_options(
+    instance_root: &Path,
+    included_root_entries: &mut BTreeMap<String, bool>,
+) {
+    let available_entries = list_exportable_root_entries(instance_root);
+    let available_set = available_entries.iter().cloned().collect::<HashSet<_>>();
+    included_root_entries.retain(|entry, _| available_set.contains(entry));
+    for entry in available_entries {
+        included_root_entries
+            .entry(entry.clone())
+            .or_insert_with(|| default_server_root_entry_selected(entry.as_str()));
+    }
+}
+
+fn render_export_server_modal(
+    ctx: &egui::Context,
+    text_ui: &mut TextUi,
+    instance_id: &str,
+    state: &mut InstanceScreenState,
+    instances: &InstanceStore,
+    config: &Config,
+) {
+    if !state.show_export_server_modal {
+        return;
+    }
+
+    let mut open = state.show_export_server_modal;
+    let mut close_requested = false;
+    let viewport_rect = ctx.input(|i| i.content_rect());
+    let installations_root = PathBuf::from(config.minecraft_installations_root());
+    let instance_root = instances
+        .find(instance_id)
+        .map(|instance| instances::instance_root_path(&installations_root, instance));
+    if let Some(instance_root) = instance_root.as_deref() {
+        sync_server_export_options(
+            instance_root,
+            &mut state.export_server_included_root_entries,
+        );
+    }
+    let modal_width = viewport_rect.width().min(620.0).max(340.0);
+    let modal_height = viewport_rect.height().min(560.0).max(320.0);
+    let modal_pos = egui::pos2(
+        (viewport_rect.center().x - modal_width * 0.5)
+            .clamp(viewport_rect.left(), viewport_rect.right() - modal_width),
+        (viewport_rect.center().y - modal_height * 0.5)
+            .clamp(viewport_rect.top(), viewport_rect.bottom() - modal_height),
+    );
+    modal::show_scrim(
+        ctx,
+        ("instance_export_server_modal_scrim", instance_id),
+        viewport_rect,
+    );
+
+    let mut export_requested = false;
+    egui::Window::new("Auto-generate server zip")
+        .id(egui::Id::new(("instance_export_server_modal", instance_id)))
+        .order(egui::Order::Foreground)
+        .open(&mut open)
+        .fixed_pos(modal_pos)
+        .fixed_size(egui::vec2(modal_width, modal_height))
+        .collapsible(false)
+        .resizable(false)
+        .movable(false)
+        .title_bar(false)
+        .hscroll(false)
+        .vscroll(true)
+        .constrain(true)
+        .constrain_to(viewport_rect)
+        .frame(modal::window_frame(ctx))
+        .show(ctx, |ui| {
+            let title_style = style::heading(ui, 26.0, 30.0);
+            let body_style = style::muted(ui);
+            let _ = text_ui.label(
+                ui,
+                ("instance_export_server_title", instance_id),
+                "Auto-generate server zip",
+                &title_style,
+            );
+            let _ = text_ui.label(
+                ui,
+                ("instance_export_server_body", instance_id),
+                "Builds a portable server package in your Downloads folder using this instance's files. CurseForge-managed mods that cannot be resolved on Modrinth by hash are listed as unknowns in the report.",
+                &body_style,
+            );
+            ui.add_space(12.0);
+
+            if state.export_server_in_flight {
+                let progress = state.export_server_latest_progress.as_ref();
+                let progress_fraction = progress
+                    .and_then(|progress| {
+                        (progress.total_steps > 0)
+                            .then_some(progress.completed_steps as f32 / progress.total_steps as f32)
+                    })
+                    .unwrap_or(0.0)
+                    .clamp(0.0, 1.0);
+                let progress_label = progress
+                    .map(|progress| progress.message.as_str())
+                    .unwrap_or("Starting export...");
+                let progress_counts = progress
+                    .map(|progress| {
+                        format!(
+                            "{} of {} steps complete",
+                            progress.completed_steps.min(progress.total_steps),
+                            progress.total_steps
+                        )
+                    })
+                    .unwrap_or_else(|| "Preparing export task...".to_owned());
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_export_server_progress_title", instance_id),
+                        "Server export in progress",
+                        &LabelOptions {
+                            font_size: 18.0,
+                            line_height: 22.0,
+                            weight: 600,
+                            color: ui.visuals().text_color(),
+                            wrap: false,
+                            ..LabelOptions::default()
+                        },
+                    );
+                });
+                ui.add_space(12.0);
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_export_server_progress_message", instance_id),
+                    progress_label,
+                    &body_style,
+                );
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_export_server_progress_counts", instance_id),
+                    progress_counts.as_str(),
+                    &body_style,
+                );
+                if let Some(path) = state.export_server_output_path.as_ref() {
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_export_server_progress_path", instance_id),
+                        &format!("Destination: {}", path.display()),
+                        &style::muted(ui),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.add(
+                    egui::ProgressBar::new(progress_fraction)
+                        .desired_width(ui.available_width())
+                        .show_percentage(),
+                );
+            } else {
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_export_server_include_label", instance_id),
+                    "Include top-level entries from the Minecraft root",
+                    &LabelOptions {
+                        font_size: 18.0,
+                        line_height: 22.0,
+                        weight: 600,
+                        color: ui.visuals().text_color(),
+                        wrap: false,
+                        ..LabelOptions::default()
+                    },
+                );
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_export_server_include_help", instance_id),
+                    "Defaults to common server directories. You can enable or disable any top-level file or folder before export.",
+                    &body_style,
+                );
+                ui.add_space(8.0);
+
+                if let Some(instance_root) = instance_root.as_deref() {
+                    let entries = list_exportable_root_entries(instance_root);
+                    ui.set_width(ui.available_width());
+                    egui::ScrollArea::vertical()
+                        .id_salt(("instance_export_server_entries_scroll", instance_id))
+                        .max_height(360.0)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            for entry in entries {
+                                let checked = state
+                                    .export_server_included_root_entries
+                                    .entry(entry.clone())
+                                    .or_insert_with(|| {
+                                        default_server_root_entry_selected(entry.as_str())
+                                    });
+                                let label = if instance_root.join(entry.as_str()).is_dir() {
+                                    format!("{entry}/")
+                                } else {
+                                    entry.clone()
+                                };
+                                ui.checkbox(checked, label);
+                            }
+                        });
+                } else {
+                    let _ = text_ui.label(
+                        ui,
+                        ("instance_export_server_missing_instance", instance_id),
+                        "Instance root is unavailable, so folder selection cannot be shown.",
+                        &body_style,
+                    );
+                }
+
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    if text_ui
+                        .button(
+                            ui,
+                            ("instance_export_server_cancel", instance_id),
+                            "Cancel",
+                            &ButtonOptions::default(),
+                        )
+                        .clicked()
+                    {
+                        close_requested = true;
+                    }
+                    if text_ui
+                        .button(
+                            ui,
+                            ("instance_export_server_confirm", instance_id),
+                            "Build zip in Downloads",
+                            &ButtonOptions::default(),
+                        )
+                        .clicked()
+                    {
+                        export_requested = true;
+                    }
+                });
+            }
+        });
+
+    if close_requested && !state.export_server_in_flight {
+        open = false;
+    }
+
+    if export_requested {
+        if let Some(instance) = instances.find(instance_id) {
+            let instance_root = instances::instance_root_path(&installations_root, instance);
+            let output_path = default_server_export_output_path(instance, config);
+            request_server_export(
+                state,
+                instance.clone(),
+                instance_root,
+                output_path,
+                state.export_server_included_root_entries.clone(),
+                config.force_java_21_minimum(),
+            );
+            open = true;
+        } else {
+            state.status_message = Some("Instance was removed before export.".to_owned());
+            open = false;
+        }
+    }
+
+    state.show_export_server_modal = open || state.export_server_in_flight;
+}
+
+fn ensure_server_export_channels(state: &mut InstanceScreenState) {
+    if state.export_server_progress_tx.is_none() || state.export_server_progress_rx.is_none() {
+        let (tx, rx) = mpsc::channel();
+        state.export_server_progress_tx = Some(tx);
+        state.export_server_progress_rx = Some(Arc::new(Mutex::new(rx)));
+    }
+    if state.export_server_results_tx.is_none() || state.export_server_results_rx.is_none() {
+        let (tx, rx) = mpsc::channel();
+        state.export_server_results_tx = Some(tx);
+        state.export_server_results_rx = Some(Arc::new(Mutex::new(rx)));
+    }
+}
+
+fn request_server_export(
+    state: &mut InstanceScreenState,
+    instance: instances::InstanceRecord,
+    instance_root: PathBuf,
+    output_path: PathBuf,
+    included_root_entries: BTreeMap<String, bool>,
+    force_java_21_minimum: bool,
+) {
+    if state.export_server_in_flight {
+        state.show_export_server_modal = true;
+        return;
+    }
+
+    ensure_server_export_channels(state);
+    let Some(progress_tx) = state.export_server_progress_tx.as_ref().cloned() else {
+        state.status_message = Some("Failed to start server export progress channel.".to_owned());
+        return;
+    };
+    let Some(results_tx) = state.export_server_results_tx.as_ref().cloned() else {
+        state.status_message = Some("Failed to start server export result channel.".to_owned());
+        return;
+    };
+
+    state.export_server_in_flight = true;
+    state.export_server_output_path = Some(output_path.clone());
+    state.export_server_latest_progress = None;
+    state.show_export_server_modal = true;
+    state.status_message = Some(format!(
+        "Building server zip for {} at {}...",
+        instance.name,
+        output_path.display()
+    ));
+
+    let instance_name = instance.name.clone();
+    let output_path_for_task = output_path.clone();
+    let _ = tokio_runtime::spawn_detached(async move {
+        let result = export_instance_as_server_zip_with_progress(
+            &instance,
+            instance_root.as_path(),
+            output_path_for_task.as_path(),
+            &included_root_entries,
+            force_java_21_minimum,
+            |progress| {
+                let _ = progress_tx.send(progress);
+            },
+        );
+        let _ = results_tx.send(ServerExportOutcome {
+            instance_name,
+            output_path,
+            result,
+        });
+    });
+}
+
+fn poll_server_export_progress(state: &mut InstanceScreenState) {
+    let mut updates = Vec::new();
+    let mut should_reset_channel = false;
+    if let Some(rx) = state.export_server_progress_rx.as_ref() {
+        match rx.lock() {
+            Ok(receiver) => loop {
+                match receiver.try_recv() {
+                    Ok(update) => updates.push(update),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        should_reset_channel = true;
+                        break;
+                    }
+                }
+            },
+            Err(_) => should_reset_channel = true,
+        }
+    }
+
+    if should_reset_channel && !state.export_server_in_flight {
+        state.export_server_progress_tx = None;
+        state.export_server_progress_rx = None;
+    }
+
+    if let Some(update) = updates.into_iter().last() {
+        state.export_server_latest_progress = Some(update);
+    }
+}
+
+fn poll_server_export_results(state: &mut InstanceScreenState) {
+    let mut updates = Vec::new();
+    let mut should_reset_channel = false;
+    if let Some(rx) = state.export_server_results_rx.as_ref() {
+        match rx.lock() {
+            Ok(receiver) => loop {
+                match receiver.try_recv() {
+                    Ok(update) => updates.push(update),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        should_reset_channel = true;
+                        break;
+                    }
+                }
+            },
+            Err(_) => should_reset_channel = true,
+        }
+    }
+
+    for update in updates {
+        state.export_server_in_flight = false;
+        state.export_server_latest_progress = None;
+        state.export_server_output_path = None;
+        state.show_export_server_modal = false;
+        match update.result {
+            Ok(summary) => {
+                state.status_message = Some(format!(
+                    "Server zip ready for {} at {}. {summary}",
+                    update.instance_name,
+                    update.output_path.display()
+                ));
+            }
+            Err(err) => {
+                state.status_message = Some(format!("Failed to export server zip: {err}"));
+            }
+        }
+    }
+
+    if should_reset_channel && state.export_server_in_flight {
+        state.export_server_in_flight = false;
+        state.export_server_latest_progress = None;
+        state.export_server_output_path = None;
+        state.show_export_server_modal = false;
+        state.status_message =
+            Some("Failed to export server zip: export task stopped unexpectedly.".to_owned());
+    }
+
+    if should_reset_channel || !state.export_server_in_flight {
+        state.export_server_progress_tx = None;
+        state.export_server_progress_rx = None;
+        state.export_server_results_tx = None;
+        state.export_server_results_rx = None;
+    }
+}
+
+fn default_server_export_output_path(
+    instance: &instances::InstanceRecord,
+    config: &Config,
+) -> PathBuf {
+    let downloads_dir = UserDirs::new()
+        .and_then(|dirs| dirs.download_dir().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(config.minecraft_installations_root()));
+    let base_name = format!(
+        "{}-server-{}-{}",
+        sanitize_file_stem(instance.name.as_str()),
+        sanitize_file_stem(instance.game_version.as_str()),
+        sanitize_file_stem(instance.modloader.as_str()),
+    );
+    unique_file_path(downloads_dir.as_path(), base_name.as_str(), "zip")
+}
+
+fn sanitize_file_stem(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.trim().chars() {
+        let lower = ch.to_ascii_lowercase();
+        let keep = lower.is_ascii_alphanumeric();
+        if keep {
+            out.push(lower);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "instance".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn unique_file_path(parent: &Path, stem: &str, extension: &str) -> PathBuf {
+    let mut attempt = 0u32;
+    loop {
+        let file_name = if attempt == 0 {
+            format!("{stem}.{extension}")
+        } else {
+            format!("{stem}-{attempt}.{extension}")
+        };
+        let candidate = parent.join(file_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+fn export_instance_as_server_zip_with_progress<F>(
+    instance: &instances::InstanceRecord,
+    instance_root: &Path,
+    output_path: &Path,
+    included_root_entries: &BTreeMap<String, bool>,
+    force_java_21_minimum: bool,
+    mut progress: F,
+) -> Result<String, String>
+where
+    F: FnMut(vtmpack::VtmpackExportProgress),
+{
+    progress(vtmpack::VtmpackExportProgress {
+        message: "Scanning instance files...".to_owned(),
+        completed_steps: 0,
+        total_steps: 1,
+    });
+    let included_files = collect_server_export_files(instance_root, included_root_entries)?;
+    let manifest = managed_content::load_content_manifest(instance_root);
+    let unknowns = classify_curseforge_unknown_mods_for_server_export(
+        instance_root,
+        &manifest,
+        &mut progress,
+        included_files.len(),
+    );
+
+    let required_java = runtime::required_java_major(instance.game_version.as_str()).map(|major| {
+        if force_java_21_minimum && major < 21 {
+            21
+        } else {
+            major
+        }
+    });
+
+    if let Some(parent) = output_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create server export directory {}: {err}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let output_file = fs::File::create(output_path)
+        .map_err(|err| format!("failed to create {}: {err}", output_path.display()))?;
+    let mut zip = zip::ZipWriter::new(output_file);
+    let file_options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+    let script_options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o755);
+
+    let mut completed_steps = 0usize;
+    let total_steps = included_files.len() + 5;
+    for file in &included_files {
+        let relative = file.strip_prefix(instance_root).unwrap_or(file.as_path());
+        let zip_path = normalize_zip_path(relative);
+        progress(vtmpack::VtmpackExportProgress {
+            message: format!("Adding {}", relative.display()),
+            completed_steps,
+            total_steps,
+        });
+        zip.start_file(zip_path.as_str(), file_options)
+            .map_err(|err| format!("failed to add {zip_path} to zip: {err}"))?;
+        let mut input = fs::File::open(file.as_path())
+            .map_err(|err| format!("failed to open {}: {err}", file.display()))?;
+        std::io::copy(&mut input, &mut zip)
+            .map_err(|err| format!("failed to write {} to zip: {err}", file.display()))?;
+        completed_steps += 1;
+    }
+
+    progress(vtmpack::VtmpackExportProgress {
+        message: "Writing launch scripts...".to_owned(),
+        completed_steps,
+        total_steps,
+    });
+    zip.start_file("start-server.sh", script_options)
+        .map_err(|err| format!("failed to add start-server.sh: {err}"))?;
+    zip.write_all(build_server_start_script_sh(required_java).as_bytes())
+        .map_err(|err| format!("failed to write start-server.sh: {err}"))?;
+    completed_steps += 1;
+
+    zip.start_file("start-server.bat", script_options)
+        .map_err(|err| format!("failed to add start-server.bat: {err}"))?;
+    zip.write_all(build_server_start_script_bat(required_java).as_bytes())
+        .map_err(|err| format!("failed to write start-server.bat: {err}"))?;
+    completed_steps += 1;
+
+    progress(vtmpack::VtmpackExportProgress {
+        message: "Writing server build report...".to_owned(),
+        completed_steps,
+        total_steps,
+    });
+    zip.start_file("VERTEX_SERVER_BUILD_REPORT.txt", file_options)
+        .map_err(|err| format!("failed to add VERTEX_SERVER_BUILD_REPORT.txt: {err}"))?;
+    zip.write_all(
+        build_server_export_report(instance, included_root_entries, required_java, &unknowns)
+            .as_bytes(),
+    )
+    .map_err(|err| format!("failed to write server build report: {err}"))?;
+    completed_steps += 1;
+
+    progress(vtmpack::VtmpackExportProgress {
+        message: "Writing EULA placeholder...".to_owned(),
+        completed_steps,
+        total_steps,
+    });
+    zip.start_file("eula.txt", file_options)
+        .map_err(|err| format!("failed to add eula.txt: {err}"))?;
+    zip.write_all(b"eula=false\n")
+        .map_err(|err| format!("failed to write eula.txt: {err}"))?;
+    completed_steps += 1;
+
+    progress(vtmpack::VtmpackExportProgress {
+        message: "Finalizing zip archive...".to_owned(),
+        completed_steps,
+        total_steps,
+    });
+    let _ = zip
+        .finish()
+        .map_err(|err| format!("failed to finalize zip archive: {err}"))?;
+    completed_steps += 1;
+
+    progress(vtmpack::VtmpackExportProgress {
+        message: "Server export complete.".to_owned(),
+        completed_steps,
+        total_steps,
+    });
+    Ok(format!(
+        "{} files included, {} CurseForge-managed unknown mods flagged.",
+        included_files.len(),
+        unknowns.len()
+    ))
+}
+
+fn collect_server_export_files(
+    instance_root: &Path,
+    included_root_entries: &BTreeMap<String, bool>,
+) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    for (entry, included) in included_root_entries {
+        if !*included {
+            continue;
+        }
+        let path = instance_root.join(entry);
+        if !path.exists() {
+            continue;
+        }
+        if path.is_file() {
+            files.push(path);
+            continue;
+        }
+        collect_regular_files_recursive(path.as_path(), &mut files)
+            .map_err(|err| format!("failed to collect files under {}: {err}", path.display()))?;
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn collect_regular_files_recursive(root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let entries = fs::read_dir(root)?;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_regular_files_recursive(path.as_path(), out)?;
+        } else if path.is_file() {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn classify_curseforge_unknown_mods_for_server_export<F>(
+    instance_root: &Path,
+    manifest: &managed_content::ContentInstallManifest,
+    progress: &mut F,
+    initial_step_offset: usize,
+) -> Vec<String>
+where
+    F: FnMut(vtmpack::VtmpackExportProgress),
+{
+    let candidates = manifest
+        .projects
+        .values()
+        .filter(|project| {
+            project.selected_source == Some(managed_content::ManagedContentSource::CurseForge)
+                && normalize_path_key(Path::new(project.file_path.as_str())).starts_with("mods/")
+        })
+        .map(|project| {
+            let display_name = project.name.trim().to_owned();
+            let name = if display_name.is_empty() {
+                project.file_path.clone()
+            } else {
+                display_name
+            };
+            (
+                name,
+                instance_root.join(project.file_path.as_str()),
+                project.file_path.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut unknowns = Vec::new();
+    if candidates.is_empty() {
+        return unknowns;
+    }
+
+    let modrinth = modrinth::Client::default();
+    let total_steps = initial_step_offset + candidates.len() + 1;
+    let mut completed = initial_step_offset;
+    for (name, path, relative) in candidates {
+        progress(vtmpack::VtmpackExportProgress {
+            message: format!("Classifying CurseForge mod {relative}..."),
+            completed_steps: completed,
+            total_steps,
+        });
+        completed += 1;
+
+        if !path.is_file() {
+            unknowns.push(format!("{name} ({relative}) - file missing"));
+            continue;
+        }
+        let hashes = match modrinth::hash_file_sha1_and_sha512_hex(path.as_path()) {
+            Ok(values) => values,
+            Err(error) => {
+                unknowns.push(format!("{name} ({relative}) - hash failed: {error}"));
+                continue;
+            }
+        };
+        let (sha1, sha512) = hashes;
+        let matched = modrinth
+            .get_version_from_hash(sha512.as_str(), "sha512")
+            .ok()
+            .flatten()
+            .is_some()
+            || modrinth
+                .get_version_from_hash(sha1.as_str(), "sha1")
+                .ok()
+                .flatten()
+                .is_some();
+        if !matched {
+            unknowns.push(format!("{name} ({relative})"));
+        }
+    }
+    progress(vtmpack::VtmpackExportProgress {
+        message: "CurseForge unknown-classification complete.".to_owned(),
+        completed_steps: completed,
+        total_steps,
+    });
+    unknowns
+}
+
+fn build_server_export_report(
+    instance: &instances::InstanceRecord,
+    included_root_entries: &BTreeMap<String, bool>,
+    required_java: Option<u8>,
+    unknowns: &[String],
+) -> String {
+    let mut report = String::new();
+    report.push_str("Vertex Auto-Generated Server Package\n");
+    report.push_str("===================================\n\n");
+    report.push_str(format!("Instance: {}\n", instance.name).as_str());
+    report.push_str(format!("Minecraft: {}\n", instance.game_version).as_str());
+    report.push_str(format!("Modloader: {}\n", instance.modloader).as_str());
+    if let Some(version) = normalize_optional(instance.modloader_version.as_str()) {
+        report.push_str(format!("Modloader version: {version}\n").as_str());
+    }
+    if let Some(java_major) = required_java {
+        report.push_str(format!("Recommended Java: {java_major}\n").as_str());
+    } else {
+        report.push_str("Recommended Java: unknown\n");
+    }
+    report.push('\n');
+    report.push_str("Included top-level entries:\n");
+    for entry in included_root_entries
+        .iter()
+        .filter_map(|(entry, enabled)| enabled.then_some(entry.as_str()))
+    {
+        report.push_str(format!("- {entry}\n").as_str());
+    }
+    report.push('\n');
+    if unknowns.is_empty() {
+        report.push_str("CurseForge unknowns:\n- none\n\n");
+    } else {
+        report.push_str("CurseForge unknowns (not found on Modrinth by hash):\n");
+        for entry in unknowns {
+            report.push_str(format!("- {entry}\n").as_str());
+        }
+        report.push('\n');
+    }
+    report.push_str("How to start:\n");
+    report.push_str("- Linux/macOS: ./start-server.sh\n");
+    report.push_str("- Windows: start-server.bat\n");
+    report.push_str(
+        "- If startup fails, check unknowns above first. Some mods may still be required or incompatible on dedicated server.\n",
+    );
+    report
+}
+
+fn build_server_start_script_sh(required_java: Option<u8>) -> String {
+    let java_note = required_java
+        .map(|major| format!("echo \"Recommended Java major: {major}\""))
+        .unwrap_or_else(|| "echo \"Recommended Java major: unknown\"".to_owned());
+    format!(
+        "#!/usr/bin/env bash
+set -euo pipefail
+{java_note}
+
+jar=\"$(find . -maxdepth 6 -type f \\( -iname '*server*.jar' -o -iname '*forge*.jar' -o -iname '*fabric*.jar' -o -iname '*quilt*.jar' -o -iname '*neoforge*.jar' \\) | head -n 1)\"
+if [ -z \"$jar\" ]; then
+  jar=\"$(find . -maxdepth 6 -type f -iname '*.jar' | head -n 1)\"
+fi
+jar=\"${{jar#./}}\"
+
+if [ -z \"$jar\" ]; then
+  echo \"No server jar found in this directory.\"
+  echo \"Check VERTEX_SERVER_BUILD_REPORT.txt for guidance.\"
+  exit 1
+fi
+
+echo \"Starting server using $jar\"
+java -Xms2G -Xmx4G -jar \"$jar\" nogui
+"
+    )
+}
+
+fn build_server_start_script_bat(required_java: Option<u8>) -> String {
+    let java_note = required_java
+        .map(|major| format!("echo Recommended Java major: {major}"))
+        .unwrap_or_else(|| "echo Recommended Java major: unknown".to_owned());
+    format!(
+        "@echo off
+setlocal EnableDelayedExpansion
+{java_note}
+
+set \"jar=\"
+for /r %%f in (*server*.jar) do (
+  if not defined jar set \"jar=%%f\"
+)
+if not defined jar (
+  for /r %%f in (*forge*.jar *fabric*.jar *quilt*.jar *neoforge*.jar) do (
+    if not defined jar set \"jar=%%f\"
+  )
+)
+if not defined jar (
+  for /r %%f in (*.jar) do (
+  if not defined jar set \"jar=%%f\"
+  )
+)
+
+if not defined jar (
+  echo No server jar found in this directory.
+  echo Check VERTEX_SERVER_BUILD_REPORT.txt for guidance.
+  exit /b 1
+)
+
+echo Starting server using !jar!
+java -Xms2G -Xmx4G -jar \"!jar!\" nogui
+"
+    )
+}
+
+fn normalize_zip_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn modified_millis(path: &Path) -> Option<u64> {

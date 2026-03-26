@@ -75,6 +75,13 @@ pub(super) struct VtmpackExportOutcome {
 }
 
 #[derive(Clone, Debug)]
+pub(super) struct ServerExportOutcome {
+    pub(super) instance_name: String,
+    pub(super) output_path: PathBuf,
+    pub(super) result: Result<String, String>,
+}
+
+#[derive(Clone, Debug)]
 pub(super) struct InstanceScreenState {
     pub(super) running: bool,
     pub(super) status_message: Option<String>,
@@ -198,6 +205,7 @@ pub(super) struct InstanceScreenState {
     >,
     pub(super) show_settings_modal: bool,
     pub(super) show_export_vtmpack_modal: bool,
+    pub(super) show_export_server_modal: bool,
     pub(super) export_vtmpack_options: VtmpackExportOptions,
     pub(super) export_vtmpack_in_flight: bool,
     pub(super) export_vtmpack_output_path: Option<PathBuf>,
@@ -207,6 +215,14 @@ pub(super) struct InstanceScreenState {
     pub(super) export_vtmpack_latest_progress: Option<VtmpackExportProgress>,
     pub(super) export_vtmpack_results_tx: Option<mpsc::Sender<VtmpackExportOutcome>>,
     pub(super) export_vtmpack_results_rx: Option<Arc<Mutex<mpsc::Receiver<VtmpackExportOutcome>>>>,
+    pub(super) export_server_included_root_entries: BTreeMap<String, bool>,
+    pub(super) export_server_in_flight: bool,
+    pub(super) export_server_output_path: Option<PathBuf>,
+    pub(super) export_server_progress_tx: Option<mpsc::Sender<VtmpackExportProgress>>,
+    pub(super) export_server_progress_rx: Option<Arc<Mutex<mpsc::Receiver<VtmpackExportProgress>>>>,
+    pub(super) export_server_latest_progress: Option<VtmpackExportProgress>,
+    pub(super) export_server_results_tx: Option<mpsc::Sender<ServerExportOutcome>>,
+    pub(super) export_server_results_rx: Option<Arc<Mutex<mpsc::Receiver<ServerExportOutcome>>>>,
     pub(super) launch_username: Option<String>,
     pub(super) launch_user_key: Option<String>,
 }
@@ -319,6 +335,7 @@ impl InstanceScreenState {
             log_load_results_rx: None,
             show_settings_modal: false,
             show_export_vtmpack_modal: false,
+            show_export_server_modal: false,
             export_vtmpack_options: VtmpackExportOptions::default(),
             export_vtmpack_in_flight: false,
             export_vtmpack_output_path: None,
@@ -327,6 +344,14 @@ impl InstanceScreenState {
             export_vtmpack_latest_progress: None,
             export_vtmpack_results_tx: None,
             export_vtmpack_results_rx: None,
+            export_server_included_root_entries: BTreeMap::new(),
+            export_server_in_flight: false,
+            export_server_output_path: None,
+            export_server_progress_tx: None,
+            export_server_progress_rx: None,
+            export_server_latest_progress: None,
+            export_server_results_tx: None,
+            export_server_results_rx: None,
             launch_username: None,
             launch_user_key: None,
         }
