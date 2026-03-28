@@ -1813,13 +1813,12 @@ impl TextUi {
         scroll_metrics: &mut EditorScrollMetrics,
     ) -> bool {
         let mut changed = false;
-        let (modifiers, primary_pressed, smooth_scroll_delta, raw_scroll_delta) =
+        let (modifiers, primary_pressed, smooth_scroll_delta) =
             ui.ctx().input(|i| {
                 (
                     i.modifiers,
                     i.pointer.primary_pressed(),
                     i.smooth_scroll_delta,
-                    i.raw.scroll_delta,
                 )
             });
         let pointer_pressed_on_widget = primary_pressed && response.is_pointer_button_down_on();
@@ -1869,25 +1868,16 @@ impl TextUi {
         }
 
         if response.hovered() {
-            let vertical_scroll_delta = if smooth_scroll_delta.y.abs() > f32::EPSILON {
-                smooth_scroll_delta.y
-            } else {
-                raw_scroll_delta.y
-            };
+            let vertical_scroll_delta = smooth_scroll_delta.y;
             let horizontal_scroll_delta = if smooth_scroll_delta.x.abs() > f32::EPSILON {
                 smooth_scroll_delta.x
-            } else if raw_scroll_delta.x.abs() > f32::EPSILON {
-                raw_scroll_delta.x
             } else if modifiers.shift && smooth_scroll_delta.y.abs() > f32::EPSILON {
                 smooth_scroll_delta.y
-            } else if modifiers.shift {
-                raw_scroll_delta.y
             } else {
                 0.0
             };
             let horizontal_uses_vertical_wheel = modifiers.shift
                 && smooth_scroll_delta.x.abs() <= f32::EPSILON
-                && raw_scroll_delta.x.abs() <= f32::EPSILON
                 && horizontal_scroll_delta.abs() > f32::EPSILON;
 
             if !horizontal_uses_vertical_wheel && vertical_scroll_delta.abs() > f32::EPSILON {
