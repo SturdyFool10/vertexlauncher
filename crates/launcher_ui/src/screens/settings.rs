@@ -703,31 +703,26 @@ fn render_download_settings(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Conf
 }
 
 fn render_java_runtime_settings(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let heading_style = style::section_heading(ui);
+    let mut body_style = style::muted(ui);
+    body_style.wrap = false;
+
+    let _ = text_ui.label(
+        ui,
+        "java_paths_heading",
+        "Java JVM Paths (Optional)",
+        &heading_style,
+    );
+    let _ = text_ui.label(
+        ui,
+        "java_paths_description",
+        "Leave blank for None. Configure only versions you actually use.",
+        &body_style,
+    );
+    ui.add_space(8.0);
+
     for runtime in JavaRuntimeVersion::ALL {
-        let mut value = config
-            .java_runtime_path(runtime)
-            .unwrap_or_default()
-            .to_owned();
-        let response = settings_widgets::text_input_row(
-            text_ui,
-            ui,
-            ("java_runtime_path", runtime.major()),
-            runtime.label(),
-            Some(runtime.info_tooltip()),
-            &mut value,
-        );
-        if response.changed() {
-            let trimmed = value.trim();
-            config.set_java_runtime_path(
-                runtime,
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_owned())
-                },
-            );
-        }
-        ui.add_space(style::SPACE_MD);
+        render_java_runtime_path_row(ui, text_ui, config, runtime);
     }
 }
 
@@ -932,24 +927,6 @@ fn render_instance_defaults_section(ui: &mut Ui, text_ui: &mut TextUi, config: &
         config.default_instance_cli_args_mut(),
     );
     ui.add_space(10.0);
-
-    let _ = text_ui.label(
-        ui,
-        "java_paths_heading",
-        "Java JVM Paths (Optional)",
-        &heading_style,
-    );
-    let _ = text_ui.label(
-        ui,
-        "java_paths_description",
-        "Leave blank for None. Configure only versions you actually use.",
-        &body_style,
-    );
-    ui.add_space(8.0);
-
-    for runtime in JavaRuntimeVersion::ALL {
-        render_java_runtime_path_row(ui, text_ui, config, runtime);
-    }
 }
 
 fn render_java_runtime_path_row(
