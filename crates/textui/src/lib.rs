@@ -1819,7 +1819,7 @@ impl TextUi {
                     i.modifiers,
                     i.pointer.primary_pressed(),
                     i.smooth_scroll_delta,
-                    i.raw_scroll_delta,
+                    i.raw.scroll_delta,
                 )
             });
         let pointer_pressed_on_widget = primary_pressed && response.is_pointer_button_down_on();
