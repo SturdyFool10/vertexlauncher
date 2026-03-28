@@ -3527,6 +3527,7 @@ fn try_modrinth_backup_download_for_curseforge_file(
             Some("mod"),
             normalized_game_version.as_deref(),
             loader_slug,
+            None,
         ) {
             Ok(projects) => projects,
             Err(err) => {

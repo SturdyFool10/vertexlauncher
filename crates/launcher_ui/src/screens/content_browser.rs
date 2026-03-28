@@ -3259,6 +3259,7 @@ fn search_content_type_providers(
         Some(content_type.modrinth_project_type()),
         game_version.as_deref(),
         mod_loader,
+        None,
     ) {
         Ok(entries) => {
             outcome
@@ -3307,6 +3308,7 @@ fn search_content_type_providers(
         Some(class_id),
         game_version.as_deref(),
         mod_loader_type,
+        None,
     ) {
         Ok(entries) => {
             outcome

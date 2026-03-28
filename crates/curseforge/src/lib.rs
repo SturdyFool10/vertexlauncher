@@ -284,7 +284,7 @@ impl Client {
         index: u32,
         page_size: u32,
     ) -> Result<Vec<SearchProject>, CurseForgeError> {
-        self.search_projects_with_filters(game_id, query, index, page_size, None, None, None)
+        self.search_projects_with_filters(game_id, query, index, page_size, None, None, None, None)
     }
 
     /// Searches CurseForge projects with optional class and compatibility filters.
@@ -297,16 +297,9 @@ impl Client {
         class_id: Option<u32>,
         game_version: Option<&str>,
         mod_loader_type: Option<u32>,
+        sort_field: Option<u32>,
     ) -> Result<Vec<SearchProject>, CurseForgeError> {
         let trimmed = query.trim();
-        if trimmed.is_empty() {
-            debug!(
-                target: "vertexlauncher/curseforge",
-                "skipping CurseForge search because query is empty"
-            );
-            return Ok(Vec::new());
-        }
-
         let page_size = page_size.clamp(1, 50);
         debug!(
             target: "vertexlauncher/curseforge",
@@ -333,6 +326,9 @@ impl Client {
         }
         if let Some(mod_loader_type) = mod_loader_type {
             query_params.push(("modLoaderType", mod_loader_type.to_string()));
+        }
+        if let Some(sort_field) = sort_field {
+            query_params.push(("sortField", sort_field.to_string()));
         }
 
         let response: DataResponse<Vec<ModRecord>> =

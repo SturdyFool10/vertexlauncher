@@ -105,7 +105,7 @@ impl Client {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<SearchProject>, ModrinthError> {
-        self.search_projects_with_filters(query, limit, offset, None, None, None)
+        self.search_projects_with_filters(query, limit, offset, None, None, None, None)
     }
 
     /// Searches Modrinth projects with optional compatibility filters.
@@ -113,6 +113,8 @@ impl Client {
     /// - `project_type`: values such as `mod`, `resourcepack`, `shader`, `datapack`.
     /// - `game_version`: Minecraft version string (for example `1.20.1`).
     /// - `loader`: mod loader slug (for example `fabric`, `forge`, `neoforge`, `quilt`).
+    /// - `sort_index`: Modrinth sort index — `"relevance"`, `"downloads"`, `"follows"`,
+    ///   `"newest"`, or `"updated"`. Defaults to `"relevance"` when `None`.
     ///
     /// `loader` is only meaningful for mod projects.
     pub fn search_projects_with_filters(
@@ -123,16 +125,9 @@ impl Client {
         project_type: Option<&str>,
         game_version: Option<&str>,
         loader: Option<&str>,
+        sort_index: Option<&str>,
     ) -> Result<Vec<SearchProject>, ModrinthError> {
         let trimmed = query.trim();
-        if trimmed.is_empty() {
-            debug!(
-                target: "vertexlauncher/modrinth",
-                "skipping Modrinth search because query is empty"
-            );
-            return Ok(Vec::new());
-        }
-
         let limit = limit.clamp(1, 100);
         debug!(
             target: "vertexlauncher/modrinth",
@@ -162,6 +157,9 @@ impl Client {
         if !facets.is_empty() {
             let facets_json = serde_json::to_string(&facets).map_err(ModrinthError::Json)?;
             search_query.push(("facets", facets_json));
+        }
+        if let Some(index) = non_empty(sort_index) {
+            search_query.push(("index", index.to_owned()));
         }
 
         let response: SearchResponse = self.get_json("/search", &search_query)?;

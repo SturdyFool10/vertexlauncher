@@ -1189,11 +1189,7 @@ fn current_request(state: &DiscoverState, mode: SearchMode) -> DiscoverSearchReq
     let combined_query =
         compose_search_query(state.query_input.as_str(), state.search_tags.as_slice());
     DiscoverSearchRequest {
-        query: if combined_query.is_empty() {
-            "modpack".to_owned()
-        } else {
-            combined_query
-        },
+        query: combined_query,
         tags: state.search_tags.clone(),
         game_version: non_empty(state.game_version_filter.as_str()),
         provider_filter: state.provider_filter,
@@ -1221,6 +1217,11 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
         request.provider_filter,
         DiscoverProviderFilter::All | DiscoverProviderFilter::Modrinth
     ) {
+        let modrinth_sort_index = match request.sort_mode {
+            DiscoverSortMode::Popularity => Some("downloads"),
+            DiscoverSortMode::LastUpdated => Some("updated"),
+            DiscoverSortMode::Relevance => None,
+        };
         match modrinth.search_projects_with_filters(
             request.query.as_str(),
             DISCOVER_PROVIDER_LIMIT,
@@ -1228,6 +1229,7 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
             Some("modpack"),
             request.game_version.as_deref(),
             request.loader_filter.modrinth_slug(),
+            modrinth_sort_index,
         ) {
             Ok(entries) => {
                 provider_result_count += entries.len();
@@ -1260,6 +1262,12 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
             Some(client) => {
                 let class_id = resolve_curseforge_modpack_class_id_cached(&client, &mut warnings);
                 if let Some(class_id) = class_id {
+                    // CurseForge sortField: 6 = TotalDownloads, 3 = LastUpdated
+                    let curseforge_sort_field = match request.sort_mode {
+                        DiscoverSortMode::Popularity => Some(6),
+                        DiscoverSortMode::LastUpdated => Some(3),
+                        DiscoverSortMode::Relevance => None,
+                    };
                     match client.search_projects_with_filters(
                         MINECRAFT_GAME_ID,
                         request.query.as_str(),
@@ -1268,6 +1276,7 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
                         Some(class_id),
                         request.game_version.as_deref(),
                         request.loader_filter.curseforge_mod_loader_type(),
+                        curseforge_sort_field,
                     ) {
                         Ok(entries) => {
                             provider_result_count += entries.len();

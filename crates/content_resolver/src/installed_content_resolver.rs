@@ -663,6 +663,7 @@ fn search_modrinth_heuristic_content(
         Some(kind.modrinth_project_type()),
         game_version.as_deref(),
         loader_filter,
+        None,
     ) else {
         return Vec::new();
     };
