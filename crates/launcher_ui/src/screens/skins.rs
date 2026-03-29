@@ -2543,7 +2543,14 @@ fn uv_rect_from_texel_rect(rect: TextureRectU32) -> Rect {
 }
 
 fn uv_rect_from_eyelid_texel_rect(rect: TextureRectU32) -> Rect {
-    uv_rect_with_inset([64, 64], rect.x, rect.y, rect.w, rect.h, UV_EDGE_INSET_OVERLAY_TEXELS)
+    uv_rect_with_inset(
+        [64, 64],
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        UV_EDGE_INSET_OVERLAY_TEXELS,
+    )
 }
 
 fn eye_lid_rects(spec: EyeExpressionSpec) -> (TextureRectU32, TextureRectU32) {

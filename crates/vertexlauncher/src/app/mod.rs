@@ -27,7 +27,7 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use textui::TextUi;
 
@@ -94,6 +94,32 @@ struct VertexApp {
     create_instance_state: create_instance_modal::CreateInstanceState,
     show_import_instance_modal: bool,
     import_instance_state: import_instance_modal::ImportInstanceState,
+    in_flight_import_request: Option<import_instance_modal::ImportRequest>,
+    curseforge_manual_download_preflight_request: Option<import_instance_modal::ImportRequest>,
+    curseforge_manual_download_preflight_in_flight: bool,
+    curseforge_manual_download_preflight_tx: Option<
+        mpsc::Sender<
+            Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
+        >,
+    >,
+    curseforge_manual_download_preflight_rx: Option<
+        mpsc::Receiver<
+            Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
+        >,
+    >,
+    discover_curseforge_manual_download_preflight_request: Option<screens::DiscoverInstallRequest>,
+    discover_curseforge_manual_download_preflight_in_flight: bool,
+    discover_curseforge_manual_download_preflight_tx: Option<
+        mpsc::Sender<
+            Result<Option<import_instance_modal::CurseForgeManualDownloadRequirement>, String>,
+        >,
+    >,
+    discover_curseforge_manual_download_preflight_rx: Option<
+        mpsc::Receiver<
+            Result<Option<import_instance_modal::CurseForgeManualDownloadRequirement>, String>,
+        >,
+    >,
+    pending_curseforge_manual_download: Option<PendingCurseForgeManualDownloadState>,
     discover_install_progress_tx: Option<mpsc::Sender<import_instance_modal::ImportProgress>>,
     discover_install_progress_rx:
         Option<Arc<Mutex<mpsc::Receiver<import_instance_modal::ImportProgress>>>>,
@@ -208,6 +234,16 @@ impl VertexApp {
             create_instance_state: create_instance_modal::CreateInstanceState::default(),
             show_import_instance_modal: false,
             import_instance_state: import_instance_modal::ImportInstanceState::default(),
+            in_flight_import_request: None,
+            curseforge_manual_download_preflight_request: None,
+            curseforge_manual_download_preflight_in_flight: false,
+            curseforge_manual_download_preflight_tx: None,
+            curseforge_manual_download_preflight_rx: None,
+            discover_curseforge_manual_download_preflight_request: None,
+            discover_curseforge_manual_download_preflight_in_flight: false,
+            discover_curseforge_manual_download_preflight_tx: None,
+            discover_curseforge_manual_download_preflight_rx: None,
+            pending_curseforge_manual_download: None,
             discover_install_progress_tx: None,
             discover_install_progress_rx: None,
             discover_install_results_tx: None,
@@ -253,8 +289,11 @@ impl VertexApp {
         let previous_config = self.config.clone();
         let previous_instance_store = self.instance_store.clone();
         poll_create_instance_result(self);
+        poll_curseforge_manual_download_preflight(self);
+        poll_discover_curseforge_manual_download_preflight(self);
         poll_import_instance_progress(self);
         poll_import_instance_result(self);
+        poll_pending_curseforge_manual_download(self);
         poll_discover_install_progress(self);
         poll_discover_install_result(self);
         self.sync_theme_from_config();
@@ -534,7 +573,7 @@ impl VertexApp {
             }
         }
 
-        if self.show_import_instance_modal {
+        if self.show_import_instance_modal && self.pending_curseforge_manual_download.is_none() {
             if self.import_instance_state.import_in_flight {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
@@ -542,6 +581,7 @@ impl VertexApp {
                 ctx,
                 &mut self.text_ui,
                 &mut self.import_instance_state,
+                !self.config.curseforge_api_key().trim().is_empty(),
             ) {
                 import_instance_modal::ModalAction::None => {}
                 import_instance_modal::ModalAction::Cancel => {
@@ -550,6 +590,26 @@ impl VertexApp {
                 }
                 import_instance_modal::ModalAction::Import(request) => {
                     start_import_instance_task(self, request);
+                }
+            }
+        }
+        if let Some(pending) = self
+            .pending_curseforge_manual_download
+            .as_mut()
+            .filter(|pending| !pending.pending_files.is_empty())
+        {
+            ctx.request_repaint_after(Duration::from_millis(200));
+            match render_curseforge_manual_download_modal(ctx, &mut self.text_ui, pending) {
+                ManualCurseForgeDownloadAction::None => {}
+                ManualCurseForgeDownloadAction::Cancel => {
+                    cancel_pending_curseforge_manual_download(self);
+                }
+                ManualCurseForgeDownloadAction::OpenDownloadsFolder => {
+                    if let Err(err) =
+                        launcher_ui::desktop::open_in_file_manager(pending.downloads_dir.as_path())
+                    {
+                        pending.error = Some(format!("Failed to open downloads folder: {err}"));
+                    }
                 }
             }
         }
@@ -676,6 +736,16 @@ impl VertexApp {
         }
         if egui::Popup::is_any_open(ctx) {
             egui::Popup::close_all(ctx);
+            return true;
+        }
+        if self.pending_curseforge_manual_download.is_some() {
+            if self.import_instance_state.import_in_flight
+                || self.curseforge_manual_download_preflight_in_flight
+                || self.discover_curseforge_manual_download_preflight_in_flight
+            {
+                return true;
+            }
+            cancel_pending_curseforge_manual_download(self);
             return true;
         }
         if self.show_import_instance_modal {
@@ -1007,11 +1077,123 @@ fn ensure_import_instance_progress_channel(state: &mut import_instance_modal::Im
     state.import_progress_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
-fn start_import_instance_task(app: &mut VertexApp, request: import_instance_modal::ImportRequest) {
-    if app.import_instance_state.import_in_flight {
+fn start_import_instance_task(
+    app: &mut VertexApp,
+    mut request: import_instance_modal::ImportRequest,
+) {
+    if app.import_instance_state.import_in_flight
+        || app.curseforge_manual_download_preflight_in_flight
+        || app.pending_curseforge_manual_download.is_some()
+    {
         return;
     }
 
+    request.max_concurrent_downloads = app.config.download_max_concurrent().max(1);
+
+    spawn_import_instance_task(app, request);
+}
+
+fn ensure_curseforge_manual_download_preflight_channel(app: &mut VertexApp) {
+    if app.curseforge_manual_download_preflight_tx.is_some()
+        && app.curseforge_manual_download_preflight_rx.is_some()
+    {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<
+        Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
+    >();
+    app.curseforge_manual_download_preflight_tx = Some(tx);
+    app.curseforge_manual_download_preflight_rx = Some(rx);
+}
+
+fn start_curseforge_manual_download_preflight(
+    app: &mut VertexApp,
+    request: import_instance_modal::ImportRequest,
+) {
+    ensure_curseforge_manual_download_preflight_channel(app);
+    let Some(tx) = app
+        .curseforge_manual_download_preflight_tx
+        .as_ref()
+        .cloned()
+    else {
+        return;
+    };
+    app.import_instance_state.error = None;
+    app.import_instance_state.import_in_flight = true;
+    app.import_instance_state.import_latest_progress =
+        Some(import_instance_modal::ImportProgress {
+            message: "Checking CurseForge download restrictions...".to_owned(),
+            completed_steps: 0,
+            total_steps: 1,
+        });
+    app.curseforge_manual_download_preflight_request = Some(request.clone());
+    app.curseforge_manual_download_preflight_in_flight = true;
+    let _ = tokio_runtime::spawn_detached(async move {
+        let result = import_instance_modal::prepare_curseforge_manual_downloads(&request);
+        let _ = tx.send(result);
+    });
+}
+
+fn poll_curseforge_manual_download_preflight(app: &mut VertexApp) {
+    if !app.curseforge_manual_download_preflight_in_flight {
+        return;
+    }
+    let Some(rx) = app.curseforge_manual_download_preflight_rx.as_ref() else {
+        return;
+    };
+    let Ok(result) = rx.try_recv() else {
+        return;
+    };
+    app.curseforge_manual_download_preflight_in_flight = false;
+    app.import_instance_state.import_in_flight = false;
+    app.import_instance_state.import_latest_progress = None;
+    let request = app.curseforge_manual_download_preflight_request.take();
+    match (request, result) {
+        (Some(request), Ok(Some(requirements))) if !requirements.is_empty() => {
+            match PendingCurseForgeManualDownloadState::new(
+                ManualDownloadContinuation::Import(request),
+                requirements,
+                HashMap::new(),
+                app.config.minecraft_installations_root(),
+            ) {
+                Ok(mut pending) => {
+                    if let Err(err) = scan_curseforge_manual_downloads(&mut pending) {
+                        app.import_instance_state.error = Some(format!(
+                            "Failed to prepare manual CurseForge downloads: {err}"
+                        ));
+                        cleanup_pending_curseforge_manual_download(Some(pending));
+                        return;
+                    }
+                    if pending.pending_files.is_empty() {
+                        let request = match &pending.continuation {
+                            ManualDownloadContinuation::Import(request) => request.clone(),
+                            ManualDownloadContinuation::DiscoverInstall(_) => return,
+                        };
+                        cleanup_pending_curseforge_manual_download(Some(pending));
+                        spawn_import_instance_task(app, request);
+                    } else {
+                        app.pending_curseforge_manual_download = Some(pending);
+                    }
+                }
+                Err(err) => {
+                    app.import_instance_state.error = Some(format!(
+                        "Failed to prepare manual CurseForge downloads: {err}"
+                    ));
+                }
+            }
+        }
+        (Some(request), Ok(_)) => {
+            spawn_import_instance_task(app, request);
+        }
+        (_, Err(err)) => {
+            app.import_instance_state.error =
+                Some(format!("Failed to prepare CurseForge import: {err}"));
+        }
+        (None, Ok(_)) => {}
+    }
+}
+
+fn spawn_import_instance_task(app: &mut VertexApp, request: import_instance_modal::ImportRequest) {
     ensure_import_instance_channel(&mut app.import_instance_state);
     ensure_import_instance_progress_channel(&mut app.import_instance_state);
     let Some(tx) = app
@@ -1034,6 +1216,7 @@ fn start_import_instance_task(app: &mut VertexApp, request: import_instance_moda
     app.import_instance_state.error = None;
     app.import_instance_state.import_in_flight = true;
     app.import_instance_state.import_latest_progress = None;
+    app.in_flight_import_request = Some(request.clone());
     let store = app.instance_store.clone();
     let installations_root = PathBuf::from(app.config.minecraft_installations_root());
     let _ = tokio_runtime::spawn_detached(async move {
@@ -1077,10 +1260,14 @@ fn poll_import_instance_result(app: &mut VertexApp) {
 
     app.import_instance_state.import_in_flight = false;
     app.import_instance_state.import_latest_progress = None;
+    let original_request = app.in_flight_import_request.take();
     match result {
         Ok((store, instance)) => {
             let installations_root = PathBuf::from(app.config.minecraft_installations_root());
             app.instance_store = store;
+            cleanup_pending_curseforge_manual_download(
+                app.pending_curseforge_manual_download.take(),
+            );
             start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
             app.selected_instance_id = Some(instance.id);
             app.active_screen = screens::AppScreen::Instance;
@@ -1089,6 +1276,52 @@ fn poll_import_instance_result(app: &mut VertexApp) {
             app.refresh_instance_shortcuts();
         }
         Err(err) => {
+            if let (
+                Some(request),
+                import_instance_modal::ImportPackageError::ManualCurseForgeDownloads {
+                    requirements,
+                    staged_files,
+                },
+            ) = (original_request, err.clone())
+            {
+                match PendingCurseForgeManualDownloadState::new(
+                    ManualDownloadContinuation::Import(request),
+                    requirements,
+                    staged_files,
+                    app.config.minecraft_installations_root(),
+                ) {
+                    Ok(mut pending) => {
+                        if let Err(scan_err) = scan_curseforge_manual_downloads(&mut pending) {
+                            cleanup_pending_curseforge_manual_download(Some(pending));
+                            app.import_instance_state.error = Some(format!(
+                                "Failed to reopen manual CurseForge downloads: {scan_err}"
+                            ));
+                            return;
+                        }
+                        if pending.pending_files.is_empty() {
+                            let mut request = match &pending.continuation {
+                                ManualDownloadContinuation::Import(request) => request.clone(),
+                                ManualDownloadContinuation::DiscoverInstall(_) => return,
+                            };
+                            request.manual_curseforge_files = pending.staged_files.clone();
+                            app.pending_curseforge_manual_download = Some(pending);
+                            spawn_import_instance_task(app, request);
+                        } else {
+                            app.pending_curseforge_manual_download = Some(pending);
+                        }
+                        return;
+                    }
+                    Err(setup_err) => {
+                        app.import_instance_state.error = Some(format!(
+                            "Failed to reopen manual CurseForge downloads: {setup_err}"
+                        ));
+                        return;
+                    }
+                }
+            }
+            cleanup_pending_curseforge_manual_download(
+                app.pending_curseforge_manual_download.take(),
+            );
             tracing::error!(
                 target: "vertexlauncher/app/import",
                 error = %err,
@@ -1097,6 +1330,436 @@ fn poll_import_instance_result(app: &mut VertexApp) {
             app.import_instance_state.error = Some(format!("Failed to import profile: {err}"));
         }
     }
+}
+
+#[derive(Debug)]
+enum ManualDownloadContinuation {
+    Import(import_instance_modal::ImportRequest),
+    DiscoverInstall(screens::DiscoverInstallRequest),
+}
+
+#[derive(Debug)]
+struct PendingCurseForgeManualDownloadState {
+    continuation: ManualDownloadContinuation,
+    downloads_dir: PathBuf,
+    staging_dir: PathBuf,
+    pending_files: Vec<import_instance_modal::CurseForgeManualDownloadRequirement>,
+    staged_files: HashMap<u64, PathBuf>,
+    last_scan_at: Instant,
+    error: Option<String>,
+}
+
+impl PendingCurseForgeManualDownloadState {
+    fn new(
+        continuation: ManualDownloadContinuation,
+        pending_files: Vec<import_instance_modal::CurseForgeManualDownloadRequirement>,
+        initial_staged_files: HashMap<u64, PathBuf>,
+        installations_root: &str,
+    ) -> Result<Self, String> {
+        let downloads_dir = default_downloads_dir(installations_root);
+        let staging_dir = std::env::temp_dir().join(format!(
+            "vertexlauncher-cf-manual-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        fs::create_dir_all(staging_dir.as_path())
+            .map_err(|err| format!("failed to create staging directory: {err}"))?;
+        let mut staged_files = HashMap::new();
+        for (file_id, source_path) in initial_staged_files {
+            let file_name = source_path
+                .file_name()
+                .ok_or_else(|| {
+                    format!(
+                        "staged CurseForge retry file {} had no file name",
+                        source_path.display()
+                    )
+                })?
+                .to_owned();
+            let destination = staging_dir.join(file_name);
+            if source_path != destination {
+                fs::copy(source_path.as_path(), destination.as_path()).map_err(|err| {
+                    format!(
+                        "failed to copy staged CurseForge retry file {} into {}: {err}",
+                        source_path.display(),
+                        destination.display()
+                    )
+                })?;
+            }
+            staged_files.insert(file_id, destination);
+        }
+        Ok(Self {
+            continuation,
+            downloads_dir,
+            staging_dir,
+            pending_files,
+            staged_files,
+            last_scan_at: Instant::now() - Duration::from_secs(1),
+            error: None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ManualCurseForgeDownloadAction {
+    None,
+    Cancel,
+    OpenDownloadsFolder,
+}
+
+fn render_curseforge_manual_download_modal(
+    ctx: &egui::Context,
+    text_ui: &mut TextUi,
+    state: &mut PendingCurseForgeManualDownloadState,
+) -> ManualCurseForgeDownloadAction {
+    let viewport_rect = ctx.input(|input| input.content_rect());
+    let modal_max_width = (viewport_rect.width() * 0.78).clamp(480.0, 900.0);
+    let modal_max_height = (viewport_rect.height() * 0.82).max(1.0);
+    let modal_pos = egui::pos2(
+        (viewport_rect.center().x - modal_max_width * 0.5).clamp(
+            viewport_rect.left(),
+            viewport_rect.right() - modal_max_width,
+        ),
+        (viewport_rect.center().y - modal_max_height * 0.5).clamp(
+            viewport_rect.top(),
+            viewport_rect.bottom() - modal_max_height,
+        ),
+    );
+    launcher_ui::ui::modal::show_scrim(
+        ctx,
+        "curseforge_manual_download_modal_scrim",
+        viewport_rect,
+    );
+    let mut action = ManualCurseForgeDownloadAction::None;
+    egui::Window::new("CurseForge Manual Downloads")
+        .id(egui::Id::new("curseforge_manual_download_modal"))
+        .order(egui::Order::Foreground)
+        .collapsible(false)
+        .resizable(false)
+        .movable(false)
+        .fixed_pos(modal_pos)
+        .fixed_size(egui::vec2(modal_max_width, modal_max_height))
+        .title_bar(false)
+        .constrain(true)
+        .constrain_to(viewport_rect)
+        .frame(launcher_ui::ui::modal::window_frame(ctx))
+        .show(ctx, |ui| {
+            let body_style = textui::LabelOptions {
+                color: ui.visuals().text_color(),
+                wrap: true,
+                ..textui::LabelOptions::default()
+            };
+            let subtle_style = textui::LabelOptions {
+                color: ui.visuals().weak_text_color(),
+                wrap: true,
+                ..textui::LabelOptions::default()
+            };
+            let error_style = textui::LabelOptions {
+                color: ui.visuals().error_fg_color,
+                wrap: true,
+                ..textui::LabelOptions::default()
+            };
+            let _ = text_ui.label(
+                ui,
+                "cf_manual_download_intro",
+                "Some files in this CurseForge pack cannot be downloaded through the third-party API. Download them from CurseForge, and Vertex will continue automatically when they appear.",
+                &body_style,
+            );
+            ui.add_space(ui::style::SPACE_SM);
+            ui.horizontal(|ui| {
+                ui.spinner();
+                let message = format!(
+                    "{} file{} remaining",
+                    state.pending_files.len(),
+                    if state.pending_files.len() == 1 { "" } else { "s" }
+                );
+                let _ = text_ui.label(
+                    ui,
+                    "cf_manual_download_status",
+                    message.as_str(),
+                    &body_style,
+                );
+            });
+            let watched_path = format!(
+                "Watching {}",
+                display_user_path(state.downloads_dir.as_path())
+            );
+            let _ = text_ui.label(
+                ui,
+                "cf_manual_download_watched_path",
+                watched_path.as_str(),
+                &subtle_style,
+            );
+            if let Some(error) = state.error.as_deref() {
+                ui.add_space(ui::style::SPACE_XS);
+                let _ = text_ui.label(ui, "cf_manual_download_error", error, &error_style);
+            }
+            ui.add_space(ui::style::SPACE_SM);
+            ui.horizontal(|ui| {
+                if text_ui
+                    .button(
+                        ui,
+                        "cf_manual_download_open_downloads",
+                        "Open Downloads Folder",
+                        &textui::ButtonOptions::default(),
+                    )
+                    .clicked()
+                {
+                    action = ManualCurseForgeDownloadAction::OpenDownloadsFolder;
+                }
+                let staged_message = format!("{} of {} detected", state.staged_files.len(), state.staged_files.len() + state.pending_files.len());
+                let _ = text_ui.label(
+                    ui,
+                    "cf_manual_download_detected_count",
+                    staged_message.as_str(),
+                    &subtle_style,
+                );
+            });
+            ui.add_space(ui::style::SPACE_SM);
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .max_height((modal_max_height - 210.0).max(140.0))
+                .show(ui, |ui| {
+                    for requirement in &state.pending_files {
+                        ui.group(|ui| {
+                            let title = format!(
+                                "{}\n{}",
+                                requirement.project_name, requirement.display_name
+                            );
+                            let _ = text_ui.label(
+                                ui,
+                                ("cf_manual_download_title", requirement.file_id),
+                                title.as_str(),
+                                &body_style,
+                            );
+                            let file_name = format!("Expected file: {}", requirement.file_name);
+                            let _ = text_ui.label(
+                                ui,
+                                ("cf_manual_download_file", requirement.file_id),
+                                file_name.as_str(),
+                                &subtle_style,
+                            );
+                            let reference = format!(
+                                "CurseForge project {}, file {}",
+                                requirement.project_id, requirement.file_id
+                            );
+                            let _ = text_ui.label(
+                                ui,
+                                ("cf_manual_download_ids", requirement.file_id),
+                                reference.as_str(),
+                                &subtle_style,
+                            );
+                            ui.hyperlink_to("Open CurseForge file page", requirement.download_page_url.as_str());
+                        });
+                        ui.add_space(ui::style::SPACE_XS);
+                    }
+                });
+            ui.add_space(ui::style::SPACE_SM);
+            let cancel_label = match state.continuation {
+                ManualDownloadContinuation::Import(_) => "Cancel Import",
+                ManualDownloadContinuation::DiscoverInstall(_) => "Cancel Install",
+            };
+            if text_ui
+                .button(
+                    ui,
+                    "cf_manual_download_cancel",
+                    cancel_label,
+                    &textui::ButtonOptions::default(),
+                )
+                .clicked()
+            {
+                action = ManualCurseForgeDownloadAction::Cancel;
+            }
+        });
+    action
+}
+
+fn poll_pending_curseforge_manual_download(app: &mut VertexApp) {
+    let mut should_resume = false;
+    {
+        let Some(state) = app.pending_curseforge_manual_download.as_mut() else {
+            return;
+        };
+        if state.last_scan_at.elapsed() < Duration::from_millis(400) {
+            return;
+        }
+        state.last_scan_at = Instant::now();
+        match scan_curseforge_manual_downloads(state) {
+            Ok(()) => {
+                if state.pending_files.is_empty() {
+                    should_resume = true;
+                }
+            }
+            Err(err) => {
+                state.error = Some(err);
+            }
+        }
+    }
+    if !should_resume {
+        return;
+    }
+    let Some(mut pending) = app.pending_curseforge_manual_download.take() else {
+        return;
+    };
+    pending.error = None;
+    match &mut pending.continuation {
+        ManualDownloadContinuation::Import(request) => {
+            request.manual_curseforge_files = pending.staged_files.clone();
+            let request = request.clone();
+            spawn_import_instance_task(app, request);
+            app.pending_curseforge_manual_download = Some(pending);
+        }
+        ManualDownloadContinuation::DiscoverInstall(request) => {
+            let Some(staged_path) = pending.staged_files.values().next().cloned() else {
+                pending.error = Some("Manual CurseForge download staging was empty.".to_owned());
+                app.pending_curseforge_manual_download = Some(pending);
+                return;
+            };
+            if let screens::DiscoverInstallSource::CurseForge {
+                manual_download_path,
+                download_url,
+                ..
+            } = &mut request.source
+            {
+                *manual_download_path = Some(staged_path);
+                *download_url = None;
+            }
+            let request = request.clone();
+            cleanup_pending_curseforge_manual_download(Some(pending));
+            spawn_discover_install_task(app, request);
+        }
+    }
+}
+
+fn scan_curseforge_manual_downloads(
+    state: &mut PendingCurseForgeManualDownloadState,
+) -> Result<(), String> {
+    let entries = fs::read_dir(state.downloads_dir.as_path())
+        .map_err(|err| format!("failed to read downloads folder: {err}"))?;
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("failed to inspect downloads folder: {err}"))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        candidates.push((file_name.to_owned(), path));
+    }
+
+    let mut found = Vec::new();
+    for requirement in &state.pending_files {
+        let Some((_, source_path)) = candidates.iter().find(|(candidate_name, _)| {
+            downloaded_filename_matches(candidate_name.as_str(), requirement.file_name.as_str())
+        }) else {
+            continue;
+        };
+        let staged_path = state.staging_dir.join(requirement.file_name.as_str());
+        fs::copy(source_path, staged_path.as_path()).map_err(|err| {
+            format!(
+                "failed to stage {} from downloads folder: {err}",
+                requirement.file_name
+            )
+        })?;
+        found.push((requirement.file_id, staged_path));
+    }
+    if found.is_empty() {
+        return Ok(());
+    }
+    state.pending_files.retain(|requirement| {
+        !found
+            .iter()
+            .any(|(file_id, _)| *file_id == requirement.file_id)
+    });
+    for (file_id, staged_path) in found {
+        state.staged_files.insert(file_id, staged_path);
+    }
+    state.error = None;
+    Ok(())
+}
+
+fn downloaded_filename_matches(candidate_name: &str, expected_name: &str) -> bool {
+    if candidate_name == expected_name {
+        return true;
+    }
+    let expected_path = Path::new(expected_name);
+    let candidate_path = Path::new(candidate_name);
+    let Some(expected_stem) = expected_path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    let Some(candidate_stem) = candidate_path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    if expected_path.extension() != candidate_path.extension() {
+        return false;
+    }
+    let Some(suffix) = candidate_stem.strip_prefix(expected_stem) else {
+        return false;
+    };
+    suffix.starts_with(" (")
+        && suffix.ends_with(')')
+        && suffix[2..suffix.len() - 1]
+            .chars()
+            .all(|ch| ch.is_ascii_digit())
+}
+
+fn cleanup_pending_curseforge_manual_download(
+    pending: Option<PendingCurseForgeManualDownloadState>,
+) {
+    let Some(pending) = pending else {
+        return;
+    };
+    let _ = fs::remove_dir_all(pending.staging_dir.as_path());
+}
+
+fn cancel_pending_curseforge_manual_download(app: &mut VertexApp) {
+    let continuation = app
+        .pending_curseforge_manual_download
+        .as_ref()
+        .map(|pending| match pending.continuation {
+            ManualDownloadContinuation::Import(_) => 0u8,
+            ManualDownloadContinuation::DiscoverInstall(_) => 1u8,
+        });
+    cleanup_pending_curseforge_manual_download(app.pending_curseforge_manual_download.take());
+    match continuation {
+        Some(0) => {
+            app.show_import_instance_modal = false;
+            app.import_instance_state.reset();
+        }
+        Some(1) => {
+            app.discover_state
+                .finish_install(Err("CurseForge install canceled.".to_owned()));
+        }
+        _ => {}
+    }
+}
+
+fn default_downloads_dir(installations_root: &str) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(profile_dir) = std::env::var_os("USERPROFILE") {
+            let candidate = PathBuf::from(profile_dir).join("Downloads");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(home_dir) = std::env::var_os("HOME") {
+            let candidate = PathBuf::from(home_dir).join("Downloads");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    PathBuf::from(installations_root)
 }
 
 fn ensure_discover_install_channel(app: &mut VertexApp) {
@@ -1118,9 +1781,152 @@ fn ensure_discover_install_progress_channel(app: &mut VertexApp) {
 }
 
 fn start_discover_install_task(app: &mut VertexApp, request: screens::DiscoverInstallRequest) {
-    if app.show_import_instance_modal || app.import_instance_state.import_in_flight {
+    if app.show_import_instance_modal
+        || app.import_instance_state.import_in_flight
+        || app.curseforge_manual_download_preflight_in_flight
+        || app.discover_curseforge_manual_download_preflight_in_flight
+        || app.pending_curseforge_manual_download.is_some()
+    {
         return;
     }
+    if matches!(
+        &request.source,
+        screens::DiscoverInstallSource::CurseForge {
+            manual_download_path: None,
+            ..
+        }
+    ) {
+        start_discover_curseforge_manual_download_preflight(app, request);
+        return;
+    }
+    spawn_discover_install_task(app, request);
+}
+
+fn ensure_discover_curseforge_manual_download_preflight_channel(app: &mut VertexApp) {
+    if app
+        .discover_curseforge_manual_download_preflight_tx
+        .is_some()
+        && app
+            .discover_curseforge_manual_download_preflight_rx
+            .is_some()
+    {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<
+        Result<Option<import_instance_modal::CurseForgeManualDownloadRequirement>, String>,
+    >();
+    app.discover_curseforge_manual_download_preflight_tx = Some(tx);
+    app.discover_curseforge_manual_download_preflight_rx = Some(rx);
+}
+
+fn start_discover_curseforge_manual_download_preflight(
+    app: &mut VertexApp,
+    request: screens::DiscoverInstallRequest,
+) {
+    let (project_id, file_id) = match &request.source {
+        screens::DiscoverInstallSource::CurseForge {
+            project_id,
+            file_id,
+            ..
+        } => (*project_id, *file_id),
+        _ => {
+            spawn_discover_install_task(app, request);
+            return;
+        }
+    };
+    ensure_discover_curseforge_manual_download_preflight_channel(app);
+    let Some(tx) = app
+        .discover_curseforge_manual_download_preflight_tx
+        .as_ref()
+        .cloned()
+    else {
+        return;
+    };
+    app.discover_state
+        .begin_install("Checking CurseForge download restrictions...");
+    app.discover_curseforge_manual_download_preflight_request = Some(request);
+    app.discover_curseforge_manual_download_preflight_in_flight = true;
+    let _ = tokio_runtime::spawn_detached(async move {
+        let result =
+            import_instance_modal::prepare_curseforge_manual_download_for_file(project_id, file_id);
+        let _ = tx.send(result);
+    });
+}
+
+fn poll_discover_curseforge_manual_download_preflight(app: &mut VertexApp) {
+    if !app.discover_curseforge_manual_download_preflight_in_flight {
+        return;
+    }
+    let Some(rx) = app
+        .discover_curseforge_manual_download_preflight_rx
+        .as_ref()
+    else {
+        return;
+    };
+    let Ok(result) = rx.try_recv() else {
+        return;
+    };
+    app.discover_curseforge_manual_download_preflight_in_flight = false;
+    let request = app
+        .discover_curseforge_manual_download_preflight_request
+        .take();
+    match (request, result) {
+        (Some(request), Ok(Some(requirement))) => {
+            match PendingCurseForgeManualDownloadState::new(
+                ManualDownloadContinuation::DiscoverInstall(request),
+                vec![requirement],
+                HashMap::new(),
+                app.config.minecraft_installations_root(),
+            ) {
+                Ok(mut pending) => {
+                    if let Err(err) = scan_curseforge_manual_downloads(&mut pending) {
+                        cleanup_pending_curseforge_manual_download(Some(pending));
+                        app.discover_state.finish_install(Err(format!(
+                            "Failed to prepare manual CurseForge download: {err}"
+                        )));
+                        return;
+                    }
+                    if pending.pending_files.is_empty() {
+                        let mut request = match &pending.continuation {
+                            ManualDownloadContinuation::DiscoverInstall(request) => request.clone(),
+                            ManualDownloadContinuation::Import(_) => return,
+                        };
+                        if let screens::DiscoverInstallSource::CurseForge {
+                            manual_download_path,
+                            download_url,
+                            ..
+                        } = &mut request.source
+                        {
+                            *manual_download_path = pending.staged_files.values().next().cloned();
+                            *download_url = None;
+                        }
+                        app.pending_curseforge_manual_download = Some(pending);
+                        spawn_discover_install_task(app, request);
+                    } else {
+                        app.discover_state
+                            .begin_install("Waiting for manual CurseForge download...");
+                        app.pending_curseforge_manual_download = Some(pending);
+                    }
+                }
+                Err(err) => {
+                    app.discover_state.finish_install(Err(format!(
+                        "Failed to prepare manual CurseForge download: {err}"
+                    )));
+                }
+            }
+        }
+        (Some(request), Ok(None)) => {
+            spawn_discover_install_task(app, request);
+        }
+        (_, Err(err)) => {
+            app.discover_state
+                .finish_install(Err(format!("Failed to prepare CurseForge install: {err}")));
+        }
+        (None, Ok(_)) => {}
+    }
+}
+
+fn spawn_discover_install_task(app: &mut VertexApp, request: screens::DiscoverInstallRequest) {
     ensure_discover_install_channel(app);
     ensure_discover_install_progress_channel(app);
     let Some(tx) = app.discover_install_results_tx.as_ref().cloned() else {
@@ -1172,6 +1978,9 @@ fn poll_discover_install_result(app: &mut VertexApp) {
         Ok((store, instance)) => {
             let installations_root = PathBuf::from(app.config.minecraft_installations_root());
             app.instance_store = store;
+            cleanup_pending_curseforge_manual_download(
+                app.pending_curseforge_manual_download.take(),
+            );
             start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
             app.selected_instance_id = Some(instance.id);
             app.active_screen = screens::AppScreen::Instance;
@@ -1180,12 +1989,15 @@ fn poll_discover_install_result(app: &mut VertexApp) {
             app.refresh_instance_shortcuts();
         }
         Err(err) => {
+            cleanup_pending_curseforge_manual_download(
+                app.pending_curseforge_manual_download.take(),
+            );
             tracing::error!(
                 target: "vertexlauncher/app/discover",
                 error = %err,
                 "Discover modpack install failed."
             );
-            app.discover_state.finish_install(Err(err));
+            app.discover_state.finish_install(Err(err.to_string()));
         }
     }
 }
@@ -1195,7 +2007,7 @@ fn install_discover_modpack_in_background(
     installations_root: PathBuf,
     request: screens::DiscoverInstallRequest,
     progress_tx: mpsc::Sender<import_instance_modal::ImportProgress>,
-) -> Result<(InstanceStore, InstanceRecord), String> {
+) -> import_instance_modal::ImportTaskResult {
     let instance_name = request.instance_name.clone();
     let project_summary = request.project_summary.clone();
     let icon_url = request.icon_url.clone();
@@ -1213,6 +2025,8 @@ fn install_discover_modpack_in_background(
             let import_request = import_instance_modal::ImportRequest {
                 source: import_instance_modal::ImportSource::ManifestFile(temp_path.clone()),
                 instance_name: instance_name.clone(),
+                manual_curseforge_files: HashMap::new(),
+                max_concurrent_downloads: 4,
             };
             let result = import_package_in_background(
                 store,
@@ -1234,31 +2048,38 @@ fn install_discover_modpack_in_background(
             file_id,
             file_name,
             download_url,
+            manual_download_path,
         } => {
-            let download_url = match download_url {
-                Some(url) => url,
-                None => curseforge::Client::from_env()
-                    .ok_or_else(|| "CurseForge API key missing in settings.".to_owned())?
-                    .get_mod_file_download_url(project_id, file_id)
-                    .map_err(|err| {
-                        import_instance_modal::format_curseforge_download_url_error(
-                            project_id, file_id, &err,
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        format!(
-                            "CurseForge file {file_id} for project {project_id} has no download URL"
-                        )
-                    })?,
+            let temp_path = if let Some(path) = manual_download_path {
+                path
+            } else {
+                let download_url = match download_url {
+                    Some(url) => url,
+                    None => curseforge::Client::from_env()
+                        .ok_or_else(|| "CurseForge API key missing in settings.".to_owned())?
+                        .get_mod_file_download_url(project_id, file_id)
+                        .map_err(|err| {
+                            import_instance_modal::format_curseforge_download_url_error(
+                                project_id, file_id, &err,
+                            )
+                        })?
+                        .ok_or_else(|| {
+                            format!(
+                                "CurseForge file {file_id} for project {project_id} has no download URL"
+                            )
+                        })?,
+                };
+                download_discover_modpack_file(
+                    download_url.as_str(),
+                    file_name.as_str(),
+                    &progress_tx,
+                )?
             };
-            let temp_path = download_discover_modpack_file(
-                download_url.as_str(),
-                file_name.as_str(),
-                &progress_tx,
-            )?;
             let import_request = import_instance_modal::ImportRequest {
                 source: import_instance_modal::ImportSource::ManifestFile(temp_path.clone()),
                 instance_name: instance_name.clone(),
+                manual_curseforge_files: HashMap::new(),
+                max_concurrent_downloads: 4,
             };
             let result = import_package_in_background(
                 store,
@@ -1290,12 +2111,12 @@ fn install_discover_modpack_in_background(
 }
 
 fn finalize_discover_instance(
-    result: Result<(InstanceStore, InstanceRecord), String>,
+    result: import_instance_modal::ImportTaskResult,
     installations_root: &Path,
     instance_name: &str,
     project_summary: Option<&str>,
     icon_url: Option<&str>,
-) -> Result<(InstanceStore, InstanceRecord), String> {
+) -> import_instance_modal::ImportTaskResult {
     let (mut store, instance) = result?;
     apply_discover_instance_metadata(
         &mut store,
@@ -1459,7 +2280,7 @@ fn import_package_in_background(
     installations_root: PathBuf,
     request: import_instance_modal::ImportRequest,
     progress_tx: mpsc::Sender<import_instance_modal::ImportProgress>,
-) -> Result<(InstanceStore, InstanceRecord), String> {
+) -> import_instance_modal::ImportTaskResult {
     let instance = import_instance_modal::import_package_with_progress(
         &mut store,
         installations_root.as_path(),

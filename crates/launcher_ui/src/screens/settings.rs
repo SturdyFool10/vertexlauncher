@@ -733,7 +733,7 @@ fn render_curseforge_settings(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Co
         "curseforge_api_key",
         "CurseForge API Key",
         Some(
-            "Optional. Overrides VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY and enables CurseForge browsing/download metadata.",
+            "Required for CurseForge modpack zip imports. Overrides VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY and enables CurseForge browsing/download metadata.",
         ),
         config.curseforge_api_key_mut(),
     );

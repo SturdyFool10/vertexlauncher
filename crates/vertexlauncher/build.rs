@@ -100,12 +100,16 @@ fn emit_git_rerun_rules(repo_root: &Path, git_dir: &Path) {
 fn git_revision() -> Option<String> {
     let repo_root = locate_repo_root()?;
 
-    if git_worktree_clean(&repo_root)? {
-        return git_output(&repo_root, &["rev-parse", "--short=8", "HEAD"]);
+    match git_worktree_clean(&repo_root) {
+        Some(true) => git_output(&repo_root, &["rev-parse", "--short=8", "HEAD"]),
+        Some(false) => {
+            let tree_hash = git_current_tree_hash(&repo_root)?;
+            Some(format!("tree-{}", shorten_hash(&tree_hash)))
+        }
+        // git status failed (e.g. safe.directory restriction, no git in build env) —
+        // fall back to the commit hash directly rather than returning None.
+        None => git_output(&repo_root, &["rev-parse", "--short=8", "HEAD"]),
     }
-
-    let tree_hash = git_current_tree_hash(&repo_root)?;
-    Some(format!("tree-{}", shorten_hash(&tree_hash)))
 }
 
 fn git_worktree_clean(repo_root: &Path) -> Option<bool> {

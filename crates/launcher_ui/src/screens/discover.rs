@@ -168,6 +168,7 @@ pub enum DiscoverInstallSource {
         file_id: u64,
         file_name: String,
         download_url: Option<String>,
+        manual_download_path: Option<std::path::PathBuf>,
     },
 }
 
@@ -1773,6 +1774,7 @@ fn build_install_request(
                 file_id: version.version_id.parse().ok()?,
                 file_name: version.file_name.clone(),
                 download_url: version.file_url.clone(),
+                manual_download_path: None,
             }
         }
         _ => return None,

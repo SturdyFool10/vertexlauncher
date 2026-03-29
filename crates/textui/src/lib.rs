@@ -1813,14 +1813,13 @@ impl TextUi {
         scroll_metrics: &mut EditorScrollMetrics,
     ) -> bool {
         let mut changed = false;
-        let (modifiers, primary_pressed, smooth_scroll_delta) =
-            ui.ctx().input(|i| {
-                (
-                    i.modifiers,
-                    i.pointer.primary_pressed(),
-                    i.smooth_scroll_delta,
-                )
-            });
+        let (modifiers, primary_pressed, smooth_scroll_delta) = ui.ctx().input(|i| {
+            (
+                i.modifiers,
+                i.pointer.primary_pressed(),
+                i.smooth_scroll_delta,
+            )
+        });
         let pointer_pressed_on_widget = primary_pressed && response.is_pointer_button_down_on();
         let horizontal_scroll = editor_horizontal_scroll(editor);
 

@@ -88,7 +88,10 @@ impl std::fmt::Debug for LaunchAuthContext {
             .field("account_key", &self.account_key)
             .field("player_name", &self.player_name)
             .field("player_uuid", &self.player_uuid)
-            .field("access_token", &self.access_token.as_ref().map(|_| "[redacted]"))
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "[redacted]"),
+            )
             .field("xuid", &self.xuid)
             .field("user_type", &self.user_type)
             .finish()

@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use curseforge::Client as CurseForgeClient;
@@ -65,6 +66,8 @@ impl ImportInstanceState {
 pub struct ImportRequest {
     pub source: ImportSource,
     pub instance_name: String,
+    pub manual_curseforge_files: HashMap<u64, PathBuf>,
+    pub max_concurrent_downloads: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -83,7 +86,49 @@ pub enum ModalAction {
     Import(ImportRequest),
 }
 
-pub type ImportTaskResult = Result<(InstanceStore, InstanceRecord), String>;
+pub type ImportTaskResult = Result<(InstanceStore, InstanceRecord), ImportPackageError>;
+
+#[derive(Clone, Debug)]
+pub enum ImportPackageError {
+    Message(String),
+    ManualCurseForgeDownloads {
+        requirements: Vec<CurseForgeManualDownloadRequirement>,
+        staged_files: HashMap<u64, PathBuf>,
+    },
+}
+
+impl ImportPackageError {
+    fn message(message: impl Into<String>) -> Self {
+        Self::Message(message.into())
+    }
+}
+
+impl std::fmt::Display for ImportPackageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Message(message) => f.write_str(message),
+            Self::ManualCurseForgeDownloads { requirements, .. } => write!(
+                f,
+                "{} CurseForge files require manual download",
+                requirements.len()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ImportPackageError {}
+
+impl From<String> for ImportPackageError {
+    fn from(value: String) -> Self {
+        Self::Message(value)
+    }
+}
+
+impl From<&str> for ImportPackageError {
+    fn from(value: &str) -> Self {
+        Self::Message(value.to_owned())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ImportProgress {
@@ -139,7 +184,7 @@ struct ImportPreview {
     summary: String,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ImportPreviewKind {
     Manifest(ImportPackageKind),
     Launcher(LauncherKind),
@@ -237,6 +282,7 @@ pub fn render(
     ctx: &egui::Context,
     text_ui: &mut TextUi,
     state: &mut ImportInstanceState,
+    curseforge_api_key_configured: bool,
 ) -> ModalAction {
     poll_preview_results(state);
     let mut action = ModalAction::None;
@@ -366,6 +412,30 @@ pub fn render(
                             load_preview_from_state(state);
                         }
                     });
+
+                    let highlight_curseforge_notice = !curseforge_api_key_configured
+                        && (matches!(
+                            state.preview.as_ref().map(|preview| preview.kind),
+                            Some(ImportPreviewKind::Manifest(ImportPackageKind::CurseForgePack))
+                        ) || state
+                            .package_path
+                            .trim()
+                            .to_ascii_lowercase()
+                            .ends_with(".zip"));
+                    let _ = text_ui.label(
+                        ui,
+                        "instance_import_curseforge_notice",
+                        "CurseForge modpack zips are supported, but they only work if you have a CurseForge API key in Settings. Vertex will fall back to Modrinth downloads when it can resolve an exact compatible match.",
+                        &LabelOptions {
+                            color: if highlight_curseforge_notice {
+                                ui.visuals().error_fg_color
+                            } else {
+                                ui.visuals().weak_text_color()
+                            },
+                            wrap: true,
+                            ..LabelOptions::default()
+                        },
+                    );
                 }
                 ImportMode::LauncherDirectory => {
                     let previous_path = state.launcher_path.clone();
@@ -607,6 +677,8 @@ pub fn render(
                                 }
                             },
                             instance_name,
+                            manual_curseforge_files: HashMap::new(),
+                            max_concurrent_downloads: 4,
                         });
                     }
                 }
@@ -621,31 +693,34 @@ pub fn import_package_with_progress<F>(
     installations_root: &Path,
     request: ImportRequest,
     mut progress: F,
-) -> Result<InstanceRecord, String>
+) -> Result<InstanceRecord, ImportPackageError>
 where
     F: FnMut(ImportProgress),
 {
     match &request.source {
         ImportSource::ManifestFile(path) => {
-            let preview = inspect_package(path.as_path())?;
+            let preview = inspect_package(path.as_path()).map_err(ImportPackageError::message)?;
             match preview.kind {
                 ImportPreviewKind::Manifest(ImportPackageKind::VertexPack) => {
                     import_vtmpack(store, installations_root, &request, &mut progress)
+                        .map_err(ImportPackageError::message)
                 }
                 ImportPreviewKind::Manifest(ImportPackageKind::ModrinthPack) => {
                     import_mrpack(store, installations_root, &request, &mut progress)
+                        .map_err(ImportPackageError::message)
                 }
                 ImportPreviewKind::Manifest(ImportPackageKind::CurseForgePack) => {
                     import_curseforge_pack(store, installations_root, &request, &mut progress)
                 }
-                ImportPreviewKind::Launcher(_) => {
-                    Err("Launcher previews are not valid for manifest imports.".to_owned())
-                }
+                ImportPreviewKind::Launcher(_) => Err(ImportPackageError::message(
+                    "Launcher previews are not valid for manifest imports.",
+                )),
             }
         }
         ImportSource::LauncherDirectory { .. } => {
             progress(import_progress("Copying launcher instance files...", 0, 0));
             import_launcher_instance(store, installations_root, &request)
+                .map_err(ImportPackageError::message)
         }
     }
 }
@@ -2189,19 +2264,30 @@ fn import_curseforge_pack(
     installations_root: &Path,
     request: &ImportRequest,
     progress: &mut dyn FnMut(ImportProgress),
-) -> Result<InstanceRecord, String> {
+) -> Result<InstanceRecord, ImportPackageError> {
     let ImportSource::ManifestFile(package_path) = &request.source else {
-        return Err("CurseForge pack import requires a manifest file source.".to_owned());
+        return Err(ImportPackageError::message(
+            "CurseForge pack import requires a manifest file source.",
+        ));
     };
-    progress(import_progress("Reading CurseForge manifest...", 0, 1));
-    let manifest = read_curseforge_pack_manifest(package_path.as_path())?;
-    let dependency_info = resolve_curseforge_pack_dependencies(&manifest.minecraft)?;
+    let manifest = read_curseforge_pack_manifest(package_path.as_path())
+        .map_err(ImportPackageError::message)?;
     let override_steps = count_curseforge_override_entries(
         package_path.as_path(),
         manifest.overrides.as_deref().unwrap_or("overrides"),
-    )?;
+    )
+    .map_err(ImportPackageError::message)?;
     let file_count = manifest.files.iter().filter(|file| file.required).count();
-    let total_steps = 3 + override_steps + file_count;
+    let total_steps = 5 + override_steps + (file_count * 2);
+    progress(import_progress("Read CurseForge manifest.", 1, total_steps));
+    progress(import_progress(
+        "Resolving CurseForge pack metadata...",
+        2,
+        total_steps,
+    ));
+    let resolved = resolve_curseforge_pack_data(&manifest).map_err(ImportPackageError::message)?;
+    let staged_files =
+        predownload_curseforge_pack_files(&manifest, &resolved, request, total_steps, progress)?;
     let instance = create_instance(
         store,
         installations_root,
@@ -2210,15 +2296,19 @@ fn import_curseforge_pack(
             description: non_empty(manifest.author.as_str())
                 .map(|author| format!("Imported CurseForge pack by {author}.")),
             thumbnail_path: None,
-            modloader: dependency_info.modloader.clone(),
-            game_version: dependency_info.game_version.clone(),
-            modloader_version: dependency_info.modloader_version.clone(),
+            modloader: resolved.dependency_info.modloader.clone(),
+            game_version: resolved.dependency_info.game_version.clone(),
+            modloader_version: resolved.dependency_info.modloader_version.clone(),
         },
     )
-    .map_err(|err| format!("failed to create imported profile: {err}"))?;
+    .map_err(|err| {
+        ImportPackageError::message(format!("failed to create imported profile: {err}"))
+    })?;
     progress(import_progress(
-        "Created imported profile. Restoring overrides...",
-        1,
+        &format!(
+            "Downloaded {file_count}/{file_count} mods. Created imported profile. Restoring overrides..."
+        ),
+        3 + file_count,
         total_steps,
     ));
     let instance_root = instance_root_path(installations_root, &instance);
@@ -2226,23 +2316,31 @@ fn import_curseforge_pack(
     if let Err(err) = populate_curseforge_pack_instance(
         package_path.as_path(),
         &manifest,
+        &resolved,
+        &staged_files,
         instance_root.as_path(),
         total_steps,
+        3 + file_count,
         progress,
     ) {
         let _ = delete_instance(store, instance.id.as_str(), installations_root);
         return Err(err);
     }
 
-    let base_manifest = build_curseforge_base_manifest(&manifest)?;
+    progress(import_progress(
+        "Writing managed metadata...",
+        total_steps.saturating_sub(1),
+        total_steps,
+    ));
+    let base_manifest = build_curseforge_base_manifest_from_resolved(&manifest, &resolved);
     if let Err(err) = save_content_manifest(instance_root.as_path(), &base_manifest) {
         let _ = delete_instance(store, instance.id.as_str(), installations_root);
-        return Err(err);
+        return Err(ImportPackageError::message(err));
     }
     let modpack_state = build_curseforge_install_state(&manifest, base_manifest);
     if let Err(err) = save_modpack_install_state(instance_root.as_path(), &modpack_state) {
         let _ = delete_instance(store, instance.id.as_str(), installations_root);
-        return Err(err);
+        return Err(ImportPackageError::message(err));
     }
 
     progress(import_progress(
@@ -2373,48 +2471,16 @@ fn resolve_mrpack_manifest_project_version(
     (version.project_id == resolved.project_id).then_some((project, version))
 }
 
-fn build_curseforge_base_manifest(
+fn build_curseforge_base_manifest_from_resolved(
     manifest: &CurseForgePackManifest,
-) -> Result<ContentInstallManifest, String> {
-    let client = CurseForgeClient::from_env().ok_or_else(|| {
-        "CurseForge API key missing; set VERTEX_CURSEFORGE_API_KEY or CURSEFORGE_API_KEY to import this pack."
-            .to_owned()
-    })?;
-    let files = client
-        .get_files(
-            manifest
-                .files
-                .iter()
-                .filter(|file| file.required)
-                .map(|file| file.file_id)
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .map_err(|err| format!("failed to fetch CurseForge pack files: {err}"))?
-        .into_iter()
-        .map(|file| (file.id, file))
-        .collect::<HashMap<_, _>>();
-    let projects = client
-        .get_mods(
-            manifest
-                .files
-                .iter()
-                .filter(|file| file.required)
-                .map(|file| file.project_id)
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .map_err(|err| format!("failed to fetch CurseForge pack projects: {err}"))?
-        .into_iter()
-        .map(|project| (project.id, project))
-        .collect::<HashMap<_, _>>();
-
+    resolved: &ResolvedCurseForgePackData,
+) -> ContentInstallManifest {
     let mut content_manifest = ContentInstallManifest::default();
     for manifest_file in manifest.files.iter().filter(|file| file.required) {
-        let Some(file) = files.get(&manifest_file.file_id) else {
+        let Some(file) = resolved.files.get(&manifest_file.file_id) else {
             continue;
         };
-        let project = projects.get(&manifest_file.project_id);
+        let project = resolved.projects.get(&manifest_file.project_id);
         let project_key = format!("curseforge:{}", manifest_file.project_id);
         content_manifest.projects.insert(
             project_key.clone(),
@@ -2436,7 +2502,303 @@ fn build_curseforge_base_manifest(
             },
         );
     }
-    Ok(content_manifest)
+    content_manifest
+}
+
+#[derive(Debug)]
+struct ResolvedCurseForgePackData {
+    dependency_info: MrpackDependencyInfo,
+    files: HashMap<u64, curseforge::File>,
+    projects: HashMap<u64, curseforge::Project>,
+}
+
+fn resolve_curseforge_pack_data(
+    manifest: &CurseForgePackManifest,
+) -> Result<ResolvedCurseForgePackData, String> {
+    let client = CurseForgeClient::from_env().ok_or_else(|| {
+        "CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack."
+            .to_owned()
+    })?;
+    let dependency_info = resolve_curseforge_pack_dependencies(&manifest.minecraft)?;
+    let required_files = manifest
+        .files
+        .iter()
+        .filter(|file| file.required)
+        .collect::<Vec<_>>();
+    let files = client
+        .get_files(
+            required_files
+                .iter()
+                .map(|file| file.file_id)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .map_err(|err| format!("failed to fetch CurseForge pack files: {err}"))?
+        .into_iter()
+        .map(|file| (file.id, file))
+        .collect::<HashMap<_, _>>();
+    let projects = client
+        .get_mods(
+            required_files
+                .iter()
+                .map(|file| file.project_id)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .map_err(|err| format!("failed to fetch CurseForge pack projects: {err}"))?
+        .into_iter()
+        .map(|project| (project.id, project))
+        .collect::<HashMap<_, _>>();
+
+    Ok(ResolvedCurseForgePackData {
+        dependency_info,
+        files,
+        projects,
+    })
+}
+
+#[derive(Clone, Debug)]
+struct CurseForgeDownloadPlan {
+    requirement: CurseForgeManualDownloadRequirement,
+    download_url: String,
+    source_label: &'static str,
+}
+
+fn predownload_curseforge_pack_files(
+    manifest: &CurseForgePackManifest,
+    resolved: &ResolvedCurseForgePackData,
+    request: &ImportRequest,
+    total_steps: usize,
+    progress: &mut dyn FnMut(ImportProgress),
+) -> Result<HashMap<u64, PathBuf>, ImportPackageError> {
+    let mut staged_files = request.manual_curseforge_files.clone();
+    let mut download_plans = Vec::new();
+    let mut manual_requirements = Vec::new();
+    let client = CurseForgeClient::from_env().ok_or_else(|| {
+        ImportPackageError::message(
+            "CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack.",
+        )
+    })?;
+
+    for manifest_file in manifest.files.iter().filter(|file| file.required) {
+        if staged_files.contains_key(&manifest_file.file_id) {
+            continue;
+        }
+        let file = resolved.files.get(&manifest_file.file_id).ok_or_else(|| {
+            ImportPackageError::message(format!(
+                "CurseForge file {} for project {} was not found.",
+                manifest_file.file_id, manifest_file.project_id
+            ))
+        })?;
+        let project = resolved.projects.get(&manifest_file.project_id);
+        let requirement = build_curseforge_manual_download_requirement(
+            manifest_file.project_id,
+            manifest_file.file_id,
+            file,
+            project,
+        );
+        match resolve_curseforge_download_plan(
+            &client,
+            file,
+            project.map(|project| project.name.as_str()),
+            manifest_file.project_id,
+            manifest_file.file_id,
+            resolved.dependency_info.game_version.as_str(),
+            resolved.dependency_info.modloader.as_str(),
+        )
+        .map_err(ImportPackageError::message)?
+        {
+            Some((download_url, source_label)) => download_plans.push(CurseForgeDownloadPlan {
+                requirement,
+                download_url,
+                source_label,
+            }),
+            None => manual_requirements.push(requirement),
+        }
+    }
+
+    if !download_plans.is_empty() {
+        progress(import_progress(
+            &format!(
+                "Preparing {} CurseForge mod downloads...",
+                download_plans.len()
+            ),
+            2,
+            total_steps,
+        ));
+        let download_results = download_curseforge_plans_concurrently(
+            download_plans,
+            request.max_concurrent_downloads.max(1) as usize,
+            total_steps,
+            progress,
+        )
+        .map_err(ImportPackageError::message)?;
+        staged_files.extend(download_results.staged_files);
+        manual_requirements.extend(download_results.failed_requirements);
+    }
+
+    if !manual_requirements.is_empty() {
+        manual_requirements.sort_by(|left, right| left.file_name.cmp(&right.file_name));
+        manual_requirements.dedup_by(|left, right| left.file_id == right.file_id);
+        return Err(ImportPackageError::ManualCurseForgeDownloads {
+            requirements: manual_requirements,
+            staged_files,
+        });
+    }
+
+    Ok(staged_files)
+}
+
+fn resolve_curseforge_download_plan(
+    client: &CurseForgeClient,
+    curseforge_file: &curseforge::File,
+    curseforge_project_name: Option<&str>,
+    project_id: u64,
+    file_id: u64,
+    game_version: &str,
+    modloader: &str,
+) -> Result<Option<(String, &'static str)>, String> {
+    if let Some(url) = curseforge_file
+        .download_url
+        .as_deref()
+        .filter(|url| !url.trim().is_empty())
+    {
+        return Ok(Some((url.to_owned(), "CurseForge")));
+    }
+    match client.get_mod_file_download_url(project_id, file_id) {
+        Ok(Some(url)) if !url.trim().is_empty() => return Ok(Some((url, "CurseForge"))),
+        Ok(_) => {}
+        Err(curseforge::CurseForgeError::HttpStatus { status: 403, .. }) => {}
+        Err(err) => {
+            tracing::warn!(
+                target: "vertexlauncher/import",
+                curseforge_project_id = project_id,
+                curseforge_file_id = file_id,
+                error = %format_curseforge_download_url_error(project_id, file_id, &err),
+                "CurseForge download URL resolution failed during pack predownload"
+            );
+        }
+    }
+    Ok(resolve_modrinth_backup_download_url_for_curseforge_file(
+        curseforge_file,
+        curseforge_project_name,
+        game_version,
+        modloader,
+    )?
+    .map(|url| (url, "Modrinth backup")))
+}
+
+struct CurseForgeConcurrentDownloadResult {
+    staged_files: HashMap<u64, PathBuf>,
+    failed_requirements: Vec<CurseForgeManualDownloadRequirement>,
+}
+
+fn download_curseforge_plans_concurrently(
+    plans: Vec<CurseForgeDownloadPlan>,
+    max_concurrent_downloads: usize,
+    total_steps: usize,
+    progress: &mut dyn FnMut(ImportProgress),
+) -> Result<CurseForgeConcurrentDownloadResult, String> {
+    if plans.is_empty() {
+        return Ok(CurseForgeConcurrentDownloadResult {
+            staged_files: HashMap::new(),
+            failed_requirements: Vec::new(),
+        });
+    }
+    let staging_dir = std::env::temp_dir().join(format!(
+        "vertexlauncher-cf-download-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
+    fs::create_dir_all(staging_dir.as_path())
+        .map_err(|err| format!("failed to create CurseForge staging directory: {err}"))?;
+    let total_downloads = plans.len();
+    let queue = Arc::new(Mutex::new(VecDeque::from(plans)));
+    let (tx, rx) = mpsc::channel::<(
+        CurseForgeManualDownloadRequirement,
+        Result<PathBuf, String>,
+        &'static str,
+    )>();
+    let worker_count = max_concurrent_downloads.max(1).min(total_downloads.max(1));
+    let mut handles = Vec::with_capacity(worker_count);
+
+    for _ in 0..worker_count {
+        let queue = queue.clone();
+        let tx = tx.clone();
+        let staging_dir = staging_dir.clone();
+        handles.push(thread::spawn(move || {
+            loop {
+                let next = {
+                    let mut guard = match queue.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => return,
+                    };
+                    guard.pop_front()
+                };
+                let Some(plan) = next else {
+                    return;
+                };
+                let staged_path = staging_dir.join(format!(
+                    "{}-{}",
+                    plan.requirement.file_id, plan.requirement.file_name
+                ));
+                let result = download_file(plan.download_url.as_str(), staged_path.as_path())
+                    .map(|_| staged_path);
+                let _ = tx.send((plan.requirement, result, plan.source_label));
+            }
+        }));
+    }
+    drop(tx);
+
+    let mut completed_downloads = 0usize;
+    let mut staged_files = HashMap::new();
+    let mut failed_requirements = Vec::new();
+    while let Ok((requirement, result, source_label)) = rx.recv() {
+        completed_downloads += 1;
+        match result {
+            Ok(path) => {
+                progress(import_progress(
+                    &format!(
+                        "Downloaded {} via {} ({}/{total_downloads} mods)",
+                        requirement.display_name, source_label, completed_downloads
+                    ),
+                    2 + completed_downloads,
+                    total_steps,
+                ));
+                staged_files.insert(requirement.file_id, path);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/import",
+                    curseforge_project_id = requirement.project_id,
+                    curseforge_file_id = requirement.file_id,
+                    error = %err,
+                    source = source_label,
+                    "CurseForge pack predownload failed; requiring manual download"
+                );
+                progress(import_progress(
+                    &format!(
+                        "Queued {} for manual download ({}/{total_downloads} mods checked)",
+                        requirement.display_name, completed_downloads
+                    ),
+                    2 + completed_downloads,
+                    total_steps,
+                ));
+                failed_requirements.push(requirement);
+            }
+        }
+    }
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    Ok(CurseForgeConcurrentDownloadResult {
+        staged_files,
+        failed_requirements,
+    })
 }
 
 fn build_mrpack_install_state(
@@ -2906,7 +3268,7 @@ fn download_vtmpack_entry(
                 .parse::<u64>()
                 .map_err(|err| format!("invalid CurseForge file id for {}: {err}", entry.name))?;
             let client = CurseForgeClient::from_env().ok_or_else(|| {
-                "CurseForge API key missing; set VERTEX_CURSEFORGE_API_KEY or CURSEFORGE_API_KEY to import this pack."
+                "CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack."
                     .to_owned()
             })?;
             let file = find_curseforge_file(&client, project_id, file_id)?;
@@ -3003,13 +3365,17 @@ fn populate_mrpack_instance(
 fn populate_curseforge_pack_instance(
     package_path: &Path,
     manifest: &CurseForgePackManifest,
+    resolved: &ResolvedCurseForgePackData,
+    manual_curseforge_files: &HashMap<u64, PathBuf>,
     instance_root: &Path,
     total_steps: usize,
+    starting_completed_steps: usize,
     progress: &mut dyn FnMut(ImportProgress),
-) -> Result<(), String> {
-    let mut completed_steps = 1usize;
+) -> Result<(), ImportPackageError> {
+    let mut completed_steps = starting_completed_steps;
+    let total_mods = manifest.files.iter().filter(|file| file.required).count();
+    let mut applied_mods = 0usize;
     let overrides_root = manifest.overrides.as_deref().unwrap_or("overrides");
-    let dependency_info = resolve_curseforge_pack_dependencies(&manifest.minecraft)?;
     extract_curseforge_overrides(
         package_path,
         instance_root,
@@ -3017,104 +3383,47 @@ fn populate_curseforge_pack_instance(
         total_steps,
         &mut completed_steps,
         progress,
-    )?;
-
-    let client = CurseForgeClient::from_env().ok_or_else(|| {
-        "CurseForge API key missing; set VERTEX_CURSEFORGE_API_KEY or CURSEFORGE_API_KEY to import this pack."
-            .to_owned()
-    })?;
-    let files = client
-        .get_files(
-            manifest
-                .files
-                .iter()
-                .map(|file| file.file_id)
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .map_err(|err| format!("failed to fetch CurseForge pack files: {err}"))?
-        .into_iter()
-        .map(|file| (file.id, file))
-        .collect::<HashMap<_, _>>();
+    )
+    .map_err(ImportPackageError::message)?;
 
     for manifest_file in manifest.files.iter().filter(|file| file.required) {
-        let file = files.get(&manifest_file.file_id).ok_or_else(|| {
-            format!(
+        let file = resolved.files.get(&manifest_file.file_id).ok_or_else(|| {
+            ImportPackageError::message(format!(
                 "CurseForge file {} for project {} was not found.",
                 manifest_file.file_id, manifest_file.project_id
-            )
+            ))
         })?;
         let destination = instance_root.join("mods").join(file.file_name.as_str());
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+            fs::create_dir_all(parent).map_err(|err| {
+                ImportPackageError::message(format!("failed to create {}: {err}", parent.display()))
+            })?;
         }
-        let resolved_download_url = if let Some(url) = file.download_url.as_deref() {
-            Some(url.to_owned())
-        } else {
-            match client.get_mod_file_download_url(manifest_file.project_id, manifest_file.file_id)
-            {
-                Ok(url) => url,
-                Err(err) => {
-                    if try_modrinth_backup_download_for_curseforge_file(
-                        file,
-                        dependency_info.game_version.as_str(),
-                        dependency_info.modloader.as_str(),
-                        destination.as_path(),
-                    )? {
-                        completed_steps += 1;
-                        progress(import_progress(
-                            &format!("Downloading {} (Modrinth backup)", file.display_name),
-                            completed_steps,
-                            total_steps,
-                        ));
-                        continue;
-                    }
-                    return Err(format_curseforge_download_url_error(
-                        manifest_file.project_id,
-                        manifest_file.file_id,
-                        &err,
-                    ));
-                }
-            }
-        };
-        let download_url = if let Some(url) = resolved_download_url.as_deref() {
-            url
-        } else if try_modrinth_backup_download_for_curseforge_file(
-            file,
-            dependency_info.game_version.as_str(),
-            dependency_info.modloader.as_str(),
-            destination.as_path(),
-        )? {
-            completed_steps += 1;
-            progress(import_progress(
-                &format!("Downloading {} (Modrinth backup)", file.display_name),
-                completed_steps,
-                total_steps,
-            ));
-            continue;
-        } else {
-            return Err(format!(
-                "CurseForge file {} has no download URL available, and no Modrinth backup could be resolved.",
-                manifest_file.file_id
-            ));
-        };
+        let source_path = manual_curseforge_files
+            .get(&manifest_file.file_id)
+            .ok_or_else(|| {
+                ImportPackageError::message(format!(
+                    "CurseForge file {} was not predownloaded before installation.",
+                    manifest_file.file_id
+                ))
+            })?;
         completed_steps += 1;
+        applied_mods += 1;
         progress(import_progress(
-            &format!("Downloading {}", file.display_name),
+            &format!(
+                "Applying staged file for {} ({applied_mods}/{total_mods} mods)",
+                file.display_name
+            ),
             completed_steps,
             total_steps,
         ));
-        if let Err(err) = download_file(download_url, destination.as_path()) {
-            if !try_modrinth_backup_download_for_curseforge_file(
-                file,
-                dependency_info.game_version.as_str(),
-                dependency_info.modloader.as_str(),
-                destination.as_path(),
-            )? {
-                return Err(err);
-            }
-        }
+        fs::copy(source_path, destination.as_path()).map_err(|err| {
+            ImportPackageError::message(format!(
+                "failed to copy predownloaded file {} into {}: {err}",
+                source_path.display(),
+                destination.display()
+            ))
+        })?;
     }
 
     Ok(())
@@ -3488,24 +3797,42 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
 
 fn try_modrinth_backup_download_for_curseforge_file(
     curseforge_file: &curseforge::File,
+    curseforge_project_name: Option<&str>,
     game_version: &str,
     modloader: &str,
     destination: &Path,
 ) -> Result<bool, String> {
+    if let Some(url) = resolve_modrinth_backup_download_url_for_curseforge_file(
+        curseforge_file,
+        curseforge_project_name,
+        game_version,
+        modloader,
+    )? {
+        download_file(url.as_str(), destination)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn resolve_modrinth_backup_download_url_for_curseforge_file(
+    curseforge_file: &curseforge::File,
+    curseforge_project_name: Option<&str>,
+    game_version: &str,
+    modloader: &str,
+) -> Result<Option<String>, String> {
     let modrinth = ModrinthClient::default();
-    if try_modrinth_hash_backup_download_for_curseforge_file(
+    if let Some(url) = resolve_modrinth_hash_backup_download_url_for_curseforge_file(
         &modrinth,
         curseforge_file,
         game_version,
         modloader,
-        destination,
     )? {
-        return Ok(true);
+        return Ok(Some(url));
     }
 
-    let queries = modrinth_fallback_queries(curseforge_file);
+    let queries = modrinth_fallback_queries(curseforge_file, curseforge_project_name);
     if queries.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
     let loader_slug = modrinth_loader_slug(modloader);
@@ -3551,16 +3878,13 @@ fn try_modrinth_backup_download_for_curseforge_file(
                 Err(_) => continue,
             };
             for version in versions {
-                let Some(file) = version
-                    .files
-                    .iter()
-                    .find(|candidate| {
-                        normalized_name(candidate.filename.as_str())
-                            == normalized_name(curseforge_file.file_name.as_str())
-                    })
-                    .or_else(|| version.files.iter().find(|candidate| candidate.primary))
-                    .or_else(|| version.files.first())
-                else {
+                let Some(file) = select_modrinth_backup_file(
+                    &version,
+                    curseforge_file,
+                    game_version,
+                    modloader,
+                    true,
+                ) else {
                     continue;
                 };
                 tracing::warn!(
@@ -3570,12 +3894,112 @@ fn try_modrinth_backup_download_for_curseforge_file(
                     modrinth_version_id = %version.id,
                     "Using Modrinth fallback download for CurseForge file"
                 );
-                download_file(file.url.as_str(), destination)?;
-                return Ok(true);
+                return Ok(Some(file.url.clone()));
             }
         }
     }
-    Ok(false)
+    Ok(None)
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CurseForgeManualDownloadRequirement {
+    pub project_id: u64,
+    pub file_id: u64,
+    pub project_name: String,
+    pub file_name: String,
+    pub display_name: String,
+    pub download_page_url: String,
+}
+
+pub(crate) fn prepare_curseforge_manual_downloads(
+    request: &ImportRequest,
+) -> Result<Option<Vec<CurseForgeManualDownloadRequirement>>, String> {
+    let ImportSource::ManifestFile(package_path) = &request.source else {
+        return Ok(None);
+    };
+    if inspect_package(package_path.as_path())
+        .map(|preview| preview.kind)
+        .ok()
+        != Some(ImportPreviewKind::Manifest(
+            ImportPackageKind::CurseForgePack,
+        ))
+    {
+        return Ok(None);
+    }
+    let manifest = read_curseforge_pack_manifest(package_path.as_path())?;
+    let resolved = resolve_curseforge_pack_data(&manifest)?;
+    let mut blocked = Vec::new();
+    for manifest_file in manifest.files.iter().filter(|file| file.required) {
+        let Some(file) = resolved.files.get(&manifest_file.file_id) else {
+            continue;
+        };
+        if curseforge_file_has_api_download(file) {
+            continue;
+        }
+        blocked.push(build_curseforge_manual_download_requirement(
+            manifest_file.project_id,
+            manifest_file.file_id,
+            file,
+            resolved.projects.get(&manifest_file.project_id),
+        ));
+    }
+    Ok((!blocked.is_empty()).then_some(blocked))
+}
+
+pub(crate) fn prepare_curseforge_manual_download_for_file(
+    project_id: u64,
+    file_id: u64,
+) -> Result<Option<CurseForgeManualDownloadRequirement>, String> {
+    let client = CurseForgeClient::from_env().ok_or_else(|| {
+        "CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack."
+            .to_owned()
+    })?;
+    let file = find_curseforge_file(&client, project_id, file_id)?;
+    if curseforge_file_has_api_download(&file) {
+        return Ok(None);
+    }
+    let project = client
+        .get_mods(&[project_id])
+        .map_err(|err| format!("failed to fetch CurseForge project {project_id}: {err}"))?
+        .into_iter()
+        .next();
+    Ok(Some(build_curseforge_manual_download_requirement(
+        project_id,
+        file_id,
+        &file,
+        project.as_ref(),
+    )))
+}
+
+fn curseforge_file_has_api_download(file: &curseforge::File) -> bool {
+    file.download_url
+        .as_deref()
+        .is_some_and(|url| !url.trim().is_empty())
+}
+
+fn build_curseforge_manual_download_requirement(
+    project_id: u64,
+    file_id: u64,
+    file: &curseforge::File,
+    project: Option<&curseforge::Project>,
+) -> CurseForgeManualDownloadRequirement {
+    let project_name = project
+        .map(|project| project.name.clone())
+        .unwrap_or_else(|| file.display_name.clone());
+    let download_page_url = project
+        .and_then(|project| project.website_url.clone())
+        .map(|base| format!("{}/files/{}", base.trim_end_matches('/'), file_id))
+        .unwrap_or_else(|| {
+            format!("https://www.curseforge.com/minecraft/mc-mods/{project_id}/files/{file_id}")
+        });
+    CurseForgeManualDownloadRequirement {
+        project_id,
+        file_id,
+        project_name,
+        file_name: file.file_name.clone(),
+        display_name: file.display_name.clone(),
+        download_page_url,
+    }
 }
 
 fn try_modrinth_hash_backup_download_for_curseforge_file(
@@ -3585,6 +4009,24 @@ fn try_modrinth_hash_backup_download_for_curseforge_file(
     modloader: &str,
     destination: &Path,
 ) -> Result<bool, String> {
+    if let Some(url) = resolve_modrinth_hash_backup_download_url_for_curseforge_file(
+        modrinth,
+        curseforge_file,
+        game_version,
+        modloader,
+    )? {
+        download_file(url.as_str(), destination)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn resolve_modrinth_hash_backup_download_url_for_curseforge_file(
+    modrinth: &ModrinthClient,
+    curseforge_file: &curseforge::File,
+    game_version: &str,
+    modloader: &str,
+) -> Result<Option<String>, String> {
     let loader_slug = modrinth_loader_slug(modloader);
     let normalized_game_version = normalize_minecraft_game_version(game_version);
 
@@ -3596,7 +4038,7 @@ fn try_modrinth_hash_backup_download_for_curseforge_file(
         hash_candidates.push(("sha1", sha1));
     }
     if hash_candidates.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
     for (algorithm, hash) in hash_candidates {
@@ -3633,15 +4075,8 @@ fn try_modrinth_hash_backup_download_for_curseforge_file(
             continue;
         }
 
-        let Some(file) = version
-            .files
-            .iter()
-            .find(|candidate| {
-                normalized_name(candidate.filename.as_str())
-                    == normalized_name(curseforge_file.file_name.as_str())
-            })
-            .or_else(|| version.files.iter().find(|candidate| candidate.primary))
-            .or_else(|| version.files.first())
+        let Some(file) =
+            select_modrinth_backup_file(&version, curseforge_file, game_version, modloader, false)
         else {
             continue;
         };
@@ -3652,15 +4087,18 @@ fn try_modrinth_hash_backup_download_for_curseforge_file(
             algorithm,
             "Using exact Modrinth hash fallback for CurseForge file"
         );
-        download_file(file.url.as_str(), destination)?;
-        return Ok(true);
+        return Ok(Some(file.url.clone()));
     }
-    Ok(false)
+    Ok(None)
 }
 
-fn modrinth_fallback_queries(file: &curseforge::File) -> Vec<String> {
+fn modrinth_fallback_queries(
+    file: &curseforge::File,
+    curseforge_project_name: Option<&str>,
+) -> Vec<String> {
     let mut queries = Vec::new();
     let raw_candidates = [
+        curseforge_project_name.unwrap_or_default(),
         file.display_name.as_str(),
         file.file_name.as_str(),
         file.file_name
@@ -3680,6 +4118,73 @@ fn modrinth_fallback_queries(file: &curseforge::File) -> Vec<String> {
         }
     }
     queries
+}
+
+fn select_modrinth_backup_file<'a>(
+    version: &'a modrinth::ProjectVersion,
+    curseforge_file: &curseforge::File,
+    game_version: &str,
+    modloader: &str,
+    require_exact_filename: bool,
+) -> Option<&'a modrinth::ProjectVersionFile> {
+    let expected_name = normalized_name(curseforge_file.file_name.as_str());
+    if let Some(file) = version
+        .files
+        .iter()
+        .find(|candidate| normalized_name(candidate.filename.as_str()) == expected_name)
+    {
+        return Some(file);
+    }
+    if require_exact_filename || version.files.len() != 1 {
+        return None;
+    }
+    let file = version.files.first()?;
+    modrinth_backup_filename_looks_compatible(file.filename.as_str(), game_version, modloader)
+        .then_some(file)
+}
+
+fn modrinth_backup_filename_looks_compatible(
+    filename: &str,
+    game_version: &str,
+    modloader: &str,
+) -> bool {
+    let desired_loader = modloader_loader_family(modloader);
+    let candidate_loader = modloader_loader_family(filename);
+    if let (Some(desired_loader), Some(candidate_loader)) = (desired_loader, candidate_loader)
+        && desired_loader != candidate_loader
+    {
+        return false;
+    }
+    if let Some(candidate_game_version) = find_minecraft_version_in_text(filename)
+        && let Some(desired_game_version) = normalize_minecraft_game_version(game_version)
+        && candidate_game_version != desired_game_version
+    {
+        return false;
+    }
+    true
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModloaderFamily {
+    Fabric,
+    Forge,
+    NeoForge,
+    Quilt,
+}
+
+fn modloader_loader_family(value: &str) -> Option<ModloaderFamily> {
+    let lower = value.trim().to_ascii_lowercase();
+    if lower.contains("neoforge") || lower.contains("-neo-") {
+        Some(ModloaderFamily::NeoForge)
+    } else if lower.contains("fabric") {
+        Some(ModloaderFamily::Fabric)
+    } else if lower.contains("quilt") {
+        Some(ModloaderFamily::Quilt)
+    } else if lower.contains("forge") {
+        Some(ModloaderFamily::Forge)
+    } else {
+        None
+    }
 }
 
 fn modrinth_loader_slug(loader: &str) -> Option<&'static str> {
@@ -3944,6 +4449,101 @@ mod tests {
     }
 
     #[test]
+    fn modrinth_fallback_queries_include_project_name_once() {
+        let file = curseforge::File {
+            id: 1,
+            display_name: "Sodium".to_owned(),
+            file_name: "sodium-fabric-1.0.0.jar".to_owned(),
+            file_date: String::new(),
+            download_count: 0,
+            download_url: None,
+            hashes: Vec::new(),
+            dependencies: Vec::new(),
+            game_versions: Vec::new(),
+        };
+
+        let queries = modrinth_fallback_queries(&file, Some("Sodium"));
+        assert_eq!(queries.first().map(String::as_str), Some("Sodium"));
+        assert_eq!(
+            queries
+                .iter()
+                .filter(|query| query.as_str() == "Sodium")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn search_fallback_requires_exact_filename_match() {
+        let curseforge_file = curseforge::File {
+            id: 1,
+            display_name: "GeckoLib".to_owned(),
+            file_name: "geckolib-forge-1.20.1-4.4.9.jar".to_owned(),
+            file_date: String::new(),
+            download_count: 0,
+            download_url: None,
+            hashes: Vec::new(),
+            dependencies: Vec::new(),
+            game_versions: Vec::new(),
+        };
+        let version = modrinth::ProjectVersion {
+            id: "version".to_owned(),
+            project_id: "project".to_owned(),
+            version_number: "4.4.9".to_owned(),
+            date_published: String::new(),
+            downloads: 0,
+            loaders: vec!["forge".to_owned()],
+            game_versions: vec!["1.20.1".to_owned()],
+            dependencies: Vec::new(),
+            files: vec![modrinth::ProjectVersionFile {
+                url: "https://example.invalid/geckolib-neoforge.jar".to_owned(),
+                filename: "geckolib-neoforge-1.20.1-4.4.9.jar".to_owned(),
+                primary: true,
+            }],
+        };
+
+        assert!(
+            select_modrinth_backup_file(&version, &curseforge_file, "1.20.1", "Forge", true)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn hash_fallback_rejects_loader_or_game_version_mismatch() {
+        let curseforge_file = curseforge::File {
+            id: 1,
+            display_name: "Crop Marker".to_owned(),
+            file_name: "crop-marker-forge-1.20.1-1.2.2.jar".to_owned(),
+            file_date: String::new(),
+            download_count: 0,
+            download_url: None,
+            hashes: Vec::new(),
+            dependencies: Vec::new(),
+            game_versions: Vec::new(),
+        };
+        let version = modrinth::ProjectVersion {
+            id: "version".to_owned(),
+            project_id: "project".to_owned(),
+            version_number: "1.2.2".to_owned(),
+            date_published: String::new(),
+            downloads: 0,
+            loaders: vec!["forge".to_owned()],
+            game_versions: vec!["1.20.1".to_owned()],
+            dependencies: Vec::new(),
+            files: vec![modrinth::ProjectVersionFile {
+                url: "https://example.invalid/crop-marker-forge-1.20.4.jar".to_owned(),
+                filename: "crop-marker-forge-1.20.4-1.2.2.jar".to_owned(),
+                primary: true,
+            }],
+        };
+
+        assert!(
+            select_modrinth_backup_file(&version, &curseforge_file, "1.20.1", "Forge", false)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn normalizes_real_minecraft_versions_only() {
         assert_eq!(
             normalize_minecraft_game_version("1.21.1").as_deref(),
@@ -3967,5 +4567,27 @@ mod tests {
             find_minecraft_version_in_text("fabric-loader-0.16.10-1.21.1").as_deref(),
             Some("1.21.1")
         );
+    }
+
+    #[test]
+    fn curseforge_file_api_download_requires_non_empty_download_url() {
+        let mut file = curseforge::File {
+            id: 1,
+            display_name: "Test".to_owned(),
+            file_name: "test.jar".to_owned(),
+            file_date: String::new(),
+            download_count: 0,
+            download_url: Some("https://example.invalid/test.jar".to_owned()),
+            hashes: Vec::new(),
+            dependencies: Vec::new(),
+            game_versions: Vec::new(),
+        };
+        assert!(curseforge_file_has_api_download(&file));
+
+        file.download_url = Some("   ".to_owned());
+        assert!(!curseforge_file_has_api_download(&file));
+
+        file.download_url = None;
+        assert!(!curseforge_file_has_api_download(&file));
     }
 }

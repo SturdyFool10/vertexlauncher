@@ -1,6 +1,6 @@
 [package]
 name = "managed_content"
-version = "0.1.13-Alpha"
+version = "0.1.14-Alpha"
 edition = "2024"
 
 [dependencies]
