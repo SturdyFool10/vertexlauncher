@@ -167,11 +167,14 @@ pub fn login_finish(code: &str, flow: MinecraftLoginFlow) -> Result<CachedAccoun
         .map_err(|err| error::prefix_auth_error("GetOAuthToken", err))?;
 
     // Continue through Xbox -> XSTS -> Minecraft service token chain.
-    let account = minecraft::complete_minecraft_login(
+    let mut account = minecraft::complete_minecraft_login(
         &agent,
         &microsoft_token.access_token,
         microsoft_token.refresh_token.as_deref(),
     )?;
+    account.microsoft_client_id = Some(flow.client_id.clone());
+    account.microsoft_token_uri = Some(flow.token_uri.clone());
+    account.microsoft_scope = Some(flow.scope.clone());
     if account
         .microsoft_refresh_token
         .as_deref()
@@ -250,16 +253,41 @@ where
 
         util::wait_for_auth_request_slot("cached_account_token_renewal");
 
-        match oauth::refresh_microsoft_token(&agent, client_id, refresh_token).and_then(
-            |microsoft_token| {
-                minecraft::complete_minecraft_login(
-                    &agent,
-                    &microsoft_token.access_token,
-                    microsoft_token.refresh_token.as_deref(),
-                )
-            },
-        ) {
+        let renewal_client_id = account
+            .microsoft_client_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(client_id);
+
+        let renewal_token_uri = account
+            .microsoft_token_uri
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(constants::LIVE_TOKEN_URL);
+        let renewal_scope = account
+            .microsoft_scope
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(constants::LIVE_SCOPE);
+
+        match oauth::refresh_microsoft_token(
+            &agent,
+            renewal_client_id,
+            refresh_token,
+            renewal_token_uri,
+            renewal_scope,
+        )
+        .and_then(|microsoft_token| {
+            minecraft::complete_minecraft_login(
+                &agent,
+                &microsoft_token.access_token,
+                microsoft_token.refresh_token.as_deref(),
+            )
+        }) {
             Ok(mut renewed) => {
+                renewed.microsoft_client_id = Some(renewal_client_id.to_owned());
+                renewed.microsoft_token_uri = Some(renewal_token_uri.to_owned());
+                renewed.microsoft_scope = Some(renewal_scope.to_owned());
                 if renewed
                     .microsoft_refresh_token
                     .as_deref()
@@ -334,16 +362,44 @@ pub fn renew_cached_account_token(
         })?
         .to_owned();
 
+    let renewal_client_id = state.accounts[index]
+        .microsoft_client_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(client_id)
+        .to_owned();
+    let renewal_token_uri = state.accounts[index]
+        .microsoft_token_uri
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(constants::LIVE_TOKEN_URL)
+        .to_owned();
+    let renewal_scope = state.accounts[index]
+        .microsoft_scope
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(constants::LIVE_SCOPE)
+        .to_owned();
+
     let agent = util::build_http_agent();
     util::wait_for_auth_request_slot("single_cached_account_token_renewal");
-    let mut renewed = oauth::refresh_microsoft_token(&agent, client_id, refresh_token.as_str())
-        .and_then(|microsoft_token| {
-            minecraft::complete_minecraft_login(
-                &agent,
-                &microsoft_token.access_token,
-                microsoft_token.refresh_token.as_deref(),
-            )
-        })?;
+    let mut renewed = oauth::refresh_microsoft_token(
+        &agent,
+        renewal_client_id.as_str(),
+        refresh_token.as_str(),
+        renewal_token_uri.as_str(),
+        renewal_scope.as_str(),
+    )
+    .and_then(|microsoft_token| {
+        minecraft::complete_minecraft_login(
+            &agent,
+            &microsoft_token.access_token,
+            microsoft_token.refresh_token.as_deref(),
+        )
+    })?;
+    renewed.microsoft_client_id = Some(renewal_client_id);
+    renewed.microsoft_token_uri = Some(renewal_token_uri);
+    renewed.microsoft_scope = Some(renewal_scope);
     if renewed
         .microsoft_refresh_token
         .as_deref()

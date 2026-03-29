@@ -380,6 +380,9 @@ fn build_cached_account(
         minecraft_profile,
         minecraft_access_token: Some(minecraft_access_token.to_owned()),
         microsoft_refresh_token: microsoft_refresh_token.map(str::to_owned),
+        microsoft_client_id: None,
+        microsoft_token_uri: None,
+        microsoft_scope: None,
         refresh_token_state: if microsoft_refresh_token.is_some() {
             RefreshTokenState::Present
         } else {

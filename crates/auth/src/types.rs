@@ -96,6 +96,12 @@ pub struct CachedAccount {
     pub minecraft_access_token: Option<String>,
     #[serde(default)]
     pub microsoft_refresh_token: Option<String>,
+    #[serde(default)]
+    pub microsoft_client_id: Option<String>,
+    #[serde(default)]
+    pub microsoft_token_uri: Option<String>,
+    #[serde(default)]
+    pub microsoft_scope: Option<String>,
     #[serde(skip, default)]
     pub(crate) refresh_token_state: RefreshTokenState,
     #[serde(default)]

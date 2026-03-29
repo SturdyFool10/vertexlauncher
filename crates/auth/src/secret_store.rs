@@ -15,6 +15,7 @@ const LEGACY_REFRESH_TOKEN_SERVICE: &str = "vertexlauncher.microsoft_refresh_tok
 const SECURE_STORE_RETRY_ATTEMPTS: usize = 5;
 const SECURE_STORE_RETRY_DELAY: Duration = Duration::from_millis(75);
 const REFRESH_TOKEN_VERIFY_ATTEMPTS: usize = 5;
+const REFRESH_TOKEN_STORE_ATTEMPTS: usize = 3;
 
 static SECURE_STORE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -133,15 +134,44 @@ pub(crate) fn store_refresh_token(profile_id: &str, refresh_token: &str) -> Resu
 }
 
 fn store_refresh_token_unlocked(profile_id: &str, refresh_token: &str) -> Result<(), AuthError> {
-    let entry = refresh_token_entry(REFRESH_TOKEN_SERVICE, profile_id)?;
-    retry_keyring_operation(|| entry.set_password(refresh_token)).map_err(|err| {
-        AuthError::SecureStorage(format!(
-            "Failed to store refresh token for profile '{profile_id}': {err}",
-        ))
-    })?;
-    verify_refresh_token_round_trip_unlocked(profile_id, refresh_token)?;
-    let _ = delete_refresh_token_for_service_unlocked(LEGACY_REFRESH_TOKEN_SERVICE, profile_id);
-    Ok(())
+    for attempt in 0..REFRESH_TOKEN_STORE_ATTEMPTS {
+        let _ = delete_refresh_token_for_service_unlocked(REFRESH_TOKEN_SERVICE, profile_id);
+        let entry = refresh_token_entry(REFRESH_TOKEN_SERVICE, profile_id)?;
+        retry_keyring_operation(|| entry.set_password(refresh_token)).map_err(|err| {
+            AuthError::SecureStorage(format!(
+                "Failed to store refresh token for profile '{profile_id}': {err}",
+            ))
+        })?;
+
+        match verify_refresh_token_round_trip_unlocked(profile_id, refresh_token) {
+            Ok(()) => {
+                let _ = delete_refresh_token_for_service_unlocked(
+                    LEGACY_REFRESH_TOKEN_SERVICE,
+                    profile_id,
+                );
+                return Ok(());
+            }
+            Err(AuthError::SecureStorage(message))
+                if attempt + 1 < REFRESH_TOKEN_STORE_ATTEMPTS
+                    && is_corrupt_secure_storage_message(&message) =>
+            {
+                tracing::warn!(
+                    target: "vertexlauncher/auth/secret_store",
+                    profile_id,
+                    attempt = attempt + 1,
+                    "refresh-token verification hit corrupt secure storage data after write; deleting entry and retrying"
+                );
+                let _ =
+                    delete_refresh_token_for_service_unlocked(REFRESH_TOKEN_SERVICE, profile_id);
+                thread::sleep(SECURE_STORE_RETRY_DELAY);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err(AuthError::SecureStorage(format!(
+        "Failed to store refresh token for profile '{profile_id}' after repeated secure storage rewrite attempts."
+    )))
 }
 
 pub(crate) fn delete_refresh_token(profile_id: &str) -> Result<(), AuthError> {
@@ -284,9 +314,11 @@ fn retry_keyring_operation<T>(
 
 fn is_corrupt_secure_storage_error(err: &KeyringError) -> bool {
     let error_text = err.to_string();
-    matches!(err, KeyringError::BadEncoding(_))
-        || error_text.contains("Crypto error")
-        || error_text.contains("Unpad Error")
+    matches!(err, KeyringError::BadEncoding(_)) || is_corrupt_secure_storage_message(&error_text)
+}
+
+fn is_corrupt_secure_storage_message(error_text: &str) -> bool {
+    error_text.contains("Crypto error") || error_text.contains("Unpad Error")
 }
 
 fn is_unavailable_secure_storage_error(err: &KeyringError) -> bool {

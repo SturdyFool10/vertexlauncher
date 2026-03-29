@@ -34,11 +34,18 @@ pub(crate) fn run_device_code_login(
         poll_for_microsoft_token(&agent, client_id.as_str(), &tenant, &device_code, sender)
             .map_err(|err| prefix_auth_error("PollForMicrosoftToken", err))?;
 
-    let account = complete_minecraft_login(
+    let mut account = complete_minecraft_login(
         &agent,
         &microsoft_token.access_token,
         microsoft_token.refresh_token.as_deref(),
     )?;
+    account.microsoft_client_id = Some(client_id.clone());
+    account.microsoft_token_uri = Some(format!(
+        "{}/{}/oauth2/v2.0/token",
+        crate::constants::OAUTH_BASE_URL,
+        tenant
+    ));
+    account.microsoft_scope = Some(crate::constants::DEVICE_CODE_SCOPE.to_owned());
     if account
         .microsoft_refresh_token
         .as_deref()

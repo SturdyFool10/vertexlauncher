@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 
 use crate::constants::{
     BUILTIN_DEVICE_CODE_CLIENT_ID, BUILTIN_DEVICE_CODE_TENANT, DEVICE_CODE_SCOPE,
-    LIVE_AUTHORIZE_URL, LIVE_REDIRECT_URI, LIVE_SCOPE, LIVE_TOKEN_URL, OAUTH_BASE_URL,
+    LIVE_AUTHORIZE_URL, LIVE_SCOPE, LIVE_TOKEN_URL, OAUTH_BASE_URL,
 };
 use crate::error::{AuthError, map_http_error};
 use crate::types::{LoginEvent, MinecraftLoginFlow};
@@ -134,16 +134,17 @@ pub(crate) fn refresh_microsoft_token(
     agent: &ureq::Agent,
     client_id: &str,
     refresh_token: &str,
+    token_uri: &str,
+    scope: &str,
 ) -> Result<MicrosoftTokenResponse, AuthError> {
     let response = agent
-        .post(LIVE_TOKEN_URL)
+        .post(token_uri)
         .header("Accept", "application/json")
         .send_form([
             ("client_id", client_id),
             ("refresh_token", refresh_token),
             ("grant_type", "refresh_token"),
-            ("redirect_uri", LIVE_REDIRECT_URI),
-            ("scope", LIVE_SCOPE),
+            ("scope", scope),
         ]);
 
     match response {
