@@ -97,11 +97,6 @@ struct VertexApp {
     in_flight_import_request: Option<import_instance_modal::ImportRequest>,
     curseforge_manual_download_preflight_request: Option<import_instance_modal::ImportRequest>,
     curseforge_manual_download_preflight_in_flight: bool,
-    curseforge_manual_download_preflight_tx: Option<
-        mpsc::Sender<
-            Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
-        >,
-    >,
     curseforge_manual_download_preflight_rx: Option<
         mpsc::Receiver<
             Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
@@ -237,7 +232,6 @@ impl VertexApp {
             in_flight_import_request: None,
             curseforge_manual_download_preflight_request: None,
             curseforge_manual_download_preflight_in_flight: false,
-            curseforge_manual_download_preflight_tx: None,
             curseforge_manual_download_preflight_rx: None,
             discover_curseforge_manual_download_preflight_request: None,
             discover_curseforge_manual_download_preflight_in_flight: false,
@@ -1102,35 +1096,26 @@ fn start_import_instance_task(
     }
 
     request.max_concurrent_downloads = app.config.download_max_concurrent().max(1);
-
-    spawn_import_instance_task(app, request);
-}
-
-fn ensure_curseforge_manual_download_preflight_channel(app: &mut VertexApp) {
-    if app.curseforge_manual_download_preflight_tx.is_some()
-        && app.curseforge_manual_download_preflight_rx.is_some()
+    if matches!(
+        request.source,
+        import_instance_modal::ImportSource::ManifestFile(_)
+    ) && request.manual_curseforge_files.is_empty()
     {
+        start_curseforge_manual_download_preflight(app, request);
         return;
     }
-    let (tx, rx) = mpsc::channel::<
-        Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
-    >();
-    app.curseforge_manual_download_preflight_tx = Some(tx);
-    app.curseforge_manual_download_preflight_rx = Some(rx);
+
+    spawn_import_instance_task(app, request);
 }
 
 fn start_curseforge_manual_download_preflight(
     app: &mut VertexApp,
     request: import_instance_modal::ImportRequest,
 ) {
-    ensure_curseforge_manual_download_preflight_channel(app);
-    let Some(tx) = app
-        .curseforge_manual_download_preflight_tx
-        .as_ref()
-        .cloned()
-    else {
-        return;
-    };
+    let (tx, rx) = mpsc::channel::<
+        Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
+    >();
+    app.curseforge_manual_download_preflight_rx = Some(rx);
     app.import_instance_state.error = None;
     app.import_instance_state.import_in_flight = true;
     app.import_instance_state.import_latest_progress =

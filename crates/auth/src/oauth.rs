@@ -8,9 +8,8 @@ use url::Url;
 use zeroize::Zeroizing;
 
 use crate::constants::{
-    BUILTIN_DEVICE_CODE_CLIENT_ID, BUILTIN_DEVICE_CODE_TENANT, BUILTIN_MICROSOFT_TENANT,
-    DEVICE_CODE_SCOPE, LIVE_AUTHORIZE_URL, LIVE_REDIRECT_URI, LIVE_SCOPE, LIVE_TOKEN_URL,
-    OAUTH_BASE_URL,
+    BUILTIN_DEVICE_CODE_CLIENT_ID, BUILTIN_DEVICE_CODE_TENANT, DEVICE_CODE_SCOPE,
+    LIVE_AUTHORIZE_URL, LIVE_REDIRECT_URI, LIVE_SCOPE, LIVE_TOKEN_URL, OAUTH_BASE_URL,
 };
 use crate::error::{AuthError, map_http_error};
 use crate::types::{LoginEvent, MinecraftLoginFlow};
@@ -286,21 +285,6 @@ pub(crate) fn poll_for_microsoft_token(
 
         thread::sleep(Duration::from_secs(poll_interval_secs));
     }
-}
-
-pub(crate) fn oauth_tenant() -> String {
-    std::env::var("VERTEX_MSA_TENANT")
-        .ok()
-        .map(|tenant| tenant.trim().to_owned())
-        .filter(|tenant| !tenant.is_empty())
-        .unwrap_or_else(|| {
-            let builtin = BUILTIN_MICROSOFT_TENANT.trim();
-            if builtin.is_empty() {
-                "common".to_owned()
-            } else {
-                builtin.to_owned()
-            }
-        })
 }
 
 pub(crate) fn device_code_credentials() -> (String, String) {

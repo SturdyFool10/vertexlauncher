@@ -3795,25 +3795,6 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
         .map_err(|err| format!("failed to write {}: {err}", destination.display()))
 }
 
-fn try_modrinth_backup_download_for_curseforge_file(
-    curseforge_file: &curseforge::File,
-    curseforge_project_name: Option<&str>,
-    game_version: &str,
-    modloader: &str,
-    destination: &Path,
-) -> Result<bool, String> {
-    if let Some(url) = resolve_modrinth_backup_download_url_for_curseforge_file(
-        curseforge_file,
-        curseforge_project_name,
-        game_version,
-        modloader,
-    )? {
-        download_file(url.as_str(), destination)?;
-        return Ok(true);
-    }
-    Ok(false)
-}
-
 fn resolve_modrinth_backup_download_url_for_curseforge_file(
     curseforge_file: &curseforge::File,
     curseforge_project_name: Option<&str>,
@@ -4000,25 +3981,6 @@ fn build_curseforge_manual_download_requirement(
         display_name: file.display_name.clone(),
         download_page_url,
     }
-}
-
-fn try_modrinth_hash_backup_download_for_curseforge_file(
-    modrinth: &ModrinthClient,
-    curseforge_file: &curseforge::File,
-    game_version: &str,
-    modloader: &str,
-    destination: &Path,
-) -> Result<bool, String> {
-    if let Some(url) = resolve_modrinth_hash_backup_download_url_for_curseforge_file(
-        modrinth,
-        curseforge_file,
-        game_version,
-        modloader,
-    )? {
-        download_file(url.as_str(), destination)?;
-        return Ok(true);
-    }
-    Ok(false)
 }
 
 fn resolve_modrinth_hash_backup_download_url_for_curseforge_file(

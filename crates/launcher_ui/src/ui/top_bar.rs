@@ -10,7 +10,7 @@ use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 use textui::{ButtonOptions, LabelOptions, TextUi};
 
 use crate::{
-    assets, desktop, privacy,
+    assets, privacy,
     ui::{components::icon_button, style},
 };
 
@@ -572,15 +572,26 @@ fn render_device_code_section(
         wrap: false,
         ..base
     };
-    let code_text_size = text_ui.measure_text_size(ui, prompt.user_code.as_str(), &code_label_style);
+    let code_text_size =
+        text_ui.measure_text_size(ui, prompt.user_code.as_str(), &code_label_style);
     let code_row_height = code_text_size.y + style::SPACE_MD * 2.0;
     let code_box_width = code_text_size.x + style::SPACE_MD * 2.0;
     let copy_btn_size = code_row_height; // square button matching row height
     let total_row_width = code_box_width + copy_btn_size;
 
     let cr = style::CORNER_RADIUS_SM;
-    let box_radius = egui::CornerRadius { nw: cr, sw: cr, ne: 0, se: 0 };
-    let btn_radius = egui::CornerRadius { nw: 0, sw: 0, ne: cr, se: cr };
+    let box_radius = egui::CornerRadius {
+        nw: cr,
+        sw: cr,
+        ne: 0,
+        se: 0,
+    };
+    let btn_radius = egui::CornerRadius {
+        nw: 0,
+        sw: 0,
+        ne: cr,
+        se: cr,
+    };
 
     // Outer container centers the joined control horizontally
     ui.allocate_ui_with_layout(
@@ -598,7 +609,9 @@ fn render_device_code_section(
                     let themed_svg = apply_text_color(assets::COPY_SVG, text_color);
                     let uri = format!(
                         "bytes://vertex-topbar/device-code-copy-{:02x}{:02x}{:02x}.svg",
-                        text_color.r(), text_color.g(), text_color.b()
+                        text_color.r(),
+                        text_color.g(),
+                        text_color.b()
                     );
                     let icon_size = (copy_btn_size - style::SPACE_MD * 2.0).clamp(12.0, 28.0);
                     let (btn_rect, btn_response) = ui.allocate_exact_size(
@@ -626,8 +639,7 @@ fn render_device_code_section(
                         btn_rect.center(),
                         egui::vec2(icon_size, icon_size),
                     );
-                    egui::Image::from_bytes(uri, themed_svg)
-                        .paint_at(ui, icon_rect);
+                    egui::Image::from_bytes(uri, themed_svg).paint_at(ui, icon_rect);
                     if btn_response.clicked() {
                         ui.ctx().copy_text(prompt.user_code.clone());
                     }
@@ -705,11 +717,9 @@ fn render_qr_code(ui: &mut egui::Ui, text: &str, size: f32) {
     };
 
     let texture_name = format!("qr_code_{}", text.len());
-    let texture = ui.ctx().load_texture(
-        texture_name,
-        color_image,
-        egui::TextureOptions::NEAREST,
-    );
+    let texture = ui
+        .ctx()
+        .load_texture(texture_name, color_image, egui::TextureOptions::NEAREST);
 
     let image = egui::Image::from_texture(egui::load::SizedTexture::from_handle(&texture))
         .fit_to_exact_size(egui::vec2(size, size))
@@ -780,7 +790,7 @@ fn render_profile_popup(
                 );
             }
 
-                    if profile_ui.device_code_prompt.is_none() {
+            if profile_ui.device_code_prompt.is_none() {
                 if let Some(message) = profile_ui.status_message {
                     let _ = text_ui.label(ui, "profile_popup_status", message, &muted_style);
                 }
@@ -788,7 +798,14 @@ fn render_profile_popup(
         });
 
     if let Some(prompt) = profile_ui.device_code_prompt {
-        render_device_code_section(ui, text_ui, prompt, output, full_action_width, &button_style);
+        render_device_code_section(
+            ui,
+            text_ui,
+            prompt,
+            output,
+            full_action_width,
+            &button_style,
+        );
         return;
     }
 
@@ -881,18 +898,14 @@ fn render_profile_popup(
                                     if text_ui
                                         .selectable_button(
                                             ui,
-                                            (
-                                                "profile_popup_account_select",
-                                                &account.profile_id,
-                                            ),
+                                            ("profile_popup_account_select", &account.profile_id),
                                             &label,
                                             account.is_active,
                                             &fill_style,
                                         )
                                         .clicked()
                                     {
-                                        output.select_account_id =
-                                            Some(account.profile_id.clone());
+                                        output.select_account_id = Some(account.profile_id.clone());
                                     }
                                 },
                             );
@@ -931,8 +944,7 @@ fn render_profile_popup(
             );
         });
     } else {
-        let half_width =
-            (full_action_width - ui.spacing().item_spacing.x) / 2.0;
+        let half_width = (full_action_width - ui.spacing().item_spacing.x) / 2.0;
         let mut half_button_style = primary_button_style.clone();
         half_button_style.min_size = egui::vec2(half_width.max(1.0), style::CONTROL_HEIGHT);
 

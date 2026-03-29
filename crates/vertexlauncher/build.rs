@@ -221,7 +221,8 @@ fn shorten_hash(hash: &str) -> &str {
 #[cfg(target_os = "windows")]
 fn compile_windows_resources() -> Result<(), String> {
     use image::{
-        ExtendedColorType, ImageEncoder, ImageReader, codecs::ico::IcoEncoder, imageops::FilterType,
+        ColorType, ImageEncoder, codecs::ico::IcoEncoder, imageops::FilterType,
+        io::Reader as ImageReader,
     };
     use std::{fs::File, io::Cursor, path::PathBuf};
 
@@ -244,7 +245,7 @@ fn compile_windows_resources() -> Result<(), String> {
             resized.as_raw(),
             resized.width(),
             resized.height(),
-            ExtendedColorType::Rgba8,
+            ColorType::Rgba8,
         )
         .map_err(|error| format!("failed to write generated .ico icon: {error}"))?;
 
