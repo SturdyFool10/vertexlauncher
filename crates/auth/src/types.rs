@@ -11,6 +11,9 @@ use crate::util::decode_base64;
 pub struct MinecraftLoginFlow {
     pub verifier: String,
     pub auth_request_uri: String,
+    pub redirect_uri: String,
+    pub token_uri: String,
+    pub scope: String,
     pub(crate) state: String,
     pub(crate) client_id: String,
 }
@@ -259,6 +262,17 @@ pub struct DeviceCodePrompt {
     pub expires_in_secs: u64,
     pub poll_interval_secs: u64,
     pub message: String,
+}
+
+impl DeviceCodePrompt {
+    pub fn verification_url(&self) -> String {
+        self.verification_uri_complete
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(self.verification_uri.as_str())
+            .to_owned()
+    }
 }
 
 /// Events produced by async device-code login polling.

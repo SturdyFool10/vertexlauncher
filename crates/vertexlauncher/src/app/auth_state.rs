@@ -1,4 +1,7 @@
-use auth::{CachedAccount, CachedAccountRenewalEvent, CachedAccountsState, DeviceCodeLoginFlow, DeviceCodePrompt, LoginEvent};
+use auth::{
+    CachedAccount, CachedAccountRenewalEvent, CachedAccountsState, DeviceCodeLoginFlow,
+    DeviceCodePrompt, LoginEvent,
+};
 use launcher_runtime as tokio_runtime;
 use launcher_ui::{notification, privacy};
 use std::collections::hash_map::DefaultHasher;
@@ -7,7 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use super::webview_sign_in;
+use super::{system_browser_sign_in, webview_sign_in};
 
 pub const REPAINT_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -18,6 +21,7 @@ pub enum AuthUiStatus {
     RefreshingActiveSession,
     Starting,
     AwaitingBrowser,
+    AwaitingExternalBrowser,
     AwaitingDeviceCode(String),
     WaitingForAuthorization,
     Error(String),
@@ -33,6 +37,9 @@ impl AuthUiStatus {
             AuthUiStatus::AwaitingBrowser => {
                 Some("Complete sign-in in the Microsoft webview window...")
             }
+            AuthUiStatus::AwaitingExternalBrowser => {
+                Some("Complete sign-in in your default browser...")
+            }
             AuthUiStatus::AwaitingDeviceCode(message) => Some(message.as_str()),
             AuthUiStatus::WaitingForAuthorization => Some("Finalizing sign-in..."),
             AuthUiStatus::Error(message) => Some(message.as_str()),
@@ -42,6 +49,7 @@ impl AuthUiStatus {
 
 enum AuthFlowEvent {
     AwaitingBrowser,
+    AwaitingExternalBrowser,
     WaitingForAuthorization,
     Completed(CachedAccount),
     Failed(String),
@@ -285,6 +293,9 @@ impl AuthState {
                     AuthFlowEvent::AwaitingBrowser => {
                         self.status = AuthUiStatus::AwaitingBrowser;
                     }
+                    AuthFlowEvent::AwaitingExternalBrowser => {
+                        self.status = AuthUiStatus::AwaitingExternalBrowser;
+                    }
                     AuthFlowEvent::WaitingForAuthorization => {
                         self.status = AuthUiStatus::WaitingForAuthorization;
                     }
@@ -456,6 +467,24 @@ impl AuthState {
 
         self.status = AuthUiStatus::Starting;
         self.device_code_flow = Some(auth::start_device_code_login(client_id));
+    }
+
+    pub fn start_system_browser_sign_in(&mut self) {
+        if self.flow.is_some() || self.renewal.is_some() {
+            return;
+        }
+
+        self.device_code_flow = None;
+        self.device_code_prompt = None;
+        self.device_code_expiry = None;
+        self.status = AuthUiStatus::Starting;
+
+        let (sender, receiver) = mpsc::channel();
+        let _ = tokio_runtime::spawn_blocking_detached(move || {
+            run_system_browser_sign_in_flow(sender);
+        });
+
+        self.flow = Some(receiver);
     }
 
     pub fn select_account(&mut self, profile_id: &str) {
@@ -1008,7 +1037,7 @@ fn run_sign_in_flow(client_id: String, sender: mpsc::Sender<AuthFlowEvent>) {
     tracing::info!(
         target: "vertexlauncher/auth/signin",
         auth_url = %webview_sign_in::sanitize_url_for_log(&flow.auth_request_uri),
-        redirect_url = %webview_sign_in::sanitize_url_for_log(auth::oauth_redirect_uri()),
+        redirect_url = %webview_sign_in::sanitize_url_for_log(&flow.redirect_uri),
         expected_state = %webview_sign_in::fingerprint_for_log(flow.expected_state()),
         "Microsoft sign-in flow initialized; opening embedded webview."
     );
@@ -1017,7 +1046,7 @@ fn run_sign_in_flow(client_id: String, sender: mpsc::Sender<AuthFlowEvent>) {
 
     let callback_url = match webview_sign_in::open_microsoft_sign_in(
         &flow.auth_request_uri,
-        auth::oauth_redirect_uri(),
+        &flow.redirect_uri,
         flow.expected_state(),
     ) {
         Ok(auth_code) => auth_code,
@@ -1042,7 +1071,103 @@ fn run_sign_in_flow(client_id: String, sender: mpsc::Sender<AuthFlowEvent>) {
 
     let _ = sender.send(AuthFlowEvent::WaitingForAuthorization);
 
-    match auth::login_finish(&callback_url, flow) {
+    finish_browser_sign_in_flow(
+        flow,
+        callback_url,
+        sender,
+        started_at,
+        "Microsoft sign-in webview returned a callback URL; exchanging tokens.",
+    );
+}
+
+fn run_system_browser_sign_in_flow(sender: mpsc::Sender<AuthFlowEvent>) {
+    let started_at = std::time::Instant::now();
+    tracing::info!(
+        target: "vertexlauncher/auth/signin/browser",
+        "Starting Microsoft system-browser sign-in flow."
+    );
+
+    let callback_listener = match system_browser_sign_in::prepare_loopback_callback_listener() {
+        Ok(callback_listener) => callback_listener,
+        Err(err) => {
+            tracing::error!(
+                target: "vertexlauncher/auth/signin/browser",
+                error = %webview_sign_in::sanitize_message_for_log(&err),
+                "Failed to allocate localhost loopback redirect URI."
+            );
+            let _ = sender.send(AuthFlowEvent::Failed(err));
+            return;
+        }
+    };
+    let flow = match auth::login_begin_with_device_code_client_redirect_uri(
+        callback_listener.redirect_uri().to_owned(),
+    ) {
+        Ok(flow) => flow,
+        Err(err) => {
+            tracing::error!(
+                target: "vertexlauncher/auth/signin/browser",
+                error = %webview_sign_in::sanitize_message_for_log(&err.to_string()),
+                "Failed to initialize Microsoft system-browser sign-in flow."
+            );
+            let _ = sender.send(AuthFlowEvent::Failed(err.to_string()));
+            return;
+        }
+    };
+
+    tracing::info!(
+        target: "vertexlauncher/auth/signin/browser",
+        auth_url = %webview_sign_in::sanitize_url_for_log(&flow.auth_request_uri),
+        redirect_url = %webview_sign_in::sanitize_url_for_log(&flow.redirect_uri),
+        expected_state = %webview_sign_in::fingerprint_for_log(flow.expected_state()),
+        "Microsoft system-browser sign-in flow initialized; opening default browser."
+    );
+
+    let _ = sender.send(AuthFlowEvent::AwaitingExternalBrowser);
+
+    let callback_url = match system_browser_sign_in::open_microsoft_sign_in(
+        &flow.auth_request_uri,
+        callback_listener,
+    ) {
+        Ok(callback_url) => callback_url,
+        Err(err) => {
+            tracing::error!(
+                target: "vertexlauncher/auth/signin/browser",
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                error = %webview_sign_in::sanitize_message_for_log(&err),
+                "Microsoft system-browser sign-in failed before returning a callback URL."
+            );
+            let _ = sender.send(AuthFlowEvent::Failed(err));
+            return;
+        }
+    };
+
+    let _ = sender.send(AuthFlowEvent::WaitingForAuthorization);
+
+    finish_browser_sign_in_flow(
+        flow,
+        callback_url,
+        sender,
+        started_at,
+        "Microsoft system-browser callback received; exchanging tokens.",
+    );
+}
+
+fn finish_browser_sign_in_flow(
+    flow: auth::MinecraftLoginFlow,
+    callback_url: String,
+    sender: mpsc::Sender<AuthFlowEvent>,
+    started_at: std::time::Instant,
+    callback_message: &str,
+) {
+    tracing::info!(
+        target: "vertexlauncher/auth/signin",
+        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        callback_url = %webview_sign_in::sanitize_url_for_log(&callback_url),
+        "{}",
+        callback_message
+    );
+
+    match auth::login_finish_from_redirect(&callback_url, flow) {
         Ok(account) => {
             tracing::info!(
                 target: "vertexlauncher/auth/signin",

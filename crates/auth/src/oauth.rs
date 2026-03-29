@@ -36,7 +36,39 @@ pub(crate) struct MicrosoftTokenResponse {
     pub(crate) refresh_token: Option<String>,
 }
 
-pub(crate) fn login_begin(client_id: String) -> Result<MinecraftLoginFlow, AuthError> {
+pub(crate) fn login_begin(
+    client_id: String,
+    redirect_uri: impl Into<String>,
+) -> Result<MinecraftLoginFlow, AuthError> {
+    login_begin_with_endpoints(
+        client_id,
+        redirect_uri,
+        LIVE_AUTHORIZE_URL.to_owned(),
+        LIVE_TOKEN_URL.to_owned(),
+        LIVE_SCOPE.to_owned(),
+    )
+}
+
+pub(crate) fn login_begin_with_device_code_credentials(
+    redirect_uri: impl Into<String>,
+) -> Result<MinecraftLoginFlow, AuthError> {
+    let (client_id, tenant) = device_code_credentials();
+    login_begin_with_endpoints(
+        client_id,
+        redirect_uri,
+        format!("{OAUTH_BASE_URL}/{tenant}/oauth2/v2.0/authorize"),
+        token_url(&tenant),
+        DEVICE_CODE_SCOPE.to_owned(),
+    )
+}
+
+fn login_begin_with_endpoints(
+    client_id: String,
+    redirect_uri: impl Into<String>,
+    authorize_url: String,
+    token_uri: String,
+    scope: String,
+) -> Result<MinecraftLoginFlow, AuthError> {
     debug!(
         target: "vertexlauncher/auth/oauth",
         "building Microsoft OAuth authorization URL"
@@ -44,16 +76,17 @@ pub(crate) fn login_begin(client_id: String) -> Result<MinecraftLoginFlow, AuthE
     let verifier = Zeroizing::new(generate_pkce_verifier());
     let challenge = pkce_challenge(&verifier);
     let state = generate_random_token(24);
+    let redirect_uri = redirect_uri.into();
 
-    let mut auth_url = Url::parse(LIVE_AUTHORIZE_URL)
+    let mut auth_url = Url::parse(&authorize_url)
         .map_err(|err| AuthError::OAuth(format!("Failed to build authorize URL: {err}")))?;
 
     {
         let mut query = auth_url.query_pairs_mut();
         query.append_pair("client_id", &client_id);
         query.append_pair("response_type", "code");
-        query.append_pair("redirect_uri", LIVE_REDIRECT_URI);
-        query.append_pair("scope", LIVE_SCOPE);
+        query.append_pair("redirect_uri", &redirect_uri);
+        query.append_pair("scope", &scope);
         query.append_pair("code_challenge", &challenge);
         query.append_pair("code_challenge_method", "S256");
         query.append_pair("state", &state);
@@ -63,6 +96,9 @@ pub(crate) fn login_begin(client_id: String) -> Result<MinecraftLoginFlow, AuthE
     Ok(MinecraftLoginFlow {
         verifier: verifier.to_string(),
         auth_request_uri: auth_url.to_string(),
+        redirect_uri,
+        token_uri,
+        scope,
         state,
         client_id,
     })
@@ -74,15 +110,15 @@ pub(crate) fn exchange_auth_code_for_microsoft_token(
     flow: &MinecraftLoginFlow,
 ) -> Result<MicrosoftTokenResponse, AuthError> {
     let response = agent
-        .post(LIVE_TOKEN_URL)
+        .post(flow.token_uri.as_str())
         .header("Accept", "application/json")
         .send_form([
             ("client_id", flow.client_id.as_str()),
             ("code", code),
             ("code_verifier", flow.verifier.as_str()),
             ("grant_type", "authorization_code"),
-            ("redirect_uri", LIVE_REDIRECT_URI),
-            ("scope", LIVE_SCOPE),
+            ("redirect_uri", flow.redirect_uri.as_str()),
+            ("scope", flow.scope.as_str()),
         ]);
 
     match response {
@@ -121,14 +157,17 @@ pub(crate) fn refresh_microsoft_token(
 
 pub(crate) fn extract_authorization_code(
     callback_url: &str,
+    expected_redirect_uri: &str,
     expected_state: &str,
 ) -> Result<String, AuthError> {
     let parsed = Url::parse(callback_url)
         .map_err(|err| AuthError::OAuth(format!("Failed to parse callback URL: {err}")))?;
-
-    if parsed.scheme() != "https"
-        || parsed.host_str() != Some("login.live.com")
-        || parsed.path() != "/oauth20_desktop.srf"
+    let expected = Url::parse(expected_redirect_uri)
+        .map_err(|err| AuthError::OAuth(format!("Failed to parse expected redirect URI: {err}")))?;
+    if parsed.scheme() != expected.scheme()
+        || parsed.host_str() != expected.host_str()
+        || parsed.port_or_known_default() != expected.port_or_known_default()
+        || parsed.path() != expected.path()
     {
         return Err(AuthError::OAuth(
             "Microsoft callback URL did not match the expected redirect URI".to_owned(),

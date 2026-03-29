@@ -609,8 +609,9 @@ pub fn maybe_run_helper_from_args() -> Result<bool, String> {
         callback_url = %sanitize_url_for_log(&callback_url),
         "Webview sign-in helper received callback URL."
     );
-    let auth_code = auth::validate_oauth_callback_code(&callback_url, &expected_state)
-        .map_err(|err| format!("Failed to validate Microsoft callback in helper: {err}"))?;
+    let auth_code =
+        auth::validate_oauth_callback_code(&callback_url, &redirect_uri, &expected_state)
+            .map_err(|err| format!("Failed to validate Microsoft callback in helper: {err}"))?;
     ipc::write_helper_response_to_stdout(&mut std::io::stdout(), &auth_code)?;
 
     tracing::info!(

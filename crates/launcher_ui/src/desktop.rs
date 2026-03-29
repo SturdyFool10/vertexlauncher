@@ -45,7 +45,9 @@ pub fn open_url(url: &str) -> Result<(), String> {
             let mut parts = program.split_whitespace();
             let cmd = parts.next().unwrap();
             let mut command = std::process::Command::new(cmd);
-            command.args(parts).arg(url)
+            command
+                .args(parts)
+                .arg(url)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());

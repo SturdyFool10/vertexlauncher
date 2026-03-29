@@ -48,6 +48,7 @@ mod import_instance_modal;
 mod native_options;
 mod platform;
 mod single_instance;
+mod system_browser_sign_in;
 mod taskbar_progress;
 mod tracing_setup;
 mod webview_runtime;
@@ -381,13 +382,7 @@ impl VertexApp {
             self.auth.cancel_device_code_sign_in();
         }
         if top_bar_output.open_device_code_browser {
-            if let Some(prompt) = self.auth.device_code_prompt() {
-                let url = prompt
-                    .verification_uri_complete
-                    .clone()
-                    .unwrap_or_else(|| prompt.verification_uri.clone());
-                let _ = launcher_ui::desktop::open_url(&url);
-            }
+            self.auth.start_system_browser_sign_in();
         }
         let mut account_switched = false;
         if let Some(profile_id) = top_bar_output.select_account_id.as_deref() {

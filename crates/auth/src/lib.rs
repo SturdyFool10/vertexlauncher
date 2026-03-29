@@ -49,6 +49,11 @@ pub fn builtin_client_id() -> Option<&'static str> {
     if value.is_empty() { None } else { Some(value) }
 }
 
+/// Returns the effective client id used for device-code sign-in.
+pub fn device_code_client_id() -> String {
+    oauth::device_code_credentials().0
+}
+
 /// Returns the redirect URI expected for browser/device OAuth callbacks.
 pub fn oauth_redirect_uri() -> &'static str {
     constants::LIVE_REDIRECT_URI
@@ -57,9 +62,10 @@ pub fn oauth_redirect_uri() -> &'static str {
 /// Extracts and validates an OAuth auth code from the Microsoft callback URL.
 pub fn validate_oauth_callback_code(
     callback_url: &str,
+    redirect_uri: &str,
     expected_state: &str,
 ) -> Result<String, AuthError> {
-    oauth::extract_authorization_code(callback_url, expected_state)
+    oauth::extract_authorization_code(callback_url, redirect_uri, expected_state)
 }
 
 /// Starts the device-code login flow on the current Tokio runtime if available.
@@ -126,8 +132,27 @@ fn failed_device_code_login_flow(message: String) -> DeviceCodeLoginFlow {
 
 /// Starts interactive browser OAuth by generating PKCE + auth request URL.
 pub fn login_begin(client_id: impl Into<String>) -> Result<MinecraftLoginFlow, AuthError> {
+    login_begin_with_redirect_uri(client_id, oauth_redirect_uri())
+}
+
+/// Starts interactive browser OAuth using the provided redirect URI.
+pub fn login_begin_with_redirect_uri(
+    client_id: impl Into<String>,
+    redirect_uri: impl Into<String>,
+) -> Result<MinecraftLoginFlow, AuthError> {
     tracing::debug!(target: "vertexlauncher/auth", "starting browser OAuth flow");
-    oauth::login_begin(client_id.into())
+    oauth::login_begin(client_id.into(), redirect_uri)
+}
+
+/// Starts interactive browser OAuth using the device-code client/app registration.
+pub fn login_begin_with_device_code_client_redirect_uri(
+    redirect_uri: impl Into<String>,
+) -> Result<MinecraftLoginFlow, AuthError> {
+    tracing::debug!(
+        target: "vertexlauncher/auth",
+        "starting browser OAuth flow with device-code client"
+    );
+    oauth::login_begin_with_device_code_credentials(redirect_uri)
 }
 
 /// Completes login from OAuth authorization code.
@@ -339,7 +364,7 @@ pub fn login_finish_from_redirect(
     callback_url: &str,
     flow: MinecraftLoginFlow,
 ) -> Result<CachedAccount, AuthError> {
-    let code = oauth::extract_authorization_code(callback_url, &flow.state)?;
+    let code = oauth::extract_authorization_code(callback_url, &flow.redirect_uri, &flow.state)?;
     login_finish(&code, flow)
 }
 
