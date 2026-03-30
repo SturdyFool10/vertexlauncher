@@ -11,9 +11,30 @@ use crate::{
 const ACTION_COPY_SELECTION: &str = "copy_selection";
 const ACTION_CLEAR_SELECTION: &str = "clear_selection";
 const ACTION_COPY_LINE: &str = "copy_line";
+const LOG_SELECTION_AUTOSCROLL_MARGIN: f32 = 32.0;
+const LOG_SELECTION_AUTOSCROLL_MAX_SPEED: f32 = 1100.0;
 
 fn log_console_context_menu(message: impl AsRef<str>) {
     eprintln!("[console_context_menu] {}", message.as_ref());
+}
+
+fn edge_autoscroll_speed(pointer_pos: f32, min: f32, max: f32, margin: f32) -> f32 {
+    if margin <= 0.0 {
+        return 0.0;
+    }
+
+    let normalized = if pointer_pos < min + margin {
+        ((min + margin - pointer_pos) / margin).clamp(0.0, 1.0)
+    } else if pointer_pos > max - margin {
+        -((pointer_pos - (max - margin)) / margin).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    // Smoothstep keeps the ramp gentle near the threshold and stronger at the edge.
+    let magnitude = normalized.abs();
+    let eased = magnitude * magnitude * (3.0 - 2.0 * magnitude);
+    normalized.signum() * eased * LOG_SELECTION_AUTOSCROLL_MAX_SPEED
 }
 
 pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
@@ -380,11 +401,12 @@ fn render_virtualized_log_lines(
 
     let mut clear_selection = false;
     let mut viewport_has_focus = false;
+    let selection_active = selection_state.dragging || selection_state.has_selection();
 
     egui::ScrollArea::both()
         .id_salt((text_base_id, "virtual_log_scroll"))
         .auto_shrink([false, false])
-        .stick_to_bottom(stick_to_bottom)
+        .stick_to_bottom(stick_to_bottom && !selection_active)
         .show_viewport(ui, |ui, viewport| {
             let total_rows = lines.len();
             let visible_rows = ((viewport.height() / row_height).ceil() as usize).max(1);
@@ -397,7 +419,8 @@ fn render_virtualized_log_lines(
             // causes it to land just above or just below the true bottom on alternating
             // frames, which flips first_row by ±1 and produces the visible jitter.
             let max_scroll_y = (total_rows as f32 * row_height - viewport.height()).max(0.0);
-            let at_bottom = stick_to_bottom && viewport.min.y >= max_scroll_y - row_height;
+            let at_bottom =
+                stick_to_bottom && !selection_active && viewport.min.y >= max_scroll_y - row_height;
             let first_row = if at_bottom {
                 total_rows.saturating_sub(visible_rows)
             } else {
@@ -480,6 +503,52 @@ fn render_virtualized_log_lines(
                 if let Some(row) = row_hits.iter().find(|row| row_contains_text(row, pointer_pos)) {
                     current_hovered_line = Some(row.line_index);
                     ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Text);
+                }
+            }
+
+            if selection_active {
+                let (modifiers, smooth_scroll_delta, pointer_pos) = ui.input(|i| {
+                    (
+                        i.modifiers,
+                        i.smooth_scroll_delta,
+                        i.pointer.hover_pos().or_else(|| i.pointer.latest_pos()),
+                    )
+                });
+                let pointer_over_viewport =
+                    pointer_pos.is_some_and(|pointer_pos| clip_rect.contains(pointer_pos));
+                if pointer_over_viewport {
+                    let vertical_scroll_delta = smooth_scroll_delta.y;
+                    let horizontal_scroll_delta = if smooth_scroll_delta.x.abs() > f32::EPSILON {
+                        smooth_scroll_delta.x
+                    } else if modifiers.shift && smooth_scroll_delta.y.abs() > f32::EPSILON {
+                        smooth_scroll_delta.y
+                    } else {
+                        0.0
+                    };
+                    let horizontal_uses_vertical_wheel = modifiers.shift
+                        && smooth_scroll_delta.x.abs() <= f32::EPSILON
+                        && horizontal_scroll_delta.abs() > f32::EPSILON;
+                    let scroll_delta = vec2(
+                        if horizontal_scroll_delta.abs() > f32::EPSILON {
+                            -horizontal_scroll_delta
+                        } else {
+                            0.0
+                        },
+                        if !horizontal_uses_vertical_wheel
+                            && vertical_scroll_delta.abs() > f32::EPSILON
+                        {
+                            -vertical_scroll_delta
+                        } else {
+                            0.0
+                        },
+                    );
+                    if scroll_delta.x.abs() > f32::EPSILON || scroll_delta.y.abs() > f32::EPSILON
+                    {
+                        ui.scroll_with_delta_animation(
+                            scroll_delta,
+                            egui::style::ScrollAnimation::none(),
+                        );
+                    }
                 }
             }
 
@@ -579,9 +648,39 @@ fn render_virtualized_log_lines(
             }
 
             if selection_state.dragging && ui.input(|i| i.pointer.primary_down()) {
-                if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                if let Some(pointer_pos) =
+                    ui.input(|i| i.pointer.latest_pos().or_else(|| i.pointer.interact_pos()))
+                {
                     if let Some(cursor) = cursor_from_visible_rows(&row_hits, pointer_pos) {
                         selection_state.head = Some(cursor);
+                    }
+                    let vertical_margin =
+                        LOG_SELECTION_AUTOSCROLL_MARGIN.min(clip_rect.height() * 0.25);
+                    let horizontal_margin =
+                        LOG_SELECTION_AUTOSCROLL_MARGIN.min(clip_rect.width() * 0.25);
+                    if vertical_margin > 0.0 || horizontal_margin > 0.0 {
+                        let dt = ui.input(|i| i.stable_dt).max(1.0 / 240.0);
+                        let autoscroll_delta_x = edge_autoscroll_speed(
+                            pointer_pos.x,
+                            clip_rect.left(),
+                            clip_rect.right(),
+                            horizontal_margin,
+                        ) * dt;
+                        let autoscroll_delta_y = edge_autoscroll_speed(
+                            pointer_pos.y,
+                            clip_rect.top(),
+                            clip_rect.bottom(),
+                            vertical_margin,
+                        ) * dt;
+                        if autoscroll_delta_x.abs() > f32::EPSILON
+                            || autoscroll_delta_y.abs() > f32::EPSILON
+                        {
+                            ui.scroll_with_delta_animation(
+                                vec2(autoscroll_delta_x, autoscroll_delta_y),
+                                egui::style::ScrollAnimation::none(),
+                            );
+                            ui.ctx().request_repaint();
+                        }
                     }
                 }
             }
@@ -597,10 +696,22 @@ fn render_virtualized_log_lines(
         selection_state.clear();
     }
 
-    let copy_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
-    let copy_requested = viewport_has_focus
-        && selection_state.has_selection()
-        && ui.input_mut(|i| i.consume_shortcut(&copy_shortcut));
+    let copy_requested = selection_state.has_selection()
+        && ui.input_mut(|i| {
+            let command_shortcut =
+                egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
+            let ctrl_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::C);
+            let shortcut_copy =
+                i.consume_shortcut(&command_shortcut) || i.consume_shortcut(&ctrl_shortcut);
+            let logical_copy = i.consume_key(egui::Modifiers::NONE, egui::Key::Copy);
+            let mut event_copy = false;
+            i.events.retain(|event| {
+                let is_copy = matches!(event, egui::Event::Copy);
+                event_copy |= is_copy;
+                !is_copy
+            });
+            shortcut_copy || logical_copy || event_copy
+        });
 
     if copy_requested {
         if let Some(text) = selected_log_text(lines, &selection_state) {
