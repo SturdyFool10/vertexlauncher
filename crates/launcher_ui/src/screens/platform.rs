@@ -1,8 +1,8 @@
-use config::Config;
+use config::{Config, WindowsBackdropType};
 use egui::Ui;
 use textui::TextUi;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::ui::components::settings_widgets;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub(crate) fn current_platform_specific_section() -> Option<PlatformSpecificSect
         return Some(PlatformSpecificSection {
             id: "windows",
             heading: "Windows",
-            launcher_description: "Reserved for Windows-specific launcher settings.",
+            launcher_description: "Windows-specific window composition and compatibility settings.",
             instance_description: "Reserved for Windows-specific instance settings.",
         });
     }
@@ -53,16 +53,51 @@ pub(crate) fn render_launcher_platform_settings(
     text_ui: &mut TextUi,
     config: &mut Config,
 ) {
+    #[cfg(target_os = "windows")]
+    {
+        render_windows_launcher_settings(ui, text_ui, config);
+        return;
+    }
+
     #[cfg(target_os = "linux")]
     {
         render_linux_launcher_settings(ui, text_ui, config);
         return;
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         let _ = (ui, text_ui, config);
     }
+}
+
+#[cfg(target_os = "windows")]
+fn render_windows_launcher_settings(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let mut selected_backdrop = WindowsBackdropType::ALL
+        .iter()
+        .position(|value| *value == config.windows_backdrop_type())
+        .unwrap_or(0);
+    let backdrop_labels: Vec<&str> = WindowsBackdropType::ALL
+        .iter()
+        .map(|value| value.label())
+        .collect();
+    let backdrop_response = settings_widgets::dropdown_row(
+        text_ui,
+        ui,
+        "windows_backdrop_type",
+        "Window Backdrop Type",
+        Some(
+            "Choose the Windows composition material. Auto tries host backdrop, Acrylic, Mica, Mica Alt, then legacy blur.",
+        ),
+        &mut selected_backdrop,
+        &backdrop_labels,
+    );
+    if backdrop_response.changed()
+        && let Some(next) = WindowsBackdropType::ALL.get(selected_backdrop).copied()
+    {
+        config.set_windows_backdrop_type(next);
+    }
+    ui.add_space(crate::ui::style::SPACE_MD);
 }
 
 pub(crate) fn detect_total_memory_mib() -> Option<u128> {

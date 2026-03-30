@@ -177,7 +177,11 @@ impl VertexApp {
                 "macOS safety fallback",
             );
         }
-        if let Err(error) = window_effects::apply(cc, effective_window_blur_enabled(&config)) {
+        if let Err(error) = window_effects::apply(
+            cc,
+            effective_window_blur_enabled(&config),
+            config.windows_backdrop_type(),
+        ) {
             disable_window_blur_for_startup(
                 cc,
                 &mut config,
@@ -293,7 +297,7 @@ impl VertexApp {
         poll_discover_install_result(self);
         self.sync_theme_from_config();
         self.theme
-            .apply(ctx, effective_window_blur_enabled(&self.config));
+            .apply(ctx, effective_ui_opacity_percent(&self.config));
         self.auth
             .set_streamer_mode(self.config.streamer_mode_enabled());
         notification::set_streamer_mode(self.config.streamer_mode_enabled());
@@ -668,6 +672,13 @@ impl VertexApp {
         self.fonts
             .ensure_selected_font_is_available(&mut self.config);
         if self.config != previous_config {
+            if transparent_viewport_enabled(&self.config)
+                != transparent_viewport_enabled(&previous_config)
+            {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Transparent(
+                    transparent_viewport_enabled(&self.config),
+                ));
+            }
             queue_config_save(self);
             self.fonts
                 .apply_from_config(ctx, &self.config, &mut self.text_ui);
@@ -864,7 +875,31 @@ fn sleep_precise(duration: Duration) {
 }
 
 fn effective_window_blur_enabled(config: &Config) -> bool {
-    config.window_blur_enabled() && window_effects::platform_supports_blur()
+    if !config.window_blur_enabled() || !window_effects::platform_supports_blur() {
+        return false;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return true;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        true
+    }
+}
+
+fn transparent_viewport_enabled(config: &Config) -> bool {
+    effective_window_blur_enabled(config)
+}
+
+fn effective_ui_opacity_percent(config: &Config) -> u8 {
+    if effective_window_blur_enabled(config) {
+        config.ui_opacity_percent()
+    } else {
+        100
+    }
 }
 
 fn disable_window_blur_for_startup(
@@ -880,7 +915,9 @@ fn disable_window_blur_for_startup(
 
     config.set_window_blur_enabled(false);
     cc.egui_ctx
-        .send_viewport_cmd(egui::ViewportCommand::Transparent(false));
+        .send_viewport_cmd(egui::ViewportCommand::Transparent(
+            transparent_viewport_enabled(config),
+        ));
     notification::warn!("window_blur", "{message}");
 
     if !config_loaded_from_disk {
@@ -2359,6 +2396,17 @@ impl eframe::App for VertexApp {
             log_unexpected_panic("ui update", payload.as_ref());
             resume_unwind(payload);
         }
+    }
+
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        #[cfg(target_os = "windows")]
+        {
+            if transparent_viewport_enabled(&self.config) {
+                return egui::Rgba::TRANSPARENT.to_array();
+            }
+        }
+
+        egui::Rgba::from(visuals.panel_fill).to_array()
     }
 }
 

@@ -5,12 +5,17 @@ const MODAL_INNER_MARGIN: i8 = 14;
 const MODAL_SCRIM_ALPHA: u8 = 160;
 
 pub fn show_scrim(ctx: &Context, id: impl std::hash::Hash, viewport_rect: Rect) {
-    egui::Area::new(Id::new(id))
+    let area_id = Id::new((&id, "modal_scrim_area"));
+    let blocker_id = Id::new((&id, "modal_scrim_blocker"));
+    egui::Area::new(area_id)
         .order(Order::Foreground)
         .fixed_pos(viewport_rect.min)
+        .interactable(true)
         .show(ctx, |ui| {
+            let local_rect = Rect::from_min_size(egui::Pos2::ZERO, viewport_rect.size());
+            let _ = ui.interact(local_rect, blocker_id, egui::Sense::click_and_drag());
             ui.painter().rect_filled(
-                viewport_rect,
+                local_rect,
                 CornerRadius::ZERO,
                 Color32::from_rgba_premultiplied(0, 0, 0, MODAL_SCRIM_ALPHA),
             );

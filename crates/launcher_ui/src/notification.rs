@@ -278,8 +278,14 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi, expiry_bars_empt
             let mut dismissed_ids = Vec::new();
 
             for (index, entry) in entries.iter().enumerate() {
+                let base = ui.visuals().window_fill;
                 let frame = Frame::new()
-                    .fill(ui.visuals().window_fill)
+                    .fill(Color32::from_rgba_premultiplied(
+                        base.r(),
+                        base.g(),
+                        base.b(),
+                        255,
+                    ))
                     .stroke(Stroke::new(1.0, ui.visuals().window_stroke.color))
                     .corner_radius(CornerRadius::same(10))
                     .inner_margin(Margin::same(10));

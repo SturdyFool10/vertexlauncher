@@ -9,6 +9,8 @@ use std::path::Path;
 pub const UI_FONT_SIZE_MIN: f32 = 10.0;
 pub const UI_FONT_SIZE_MAX: f32 = 42.0;
 pub const UI_FONT_SIZE_STEP: f32 = 0.5;
+pub const UI_OPACITY_PERCENT_MIN: u8 = 0;
+pub const UI_OPACITY_PERCENT_MAX: u8 = 100;
 pub const UI_FONT_WEIGHT_MIN: i32 = 100;
 pub const UI_FONT_WEIGHT_MAX: i32 = 900;
 pub const UI_FONT_WEIGHT_STEP: i32 = 100;
@@ -105,6 +107,64 @@ impl SvgAaMode {
             SvgAaMode::Ultra => 4,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsTransparencyLevel {
+    Solid,
+    Low,
+    Medium,
+    High,
+}
+
+impl WindowsTransparencyLevel {
+    pub const fn ui_opacity_percent(self) -> u8 {
+        match self {
+            WindowsTransparencyLevel::Solid => 100,
+            WindowsTransparencyLevel::Low => 70,
+            WindowsTransparencyLevel::Medium => 50,
+            WindowsTransparencyLevel::High => 30,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowsBackdropType {
+    Auto,
+    Mica,
+    Acrylic,
+    MicaAlt,
+    LegacyBlur,
+}
+
+impl WindowsBackdropType {
+    pub const ALL: [WindowsBackdropType; 5] = [
+        WindowsBackdropType::Auto,
+        WindowsBackdropType::Mica,
+        WindowsBackdropType::Acrylic,
+        WindowsBackdropType::MicaAlt,
+        WindowsBackdropType::LegacyBlur,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            WindowsBackdropType::Auto => "Auto",
+            WindowsBackdropType::Mica => "Mica",
+            WindowsBackdropType::Acrylic => "Acrylic",
+            WindowsBackdropType::MicaAlt => "Mica Alt",
+            WindowsBackdropType::LegacyBlur => "Legacy Blur",
+        }
+    }
+}
+
+const fn default_windows_backdrop_type() -> WindowsBackdropType {
+    WindowsBackdropType::Auto
+}
+
+const fn default_ui_opacity_percent() -> u8 {
+    100
 }
 
 /// File format choice for config creation.
@@ -648,6 +708,12 @@ pub struct Config {
     low_power_gpu_preferred: bool,
     streamer_mode_enabled: bool,
     window_blur_enabled: bool,
+    #[serde(default = "default_windows_backdrop_type")]
+    windows_backdrop_type: WindowsBackdropType,
+    #[serde(default = "default_ui_opacity_percent")]
+    ui_opacity_percent: u8,
+    #[serde(default, rename = "windows_transparency_level", skip_serializing)]
+    legacy_windows_transparency_level: Option<WindowsTransparencyLevel>,
     linux_set_opengl_driver: bool,
     linux_use_zink_driver: bool,
     theme_id: String,
@@ -819,6 +885,22 @@ impl Config {
     /// Enables or disables platform blur effects.
     pub fn set_window_blur_enabled(&mut self, enabled: bool) {
         self.window_blur_enabled = enabled;
+    }
+
+    pub fn windows_backdrop_type(&self) -> WindowsBackdropType {
+        self.windows_backdrop_type
+    }
+
+    pub fn set_windows_backdrop_type(&mut self, value: WindowsBackdropType) {
+        self.windows_backdrop_type = value;
+    }
+
+    pub fn ui_opacity_percent(&self) -> u8 {
+        self.ui_opacity_percent
+    }
+
+    pub fn set_ui_opacity_percent(&mut self, value: u8) {
+        self.ui_opacity_percent = value.clamp(UI_OPACITY_PERCENT_MIN, UI_OPACITY_PERCENT_MAX);
     }
 
     /// Returns whether launch commands should explicitly manage the Linux OpenGL driver.
@@ -998,7 +1080,18 @@ impl Config {
 
     /// Normalizes all config values into launcher-supported ranges/defaults.
     pub fn normalize(&mut self) {
+        if !WindowsBackdropType::ALL.contains(&self.windows_backdrop_type) {
+            self.windows_backdrop_type = default_windows_backdrop_type();
+        }
+        if let Some(level) = self.legacy_windows_transparency_level.take() {
+            if self.ui_opacity_percent == default_ui_opacity_percent() {
+                self.ui_opacity_percent = level.ui_opacity_percent();
+            }
+        }
         self.ui_font_family.normalize();
+        self.ui_opacity_percent = self
+            .ui_opacity_percent
+            .clamp(UI_OPACITY_PERCENT_MIN, UI_OPACITY_PERCENT_MAX);
         self.ui_font_size = self.ui_font_size.clamp(UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX);
         self.skin_preview_motion_blur_amount = self.skin_preview_motion_blur_amount.clamp(
             SKIN_PREVIEW_MOTION_BLUR_AMOUNT_MIN,
@@ -1051,6 +1144,9 @@ impl Config {
             low_power_gpu_preferred,
             streamer_mode_enabled,
             window_blur_enabled,
+            windows_backdrop_type: _,
+            ui_opacity_percent: _,
+            legacy_windows_transparency_level: _,
             linux_set_opengl_driver: _,
             linux_use_zink_driver: _,
             theme_id: _,
@@ -1144,6 +1240,9 @@ impl Config {
             low_power_gpu_preferred: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
+            windows_backdrop_type: _,
+            ui_opacity_percent: _,
+            legacy_windows_transparency_level: _,
             linux_set_opengl_driver: _,
             linux_use_zink_driver: _,
             theme_id: _,
@@ -1191,6 +1290,9 @@ impl Config {
             low_power_gpu_preferred: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
+            windows_backdrop_type: _,
+            ui_opacity_percent: _,
+            legacy_windows_transparency_level: _,
             linux_set_opengl_driver: _,
             linux_use_zink_driver: _,
             theme_id: _,
@@ -1246,6 +1348,9 @@ impl Config {
             low_power_gpu_preferred: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
+            windows_backdrop_type: _,
+            ui_opacity_percent: _,
+            legacy_windows_transparency_level: _,
             linux_set_opengl_driver: _,
             linux_use_zink_driver: _,
             theme_id: _,
@@ -1302,6 +1407,9 @@ impl Config {
             low_power_gpu_preferred: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
+            windows_backdrop_type: _,
+            ui_opacity_percent: _,
+            legacy_windows_transparency_level: _,
             linux_set_opengl_driver: _,
             linux_use_zink_driver: _,
             theme_id: _,
@@ -1369,6 +1477,9 @@ impl Default for Config {
             low_power_gpu_preferred: true,
             streamer_mode_enabled: false,
             window_blur_enabled: !cfg!(target_os = "macos"),
+            windows_backdrop_type: default_windows_backdrop_type(),
+            ui_opacity_percent: default_ui_opacity_percent(),
+            legacy_windows_transparency_level: None,
             linux_set_opengl_driver: false,
             linux_use_zink_driver: false,
             theme_id: "matrix_oled".to_owned(),

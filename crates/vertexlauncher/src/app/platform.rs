@@ -7,16 +7,22 @@ pub(crate) struct StartupGraphicsConfig {
     pub backends: wgpu::Backends,
 }
 
-pub(crate) fn startup_graphics_config() -> StartupGraphicsConfig {
+pub(crate) fn startup_graphics_config(transparent_viewport: bool) -> StartupGraphicsConfig {
     StartupGraphicsConfig {
         renderer: eframe::Renderer::Wgpu,
         hardware_acceleration: eframe::HardwareAcceleration::Required,
-        backends: startup_backends(),
+        backends: startup_backends(transparent_viewport),
     }
 }
 
 pub(crate) fn log_startup_graphics_choice(config: StartupGraphicsConfig) {
-    let _ = config;
+    tracing::info!(
+        target: "vertexlauncher/app/graphics",
+        renderer = ?config.renderer,
+        hardware_acceleration = ?config.hardware_acceleration,
+        backends = ?config.backends,
+        "Startup graphics configuration selected."
+    );
 }
 
 pub(crate) fn detect_cpu_name() -> String {
@@ -124,14 +130,25 @@ pub(crate) fn detect_total_memory() -> String {
     "Unknown".to_owned()
 }
 
-fn startup_backends() -> wgpu::Backends {
+fn startup_backends(transparent_viewport: bool) -> wgpu::Backends {
     #[cfg(target_os = "macos")]
     {
+        let _ = transparent_viewport;
         return wgpu::Backends::METAL;
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
+        if transparent_viewport {
+            return wgpu::Backends::DX12;
+        }
+
+        return wgpu::Backends::DX12 | wgpu::Backends::VULKAN;
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let _ = transparent_viewport;
         return wgpu::Backends::VULKAN | wgpu::Backends::METAL | wgpu::Backends::DX12;
     }
 }

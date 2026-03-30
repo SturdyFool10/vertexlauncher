@@ -1,5 +1,6 @@
 #![cfg_attr(target_os = "macos", allow(unexpected_cfgs))]
 
+use config::WindowsBackdropType;
 use eframe::CreationContext;
 
 /// Returns whether the current target should opt into native blur effects.
@@ -18,18 +19,42 @@ pub const fn platform_supports_blur() -> bool {
     }
 }
 
+/// Returns whether native blur needs an alpha-capable transparent viewport.
+///
+/// On Windows, DWM backdrop attributes do not require requesting a transparent
+/// swapchain from wgpu. On Linux compositors, transparency is typically needed
+/// for blur regions to be visible.
+pub const fn blur_requires_transparent_viewport() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        true
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 /// Applies platform-specific window blur/backdrop effects when enabled.
-pub fn apply(cc: &CreationContext<'_>, blur_enabled: bool) -> Result<(), String> {
+pub fn apply(
+    cc: &CreationContext<'_>,
+    blur_enabled: bool,
+    windows_backdrop_type: WindowsBackdropType,
+) -> Result<(), String> {
     if !blur_enabled || !platform_supports_blur() {
         return Ok(());
     }
 
-    apply_impl(cc)
+    apply_impl(cc, windows_backdrop_type)
 }
 
-fn apply_impl(cc: &CreationContext<'_>) -> Result<(), String> {
+fn apply_impl(
+    cc: &CreationContext<'_>,
+    windows_backdrop_type: WindowsBackdropType,
+) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    return windows::apply(cc);
+    return windows::apply(cc, windows_backdrop_type);
     #[cfg(target_os = "linux")]
     return linux::apply(cc);
     #[cfg(target_os = "macos")]
@@ -41,16 +66,54 @@ fn apply_impl(cc: &CreationContext<'_>) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 mod windows {
+    use config::WindowsBackdropType;
+    use core::ffi::c_void;
     use core::mem::size_of;
     use eframe::CreationContext;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWM_BB_ENABLE, DWM_BLURBEHIND, DwmEnableBlurBehindWindow, DwmSetWindowAttribute,
+    };
 
     const DWMWA_SYSTEMBACKDROP_TYPE: i32 = 38;
+    const DWMWA_REDIRECTIONBITMAP_ALPHA: i32 = 39;
+    const DWMWA_USE_HOSTBACKDROPBRUSH: i32 = 17;
+    const DWMWA_MICA_EFFECT: i32 = 1029;
+    const DWMSBT_AUTO: i32 = 0;
+    const DWMSBT_MAINWINDOW: i32 = 2;
     const DWMSBT_TRANSIENTWINDOW: i32 = 3;
+    const DWMSBT_TABBEDWINDOW: i32 = 4;
+    const WCA_ACCENT_POLICY: i32 = 19;
+    const ACCENT_FLAG_DRAW_ALL_BORDERS: u32 = 0x20 | 0x40 | 0x80 | 0x100;
+    const ACCENT_ENABLE_BLURBEHIND: i32 = 3;
+    const ACCENT_ENABLE_ACRYLICBLURBEHIND: i32 = 4;
+    const ACCENT_ENABLE_HOSTBACKDROP: i32 = 5;
 
-    pub fn apply(cc: &CreationContext<'_>) -> Result<(), String> {
+    #[repr(C)]
+    struct AccentPolicy {
+        accent_state: i32,
+        accent_flags: u32,
+        gradient_color: u32,
+        animation_id: u32,
+    }
+
+    #[repr(C)]
+    struct WindowCompositionAttribData {
+        attrib: i32,
+        pv_data: *mut c_void,
+        cb_data: usize,
+    }
+
+    unsafe extern "system" {
+        fn GetModuleHandleA(module_name: *const u8) -> isize;
+        fn GetProcAddress(module: isize, proc_name: *const u8) -> *const c_void;
+    }
+
+    pub fn apply(
+        cc: &CreationContext<'_>,
+        windows_backdrop_type: WindowsBackdropType,
+    ) -> Result<(), String> {
         let window_handle = cc
             .window_handle()
             .map_err(|error| format!("window handle unavailable: {error}"))?;
@@ -58,7 +121,168 @@ mod windows {
             return Err("unsupported window handle for Windows blur".to_owned());
         };
         let hwnd: HWND = handle.hwnd.get() as HWND;
-        let backdrop_type = DWMSBT_TRANSIENTWINDOW;
+        let _ = set_bool_window_attribute(hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, true);
+        let _ = set_bool_window_attribute(hwnd, DWMWA_REDIRECTIONBITMAP_ALPHA, true);
+        apply_backdrop_with_fallback(hwnd, windows_backdrop_type)
+    }
+
+    fn apply_backdrop_with_fallback(
+        hwnd: HWND,
+        windows_backdrop_type: WindowsBackdropType,
+    ) -> Result<(), String> {
+        let mut failures = Vec::new();
+        let gradient_color = default_gradient_color();
+
+        let attempts: Vec<WindowsBackdropType> =
+            if matches!(windows_backdrop_type, WindowsBackdropType::Auto) {
+                vec![
+                    WindowsBackdropType::Acrylic,
+                    WindowsBackdropType::Mica,
+                    WindowsBackdropType::MicaAlt,
+                    WindowsBackdropType::LegacyBlur,
+                ]
+            } else {
+                vec![windows_backdrop_type]
+            };
+
+        for attempt in &attempts {
+            if apply_specific_backdrop(hwnd, *attempt, gradient_color).is_ok() {
+                tracing::info!(
+                    target: "vertexlauncher/window_blur",
+                    backdrop = %attempt.label(),
+                    "Windows backdrop applied."
+                );
+                return Ok(());
+            }
+        }
+
+        for attempt in attempts {
+            if let Err(err) = apply_specific_backdrop(hwnd, attempt, gradient_color) {
+                failures.push(format!("{}: {err}", attempt.label()));
+            }
+        }
+
+        Err(format!(
+            "Windows blur/backdrop APIs were rejected by this system: {}",
+            failures.join(" | ")
+        ))
+    }
+
+    fn apply_specific_backdrop(
+        hwnd: HWND,
+        backdrop_type: WindowsBackdropType,
+        gradient_color: u32,
+    ) -> Result<(), String> {
+        match backdrop_type {
+            WindowsBackdropType::Auto => {
+                if set_system_backdrop(hwnd, DWMSBT_AUTO).is_ok() {
+                    Ok(())
+                } else {
+                    Err("DWMSBT_AUTO was rejected".to_owned())
+                }
+            }
+            WindowsBackdropType::Mica => {
+                if set_system_backdrop(hwnd, DWMSBT_MAINWINDOW).is_ok()
+                    || set_mica_effect(hwnd).is_ok()
+                {
+                    Ok(())
+                } else {
+                    Err("Mica APIs were rejected".to_owned())
+                }
+            }
+            WindowsBackdropType::Acrylic => {
+                if set_system_backdrop(hwnd, DWMSBT_TRANSIENTWINDOW).is_ok()
+                    || set_window_accent(
+                        hwnd,
+                        ACCENT_ENABLE_ACRYLICBLURBEHIND,
+                        ACCENT_FLAG_DRAW_ALL_BORDERS,
+                        gradient_color,
+                    )
+                    .is_ok()
+                    || set_window_accent(
+                        hwnd,
+                        ACCENT_ENABLE_HOSTBACKDROP,
+                        ACCENT_FLAG_DRAW_ALL_BORDERS,
+                        gradient_color,
+                    )
+                    .is_ok()
+                {
+                    Ok(())
+                } else {
+                    Err("Acrylic APIs were rejected".to_owned())
+                }
+            }
+            WindowsBackdropType::MicaAlt => {
+                if set_system_backdrop(hwnd, DWMSBT_TABBEDWINDOW).is_ok() {
+                    Ok(())
+                } else {
+                    Err("Mica Alt API was rejected".to_owned())
+                }
+            }
+            WindowsBackdropType::LegacyBlur => {
+                if set_window_accent(
+                    hwnd,
+                    ACCENT_ENABLE_BLURBEHIND,
+                    ACCENT_FLAG_DRAW_ALL_BORDERS,
+                    gradient_color,
+                )
+                .is_ok()
+                    || set_legacy_blur(hwnd).is_ok()
+                {
+                    Ok(())
+                } else {
+                    Err("Legacy blur APIs were rejected".to_owned())
+                }
+            }
+        }
+    }
+
+    fn set_window_accent(
+        hwnd: HWND,
+        accent_state: i32,
+        accent_flags: u32,
+        gradient_color: u32,
+    ) -> Result<(), String> {
+        type SetWindowCompositionAttributeFn =
+            unsafe extern "system" fn(HWND, *mut WindowCompositionAttribData) -> i32;
+
+        let user32 = unsafe { GetModuleHandleA(b"user32.dll\0".as_ptr()) };
+        if user32 == 0 {
+            return Err("GetModuleHandleA(user32.dll) failed".to_owned());
+        }
+        let proc = unsafe { GetProcAddress(user32, b"SetWindowCompositionAttribute\0".as_ptr()) };
+        if proc.is_null() {
+            return Err("SetWindowCompositionAttribute is unavailable".to_owned());
+        }
+        let set_window_composition_attribute: SetWindowCompositionAttributeFn =
+            unsafe { std::mem::transmute(proc) };
+
+        let mut policy = AccentPolicy {
+            accent_state,
+            accent_flags,
+            gradient_color,
+            animation_id: 0,
+        };
+        let mut data = WindowCompositionAttribData {
+            attrib: WCA_ACCENT_POLICY,
+            pv_data: (&mut policy as *mut AccentPolicy).cast::<c_void>(),
+            cb_data: size_of::<AccentPolicy>(),
+        };
+        let ok = unsafe { set_window_composition_attribute(hwnd, &mut data as *mut _) };
+        if ok != 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "SetWindowCompositionAttribute failed for accent_state={accent_state}"
+            ))
+        }
+    }
+
+    const fn default_gradient_color() -> u32 {
+        0x70000000
+    }
+
+    fn set_system_backdrop(hwnd: HWND, backdrop_type: i32) -> Result<(), String> {
         let result = unsafe {
             DwmSetWindowAttribute(
                 hwnd,
@@ -67,13 +291,66 @@ mod windows {
                 size_of::<i32>() as u32,
             )
         };
-
-        if result != 0 {
-            return Err(format!(
-                "Windows backdrop API rejected the blur request ({result:#x})"
-            ));
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "DWMWA_SYSTEMBACKDROP_TYPE rejected value {backdrop_type} ({result:#x})"
+            ))
         }
-        Ok(())
+    }
+
+    fn set_bool_window_attribute(hwnd: HWND, attribute: i32, value: bool) -> Result<(), String> {
+        let as_bool: i32 = if value { 1 } else { 0 };
+        let result = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute as _,
+                &as_bool as *const _ as *const _,
+                size_of::<i32>() as u32,
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "DwmSetWindowAttribute bool attr {attribute} rejected value {as_bool} ({result:#x})"
+            ))
+        }
+    }
+
+    fn set_mica_effect(hwnd: HWND) -> Result<(), String> {
+        let enabled: i32 = 1;
+        let result = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_MICA_EFFECT as _,
+                &enabled as *const _ as *const _,
+                size_of::<i32>() as u32,
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "DWMWA_MICA_EFFECT attribute was rejected ({result:#x})"
+            ))
+        }
+    }
+
+    fn set_legacy_blur(hwnd: HWND) -> Result<(), String> {
+        let blur_behind = DWM_BLURBEHIND {
+            dwFlags: DWM_BB_ENABLE,
+            fEnable: 1,
+            hRgnBlur: std::ptr::null_mut(),
+            fTransitionOnMaximized: 0,
+        };
+        let result = unsafe { DwmEnableBlurBehindWindow(hwnd, &blur_behind) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(format!("DwmEnableBlurBehindWindow failed ({result:#x})"))
+        }
     }
 }
 

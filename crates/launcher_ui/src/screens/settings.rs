@@ -65,6 +65,7 @@ fn render_settings_contents(
             render_skin_preview_setting(ui, text_ui, config);
             render_svg_aa_setting(ui, text_ui, config);
             render_window_blur_setting(ui, text_ui, config);
+            render_ui_opacity_setting(ui, text_ui, config);
             render_selected_toggles(
                 ui,
                 text_ui,
@@ -253,7 +254,7 @@ fn render_settings_section(
 
     ui.add_space(style::SPACE_XL);
     egui::Frame::new()
-        .fill(ui.visuals().widgets.noninteractive.bg_fill)
+        .fill(ui.visuals().faint_bg_color)
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
         .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
         .inner_margin(egui::Margin::same(style::SPACE_XL as i8))
@@ -570,6 +571,48 @@ fn render_window_blur_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Co
             config.set_window_blur_enabled(value);
         }
         ui.add_space(style::SPACE_MD);
+    }
+}
+
+fn render_ui_opacity_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let opacity_active = ui_opacity_setting_active(config);
+    let mut opacity_percent = config.ui_opacity_percent() as u128;
+    let response = ui
+        .add_enabled_ui(opacity_active, |ui| {
+            settings_widgets::u128_slider_with_input_row(
+                text_ui,
+                ui,
+                "ui_opacity_percent",
+                "UI Opacity",
+                Some(
+                    "Only active while native window blur is supported and enabled. 100% is fully opaque and 0% is fully transparent.",
+                ),
+                &mut opacity_percent,
+                0,
+                100,
+                1,
+            )
+        })
+        .inner;
+    if response.changed() {
+        config.set_ui_opacity_percent(opacity_percent as u8);
+    }
+    ui.add_space(style::SPACE_MD);
+}
+
+fn ui_opacity_setting_active(config: &Config) -> bool {
+    if !config.window_blur_enabled() || !crate::window_effects::platform_supports_blur() {
+        return false;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        true
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        true
     }
 }
 

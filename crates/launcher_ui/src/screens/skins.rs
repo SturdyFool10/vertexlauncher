@@ -284,7 +284,7 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
     let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
 
-    paint_preview_background(&painter, rect);
+    paint_preview_background(ui, &painter, rect);
 
     let now = ui.input(|i| i.time);
     let dt = state.consume_frame_dt(now);
@@ -467,16 +467,12 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
     button_clicked
 }
 
-fn paint_preview_background(painter: &egui::Painter, rect: Rect) {
-    painter.rect_filled(
-        rect,
-        CornerRadius::same(8),
-        Color32::from_rgba_premultiplied(23, 26, 32, 186),
-    );
+fn paint_preview_background(ui: &Ui, painter: &egui::Painter, rect: Rect) {
+    painter.rect_filled(rect, CornerRadius::same(8), ui.visuals().faint_bg_color);
     painter.rect_stroke(
         rect,
         CornerRadius::same(8),
-        Stroke::new(1.0, Color32::from_rgba_premultiplied(165, 173, 184, 42)),
+        ui.visuals().widgets.noninteractive.bg_stroke,
         egui::StrokeKind::Outside,
     );
 }
@@ -6613,7 +6609,7 @@ fn draw_cape_tile(
         ui.painter().rect_filled(
             preview_rect,
             CornerRadius::same(6),
-            ui.visuals().widgets.noninteractive.bg_fill,
+            ui.visuals().faint_bg_color,
         );
     }
 

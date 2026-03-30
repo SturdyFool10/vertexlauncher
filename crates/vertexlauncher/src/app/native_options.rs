@@ -16,11 +16,12 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
     } else {
         eframe::egui_wgpu::wgpu::PowerPreference::HighPerformance
     };
-    let startup_graphics = platform::startup_graphics_config();
-    let renderer = startup_graphics.renderer;
-    let hardware_acceleration = startup_graphics.hardware_acceleration;
     let blur_enabled =
         startup_config.window_blur_enabled() && window_effects::platform_supports_blur();
+    let transparent_viewport = blur_enabled;
+    let startup_graphics = platform::startup_graphics_config(transparent_viewport);
+    let renderer = startup_graphics.renderer;
+    let hardware_acceleration = startup_graphics.hardware_acceleration;
 
     platform::log_startup_graphics_choice(startup_graphics);
 
@@ -32,7 +33,7 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
             min_inner_size: Some(egui::vec2(900.0, 460.0)),
             resizable: Some(true),
             decorations: Some(false),
-            transparent: Some(blur_enabled),
+            transparent: Some(transparent_viewport),
             icon: app_icon::egui_icon(),
             ..Default::default()
         },
@@ -56,6 +57,7 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
                 eframe::egui_wgpu::WgpuSetupCreateNew {
                     instance_descriptor: eframe::egui_wgpu::wgpu::InstanceDescriptor {
                         backends: startup_graphics.backends,
+                        backend_options: transparent_backend_options(transparent_viewport),
                         ..Default::default()
                     },
                     power_preference: startup_power_preference,
@@ -97,5 +99,25 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
             }),
         },
         ..Default::default()
+    }
+}
+
+fn transparent_backend_options(
+    transparent_viewport: bool,
+) -> eframe::egui_wgpu::wgpu::BackendOptions {
+    #[cfg(target_os = "windows")]
+    {
+        let mut options = eframe::egui_wgpu::wgpu::BackendOptions::default();
+        if transparent_viewport {
+            options.dx12.presentation_system =
+                eframe::egui_wgpu::wgpu::wgt::Dx12SwapchainKind::DxgiFromVisual;
+        }
+        return options;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = transparent_viewport;
+        eframe::egui_wgpu::wgpu::BackendOptions::default()
     }
 }

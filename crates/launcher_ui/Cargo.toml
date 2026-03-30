@@ -43,7 +43,7 @@ zip = { version = "*", default-features = false, features = ["deflate"] }
 rfd = "*"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "*", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation"] }
+windows-sys = { version = "*", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_SystemInformation"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rfd = { version = "*", default-features = false, features = ["gtk3"] }

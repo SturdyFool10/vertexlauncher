@@ -74,7 +74,11 @@ pub fn open_microsoft_sign_in(
     colors: &CallbackPageColors,
 ) -> Result<String, String> {
     launcher_ui::desktop::open_url(auth_request_uri)?;
-    wait_for_loopback_callback(callback_listener.listener, &callback_listener.redirect_uri, colors)
+    wait_for_loopback_callback(
+        callback_listener.listener,
+        &callback_listener.redirect_uri,
+        colors,
+    )
 }
 
 fn bind_loopback_listener() -> Result<TcpListener, String> {
