@@ -1,6 +1,6 @@
 [package]
 name = "vertexlauncher"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 build = "build.rs"
 
@@ -66,3 +66,4 @@ image.workspace = true
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "*"
+

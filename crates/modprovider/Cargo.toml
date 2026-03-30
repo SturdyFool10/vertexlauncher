@@ -1,6 +1,6 @@
 [package]
 name = "modprovider"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -9,3 +9,4 @@ thiserror.workspace = true
 tracing.workspace = true
 modrinth.workspace = true
 curseforge.workspace = true
+

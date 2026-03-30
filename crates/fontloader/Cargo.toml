@@ -1,6 +1,6 @@
 [package]
 name = "fontloader"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -8,3 +8,4 @@ egui.workspace = true
 fontdb.workspace = true
 thiserror.workspace = true
 eframe.workspace = true
+

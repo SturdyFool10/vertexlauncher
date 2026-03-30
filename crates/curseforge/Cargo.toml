@@ -1,6 +1,6 @@
 [package]
 name = "curseforge"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -9,3 +9,4 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 ureq.workspace = true
+

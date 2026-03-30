@@ -1,6 +1,6 @@
 [package]
 name = "auth"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -26,3 +26,4 @@ keyring = { version = "*", default-features = false, features = ["apple-native"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "*", default-features = false, features = ["linux-native-sync-persistent", "crypto-rust", "vendored"] }
+

@@ -1,6 +1,6 @@
 [package]
 name = "textui"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -12,3 +12,4 @@ syntect = "*"
 skrifa = "*"
 tracing.workspace = true
 launcher_runtime.workspace = true
+

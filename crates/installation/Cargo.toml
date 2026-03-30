@@ -1,6 +1,6 @@
 [package]
 name = "installation"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -13,3 +13,4 @@ ureq.workspace = true
 flate2 = "*"
 tar = "*"
 zip = { version = "*", default-features = false, features = ["deflate"] }
+

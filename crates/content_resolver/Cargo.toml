@@ -1,6 +1,6 @@
 [package]
 name = "content_resolver"
-version = "0.1.14-Alpha"
+version = "0.1.15-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -10,3 +10,4 @@ managed_content.workspace = true
 modprovider.workspace = true
 modrinth.workspace = true
 curseforge.workspace = true
+
