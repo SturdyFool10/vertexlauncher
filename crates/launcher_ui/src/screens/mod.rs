@@ -22,6 +22,8 @@ mod skins;
 
 pub use content_browser::ContentBrowserState;
 pub use discover::{DiscoverInstallRequest, DiscoverInstallSource, DiscoverState};
+pub use home::HomePresenceSection;
+pub use instance::InstancePresenceSection;
 pub use library::{render_global_overlays, request_delete_instance};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +38,13 @@ pub enum AppScreen {
     Legal,
     Console,
     Instance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuPresenceContext {
+    Screen(AppScreen),
+    Home(HomePresenceSection),
+    Instance(InstancePresenceSection),
 }
 
 impl AppScreen {
@@ -73,6 +82,7 @@ pub struct ScreenOutput {
     pub selected_instance_id: Option<String>,
     pub delete_requested_instance_id: Option<String>,
     pub discover_install_requested: Option<DiscoverInstallRequest>,
+    pub menu_presence_context: Option<MenuPresenceContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +136,20 @@ pub fn handle_escape(
     output
 }
 
+pub fn menu_presence_context(
+    ctx: &egui::Context,
+    screen: AppScreen,
+    selected_instance_id: Option<&str>,
+) -> MenuPresenceContext {
+    match screen {
+        AppScreen::Home => MenuPresenceContext::Home(home::presence_section(ctx)),
+        AppScreen::Instance => {
+            MenuPresenceContext::Instance(instance::presence_section(ctx, selected_instance_id))
+        }
+        _ => MenuPresenceContext::Screen(screen),
+    }
+}
+
 pub fn render(
     ui: &mut Ui,
     screen: AppScreen,
@@ -172,6 +196,7 @@ pub fn render(
                 selected_instance_id: output.selected_instance_id,
                 delete_requested_instance_id: output.delete_requested_instance_id,
                 discover_install_requested: None,
+                menu_presence_context: Some(MenuPresenceContext::Home(output.presence_section)),
             }
         }
         AppScreen::Library => {
@@ -196,6 +221,7 @@ pub fn render(
                 selected_instance_id: output.selected_instance_id,
                 delete_requested_instance_id: None,
                 discover_install_requested: None,
+                menu_presence_context: Some(MenuPresenceContext::Screen(AppScreen::Library)),
             }
         }
         AppScreen::ContentBrowser => {
@@ -214,6 +240,7 @@ pub fn render(
                 selected_instance_id: None,
                 delete_requested_instance_id: None,
                 discover_install_requested: None,
+                menu_presence_context: Some(MenuPresenceContext::Screen(AppScreen::ContentBrowser)),
             }
         }
         AppScreen::Discover | AppScreen::DiscoverDetail => {
@@ -226,6 +253,7 @@ pub fn render(
             ScreenOutput {
                 requested_screen: output.requested_screen,
                 discover_install_requested: output.install_requested,
+                menu_presence_context: Some(MenuPresenceContext::Screen(screen)),
                 ..ScreenOutput::default()
             }
         }
@@ -248,7 +276,10 @@ pub fn render(
                 config.skin_preview_3d_layers_enabled(),
                 config.skin_preview_fresh_format_enabled(),
             );
-            ScreenOutput::default()
+            ScreenOutput {
+                menu_presence_context: Some(MenuPresenceContext::Screen(AppScreen::Skins)),
+                ..ScreenOutput::default()
+            }
         }
         AppScreen::Settings => {
             settings::render(
@@ -259,15 +290,24 @@ pub fn render(
                 available_themes,
                 settings_info,
             );
-            ScreenOutput::default()
+            ScreenOutput {
+                menu_presence_context: Some(MenuPresenceContext::Screen(AppScreen::Settings)),
+                ..ScreenOutput::default()
+            }
         }
         AppScreen::Legal => {
             legal::render(ui, text_ui);
-            ScreenOutput::default()
+            ScreenOutput {
+                menu_presence_context: Some(MenuPresenceContext::Screen(AppScreen::Legal)),
+                ..ScreenOutput::default()
+            }
         }
         AppScreen::Console => {
             console::render(ui, text_ui);
-            ScreenOutput::default()
+            ScreenOutput {
+                menu_presence_context: Some(MenuPresenceContext::Screen(AppScreen::Console)),
+                ..ScreenOutput::default()
+            }
         }
         AppScreen::Instance => {
             let output = instance::render(
@@ -288,6 +328,7 @@ pub fn render(
                 selected_instance_id: None,
                 delete_requested_instance_id: None,
                 discover_install_requested: None,
+                menu_presence_context: Some(MenuPresenceContext::Instance(output.presence_section)),
             }
         }
     };

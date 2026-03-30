@@ -384,6 +384,8 @@ impl VertexApp {
         if top_bar_output.open_device_code_browser {
             self.auth.start_system_browser_sign_in(&self.theme);
         }
+        let previous_active_screen = self.active_screen;
+        let previous_selected_instance_id = self.selected_instance_id.clone();
         let mut account_switched = false;
         if let Some(profile_id) = top_bar_output.select_account_id.as_deref() {
             self.auth.select_account(profile_id);
@@ -396,6 +398,12 @@ impl VertexApp {
             self.auth.refresh_account_token(profile_id);
         }
         if top_bar_output.open_active_user_terminal {
+            tracing::info!(
+                target: "vertexlauncher/navigation",
+                from_screen = ?self.active_screen,
+                to_screen = ?screens::AppScreen::Console,
+                "Top bar opened the active user terminal."
+            );
             self.active_screen = screens::AppScreen::Console;
             let active_launch_auth =
                 self.auth
@@ -426,15 +434,31 @@ impl VertexApp {
         );
 
         if let Some(next_screen) = sidebar_output.selected_screen {
+            tracing::info!(
+                target: "vertexlauncher/navigation",
+                from_screen = ?self.active_screen,
+                to_screen = ?next_screen,
+                "Sidebar selected a screen."
+            );
             self.active_screen = next_screen;
         }
         if let Some(instance_id) = sidebar_output.selected_profile_id {
+            tracing::info!(
+                target: "vertexlauncher/navigation",
+                instance_id = %instance_id,
+                "Sidebar selected an instance profile."
+            );
             self.selected_instance_id = Some(instance_id);
             self.active_screen = screens::AppScreen::Instance;
         }
         for (instance_id, action) in sidebar_output.instance_context_actions {
             match action {
                 InstanceContextAction::OpenInstance => {
+                    tracing::info!(
+                        target: "vertexlauncher/navigation",
+                        instance_id = %instance_id,
+                        "Instance context menu opened an instance."
+                    );
                     self.selected_instance_id = Some(instance_id);
                     self.active_screen = screens::AppScreen::Instance;
                 }
@@ -442,6 +466,11 @@ impl VertexApp {
                     self.open_instance_folder(&instance_id);
                 }
                 InstanceContextAction::Delete => {
+                    tracing::info!(
+                        target: "vertexlauncher/navigation",
+                        instance_id = %instance_id,
+                        "Instance context menu requested delete; redirecting to Library."
+                    );
                     self.selected_instance_id = Some(instance_id.clone());
                     self.active_screen = screens::AppScreen::Library;
                     screens::request_delete_instance(ctx, &instance_id);
@@ -530,17 +559,33 @@ impl VertexApp {
             self.refresh_instance_shortcuts();
         }
         if let Some(instance_id) = screen_output.selected_instance_id {
+            tracing::info!(
+                target: "vertexlauncher/navigation",
+                selected_instance_id = %instance_id,
+                "Screen output selected an instance."
+            );
             self.selected_instance_id = Some(instance_id);
         }
         if let Some(request) = screen_output.discover_install_requested {
             start_discover_install_task(self, request);
         }
         if let Some(instance_id) = screen_output.delete_requested_instance_id {
+            tracing::info!(
+                target: "vertexlauncher/navigation",
+                instance_id = %instance_id,
+                "Screen output requested instance deletion flow; redirecting to Library."
+            );
             self.selected_instance_id = Some(instance_id.clone());
             self.active_screen = screens::AppScreen::Library;
             screens::request_delete_instance(ctx, &instance_id);
         }
         if let Some(requested_screen) = screen_output.requested_screen {
+            tracing::info!(
+                target: "vertexlauncher/navigation",
+                from_screen = ?self.active_screen,
+                requested_screen = ?requested_screen,
+                "Screen output requested navigation."
+            );
             self.active_screen = requested_screen;
         }
 
@@ -647,10 +692,30 @@ impl VertexApp {
             queue_instance_store_save(self);
         }
 
+        let menu_presence_context = screen_output
+            .menu_presence_context
+            .unwrap_or(screens::MenuPresenceContext::Screen(self.active_screen));
+
+        if self.active_screen != previous_active_screen
+            || self.selected_instance_id != previous_selected_instance_id
+        {
+            tracing::info!(
+                target: "vertexlauncher/navigation",
+                from_screen = ?previous_active_screen,
+                to_screen = ?self.active_screen,
+                previous_selected_instance_id = previous_selected_instance_id.as_deref().unwrap_or(""),
+                selected_instance_id = self.selected_instance_id.as_deref().unwrap_or(""),
+                menu_presence_context = ?menu_presence_context,
+                "Launcher navigation state changed."
+            );
+        }
+
         self.discord_presence.update(
             &self.config,
             &self.instance_store,
             Path::new(self.config.minecraft_installations_root()),
+            menu_presence_context,
+            self.selected_instance_id.as_deref(),
         );
 
         ui::top_bar::handle_window_resize(ctx);

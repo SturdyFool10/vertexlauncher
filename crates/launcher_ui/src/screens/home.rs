@@ -55,6 +55,7 @@ pub struct HomeOutput {
     pub requested_screen: Option<AppScreen>,
     pub selected_instance_id: Option<String>,
     pub delete_requested_instance_id: Option<String>,
+    pub presence_section: HomePresenceSection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -64,11 +65,32 @@ enum HomeTab {
     Screenshots,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HomePresenceSection {
+    Activity,
+    Screenshots,
+}
+
+impl Default for HomePresenceSection {
+    fn default() -> Self {
+        Self::Activity
+    }
+}
+
 impl HomeTab {
     fn label(self) -> &'static str {
         match self {
             Self::InstancesAndWorlds => "Instances & Worlds",
             Self::Screenshots => "Screenshots",
+        }
+    }
+}
+
+impl HomeTab {
+    fn presence_section(self) -> HomePresenceSection {
+        match self {
+            Self::InstancesAndWorlds => HomePresenceSection::Activity,
+            Self::Screenshots => HomePresenceSection::Screenshots,
         }
     }
 }
@@ -643,6 +665,14 @@ pub(super) fn handle_escape(ctx: &egui::Context) -> bool {
     handled
 }
 
+pub fn presence_section(ctx: &egui::Context) -> HomePresenceSection {
+    let state_id = home_state_id();
+    let state = ctx.data_mut(|data| data.get_temp::<HomeState>(state_id));
+    state
+        .map(|state| state.active_tab.presence_section())
+        .unwrap_or(HomePresenceSection::Activity)
+}
+
 pub fn render(
     ui: &mut Ui,
     text_ui: &mut TextUi,
@@ -752,6 +782,7 @@ pub fn render(
 
     render_screenshot_viewer_modal(ui.ctx(), text_ui, &mut state);
     render_delete_screenshot_modal(ui.ctx(), text_ui, &mut state, instances, config);
+    output.presence_section = state.active_tab.presence_section();
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
     output
 }

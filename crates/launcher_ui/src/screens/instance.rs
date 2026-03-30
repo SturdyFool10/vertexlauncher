@@ -101,6 +101,19 @@ const MAX_INSTANCE_SCREENSHOTS: usize = 120;
 const MAX_INSTANCE_LOG_LINES: usize = 12_000;
 const INSTANCE_SCREENSHOT_COPY_BUTTON_SIZE: f32 = 28.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstancePresenceSection {
+    Content,
+    Screenshots,
+    Logs,
+}
+
+impl Default for InstancePresenceSection {
+    fn default() -> Self {
+        Self::Content
+    }
+}
+
 #[derive(Default)]
 struct MemorySliderMaxState {
     detected_total_mib: Option<u128>,
@@ -182,6 +195,22 @@ pub(super) fn handle_escape(ctx: &egui::Context, selected_instance_id: Option<&s
         }
     });
     handled
+}
+
+pub fn presence_section(
+    ctx: &egui::Context,
+    selected_instance_id: Option<&str>,
+) -> InstancePresenceSection {
+    let Some(instance_id) = selected_instance_id else {
+        return InstancePresenceSection::Content;
+    };
+    let state_id = instance_screen_state_id(instance_id);
+    let state = ctx.data_mut(|data| data.get_temp::<InstanceScreenState>(state_id));
+    match state.map(|state| state.active_tab).unwrap_or_default() {
+        InstanceScreenTab::Content => InstancePresenceSection::Content,
+        InstanceScreenTab::ScreenshotGallery => InstancePresenceSection::Screenshots,
+        InstanceScreenTab::Logs => InstancePresenceSection::Logs,
+    }
 }
 
 pub fn render(
@@ -410,6 +439,11 @@ pub fn render(
         instance_root_path.as_path(),
     );
 
+    output.presence_section = match state.active_tab {
+        InstanceScreenTab::Content => InstancePresenceSection::Content,
+        InstanceScreenTab::ScreenshotGallery => InstancePresenceSection::Screenshots,
+        InstanceScreenTab::Logs => InstancePresenceSection::Logs,
+    };
     ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
     output
 }
