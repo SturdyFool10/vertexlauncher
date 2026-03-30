@@ -4,6 +4,9 @@ version = "0.1.14-Alpha"
 edition = "2024"
 build = "build.rs"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [dependencies]
 app_paths.workspace = true
 eframe.workspace = true
