@@ -20,7 +20,7 @@ use textui::{
 };
 
 use crate::{
-    assets, desktop, notification,
+    assets, desktop, install_activity, notification,
     ui::{
         components::lazy_image_bytes::{LazyImageBytes, LazyImageBytesStatus},
         instance_context_menu::{self, InstanceContextAction},
@@ -389,7 +389,7 @@ fn build_home_activity_scan_request(
     instances: &InstanceStore,
     config: &Config,
 ) -> HomeActivityScanRequest {
-    let installations_root = PathBuf::from(config.minecraft_installations_root());
+    let installations_root = config.minecraft_installations_root_path().to_path_buf();
     let activity_instances = instances
         .instances
         .iter()
@@ -412,7 +412,7 @@ fn build_screenshot_scan_request(
     instances: &InstanceStore,
     config: &Config,
 ) -> ScreenshotScanRequest {
-    let installations_root = PathBuf::from(config.minecraft_installations_root());
+    let installations_root = config.minecraft_installations_root_path().to_path_buf();
     let screenshot_instances = instances
         .instances
         .iter()
@@ -579,7 +579,10 @@ fn request_screenshot_delete(
 
     state.delete_screenshot_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = fs::remove_file(path.as_path()).map_err(|err| err.to_string());
+        let result = fs::remove_file(path.as_path()).map_err(|err| {
+            tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %path.display(), error = %err, context = "delete home screenshot");
+            format!("failed to remove {}: {err}", path.display())
+        });
         let _ = tx.send((screenshot_key, file_name, result));
     });
 }
@@ -1874,17 +1877,22 @@ fn render_instance_usage(
                     ui.make_persistent_id(("home_instance_context", instance.id.as_str()));
 
                 if row_response.clicked() {
-                    queue_launch_intent(
-                        ui.ctx(),
-                        PendingLaunchIntent {
-                            nonce: current_time_millis(),
-                            instance_id: instance.id.clone(),
-                            quick_play_singleplayer: None,
-                            quick_play_multiplayer: None,
-                        },
-                    );
-                    output.selected_instance_id = Some(instance.id.clone());
-                    output.requested_screen = Some(AppScreen::Library);
+                    if install_activity::is_instance_installing(instance.id.as_str()) {
+                        output.selected_instance_id = Some(instance.id.clone());
+                        output.requested_screen = Some(AppScreen::Library);
+                    } else {
+                        queue_launch_intent(
+                            ui.ctx(),
+                            PendingLaunchIntent {
+                                nonce: current_time_millis(),
+                                instance_id: instance.id.clone(),
+                                quick_play_singleplayer: None,
+                                quick_play_multiplayer: None,
+                            },
+                        );
+                        output.selected_instance_id = Some(instance.id.clone());
+                        output.requested_screen = Some(AppScreen::Library);
+                    }
                 }
 
                 if row_response.secondary_clicked() {
@@ -1949,7 +1957,8 @@ fn request_instance_thumbnail(state: &mut HomeState, instance_id: &str, path: St
     };
     state.instance_thumbnail_in_flight.insert(key.clone());
     let _ = tokio_runtime::spawn_detached(async move {
-        let bytes = std::fs::read(path.as_str())
+        let bytes = tokio::fs::read(path.as_str())
+            .await
             .ok()
             .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()));
         let _ = tx.send((key, bytes));
@@ -3553,7 +3562,7 @@ fn open_home_instance_folder(
     else {
         return Err(format!("unknown instance id: {instance_id}"));
     };
-    let root = instance_root_path(Path::new(config.minecraft_installations_root()), instance);
+    let root = instance_root_path(config.minecraft_installations_root_path(), instance);
     desktop::open_in_file_manager(root.as_path())
 }
 

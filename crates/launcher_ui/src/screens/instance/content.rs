@@ -22,8 +22,12 @@ pub(super) fn render_installed_content_section(
     instance_root: &Path,
     download_policy: &DownloadPolicy,
     state: &mut InstanceScreenState,
+    external_install_active: bool,
     output: &mut InstanceScreenOutput,
 ) {
+    let content_browser_locked = state.runtime_prepare_in_flight || external_install_active;
+    let content_browser_locked_reason =
+        "Content Browser is unavailable while instance prep is running.";
     ui.add_space(12.0);
     ui.separator();
     ui.add_space(10.0);
@@ -36,15 +40,22 @@ pub(super) fn render_installed_content_section(
     );
 
     ui.horizontal(|ui| {
-        if text_ui
-            .button(
-                ui,
-                ("instance_add_content_label", instance_id),
-                "Open Content Browser",
-                &add_button_style,
-            )
-            .clicked()
-        {
+        let open_browser_response = ui
+            .add_enabled_ui(!content_browser_locked, |ui| {
+                text_ui.button(
+                    ui,
+                    ("instance_add_content_label", instance_id),
+                    "Open Content Browser",
+                    &add_button_style,
+                )
+            })
+            .inner;
+        if content_browser_locked {
+            let _ = open_browser_response
+                .clone()
+                .on_disabled_hover_text(content_browser_locked_reason);
+        }
+        if open_browser_response.clicked() {
             output.requested_screen = Some(AppScreen::ContentBrowser);
         }
 
@@ -87,15 +98,22 @@ pub(super) fn render_installed_content_section(
                     state.status_message =
                         Some("Refreshed installed content metadata and hash cache.".to_owned());
                 }
-                if text_ui
-                    .button(
-                        ui,
-                        ("instance_content_popup_mods", instance_id),
-                        "Open content browser",
-                        &popup_button_style,
-                    )
-                    .clicked()
-                {
+                let open_popup_browser_response = ui
+                    .add_enabled_ui(!content_browser_locked, |ui| {
+                        text_ui.button(
+                            ui,
+                            ("instance_content_popup_mods", instance_id),
+                            "Open content browser",
+                            &popup_button_style,
+                        )
+                    })
+                    .inner;
+                if content_browser_locked {
+                    let _ = open_popup_browser_response
+                        .clone()
+                        .on_disabled_hover_text(content_browser_locked_reason);
+                }
+                if open_popup_browser_response.clicked() {
                     output.requested_screen = Some(AppScreen::ContentBrowser);
                 }
             });
@@ -394,7 +412,12 @@ pub(super) fn render_installed_content_section(
                         ));
                     }
                 } else if rendered.open_clicked {
-                    if let Some(metadata) = state
+                    if content_browser_locked {
+                        state.status_message = Some(
+                            "Content Browser is unavailable while instance prep is running."
+                                .to_owned(),
+                        );
+                    } else if let Some(metadata) = state
                         .content_metadata_cache
                         .get(&entry.lookup_key)
                         .and_then(|meta| meta.clone())
@@ -1661,14 +1684,19 @@ fn request_bulk_content_update(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = update_all_installed_content(
-            instance_root.as_path(),
-            kind,
-            game_version.as_str(),
-            loader_label.as_str(),
-            &download_policy,
-            Some(&progress),
-        );
+        let result = tokio_runtime::spawn_blocking(move || {
+            update_all_installed_content(
+                instance_root.as_path(),
+                kind,
+                game_version.as_str(),
+                loader_label.as_str(),
+                &download_policy,
+                Some(&progress),
+            )
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
         if result.is_ok() {
             install_activity::set_status(
                 instance_name.as_str(),

@@ -6,6 +6,36 @@ use crate::{
     MODPACK_STATE_FILE_NAME, ModpackInstallState,
 };
 
+#[track_caller]
+fn fs_read_to_string(path: &Path) -> std::io::Result<String> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
+    let result = std::fs::read_to_string(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_write(path: &Path, raw: &str) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "write", path = %path.display());
+    let result = std::fs::write(path, raw);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "write", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_remove_file(path: &Path) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "remove_file", path = %path.display());
+    let result = std::fs::remove_file(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %path.display(), error = %err);
+    }
+    result
+}
+
 #[must_use]
 pub fn content_manifest_path(instance_root: &Path) -> PathBuf {
     instance_root.join(CONTENT_MANIFEST_FILE_NAME)
@@ -14,7 +44,7 @@ pub fn content_manifest_path(instance_root: &Path) -> PathBuf {
 #[must_use]
 pub fn load_content_manifest(instance_root: &Path) -> ContentInstallManifest {
     let path = content_manifest_path(instance_root);
-    let manifest = std::fs::read_to_string(path.as_path())
+    let manifest = fs_read_to_string(path.as_path())
         .ok()
         .and_then(|raw| toml::from_str::<ContentInstallManifest>(&raw).ok())
         .unwrap_or_default();
@@ -62,13 +92,13 @@ pub fn save_content_manifest(
     let path = content_manifest_path(instance_root);
     if normalized.projects.is_empty() {
         if path.exists() {
-            let _ = std::fs::remove_file(path.as_path());
+            let _ = fs_remove_file(path.as_path());
         }
         return Ok(());
     }
     let raw = toml::to_string_pretty(&normalized)
         .map_err(|err| format!("failed to serialize content manifest: {err}"))?;
-    std::fs::write(path.as_path(), raw)
+    fs_write(path.as_path(), raw.as_str())
         .map_err(|err| format!("failed to write content manifest {}: {err}", path.display()))
 }
 
@@ -80,7 +110,7 @@ pub fn modpack_install_state_path(instance_root: &Path) -> PathBuf {
 #[must_use]
 pub fn load_modpack_install_state(instance_root: &Path) -> Option<ModpackInstallState> {
     let path = modpack_install_state_path(instance_root);
-    let raw = std::fs::read_to_string(path.as_path()).ok()?;
+    let raw = fs_read_to_string(path.as_path()).ok()?;
     let mut state = toml::from_str::<ModpackInstallState>(raw.as_str()).ok()?;
     normalize_content_manifest(instance_root, &mut state.base_manifest);
     Some(state)
@@ -98,7 +128,7 @@ pub fn save_modpack_install_state(
     }
     let raw = toml::to_string_pretty(&normalized)
         .map_err(|err| format!("failed to serialize modpack install state: {err}"))?;
-    std::fs::write(path.as_path(), raw).map_err(|err| {
+    fs_write(path.as_path(), raw.as_str()).map_err(|err| {
         format!(
             "failed to write modpack install state {}: {err}",
             path.display()
@@ -109,7 +139,7 @@ pub fn save_modpack_install_state(
 pub fn remove_modpack_install_state(instance_root: &Path) -> Result<(), String> {
     let path = modpack_install_state_path(instance_root);
     if path.exists() {
-        std::fs::remove_file(path.as_path()).map_err(|err| {
+        fs_remove_file(path.as_path()).map_err(|err| {
             format!(
                 "failed to remove modpack install state {}: {err}",
                 path.display()

@@ -18,7 +18,11 @@ static NEXT_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 fn fs_read_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
-    fs::read_to_string(path)
+    let result = fs::read_to_string(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), error = %err);
+    }
+    result
 }
 
 /// Wrapper around `fs::create_dir_all` with structured IO tracing.
@@ -26,7 +30,11 @@ fn fs_read_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
 fn fs_create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display());
-    fs::create_dir_all(path)
+    let result = fs::create_dir_all(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display(), error = %err);
+    }
+    result
 }
 
 /// Wrapper around `File::create` with structured IO tracing.
@@ -34,7 +42,11 @@ fn fs_create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
 fn fs_file_create(path: impl AsRef<Path>) -> std::io::Result<fs::File> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "file_create", path = %path.display());
-    fs::File::create(path)
+    let result = fs::File::create(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "file_create", path = %path.display(), error = %err);
+    }
+    result
 }
 
 /// Wrapper around `fs::copy` with structured IO tracing.
@@ -48,7 +60,17 @@ fn fs_copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<u64>
         from = %from.display(),
         to = %to.display()
     );
-    fs::copy(from, to)
+    let result = fs::copy(from, to);
+    if let Err(err) = &result {
+        tracing::warn!(
+            target: "vertexlauncher/io",
+            op = "copy",
+            from = %from.display(),
+            to = %to.display(),
+            error = %err
+        );
+    }
+    result
 }
 
 /// Wrapper around `fs::remove_dir_all` with structured IO tracing.
@@ -60,7 +82,11 @@ fn fs_remove_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
         op = "remove_dir_all",
         path = %path.display()
     );
-    fs::remove_dir_all(path)
+    let result = fs::remove_dir_all(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "remove_dir_all", path = %path.display(), error = %err);
+    }
+    result
 }
 
 /// Persisted record describing a launcher instance.
@@ -134,7 +160,7 @@ pub struct InstanceStore {
 pub struct NewInstanceSpec {
     pub name: String,
     pub description: Option<String>,
-    pub thumbnail_path: Option<String>,
+    pub thumbnail_path: Option<PathBuf>,
     pub modloader: String,
     pub game_version: String,
     pub modloader_version: String,
@@ -272,7 +298,7 @@ pub fn create_instance(
     let game_version = required(spec.game_version, InstanceError::EmptyGameVersion)?;
     let modloader_version = spec.modloader_version.trim().to_owned();
     let description = normalize_optional_string(spec.description.as_deref());
-    let thumbnail_path = normalize_optional_string(spec.thumbnail_path.as_deref());
+    let thumbnail_path = normalize_optional_path(spec.thumbnail_path.as_deref());
 
     fs_create_dir_all(installations_root)?;
     let minecraft_root = unique_minecraft_root(store, installations_root, &name);
@@ -530,6 +556,48 @@ pub fn delete_instance(
     id: &str,
     installations_root: &Path,
 ) -> Result<InstanceRecord, InstanceError> {
+    let instance = store
+        .find(id)
+        .ok_or_else(|| InstanceError::MissingInstance(id.to_owned()))?;
+    delete_instance_files(instance, installations_root)?;
+    remove_instance_record(store, id)
+}
+
+/// Deletes the root directory for the given instance.
+///
+/// Missing instance roots on disk are tolerated so stale metadata can still be
+/// cleaned up later.
+pub fn delete_instance_files(
+    instance: &InstanceRecord,
+    installations_root: &Path,
+) -> Result<(), InstanceError> {
+    delete_instance_root_path(instance_root_path(installations_root, instance).as_path())
+}
+
+/// Deletes the directory at the given instance root path.
+///
+/// Missing directories are tolerated.
+pub fn delete_instance_root_path(instance_root: &Path) -> Result<(), InstanceError> {
+    match fs_remove_dir_all(instance_root) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) => {
+            tracing::warn!(
+                target: "vertexlauncher/instances",
+                path = %instance_root.display(),
+                error = %err,
+                "failed to delete instance root"
+            );
+            Err(InstanceError::Io(err))
+        }
+    }
+}
+
+/// Removes the instance record from the store without touching the filesystem.
+pub fn remove_instance_record(
+    store: &mut InstanceStore,
+    id: &str,
+) -> Result<InstanceRecord, InstanceError> {
     let Some(index) = store
         .instances
         .iter()
@@ -538,29 +606,11 @@ pub fn delete_instance(
         return Err(InstanceError::MissingInstance(id.to_owned()));
     };
 
-    let instance = store.instances[index].clone();
-    let instance_root = instance_root_path(installations_root, &instance);
-    match fs_remove_dir_all(&instance_root) {
-        Ok(()) => {}
-        Err(err) if err.kind() == ErrorKind::NotFound => {}
-        Err(err) => {
-            tracing::warn!(
-                target: "vertexlauncher/instances",
-                id,
-                path = %instance_root.display(),
-                error = %err,
-                "failed to delete instance root"
-            );
-            return Err(InstanceError::Io(err));
-        }
-    }
-
     let removed = store.instances.remove(index);
     tracing::info!(
         target: "vertexlauncher/instances",
         id = removed.id.as_str(),
         name = removed.name.as_str(),
-        root = %instance_root.display(),
         "deleted instance"
     );
     Ok(removed)
@@ -759,6 +809,12 @@ fn normalize_optional_string(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn normalize_optional_path(value: Option<&Path>) -> Option<String> {
+    value
+        .map(|path| path.as_os_str().to_string_lossy().trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 fn normalize_java_override(enabled: bool, runtime_major: Option<u8>) -> Option<u8> {

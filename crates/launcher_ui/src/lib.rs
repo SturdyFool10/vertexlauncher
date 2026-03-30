@@ -1,6 +1,8 @@
 pub mod app {
     pub mod tokio_runtime {
-        pub use launcher_runtime::{init, spawn, spawn_blocking_detached, spawn_detached};
+        pub use launcher_runtime::{
+            init, spawn, spawn_blocking, spawn_blocking_detached, spawn_detached,
+        };
     }
 }
 

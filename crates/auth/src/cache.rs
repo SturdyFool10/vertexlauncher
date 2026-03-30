@@ -19,7 +19,11 @@ enum AccountsStateLocation {
 fn fs_read_to_string(path: impl AsRef<Path>) -> Result<String, AuthError> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
-    Ok(fs::read_to_string(path)?)
+    let result = fs::read_to_string(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), error = %err);
+    }
+    Ok(result?)
 }
 
 #[track_caller]
@@ -30,16 +34,28 @@ fn fs_write_string(path: impl AsRef<Path>, contents: &str) -> Result<(), AuthErr
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
-        fs::create_dir_all(parent)?;
+        let create_result = fs::create_dir_all(parent);
+        if let Err(err) = &create_result {
+            tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %parent.display(), error = %err);
+        }
+        create_result?;
     }
-    Ok(fs::write(path, contents)?)
+    let write_result = fs::write(path, contents);
+    if let Err(err) = &write_result {
+        tracing::warn!(target: "vertexlauncher/io", op = "write_string", path = %path.display(), error = %err);
+    }
+    Ok(write_result?)
 }
 
 #[track_caller]
 fn fs_remove_file(path: impl AsRef<Path>) -> Result<(), AuthError> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "remove_file", path = %path.display());
-    Ok(fs::remove_file(path)?)
+    let result = fs::remove_file(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %path.display(), error = %err);
+    }
+    Ok(result?)
 }
 
 pub(crate) fn load_cached_accounts() -> Result<CachedAccountsState, AuthError> {

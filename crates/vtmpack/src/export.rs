@@ -219,6 +219,7 @@ where
         && !parent.as_os_str().is_empty()
     {
         fs::create_dir_all(parent).map_err(|err| {
+            tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %parent.display(), error = %err, context = "create vtmpack export directory");
             format!(
                 "failed to create export directory {}: {err}",
                 parent.display()
@@ -227,7 +228,10 @@ where
     }
 
     let output_file = fs::File::create(output_path)
-        .map_err(|err| format!("failed to create {}: {err}", output_path.display()))?;
+        .map_err(|err| {
+            tracing::warn!(target: "vertexlauncher/io", op = "file_create", path = %output_path.display(), error = %err, context = "create vtmpack archive");
+            format!("failed to create {}: {err}", output_path.display())
+        })?;
     let encoder = xz2::write::XzEncoder::new(output_file, 9);
     let mut archive = tar::Builder::new(encoder);
     let total_steps = 3 + bundled_mod_files.len() + config_files.len() + additional_files.len();

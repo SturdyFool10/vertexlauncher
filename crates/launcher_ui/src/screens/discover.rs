@@ -21,6 +21,8 @@ const DISCOVER_PROVIDER_LIMIT: u32 = 36;
 const DISCOVER_CARD_MIN_WIDTH: f32 = 260.0;
 const DISCOVER_CARD_GAP: f32 = 12.0;
 const DISCOVER_CARD_IMAGE_HEIGHT: f32 = 124.0;
+const VERSION_CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(75);
+const DETAIL_VERSIONS_FETCH_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Clone)]
 pub struct DiscoverState {
@@ -1626,10 +1628,26 @@ fn request_version_catalog(state: &mut DiscoverState) {
     };
 
     state.version_catalog_in_flight = true;
+    tracing::info!(target: "vertexlauncher/discover", "Starting discover version catalog fetch.");
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = fetch_version_catalog(false)
-            .map(|catalog| catalog.game_versions)
-            .map_err(|err| err.to_string());
+        let result: Result<Vec<MinecraftVersionEntry>, String> = match tokio::time::timeout(
+            VERSION_CATALOG_FETCH_TIMEOUT,
+            tokio_runtime::spawn_blocking(move || {
+                fetch_version_catalog(false)
+                    .map(|catalog| catalog.game_versions)
+                    .map_err(|err| err.to_string())
+            }),
+        )
+        .await
+        {
+            Ok(join_result) => join_result
+                .map_err(|err| err.to_string())
+                .and_then(|result| result),
+            Err(_) => Err(format!(
+                "version catalog request timed out after {}s",
+                VERSION_CATALOG_FETCH_TIMEOUT.as_secs()
+            )),
+        };
         let _ = tx.send(result);
     });
 }
@@ -1824,12 +1842,27 @@ fn request_detail_versions(state: &mut DiscoverState) {
     let loader_filter = state.loader_filter;
     let game_version_filter = non_empty(state.game_version_filter.as_str());
     let _ = tokio_runtime::spawn_detached(async move {
-        let versions = load_detail_versions(
-            &provider_ref,
-            selected_source,
-            loader_filter,
-            game_version_filter.as_deref(),
-        );
+        let versions: Result<Vec<DiscoverVersionEntry>, String> = match tokio::time::timeout(
+            DETAIL_VERSIONS_FETCH_TIMEOUT,
+            tokio_runtime::spawn_blocking(move || {
+                load_detail_versions(
+                    &provider_ref,
+                    selected_source,
+                    loader_filter,
+                    game_version_filter.as_deref(),
+                )
+            }),
+        )
+        .await
+        {
+            Ok(join_result) => join_result
+                .map_err(|err| err.to_string())
+                .and_then(|result| result),
+            Err(_) => Err(format!(
+                "detail version request timed out after {}s",
+                DETAIL_VERSIONS_FETCH_TIMEOUT.as_secs()
+            )),
+        };
         let _ = tx.send(DiscoverVersionsResult {
             request_serial,
             versions,

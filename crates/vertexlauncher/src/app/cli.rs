@@ -91,7 +91,7 @@ pub fn maybe_run_from_args() -> Result<bool, String> {
             let store = load_store().map_err(|err| format!("failed to load instances: {err}"))?;
             let instance = resolve_instance(&store, instance.as_str())?;
             let instance_root =
-                instance_root_path(Path::new(config.minecraft_installations_root()), instance);
+                instance_root_path(config.minecraft_installations_root_path(), instance);
             print_targets(instance, instance_root.as_path());
             Ok(true)
         }
@@ -119,8 +119,7 @@ fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
     let config = startup_config();
     let mut store = load_store().map_err(|err| format!("failed to load instances: {err}"))?;
     let instance = resolve_instance(&store, spec.instance.as_str())?.clone();
-    let instance_root =
-        instance_root_path(Path::new(config.minecraft_installations_root()), &instance);
+    let instance_root = instance_root_path(config.minecraft_installations_root_path(), &instance);
     let account = resolve_and_refresh_account(spec.user.as_str())?;
     let world_selector = spec
         .world
@@ -525,13 +524,12 @@ fn normalize_optional(value: &str) -> Option<String> {
 
 fn select_java_path(config: &Config, game_version: &str) -> Result<String, String> {
     let runtime = recommended_java_runtime_for_game(game_version);
-    let configured = runtime.and_then(|runtime| config.java_runtime_path(runtime));
-    if let Some(path) = configured
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .filter(|path| Path::new(path).exists())
-    {
-        return Ok(path.to_owned());
+    let configured = runtime.and_then(|runtime| config.java_runtime_path_ref(runtime));
+    if let Some(path) = configured.filter(|path| path.exists()) {
+        let normalized = path.as_os_str().to_string_lossy().trim().to_owned();
+        if !normalized.is_empty() {
+            return Ok(normalized);
+        }
     }
     if let Some(runtime) = runtime {
         return ensure_openjdk_runtime(runtime.major())

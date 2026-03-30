@@ -4,7 +4,7 @@ use serde::{
     de::{self, Visitor},
 };
 use std::io::{Error as IOError, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const UI_FONT_SIZE_MIN: f32 = 10.0;
 pub const UI_FONT_SIZE_MAX: f32 = 42.0;
@@ -995,11 +995,23 @@ impl Config {
         &self.minecraft_installations_root
     }
 
+    /// Returns root directory for instance installations as a path.
+    pub fn minecraft_installations_root_path(&self) -> &Path {
+        Path::new(&self.minecraft_installations_root)
+    }
+
     /// Sets root directory for instance installations and normalizes empties.
     pub fn set_minecraft_installations_root(&mut self, path: impl Into<String>) {
         self.minecraft_installations_root = path.into();
         let default_root = default_minecraft_installations_root();
         normalize_required_path(&mut self.minecraft_installations_root, &default_root);
+    }
+
+    /// Sets root directory for instance installations from a path value.
+    pub fn set_minecraft_installations_root_path(&mut self, path: impl AsRef<Path>) {
+        self.set_minecraft_installations_root(
+            path.as_ref().as_os_str().to_string_lossy().into_owned(),
+        );
     }
 
     /// Returns max concurrent downloads.
@@ -1067,6 +1079,11 @@ impl Config {
         }
     }
 
+    /// Returns user-provided Java runtime path for the requested runtime major as a path.
+    pub fn java_runtime_path_ref(&self, runtime: JavaRuntimeVersion) -> Option<&Path> {
+        self.java_runtime_path(runtime).map(Path::new)
+    }
+
     /// Sets Java runtime path for the requested runtime major.
     pub fn set_java_runtime_path(&mut self, runtime: JavaRuntimeVersion, path: Option<String>) {
         match runtime {
@@ -1076,6 +1093,14 @@ impl Config {
             JavaRuntimeVersion::Java21 => self.java_21_jvm_path = path,
             JavaRuntimeVersion::Java25 => self.java_25_jvm_path = path,
         }
+    }
+
+    /// Sets Java runtime path for the requested runtime major from a path value.
+    pub fn set_java_runtime_path_ref(&mut self, runtime: JavaRuntimeVersion, path: Option<&Path>) {
+        self.set_java_runtime_path(
+            runtime,
+            path.map(|path| path.as_os_str().to_string_lossy().into_owned()),
+        );
     }
 
     /// Normalizes all config values into launcher-supported ranges/defaults.
@@ -1562,9 +1587,14 @@ pub enum LoadConfigResult {
 }
 
 fn default_minecraft_installations_root() -> String {
-    launcher_paths::installations_root()
+    default_minecraft_installations_root_path()
+        .as_os_str()
         .to_string_lossy()
         .into_owned()
+}
+
+fn default_minecraft_installations_root_path() -> PathBuf {
+    launcher_paths::installations_root()
 }
 
 fn config_base_path() -> String {

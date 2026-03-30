@@ -32,6 +32,10 @@ const CACHE_LOADER_VERSIONS_DIR_NAME: &str = "loader_versions";
 const VERSION_CATALOG_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const HTTP_RETRY_ATTEMPTS: u32 = 4;
 const HTTP_RETRY_BASE_DELAY_MS: u64 = 350;
+const HTTP_TIMEOUT_GLOBAL: Duration = Duration::from_secs(45);
+const HTTP_TIMEOUT_CONNECT: Duration = Duration::from_secs(15);
+const HTTP_TIMEOUT_RECV_RESPONSE: Duration = Duration::from_secs(20);
+const HTTP_TIMEOUT_RECV_BODY: Duration = Duration::from_secs(45);
 const MAX_CONTENT_LENGTH_PROBES_PER_BATCH: usize = 32;
 const OPENJDK_USER_AGENT: &str =
     "VertexLauncher-JavaProvisioner/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
@@ -41,19 +45,37 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub fn display_user_path(path: &Path) -> String {
     #[cfg(target_os = "windows")]
     {
-        let raw = path.as_os_str().to_string_lossy();
-        if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
-            return format!(r"\\{stripped}");
-        }
-        if let Some(stripped) = raw.strip_prefix(r"\\?\") {
-            return stripped.to_owned();
-        }
-        return raw.into_owned();
+        return normalize_windows_cli_path(path.as_os_str().to_string_lossy().as_ref());
     }
 
     #[cfg(not(target_os = "windows"))]
     {
         path.as_os_str().to_string_lossy().into_owned()
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn normalize_windows_cli_path(raw: &str) -> String {
+    if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{stripped}");
+    }
+    if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        return stripped.to_owned();
+    }
+    raw.to_owned()
+}
+
+fn normalize_child_process_path(path: &Path) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        return PathBuf::from(normalize_windows_cli_path(
+            path.as_os_str().to_string_lossy().as_ref(),
+        ));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        path.to_path_buf()
     }
 }
 
@@ -66,28 +88,44 @@ pub fn normalize_path_key(path: &Path) -> String {
 fn fs_create_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display());
-    fs::create_dir_all(path)
+    let result = fs::create_dir_all(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[track_caller]
 fn fs_remove_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "remove_dir_all", path = %path.display());
-    fs::remove_dir_all(path)
+    let result = fs::remove_dir_all(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "remove_dir_all", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[track_caller]
 fn fs_read_to_string(path: impl AsRef<Path>) -> std::io::Result<String> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
-    fs::read_to_string(path)
+    let result = fs::read_to_string(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[track_caller]
 fn fs_read_dir(path: impl AsRef<Path>) -> std::io::Result<fs::ReadDir> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "read_dir", path = %path.display());
-    fs::read_dir(path)
+    let result = fs::read_dir(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_dir", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[track_caller]
@@ -100,35 +138,61 @@ fn fs_rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<()
         from = %from.display(),
         to = %to.display()
     );
-    fs::rename(from, to)
+    let result = fs::rename(from, to);
+    if let Err(err) = &result {
+        tracing::warn!(
+            target: "vertexlauncher/io",
+            op = "rename",
+            from = %from.display(),
+            to = %to.display(),
+            error = %err
+        );
+    }
+    result
 }
 
 #[track_caller]
 fn fs_canonicalize(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "canonicalize", path = %path.display());
-    fs::canonicalize(path)
+    let result = fs::canonicalize(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "canonicalize", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[track_caller]
 fn fs_write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "write", path = %path.display());
-    fs::write(path, contents)
+    let result = fs::write(path, contents);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "write", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[track_caller]
 fn fs_file_create(path: impl AsRef<Path>) -> std::io::Result<fs::File> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "file_create", path = %path.display());
-    fs::File::create(path)
+    let result = fs::File::create(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "file_create", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[track_caller]
 fn fs_file_open(path: impl AsRef<Path>) -> std::io::Result<fs::File> {
     let path = path.as_ref();
     tracing::debug!(target: "vertexlauncher/io", op = "file_open", path = %path.display());
-    fs::File::open(path)
+    let result = fs::File::open(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "file_open", path = %path.display(), error = %err);
+    }
+    result
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -737,7 +801,19 @@ pub fn ensure_game_files(
             download_policy,
             downloaded_files,
             progress.as_deref(),
-        )?;
+        )
+        .map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/installation/process",
+                instance_root = %instance_root.display(),
+                game_version = %game_version,
+                version_json_path = %version_json_path.display(),
+                client_jar_path = %client_jar_path.display(),
+                error = %err,
+                "Core file download batch failed during ensure_game_files."
+            );
+            err
+        })?;
         tracing::info!(
             target: "vertexlauncher/installation/process",
             game_version = %game_version,
@@ -751,7 +827,18 @@ pub fn ensure_game_files(
         download_policy,
         downloaded_files,
         progress.as_deref(),
-    )?;
+    )
+    .map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/process",
+            instance_root = %instance_root.display(),
+            game_version = %game_version,
+            version_json_path = %version_json_path.display(),
+            error = %err,
+            "Version dependency download phase failed during ensure_game_files."
+        );
+        err
+    })?;
     tracing::info!(
         target: "vertexlauncher/installation/process",
         game_version = %game_version,
@@ -768,7 +855,19 @@ pub fn ensure_game_files(
         download_policy,
         &mut downloaded_files,
         progress.as_deref(),
-    )?;
+    )
+    .map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/process",
+            instance_root = %instance_root.display(),
+            game_version = %game_version,
+            modloader = %modloader,
+            requested_modloader_version = %modloader_version.unwrap_or(""),
+            error = %err,
+            "Modloader installation phase failed during ensure_game_files."
+        );
+        err
+    })?;
     tracing::info!(
         target: "vertexlauncher/installation/process",
         game_version = %game_version,
@@ -796,7 +895,18 @@ pub fn ensure_game_files(
                 download_policy,
                 downloaded_files,
                 progress.as_deref(),
-            )?;
+            )
+            .map_err(|err| {
+                tracing::error!(
+                    target: "vertexlauncher/installation/process",
+                    instance_root = %instance_root.display(),
+                    game_version = %game_version,
+                    loader_profile_path = %loader_profile_path.display(),
+                    error = %err,
+                    "Loader profile dependency download phase failed during ensure_game_files."
+                );
+                err
+            })?;
         }
     }
 
@@ -2196,30 +2306,77 @@ fn download_version_dependencies(
     if !version_json_path.exists() {
         return Ok(0);
     }
-    let raw = fs_read_to_string(version_json_path)?;
+    tracing::info!(
+        target: "vertexlauncher/installation/dependencies",
+        instance_root = %instance_root.display(),
+        version_json_path = %version_json_path.display(),
+        "Starting version dependency resolution."
+    );
+    let raw = fs_read_to_string(version_json_path).map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/dependencies",
+            instance_root = %instance_root.display(),
+            version_json_path = %version_json_path.display(),
+            error = %err,
+            "Failed to read version metadata JSON."
+        );
+        InstallationError::Io(err)
+    })?;
     let version_meta: serde_json::Value = serde_json::from_str(&raw)?;
     let mut downloaded = 0u32;
 
     let mut library_tasks = Vec::new();
     collect_library_download_tasks(instance_root, &version_meta, &mut library_tasks);
+    tracing::info!(
+        target: "vertexlauncher/installation/dependencies",
+        library_task_count = library_tasks.len(),
+        "Collected library download tasks."
+    );
     downloaded += download_files_concurrent(
         InstallStage::DownloadingCore,
         library_tasks,
         policy,
         downloaded_files_offset.saturating_add(downloaded),
         progress,
-    )?;
+    )
+    .map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/dependencies",
+            instance_root = %instance_root.display(),
+            version_json_path = %version_json_path.display(),
+            error = %err,
+            "Library dependency download batch failed."
+        );
+        err
+    })?;
 
     let mut asset_index_task = Vec::new();
     let asset_index_path =
         collect_asset_index_download_task(instance_root, &version_meta, &mut asset_index_task);
+    tracing::info!(
+        target: "vertexlauncher/installation/dependencies",
+        asset_index_task_count = asset_index_task.len(),
+        asset_index_path = %asset_index_path.as_ref().map(|path| path.display().to_string()).unwrap_or_default(),
+        "Collected asset index download task."
+    );
     downloaded += download_files_concurrent(
         InstallStage::DownloadingCore,
         asset_index_task,
         policy,
         downloaded_files_offset.saturating_add(downloaded),
         progress,
-    )?;
+    )
+    .map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/dependencies",
+            instance_root = %instance_root.display(),
+            version_json_path = %version_json_path.display(),
+            asset_index_path = %asset_index_path.as_ref().map(|path| path.display().to_string()).unwrap_or_default(),
+            error = %err,
+            "Asset index download batch failed."
+        );
+        err
+    })?;
 
     if let Some(asset_index_path) = asset_index_path {
         let mut object_tasks = Vec::new();
@@ -2227,16 +2384,49 @@ fn download_version_dependencies(
             instance_root,
             asset_index_path.as_path(),
             &mut object_tasks,
-        )?;
+        )
+        .map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/installation/dependencies",
+                instance_root = %instance_root.display(),
+                asset_index_path = %asset_index_path.display(),
+                error = %err,
+                "Failed while collecting asset object download tasks from asset index."
+            );
+            err
+        })?;
+        tracing::info!(
+            target: "vertexlauncher/installation/dependencies",
+            asset_index_path = %asset_index_path.display(),
+            asset_object_task_count = object_tasks.len(),
+            "Collected asset object download tasks."
+        );
         downloaded += download_files_concurrent(
             InstallStage::DownloadingCore,
             object_tasks,
             policy,
             downloaded_files_offset.saturating_add(downloaded),
             progress,
-        )?;
+        )
+        .map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/installation/dependencies",
+                instance_root = %instance_root.display(),
+                asset_index_path = %asset_index_path.display(),
+                error = %err,
+                "Asset object download batch failed."
+            );
+            err
+        })?;
     }
 
+    tracing::info!(
+        target: "vertexlauncher/installation/dependencies",
+        instance_root = %instance_root.display(),
+        version_json_path = %version_json_path.display(),
+        downloaded,
+        "Completed version dependency resolution."
+    );
     Ok(downloaded)
 }
 
@@ -2375,11 +2565,22 @@ fn collect_asset_object_download_tasks(
     if !asset_index_path.exists() {
         return Ok(());
     }
-    let raw = fs_read_to_string(asset_index_path)?;
+    let raw = fs_read_to_string(asset_index_path).map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/dependencies",
+            instance_root = %instance_root.display(),
+            asset_index_path = %asset_index_path.display(),
+            error = %err,
+            "Failed to read asset index JSON."
+        );
+        InstallationError::Io(err)
+    })?;
     let index: serde_json::Value = serde_json::from_str(&raw)?;
     let Some(objects) = index.get("objects").and_then(serde_json::Value::as_object) else {
         return Ok(());
     };
+    let mut seen_destinations = HashSet::new();
+    let mut duplicate_count = 0usize;
     for entry in objects.values() {
         let Some(hash) = entry.get("hash").and_then(serde_json::Value::as_str) else {
             continue;
@@ -2397,6 +2598,10 @@ fn collect_asset_object_download_tasks(
         if destination.exists() {
             continue;
         }
+        if !seen_destinations.insert(destination.clone()) {
+            duplicate_count += 1;
+            continue;
+        }
         tasks.push(FileDownloadTask {
             url: format!("https://resources.download.minecraft.net/{prefix}/{hash}"),
             destination,
@@ -2405,6 +2610,15 @@ fn collect_asset_object_download_tasks(
                 .and_then(serde_json::Value::as_u64)
                 .filter(|size| *size > 0),
         });
+    }
+    if duplicate_count > 0 {
+        tracing::info!(
+            target: "vertexlauncher/installation/dependencies",
+            asset_index_path = %asset_index_path.display(),
+            duplicate_count,
+            deduped_task_count = tasks.len(),
+            "Deduplicated repeated asset object downloads that pointed to the same destination."
+        );
     }
     Ok(())
 }
@@ -2891,12 +3105,22 @@ fn download_to_file(
             .fetch_add(content_length, Ordering::Relaxed);
     }
 
-    let temp_path = task.destination.with_extension("downloading");
+    let temp_path = temporary_download_path(task.destination.as_path());
     let mut reader = response.body_mut().as_reader();
     let mut file = fs_file_create(&temp_path)?;
     let mut buffer = [0u8; 64 * 1024];
     loop {
-        let read = reader.read(&mut buffer)?;
+        let read = reader.read(&mut buffer).map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/installation/downloads",
+                url = %task.url,
+                temp_path = %temp_path.display(),
+                destination = %task.destination.display(),
+                error = %err,
+                "Failed while reading HTTP response body for download."
+            );
+            InstallationError::Io(err)
+        })?;
         if read == 0 {
             break;
         }
@@ -2907,10 +3131,40 @@ fn download_to_file(
             .downloaded_bytes
             .fetch_add(read as u64, Ordering::Relaxed);
         emit_download_progress(progress, telemetry, stage, downloaded_files_offset);
-        file.write_all(&buffer[..read])?;
+        file.write_all(&buffer[..read]).map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/installation/downloads",
+                url = %task.url,
+                temp_path = %temp_path.display(),
+                destination = %task.destination.display(),
+                error = %err,
+                "Failed while writing download chunk to temporary file."
+            );
+            InstallationError::Io(err)
+        })?;
     }
-    file.flush()?;
-    fs_rename(temp_path, &task.destination)?;
+    file.flush().map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/downloads",
+            url = %task.url,
+            temp_path = %temp_path.display(),
+            destination = %task.destination.display(),
+            error = %err,
+            "Failed while flushing temporary download file."
+        );
+        InstallationError::Io(err)
+    })?;
+    fs_rename(temp_path.as_path(), task.destination.as_path()).map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/downloads",
+            url = %task.url,
+            temp_path = %temp_path.display(),
+            destination = %task.destination.display(),
+            error = %err,
+            "Failed while promoting temporary download file into place."
+        );
+        err
+    })?;
     telemetry.completed_files.fetch_add(1, Ordering::Relaxed);
     emit_download_progress(progress, telemetry, stage, downloaded_files_offset);
     tracing::debug!(
@@ -3341,6 +3595,8 @@ fn run_modloader_installer_and_verify(
     ensure_launcher_profiles(instance_root)?;
     let installer_target =
         fs_canonicalize(instance_root).unwrap_or_else(|_| instance_root.to_path_buf());
+    let installer_path = normalize_child_process_path(installer_path.as_path());
+    let installer_target = normalize_child_process_path(installer_target.as_path());
     let installer_path_arg = display_user_path(installer_path.as_path());
     let installer_target_arg = display_user_path(installer_target.as_path());
 
@@ -3349,9 +3605,9 @@ fn run_modloader_installer_and_verify(
     for flag in ["--installClient", "--install-client"] {
         let mut cmd = Command::new(java.as_str());
         cmd.arg("-jar")
-            .arg(installer_path_arg.as_str())
+            .arg(installer_path.as_os_str())
             .arg(flag)
-            .arg(installer_target_arg.as_str())
+            .arg(installer_target.as_os_str())
             .current_dir(installer_target.as_path());
         let command_line = format!(
             "{} -jar {} {} {}",
@@ -3673,19 +3929,68 @@ fn download_file_simple(url: &str, destination: &Path) -> Result<(), Installatio
         .map_err(map_ureq_error)?;
     let (_, body) = response.into_parts();
     let mut reader = body.into_reader();
-    let temp = destination.with_extension("downloading");
+    let temp = temporary_download_path(destination);
     let mut file = fs_file_create(&temp)?;
     let mut buffer = [0u8; 128 * 1024];
     loop {
-        let read = reader.read(&mut buffer)?;
+        let read = reader.read(&mut buffer).map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/installation/downloads",
+                url,
+                temp_path = %temp.display(),
+                destination = %destination.display(),
+                error = %err,
+                "Failed while reading OpenJDK download response body."
+            );
+            InstallationError::Io(err)
+        })?;
         if read == 0 {
             break;
         }
-        file.write_all(&buffer[..read])?;
+        file.write_all(&buffer[..read]).map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/installation/downloads",
+                url,
+                temp_path = %temp.display(),
+                destination = %destination.display(),
+                error = %err,
+                "Failed while writing OpenJDK download chunk to temporary file."
+            );
+            InstallationError::Io(err)
+        })?;
     }
-    file.flush()?;
-    fs_rename(temp, destination)?;
+    file.flush().map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/downloads",
+            url,
+            temp_path = %temp.display(),
+            destination = %destination.display(),
+            error = %err,
+            "Failed while flushing OpenJDK temporary download file."
+        );
+        InstallationError::Io(err)
+    })?;
+    fs_rename(temp.as_path(), destination).map_err(|err| {
+        tracing::error!(
+            target: "vertexlauncher/installation/downloads",
+            url,
+            temp_path = %temp.display(),
+            destination = %destination.display(),
+            error = %err,
+            "Failed while promoting OpenJDK temporary download file into place."
+        );
+        err
+    })?;
     Ok(())
+}
+
+fn temporary_download_path(destination: &Path) -> PathBuf {
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}.downloading"))
+        .unwrap_or_else(|| "download.downloading".to_owned());
+    destination.with_file_name(file_name)
 }
 
 fn extract_archive(archive_path: &Path, destination: &Path) -> Result<(), InstallationError> {
@@ -4452,7 +4757,15 @@ fn get_json_with_user_agent<T: DeserializeOwned>(
 
 fn http_agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(ureq::Agent::new_with_defaults)
+    AGENT.get_or_init(|| {
+        let config = ureq::Agent::config_builder()
+            .timeout_global(Some(HTTP_TIMEOUT_GLOBAL))
+            .timeout_connect(Some(HTTP_TIMEOUT_CONNECT))
+            .timeout_recv_response(Some(HTTP_TIMEOUT_RECV_RESPONSE))
+            .timeout_recv_body(Some(HTTP_TIMEOUT_RECV_BODY))
+            .build();
+        ureq::Agent::new_with_config(config)
+    })
 }
 
 fn get_text(url: &str) -> Result<String, InstallationError> {
@@ -4465,6 +4778,14 @@ fn call_get_response_with_retry(
 ) -> Result<ureq::http::Response<ureq::Body>, InstallationError> {
     let mut last_err = None;
     for attempt in 1..=HTTP_RETRY_ATTEMPTS {
+        tracing::trace!(
+            target: "vertexlauncher/installation/http",
+            url,
+            user_agent,
+            attempt,
+            max_attempts = HTTP_RETRY_ATTEMPTS,
+            "Sending HTTP GET request."
+        );
         match http_agent()
             .get(url)
             .header("User-Agent", user_agent)
@@ -4475,6 +4796,13 @@ fn call_get_response_with_retry(
         {
             Ok(mut response) => {
                 let status = response.status().as_u16();
+                tracing::trace!(
+                    target: "vertexlauncher/installation/http",
+                    url,
+                    attempt,
+                    status,
+                    "HTTP GET request completed."
+                );
                 if status < 400 {
                     return Ok(response);
                 }
@@ -4492,6 +4820,13 @@ fn call_get_response_with_retry(
                 last_err = Some(err);
             }
             Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/installation/http",
+                    url,
+                    attempt,
+                    error = %err,
+                    "HTTP GET request failed before a valid response was received."
+                );
                 let mapped = InstallationError::Transport {
                     url: url.to_owned(),
                     message: err.to_string(),
@@ -4586,6 +4921,22 @@ fn normalized_loader_label(loader_label: &str) -> LoaderKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalizes_windows_cli_paths() {
+        assert_eq!(
+            normalize_windows_cli_path(r"\\?\C:\Users\clove\AppData\Local\vertexlauncher"),
+            r"C:\Users\clove\AppData\Local\vertexlauncher"
+        );
+        assert_eq!(
+            normalize_windows_cli_path(r"\\?\UNC\server\share\vertexlauncher"),
+            r"\\server\share\vertexlauncher"
+        );
+        assert_eq!(
+            normalize_windows_cli_path(r"C:\Users\clove\AppData\Local\vertexlauncher"),
+            r"C:\Users\clove\AppData\Local\vertexlauncher"
+        );
+    }
 
     #[test]
     fn parses_loader_matrix_entries_from_array() {

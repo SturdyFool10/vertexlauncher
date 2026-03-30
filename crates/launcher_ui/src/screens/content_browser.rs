@@ -47,6 +47,8 @@ const TILE_ACTION_BUTTON_GAP_XS: f32 = 4.0;
 const TILE_DOWNLOAD_PROGRESS_WIDTH: f32 = 96.0;
 const CONTENT_UPDATE_LOG_TARGET: &str = "vertexlauncher/content_update";
 const VERTEX_PREFETCH_DIR_NAME: &str = "vertex_prefetch";
+const VERSION_CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(75);
+const DETAIL_VERSIONS_FETCH_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ContentBrowserPage {
@@ -559,7 +561,7 @@ pub fn render(
         state.auto_populated_instance_id = None;
     }
 
-    let installations_root = PathBuf::from(config.minecraft_installations_root());
+    let installations_root = config.minecraft_installations_root_path().to_path_buf();
     let instance_root = instance_root_path(&installations_root, instance);
     let game_version = instance.game_version.trim().to_owned();
 
@@ -2266,7 +2268,20 @@ fn request_detail_versions(state: &mut ContentBrowserState) {
     state.detail_versions_error = None;
     let project_key = entry.dedupe_key.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let versions = fetch_versions_for_entry(&entry);
+        let versions: Result<Vec<BrowserVersionEntry>, String> = match tokio::time::timeout(
+            DETAIL_VERSIONS_FETCH_TIMEOUT,
+            tokio_runtime::spawn_blocking(move || fetch_versions_for_entry(&entry)),
+        )
+        .await
+        {
+            Ok(join_result) => join_result
+                .map_err(|err| err.to_string())
+                .and_then(|result| result),
+            Err(_) => Err(format!(
+                "detail version request timed out after {}s",
+                DETAIL_VERSIONS_FETCH_TIMEOUT.as_secs()
+            )),
+        };
         let _ = tx.send(DetailVersionsResult {
             project_key,
             versions,
@@ -2289,9 +2304,24 @@ fn request_version_catalog(state: &mut ContentBrowserState) {
 
     state.version_catalog_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = fetch_version_catalog(false)
-            .map(|catalog| catalog.game_versions)
-            .map_err(|err| err.to_string());
+        let result: Result<Vec<MinecraftVersionEntry>, String> = match tokio::time::timeout(
+            VERSION_CATALOG_FETCH_TIMEOUT,
+            tokio_runtime::spawn_blocking(move || {
+                fetch_version_catalog(false)
+                    .map(|catalog| catalog.game_versions)
+                    .map_err(|err| err.to_string())
+            }),
+        )
+        .await
+        {
+            Ok(join_result) => join_result
+                .map_err(|err| err.to_string())
+                .and_then(|result| result),
+            Err(_) => Err(format!(
+                "version catalog request timed out after {}s",
+                VERSION_CATALOG_FETCH_TIMEOUT.as_secs()
+            )),
+        };
         let _ = tx.send(result);
     });
 }

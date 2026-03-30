@@ -35,6 +35,86 @@ const ACTION_BUTTON_MAX_WIDTH: f32 = 260.0;
 const MODRINTH_DOWNLOAD_MIN_SPACING: Duration = Duration::from_millis(250);
 const CURSEFORGE_DOWNLOAD_MIN_SPACING: Duration = Duration::from_millis(500);
 
+#[track_caller]
+fn fs_create_dir_all_logged(path: &Path) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display());
+    let result = fs::create_dir_all(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_read_dir_logged(path: &Path) -> std::io::Result<fs::ReadDir> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_dir", path = %path.display());
+    let result = fs::read_dir(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_dir", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_read_to_string_logged(path: &Path) -> std::io::Result<String> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
+    let result = fs::read_to_string(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_copy_logged(source: &Path, destination: &Path) -> std::io::Result<u64> {
+    tracing::debug!(target: "vertexlauncher/io", op = "copy", from = %source.display(), to = %destination.display());
+    let result = fs::copy(source, destination);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "copy", from = %source.display(), to = %destination.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_write_logged(path: &Path, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "write", path = %path.display());
+    let result = fs::write(path, bytes);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "write", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_remove_dir_all_logged(path: &Path) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "remove_dir_all", path = %path.display());
+    let result = fs::remove_dir_all(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "remove_dir_all", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_rename_logged(source: &Path, destination: &Path) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "rename", from = %source.display(), to = %destination.display());
+    let result = fs::rename(source, destination);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "rename", from = %source.display(), to = %destination.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_file_open_logged(path: &Path) -> std::io::Result<fs::File> {
+    tracing::debug!(target: "vertexlauncher/io", op = "file_open", path = %path.display());
+    let result = fs::File::open(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "file_open", path = %path.display(), error = %err);
+    }
+    result
+}
+
 #[derive(Debug, Default)]
 pub struct ImportInstanceState {
     pub source_mode_index: usize,
@@ -751,13 +831,13 @@ where
     let total_steps = 6 + override_steps + manifest.files.len();
     let temp_root = unique_temp_instance_root(installations_root, existing_instance.id.as_str());
 
-    fs::create_dir_all(temp_root.as_path()).map_err(|err| {
+    fs_create_dir_all_logged(temp_root.as_path()).map_err(|err| {
         format!(
             "failed to create temp instance root {}: {err}",
             temp_root.display()
         )
     })?;
-    fs::create_dir_all(temp_root.join("mods").as_path())
+    fs_create_dir_all_logged(temp_root.join("mods").as_path())
         .map_err(|err| format!("failed to create temp mods directory: {err}"))?;
 
     progress(import_progress(
@@ -772,7 +852,7 @@ where
         total_steps,
         &mut progress,
     ) {
-        let _ = fs::remove_dir_all(temp_root.as_path());
+        let _ = fs_remove_dir_all_logged(temp_root.as_path());
         return Err(err);
     }
 
@@ -863,12 +943,17 @@ fn load_preview_from_state(state: &mut ImportInstanceState) {
     state.preview_in_flight = true;
     state.error = None;
     let _ = tokio_runtime::spawn_detached(async move {
-        let (path, launcher_hint, manifest_mode) = request;
-        let result = if manifest_mode {
-            inspect_package(path.as_path())
-        } else {
-            inspect_launcher_instance(path.as_path(), launcher_hint)
-        };
+        let result = tokio_runtime::spawn_blocking(move || {
+            let (path, launcher_hint, manifest_mode) = request;
+            if manifest_mode {
+                inspect_package(path.as_path())
+            } else {
+                inspect_launcher_instance(path.as_path(), launcher_hint)
+            }
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
         let _ = tx.send((request_serial, result));
     });
 }
@@ -1649,7 +1734,11 @@ fn copy_launcher_instance_content(
     if !managed_manifest.projects.is_empty() {
         let raw = toml::to_string_pretty(managed_manifest)
             .map_err(|err| format!("failed to serialize managed import manifest: {err}"))?;
-        fs::write(destination_root.join(CONTENT_MANIFEST_FILE_NAME), raw).map_err(|err| {
+        fs_write_logged(
+            destination_root.join(CONTENT_MANIFEST_FILE_NAME).as_path(),
+            raw,
+        )
+        .map_err(|err| {
             format!(
                 "failed to write managed import manifest into {}: {err}",
                 destination_root.display()
@@ -1660,7 +1749,7 @@ fn copy_launcher_instance_content(
 }
 
 fn copy_dir_recursive(root: &Path, current: &Path, destination_root: &Path) -> Result<(), String> {
-    let entries = fs::read_dir(current)
+    let entries = fs_read_dir_logged(current)
         .map_err(|err| format!("failed to read {}: {err}", current.display()))?;
     for entry in entries {
         let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
@@ -1673,15 +1762,15 @@ fn copy_dir_recursive(root: &Path, current: &Path, destination_root: &Path) -> R
         }
         let destination = destination_root.join(relative);
         if path.is_dir() {
-            fs::create_dir_all(destination.as_path())
+            fs_create_dir_all_logged(destination.as_path())
                 .map_err(|err| format!("failed to create {}: {err}", destination.display()))?;
             copy_dir_recursive(root, path.as_path(), destination_root)?;
         } else if path.is_file() {
             if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)
+                fs_create_dir_all_logged(parent)
                     .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
             }
-            fs::copy(path.as_path(), destination.as_path()).map_err(|err| {
+            fs_copy_logged(path.as_path(), destination.as_path()).map_err(|err| {
                 format!(
                     "failed to copy {} to {}: {err}",
                     path.display(),
@@ -1728,7 +1817,7 @@ fn should_skip_import_path(relative: &Path) -> bool {
 }
 
 fn read_json_file(path: &Path) -> Result<Value, String> {
-    let raw = fs::read_to_string(path)
+    let raw = fs_read_to_string_logged(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     serde_json::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
 }
@@ -1741,7 +1830,7 @@ fn read_json_file_optional(path: &Path) -> Result<Option<Value>, String> {
 }
 
 fn read_key_value_file(path: &Path) -> Result<HashMap<String, String>, String> {
-    let raw = fs::read_to_string(path)
+    let raw = fs_read_to_string_logged(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let mut values = HashMap::new();
     for line in raw.lines() {
@@ -1873,7 +1962,7 @@ fn load_existing_managed_manifest(path: &Path) -> Result<ContentInstallManifest,
     if !manifest_path.exists() {
         return Ok(ContentInstallManifest::default());
     }
-    let raw = fs::read_to_string(manifest_path.as_path())
+    let raw = fs_read_to_string_logged(manifest_path.as_path())
         .map_err(|err| format!("failed to read {}: {err}", manifest_path.display()))?;
     toml::from_str(&raw)
         .map_err(|err| format!("failed to parse {}: {err}", manifest_path.display()))
@@ -2116,8 +2205,8 @@ fn count_regular_files(path: &Path) -> usize {
 
 fn count_regular_files_recursive(path: &Path) -> Result<usize, String> {
     let mut count = 0usize;
-    let entries =
-        fs::read_dir(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let entries = fs_read_dir_logged(path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     for entry in entries {
         let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
         let entry_path = entry.path();
@@ -2713,7 +2802,7 @@ fn download_curseforge_plans_concurrently(
             .unwrap_or_default()
             .as_millis()
     ));
-    fs::create_dir_all(staging_dir.as_path())
+    fs_create_dir_all_logged(staging_dir.as_path())
         .map_err(|err| format!("failed to create CurseForge staging directory: {err}"))?;
     let total_downloads = plans.len();
     let queue = Arc::new(Mutex::new(VecDeque::from(plans)));
@@ -2997,9 +3086,9 @@ fn preserve_instance_user_state(existing_root: &Path, temp_root: &Path) -> Resul
 #[allow(dead_code)]
 fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(), String> {
     if source.is_dir() {
-        fs::create_dir_all(destination)
+        fs_create_dir_all_logged(destination)
             .map_err(|err| format!("failed to create {}: {err}", destination.display()))?;
-        let entries = fs::read_dir(source)
+        let entries = fs_read_dir_logged(source)
             .map_err(|err| format!("failed to read {}: {err}", source.display()))?;
         for entry in entries {
             let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
@@ -3011,10 +3100,10 @@ fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(), String> 
         return Ok(());
     }
     if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
+        fs_create_dir_all_logged(parent)
             .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
     }
-    fs::copy(source, destination).map_err(|err| {
+    fs_copy_logged(source, destination).map_err(|err| {
         format!(
             "failed to copy {} to {}: {err}",
             source.display(),
@@ -3028,27 +3117,27 @@ fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(), String> 
 fn swap_instance_root(existing_root: &Path, temp_root: &Path) -> Result<(), String> {
     let backup_root = existing_root.with_extension("modpack-update-backup");
     if backup_root.exists() {
-        fs::remove_dir_all(backup_root.as_path()).map_err(|err| {
+        fs_remove_dir_all_logged(backup_root.as_path()).map_err(|err| {
             format!(
                 "failed to remove stale backup {}: {err}",
                 backup_root.display()
             )
         })?;
     }
-    fs::rename(existing_root, backup_root.as_path()).map_err(|err| {
+    fs_rename_logged(existing_root, backup_root.as_path()).map_err(|err| {
         format!(
             "failed to stage old instance root {}: {err}",
             existing_root.display()
         )
     })?;
-    if let Err(err) = fs::rename(temp_root, existing_root) {
-        let _ = fs::rename(backup_root.as_path(), existing_root);
+    if let Err(err) = fs_rename_logged(temp_root, existing_root) {
+        let _ = fs_rename_logged(backup_root.as_path(), existing_root);
         return Err(format!(
             "failed to activate updated instance root {}: {err}",
             existing_root.display()
         ));
     }
-    fs::remove_dir_all(backup_root.as_path()).map_err(|err| {
+    fs_remove_dir_all_logged(backup_root.as_path()).map_err(|err| {
         format!(
             "failed to remove update backup {}: {err}",
             backup_root.display()
@@ -3091,7 +3180,7 @@ fn populate_vtmpack_instance(
         }
         let destination = join_safe(instance_root, downloadable.file_path.as_str())?;
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
+            fs_create_dir_all_logged(parent).map_err(|err| {
                 format!(
                     "failed to create import directory {}: {err}",
                     parent.display()
@@ -3117,7 +3206,7 @@ fn extract_vtmpack_payload(
     completed_steps: &mut usize,
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<(), String> {
-    let file = fs::File::open(package_path)
+    let file = fs_file_open_logged(package_path)
         .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
     let decoder = xz2::read::XzDecoder::new(file);
     let mut archive = tar::Archive::new(decoder);
@@ -3150,7 +3239,7 @@ fn extract_vtmpack_payload(
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).map_err(|err| {
+                fs_create_dir_all_logged(parent).map_err(|err| {
                     format!(
                         "failed to create metadata directory {}: {err}",
                         parent.display()
@@ -3173,7 +3262,7 @@ fn extract_vtmpack_payload(
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).map_err(|err| {
+                fs_create_dir_all_logged(parent).map_err(|err| {
                     format!(
                         "failed to create bundled mod directory {}: {err}",
                         parent.display()
@@ -3196,7 +3285,7 @@ fn extract_vtmpack_payload(
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).map_err(|err| {
+                fs_create_dir_all_logged(parent).map_err(|err| {
                     format!(
                         "failed to create config directory {}: {err}",
                         parent.display()
@@ -3216,7 +3305,7 @@ fn extract_vtmpack_payload(
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent).map_err(|err| {
+                fs_create_dir_all_logged(parent).map_err(|err| {
                     format!(
                         "failed to create imported root entry directory {}: {err}",
                         parent.display()
@@ -3339,7 +3428,7 @@ fn populate_mrpack_instance(
         }
         let destination = join_safe(instance_root, file.path.as_str())?;
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
+            fs_create_dir_all_logged(parent).map_err(|err| {
                 format!(
                     "failed to create import directory {}: {err}",
                     parent.display()
@@ -3395,7 +3484,7 @@ fn populate_curseforge_pack_instance(
         })?;
         let destination = instance_root.join("mods").join(file.file_name.as_str());
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
+            fs_create_dir_all_logged(parent).map_err(|err| {
                 ImportPackageError::message(format!("failed to create {}: {err}", parent.display()))
             })?;
         }
@@ -3417,7 +3506,7 @@ fn populate_curseforge_pack_instance(
             completed_steps,
             total_steps,
         ));
-        fs::copy(source_path, destination.as_path()).map_err(|err| {
+        fs_copy_logged(source_path, destination.as_path()).map_err(|err| {
             ImportPackageError::message(format!(
                 "failed to copy predownloaded file {} into {}: {err}",
                 source_path.display(),
@@ -3436,7 +3525,7 @@ fn extract_mrpack_overrides(
     completed_steps: &mut usize,
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<(), String> {
-    let file = fs::File::open(package_path)
+    let file = fs_file_open_logged(package_path)
         .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
@@ -3466,7 +3555,7 @@ fn extract_mrpack_overrides(
             total_steps,
         ));
         if entry.is_dir() {
-            fs::create_dir_all(destination.as_path()).map_err(|err| {
+            fs_create_dir_all_logged(destination.as_path()).map_err(|err| {
                 format!(
                     "failed to create override directory {}: {err}",
                     destination.display()
@@ -3475,7 +3564,7 @@ fn extract_mrpack_overrides(
             continue;
         }
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
+            fs_create_dir_all_logged(parent).map_err(|err| {
                 format!(
                     "failed to create override parent {}: {err}",
                     parent.display()
@@ -3490,7 +3579,7 @@ fn extract_mrpack_overrides(
                 package_path.display()
             )
         })?;
-        fs::write(destination.as_path(), bytes)
+        fs_write_logged(destination.as_path(), bytes)
             .map_err(|err| format!("failed to write override {}: {err}", destination.display()))?;
     }
 
@@ -3505,7 +3594,7 @@ fn extract_curseforge_overrides(
     completed_steps: &mut usize,
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<(), String> {
-    let file = fs::File::open(package_path)
+    let file = fs_file_open_logged(package_path)
         .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
@@ -3533,7 +3622,7 @@ fn extract_curseforge_overrides(
             total_steps,
         ));
         if entry.is_dir() {
-            fs::create_dir_all(destination.as_path()).map_err(|err| {
+            fs_create_dir_all_logged(destination.as_path()).map_err(|err| {
                 format!(
                     "failed to create override directory {}: {err}",
                     destination.display()
@@ -3542,7 +3631,7 @@ fn extract_curseforge_overrides(
             continue;
         }
         if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
+            fs_create_dir_all_logged(parent)
                 .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
         }
         let mut bytes = Vec::new();
@@ -3553,7 +3642,7 @@ fn extract_curseforge_overrides(
                 package_path.display()
             )
         })?;
-        fs::write(destination.as_path(), bytes)
+        fs_write_logged(destination.as_path(), bytes)
             .map_err(|err| format!("failed to write override {}: {err}", destination.display()))?;
     }
 
@@ -3561,7 +3650,7 @@ fn extract_curseforge_overrides(
 }
 
 fn count_vtmpack_payload_entries(package_path: &Path) -> Result<usize, String> {
-    let file = fs::File::open(package_path)
+    let file = fs_file_open_logged(package_path)
         .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
     let decoder = xz2::read::XzDecoder::new(file);
     let mut archive = tar::Archive::new(decoder);
@@ -3588,7 +3677,7 @@ fn count_vtmpack_payload_entries(package_path: &Path) -> Result<usize, String> {
 }
 
 fn count_mrpack_override_entries(package_path: &Path) -> Result<usize, String> {
-    let file = fs::File::open(package_path)
+    let file = fs_file_open_logged(package_path)
         .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
@@ -3616,7 +3705,7 @@ fn count_curseforge_override_entries(
     package_path: &Path,
     overrides_root: &str,
 ) -> Result<usize, String> {
-    let file = fs::File::open(package_path)
+    let file = fs_file_open_logged(package_path)
         .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
@@ -3646,8 +3735,8 @@ fn import_progress(message: &str, completed_steps: usize, total_steps: usize) ->
 }
 
 fn read_mrpack_manifest(path: &Path) -> Result<MrpackManifest, String> {
-    let file =
-        fs::File::open(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+    let file = fs_file_open_logged(path)
+        .map_err(|err| format!("failed to open {}: {err}", path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let mut manifest = archive
@@ -3661,8 +3750,8 @@ fn read_mrpack_manifest(path: &Path) -> Result<MrpackManifest, String> {
 }
 
 fn read_curseforge_pack_manifest(path: &Path) -> Result<CurseForgePackManifest, String> {
-    let file =
-        fs::File::open(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+    let file = fs_file_open_logged(path)
+        .map_err(|err| format!("failed to open {}: {err}", path.display()))?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let mut manifest = archive
@@ -3791,7 +3880,7 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
     reader
         .read_to_end(&mut bytes)
         .map_err(|err| format!("failed to read download body from {url}: {err}"))?;
-    fs::write(destination, bytes)
+    fs_write_logged(destination, bytes)
         .map_err(|err| format!("failed to write {}: {err}", destination.display()))
 }
 

@@ -541,7 +541,8 @@ impl Oklch {
 
 fn ensure_themes_dir_and_defaults(dir: &Path) {
     tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %dir.display(), context = "ensure themes dir");
-    if std::fs::create_dir_all(dir).is_err() {
+    if let Err(err) = std::fs::create_dir_all(dir) {
+        tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %dir.display(), error = %err, context = "ensure themes dir");
         return;
     }
 
@@ -558,15 +559,21 @@ fn ensure_themes_dir_and_defaults(dir: &Path) {
 
         if let Ok(contents) = toml::to_string_pretty(&theme) {
             tracing::debug!(target: "vertexlauncher/io", op = "write", path = %path.display(), context = "write default theme");
-            let _ = std::fs::write(path, contents);
+            if let Err(err) = std::fs::write(&path, contents) {
+                tracing::warn!(target: "vertexlauncher/io", op = "write", path = %path.display(), error = %err, context = "write default theme");
+            }
         }
     }
 }
 
 fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
     tracing::debug!(target: "vertexlauncher/io", op = "read_dir", path = %dir.display(), context = "load themes");
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            tracing::warn!(target: "vertexlauncher/io", op = "read_dir", path = %dir.display(), error = %err, context = "load themes");
+            return Vec::new();
+        }
     };
 
     let mut themes = Vec::new();
@@ -584,8 +591,12 @@ fn load_themes_from_dir(dir: &Path) -> Vec<Theme> {
         }
 
         tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), context = "load theme file");
-        let Ok(contents) = std::fs::read_to_string(&path) else {
-            continue;
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(err) => {
+                tracing::warn!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), error = %err, context = "load theme file");
+                continue;
+            }
         };
         let Ok(mut theme) = toml::from_str::<Theme>(&contents) else {
             continue;

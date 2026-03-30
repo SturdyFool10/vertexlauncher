@@ -176,7 +176,8 @@ fn request_thumbnail(instance_id: &str, path: String) {
     }
     let tx = thumbnail_results_channel().0.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let bytes = std::fs::read(path.as_str())
+        let bytes = tokio::fs::read(path.as_str())
+            .await
             .ok()
             .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()));
         let _ = tx.send((key, bytes));

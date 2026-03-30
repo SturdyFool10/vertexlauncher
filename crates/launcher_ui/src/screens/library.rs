@@ -9,19 +9,20 @@ use std::{
 use config::{Config, JavaRuntimeVersion};
 use egui::Ui;
 use installation::{
-    DownloadPolicy, LaunchRequest, LaunchResult, display_user_path, ensure_game_files,
-    ensure_openjdk_runtime, is_instance_running, is_instance_running_for_account, launch_instance,
-    normalize_path_key, running_instance_for_account, stop_running_instance_for_account,
+    DownloadPolicy, InstallProgressCallback, LaunchRequest, LaunchResult, display_user_path,
+    ensure_game_files, ensure_openjdk_runtime, is_instance_running,
+    is_instance_running_for_account, launch_instance, normalize_path_key,
+    running_instance_for_account, stop_running_instance_for_account,
 };
 use instances::{
-    InstanceRecord, InstanceStore, delete_instance, instance_root_path,
-    record_instance_launch_usage,
+    InstanceRecord, InstanceStore, delete_instance_root_path, instance_root_path,
+    record_instance_launch_usage, remove_instance_record,
 };
 use textui::{LabelOptions, TextUi};
 
 use crate::app::tokio_runtime;
 use crate::{
-    assets, console, desktop, notification,
+    assets, console, desktop, install_activity, notification,
     ui::{modal, style},
 };
 
@@ -34,6 +35,7 @@ const TILE_THUMBNAIL_HEIGHT: f32 = 150.0;
 const TILE_NAME_SCROLL_HEIGHT: f32 = 58.0;
 const TILE_DESCRIPTION_SCROLL_HEIGHT: f32 = 96.0;
 const TILE_DELETE_BUTTON_HEIGHT: f32 = style::CONTROL_HEIGHT;
+const LIBRARY_RUNTIME_LAUNCH_TASK_KIND: &str = "library runtime launch";
 
 #[derive(Debug, Default, Clone)]
 /// Actions emitted by the library screen for the app shell to process.
@@ -108,6 +110,7 @@ pub fn render(
     if !state.pending_launches.is_empty()
         || state.delete_in_flight
         || !state.thumbnail_in_flight.is_empty()
+        || install_activity::snapshot().is_some()
     {
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
@@ -126,12 +129,14 @@ pub fn render(
         return output;
     }
 
-    egui::ScrollArea::vertical()
+    let tiles_height = ui.available_height().max(1.0);
+    egui::ScrollArea::both()
         .id_salt("library_instance_tiles_scroll")
         .auto_shrink([false, false])
+        .max_height(tiles_height)
         .show(ui, |ui| {
             ui.add_space(style::SPACE_MD);
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_XL, style::SPACE_XL);
                 for instance in &instances.instances {
                     let instance_root = instance_root_path(installations_root, instance);
@@ -187,7 +192,9 @@ pub fn render(
                     let launch_disabled =
                         launch_disabled_for_account || launch_disabled_for_missing_ownership;
                     let launch_in_flight = state.pending_launches.contains(instance.id.as_str());
-                    let delete_disabled = instance_running || launch_in_flight;
+                    let install_in_flight =
+                        install_activity::is_instance_installing(instance.id.as_str());
+                    let delete_disabled = instance_running || launch_in_flight || install_in_flight;
 
                     let action = render_instance_tile(
                         ui,
@@ -197,6 +204,7 @@ pub fn render(
                         runtime_running_for_active_account,
                         launch_disabled,
                         launch_in_flight,
+                        install_in_flight,
                         launch_disabled_for_account,
                         launch_disabled_for_missing_ownership,
                         running_avatar,
@@ -274,7 +282,12 @@ pub fn render(
                     {
                         state.last_handled_launch_intent_nonce = Some(intent.nonce);
                         output.selected_instance_id = Some(instance.id.clone());
-                        if launch_disabled {
+                        if install_in_flight {
+                            state.status_by_instance.insert(
+                                instance.id.clone(),
+                                "Wait for installation to finish before launching.".to_owned(),
+                            );
+                        } else if launch_disabled {
                             state.status_by_instance.insert(
                                 instance.id.clone(),
                                 if launch_disabled_for_account {
@@ -326,6 +339,7 @@ fn render_instance_tile(
     runtime_running_for_active_account: bool,
     launch_disabled: bool,
     launch_in_flight: bool,
+    install_in_flight: bool,
     launch_disabled_for_account: bool,
     launch_disabled_for_missing_ownership: bool,
     running_avatar_png: Option<&[u8]>,
@@ -424,12 +438,13 @@ fn render_instance_tile(
                     runtime_running_for_active_account,
                     launch_disabled,
                     launch_in_flight,
+                    install_in_flight,
                     running_avatar_png,
                 );
                 if button_response.clicked() {
                     if runtime_running_for_active_account {
                         action = RuntimeAction::StopRequested;
-                    } else if launch_disabled || launch_in_flight {
+                    } else if launch_disabled || launch_in_flight || install_in_flight {
                         action = RuntimeAction::None;
                     } else {
                         action = RuntimeAction::LaunchRequested;
@@ -442,7 +457,9 @@ fn render_instance_tile(
                     action = RuntimeAction::DeleteRequested;
                 }
                 if delete_disabled {
-                    let reason = if launch_in_flight {
+                    let reason = if install_in_flight {
+                        "Wait for installation to finish before deleting this instance."
+                    } else if launch_in_flight {
                         "Wait for launch preparation to finish before deleting this instance."
                     } else {
                         "Stop the running instance before deleting its folder."
@@ -531,6 +548,7 @@ fn render_runtime_action_button(
     runtime_running_for_active_account: bool,
     launch_disabled: bool,
     launch_in_flight: bool,
+    install_in_flight: bool,
     running_avatar_png: Option<&[u8]>,
 ) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width().max(1.0), style::CONTROL_HEIGHT_LG);
@@ -542,7 +560,7 @@ fn render_runtime_action_button(
             egui::Stroke::new(1.0, error),
             error,
         )
-    } else if launch_in_flight {
+    } else if launch_in_flight || install_in_flight {
         (
             ui.visuals().widgets.noninteractive.bg_fill,
             ui.visuals().widgets.noninteractive.bg_stroke,
@@ -611,7 +629,7 @@ fn render_runtime_action_button(
         let icon_size = (inner_rect.height() - 4.0).clamp(12.0, 18.0);
         let icon_rect =
             egui::Rect::from_center_size(inner_rect.center(), egui::vec2(icon_size, icon_size));
-        if launch_in_flight {
+        if launch_in_flight || install_in_flight {
             let spinner_radius = (icon_size * 0.5).max(6.0);
             ui.painter().circle_stroke(
                 icon_rect.center(),
@@ -874,8 +892,7 @@ fn render_delete_instance_modal(
                 if delete_clicked {
                     request_instance_delete(
                         state,
-                        instances.clone(),
-                        instance.id.clone(),
+                        instance.clone(),
                         installations_root.to_path_buf(),
                     );
                 }
@@ -910,9 +927,8 @@ struct LibraryRuntimeState {
     delete_target_instance_id: Option<String>,
     delete_error: Option<String>,
     delete_in_flight: bool,
-    delete_results_tx: Option<mpsc::Sender<Result<(InstanceStore, InstanceRecord), String>>>,
-    delete_results_rx:
-        Option<Arc<Mutex<mpsc::Receiver<Result<(InstanceStore, InstanceRecord), String>>>>>,
+    delete_results_tx: Option<mpsc::Sender<Result<InstanceRecord, String>>>,
+    delete_results_rx: Option<Arc<Mutex<mpsc::Receiver<Result<InstanceRecord, String>>>>>,
     thumbnail_results_tx: Option<mpsc::Sender<(String, Option<Arc<[u8]>>)>>,
     thumbnail_results_rx: Option<Arc<Mutex<mpsc::Receiver<(String, Option<Arc<[u8]>>)>>>>,
     thumbnail_cache: HashMap<String, Option<Arc<[u8]>>>,
@@ -1073,69 +1089,138 @@ fn request_runtime_launch(
         },
     );
 
+    let instance_id_for_join_log = instance_id.clone();
+    let instance_id_for_result = instance_id.clone();
+    let instance_root_for_join_log = instance_root.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = (|| -> Result<RuntimeLaunchOutcome, String> {
-            let mut configured_java = None;
-            let java_path = if let Some(path) = java_executable
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .filter(|value| Path::new(value).exists())
-                .map(str::to_owned)
-            {
-                path
-            } else if let Some(runtime_major) = required_java_major {
-                let installed = ensure_openjdk_runtime(runtime_major).map_err(|err| {
-                    format!("failed to auto-install OpenJDK {runtime_major}: {err}")
+        let result = tokio_runtime::spawn_blocking(move || {
+            tracing::info!(
+                target: "vertexlauncher/library_runtime",
+                instance_id = %instance_id,
+                instance_root = %instance_root.display(),
+                game_version = %game_version,
+                modloader = %modloader,
+                "Starting library runtime launch task."
+            );
+            let result = (|| -> Result<RuntimeLaunchOutcome, String> {
+                let mut configured_java = None;
+                let java_path = if let Some(path) = java_executable
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .filter(|value| Path::new(value).exists())
+                    .map(str::to_owned)
+                {
+                    path
+                } else if let Some(runtime_major) = required_java_major {
+                    let installed = ensure_openjdk_runtime(runtime_major).map_err(|err| {
+                        format!("failed to auto-install OpenJDK {runtime_major}: {err}")
+                    })?;
+                    let installed = display_user_path(installed.as_path());
+                    configured_java = Some((runtime_major, installed.clone()));
+                    installed
+                } else {
+                    "java".to_owned()
+                };
+
+                let progress_instance_id = instance_id.clone();
+                install_activity::set_status(
+                    instance_id.as_str(),
+                    installation::InstallStage::ResolvingMetadata,
+                    format!("Preparing Minecraft {}...", game_version),
+                );
+                let progress_cb: InstallProgressCallback =
+                    Arc::new(move |progress: installation::InstallProgress| {
+                        install_activity::set_progress(progress_instance_id.as_str(), &progress);
+                    });
+
+                let setup = ensure_game_files(
+                    instance_root.as_path(),
+                    game_version.as_str(),
+                    modloader.as_str(),
+                    modloader_version.as_deref(),
+                    Some(java_path.as_str()),
+                    &download_policy,
+                    Some(progress_cb),
+                )
+                .map_err(|err| {
+                    install_activity::clear_instance(instance_id.as_str());
+                    err.to_string()
                 })?;
-                let installed = display_user_path(installed.as_path());
-                configured_java = Some((runtime_major, installed.clone()));
-                installed
-            } else {
-                "java".to_owned()
-            };
+                install_activity::clear_instance(instance_id.as_str());
+                tracing::info!(
+                    target: "vertexlauncher/library_runtime",
+                    instance_id = %instance_id,
+                    instance_root = %instance_root.display(),
+                    downloaded_files = setup.downloaded_files,
+                    "Library runtime launch completed ensure_game_files."
+                );
 
-            let setup = ensure_game_files(
-                instance_root.as_path(),
-                game_version.as_str(),
-                modloader.as_str(),
-                modloader_version.as_deref(),
-                Some(java_path.as_str()),
-                &download_policy,
-                None,
-            )
-            .map_err(|err| err.to_string())?;
-
-            let launch_request = LaunchRequest {
-                instance_root: instance_root.clone(),
-                game_version: game_version.clone(),
-                modloader: modloader.clone(),
-                modloader_version: modloader_version.clone(),
-                account_key: launch_account_name.clone(),
-                java_executable: Some(java_path),
-                max_memory_mib,
-                extra_jvm_args: extra_jvm_args.clone(),
-                player_name: player_name.clone().or(launch_account_name.clone()),
-                player_uuid: player_uuid.clone(),
-                auth_access_token: access_token.clone(),
-                auth_xuid: xuid.clone(),
-                auth_user_type: user_type.clone(),
-                quick_play_singleplayer: quick_play_singleplayer.clone(),
-                quick_play_multiplayer: quick_play_multiplayer.clone(),
-                linux_set_opengl_driver,
-                linux_use_zink_driver,
-            };
-            let launch = launch_instance(&launch_request).map_err(|err| err.to_string())?;
-            Ok(RuntimeLaunchOutcome {
-                launch,
-                downloaded_files: setup.downloaded_files,
-                resolved_modloader_version: setup.resolved_modloader_version,
-                configured_java,
-            })
-        })();
+                let launch_request = LaunchRequest {
+                    instance_root: instance_root.clone(),
+                    game_version: game_version.clone(),
+                    modloader: modloader.clone(),
+                    modloader_version: modloader_version.clone(),
+                    account_key: launch_account_name.clone(),
+                    java_executable: Some(java_path),
+                    max_memory_mib,
+                    extra_jvm_args: extra_jvm_args.clone(),
+                    player_name: player_name.clone().or(launch_account_name.clone()),
+                    player_uuid: player_uuid.clone(),
+                    auth_access_token: access_token.clone(),
+                    auth_xuid: xuid.clone(),
+                    auth_user_type: user_type.clone(),
+                    quick_play_singleplayer: quick_play_singleplayer.clone(),
+                    quick_play_multiplayer: quick_play_multiplayer.clone(),
+                    linux_set_opengl_driver,
+                    linux_use_zink_driver,
+                };
+                tracing::info!(
+                    target: "vertexlauncher/library_runtime",
+                    instance_id = %instance_id,
+                    instance_root = %instance_root.display(),
+                    "Launching prepared library instance."
+                );
+                let launch = launch_instance(&launch_request).map_err(|err| err.to_string())?;
+                Ok(RuntimeLaunchOutcome {
+                    launch,
+                    downloaded_files: setup.downloaded_files,
+                    resolved_modloader_version: setup.resolved_modloader_version,
+                    configured_java,
+                })
+            })();
+            match &result {
+                Ok(_) => tracing::info!(
+                    target: "vertexlauncher/library_runtime",
+                    instance_id = %instance_id,
+                    instance_root = %instance_root.display(),
+                    "Library runtime launch task finished successfully."
+                ),
+                Err(error) => tracing::warn!(
+                    target: "vertexlauncher/library_runtime",
+                    instance_id = %instance_id,
+                    instance_root = %instance_root.display(),
+                    error = %error,
+                    "Library runtime launch task failed."
+                ),
+            }
+            result
+        })
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                target: "vertexlauncher/library_runtime",
+                instance_id = %instance_id_for_join_log,
+                instance_root = %instance_root_for_join_log.display(),
+                error = %err,
+                "Library runtime launch task join failed."
+            );
+            format!("{LIBRARY_RUNTIME_LAUNCH_TASK_KIND} failed: {err}")
+        })
+        .and_then(|result| result);
 
         let _ = tx.send(RuntimeLaunchResult {
-            instance_id,
+            instance_id: instance_id_for_result,
             result,
         });
     });
@@ -1196,7 +1281,7 @@ fn poll_runtime_actions(
                 if let Some((runtime_major, path)) = outcome.configured_java
                     && let Some(runtime) = java_runtime_from_major(runtime_major)
                 {
-                    config.set_java_runtime_path(runtime, Some(path));
+                    config.set_java_runtime_path_ref(runtime, Some(Path::new(path.as_str())));
                 }
                 if let Some(context) = context.as_ref() {
                     let tab_id = console::ensure_instance_tab(
@@ -1267,21 +1352,21 @@ fn choose_java_executable(
     if instance.java_override_enabled
         && let Some(override_major) = instance.java_override_runtime_major
         && let Some(runtime) = java_runtime_from_major(override_major)
-        && let Some(path) = config.java_runtime_path(runtime)
+        && let Some(path) = config.java_runtime_path_ref(runtime)
     {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() && Path::new(trimmed).exists() {
-            return Some(trimmed.to_owned());
+        let trimmed = path.as_os_str().to_string_lossy().trim().to_owned();
+        if !trimmed.is_empty() && path.exists() {
+            return Some(trimmed);
         }
     }
 
     if let Some(runtime_major) = required_java_major
         && let Some(runtime) = java_runtime_from_major(runtime_major)
-        && let Some(path) = config.java_runtime_path(runtime)
+        && let Some(path) = config.java_runtime_path_ref(runtime)
     {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() && Path::new(trimmed).exists() {
-            return Some(trimmed.to_owned());
+        let trimmed = path.as_os_str().to_string_lossy().trim().to_owned();
+        if !trimmed.is_empty() && path.exists() {
+            return Some(trimmed);
         }
     }
     None
@@ -1338,15 +1423,14 @@ fn ensure_delete_channel(state: &mut LibraryRuntimeState) {
     if state.delete_results_tx.is_some() && state.delete_results_rx.is_some() {
         return;
     }
-    let (tx, rx) = mpsc::channel::<Result<(InstanceStore, InstanceRecord), String>>();
+    let (tx, rx) = mpsc::channel::<Result<InstanceRecord, String>>();
     state.delete_results_tx = Some(tx);
     state.delete_results_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
 fn request_instance_delete(
     state: &mut LibraryRuntimeState,
-    mut instances: InstanceStore,
-    instance_id: String,
+    instance: InstanceRecord,
     installations_root: PathBuf,
 ) {
     if state.delete_in_flight {
@@ -1360,14 +1444,12 @@ fn request_instance_delete(
 
     state.delete_in_flight = true;
     state.delete_error = None;
-    let _ = tokio_runtime::spawn_detached(async move {
-        let result = delete_instance(
-            &mut instances,
-            instance_id.as_str(),
-            installations_root.as_path(),
-        )
-        .map(|deleted| (instances, deleted))
-        .map_err(|err| err.to_string());
+    tokio_runtime::spawn_blocking_detached(move || {
+        let instance_root = instance_root_path(installations_root.as_path(), &instance);
+        let instance_for_result = instance.clone();
+        let result = delete_instance_root_path(instance_root.as_path())
+            .map(|()| instance_for_result)
+            .map_err(|err| err.to_string());
         let _ = tx.send(result);
     });
 }
@@ -1402,8 +1484,13 @@ fn poll_delete_instance_results(state: &mut LibraryRuntimeState, instances: &mut
     for update in updates {
         state.delete_in_flight = false;
         match update {
-            Ok((store, deleted)) => {
-                *instances = store;
+            Ok(deleted) => {
+                if let Err(err) = remove_instance_record(instances, deleted.id.as_str()) {
+                    state.delete_error = Some(format!(
+                        "Deleted the instance folder, but failed to remove launcher metadata: {err}"
+                    ));
+                    continue;
+                }
                 state.pending_launches.remove(deleted.id.as_str());
                 state.pending_launch_contexts.remove(deleted.id.as_str());
                 state.status_by_instance.remove(deleted.id.as_str());
@@ -1459,7 +1546,8 @@ fn request_instance_thumbnail(state: &mut LibraryRuntimeState, instance_id: &str
     state.thumbnail_in_flight.insert(key.clone());
     let path = PathBuf::from(path);
     let _ = tokio_runtime::spawn_detached(async move {
-        let bytes = std::fs::read(path.as_path())
+        let bytes = tokio::fs::read(path.as_path())
+            .await
             .ok()
             .map(|bytes| Arc::<[u8]>::from(bytes.into_boxed_slice()));
         let _ = tx.send((key, bytes));

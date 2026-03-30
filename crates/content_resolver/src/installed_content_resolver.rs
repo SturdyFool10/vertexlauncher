@@ -19,6 +19,56 @@ const LOOKUP_CACHE_KEY_PREFIX: &str = "lookup::";
 const HEURISTIC_WARNING_MESSAGE: &str =
     "Resolved from filename search. This match is heuristic and may be wrong.";
 
+#[track_caller]
+fn fs_read_dir(path: &Path) -> std::io::Result<std::fs::ReadDir> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_dir", path = %path.display());
+    let result = std::fs::read_dir(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_dir", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_read_to_string(path: &Path) -> std::io::Result<String> {
+    tracing::debug!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display());
+    let result = std::fs::read_to_string(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "read_to_string", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_create_dir_all(path: &Path) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display());
+    let result = std::fs::create_dir_all(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_write(path: &Path, raw: String) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "write", path = %path.display());
+    let result = std::fs::write(path, raw);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "write", path = %path.display(), error = %err);
+    }
+    result
+}
+
+#[track_caller]
+fn fs_remove_file(path: &Path) -> std::io::Result<()> {
+    tracing::debug!(target: "vertexlauncher/io", op = "remove_file", path = %path.display());
+    let result = std::fs::remove_file(path);
+    if let Err(err) = &result {
+        tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %path.display(), error = %err);
+    }
+    result
+}
+
 fn modrinth_entry_cache() -> &'static Mutex<HashMap<String, Option<UnifiedContentEntry>>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Option<UnifiedContentEntry>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -68,7 +118,7 @@ impl InstalledContentResolver {
     ) -> Vec<InstalledContentFile> {
         let dir = instance_root.join(kind.folder_name());
         let mut files = Vec::new();
-        let Ok(read_dir) = std::fs::read_dir(dir) else {
+        let Ok(read_dir) = fs_read_dir(dir.as_path()) else {
             return files;
         };
 
@@ -153,7 +203,7 @@ impl InstalledContentResolver {
 
     pub fn load_hash_cache(instance_root: &Path) -> InstalledContentHashCache {
         let cache_path = content_hash_cache_path(instance_root);
-        let Ok(raw) = std::fs::read_to_string(cache_path.as_path()) else {
+        let Ok(raw) = fs_read_to_string(cache_path.as_path()) else {
             return InstalledContentHashCache::default();
         };
         let Ok(cache) = serde_json::from_str::<InstalledContentHashCache>(raw.as_str()) else {
@@ -168,17 +218,17 @@ impl InstalledContentResolver {
     ) -> Result<(), std::io::Error> {
         let cache_path = content_hash_cache_path(instance_root);
         if let Some(parent) = cache_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs_create_dir_all(parent)?;
         }
         let raw = serde_json::to_string_pretty(cache)
             .map_err(|err| std::io::Error::other(err.to_string()))?;
-        std::fs::write(cache_path, raw)
+        fs_write(cache_path.as_path(), raw)
     }
 
     pub fn clear_hash_cache(instance_root: &Path) -> Result<(), std::io::Error> {
         let cache_path = content_hash_cache_path(instance_root);
         if cache_path.exists() {
-            std::fs::remove_file(cache_path)?;
+            fs_remove_file(cache_path.as_path())?;
         }
         Ok(())
     }

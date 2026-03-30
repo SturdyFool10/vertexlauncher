@@ -806,7 +806,11 @@ fn render_instance_defaults_section(ui: &mut Ui, text_ui: &mut TextUi, config: &
     );
     ui.add_space(style::SPACE_MD);
 
-    let mut installations_root = config.minecraft_installations_root().to_owned();
+    let mut installations_root = config
+        .minecraft_installations_root_path()
+        .as_os_str()
+        .to_string_lossy()
+        .into_owned();
     let installations_root_response = settings_widgets::full_width_text_input_row(
         text_ui,
         ui,
@@ -979,9 +983,9 @@ fn render_java_runtime_path_row(
     runtime: JavaRuntimeVersion,
 ) {
     let mut path_value = config
-        .java_runtime_path(runtime)
-        .unwrap_or_default()
-        .to_owned();
+        .java_runtime_path_ref(runtime)
+        .map(|path| path.as_os_str().to_string_lossy().into_owned())
+        .unwrap_or_default();
     let response = settings_widgets::full_width_text_input_row(
         text_ui,
         ui,
@@ -991,7 +995,12 @@ fn render_java_runtime_path_row(
         &mut path_value,
     );
     if response.changed() {
-        config.set_java_runtime_path(runtime, normalize_optional_input(&path_value));
+        config.set_java_runtime_path_ref(
+            runtime,
+            normalize_optional_input(&path_value)
+                .as_deref()
+                .map(std::path::Path::new),
+        );
     }
     ui.add_space(8.0);
 }

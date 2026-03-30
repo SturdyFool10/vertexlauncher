@@ -7,4 +7,4 @@ edition = "2024"
 serde.workspace = true
 toml.workspace = true
 modprovider.workspace = true
-
+tracing.workspace = true

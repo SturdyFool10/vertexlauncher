@@ -200,8 +200,7 @@ pub fn render(
             }
         }
         AppScreen::Library => {
-            let installations_root =
-                std::path::PathBuf::from(config.minecraft_installations_root());
+            let installations_root = config.minecraft_installations_root_path().to_path_buf();
             let output = library::render(
                 ui,
                 text_ui,
@@ -337,7 +336,7 @@ pub fn render(
         ui.ctx(),
         text_ui,
         instances,
-        std::path::Path::new(config.minecraft_installations_root()),
+        config.minecraft_installations_root_path(),
     );
     context_menu::show(ui.ctx());
     output

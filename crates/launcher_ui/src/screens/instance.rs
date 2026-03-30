@@ -292,7 +292,7 @@ pub fn render(
     let selected_game_version_for_loader = selected_game_version(&state).to_owned();
     ensure_selected_modloader_is_supported(&mut state, selected_game_version_for_loader.as_str());
 
-    let installations_root = std::path::PathBuf::from(config.minecraft_installations_root());
+    let installations_root = config.minecraft_installations_root_path().to_path_buf();
     let instance_root_path = instances::instance_root_path(&installations_root, &instance_snapshot);
     poll_instance_screenshot_delete_results(&mut state, instance_root_path.as_path());
     let content_download_policy = DownloadPolicy {
@@ -379,6 +379,7 @@ pub fn render(
                 instance_root_path.as_path(),
                 &content_download_policy,
                 &mut state,
+                external_install_active,
                 &mut output,
             );
 
@@ -1492,7 +1493,10 @@ fn request_instance_screenshot_delete(
 
     state.delete_screenshot_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = fs::remove_file(path.as_path()).map_err(|err| err.to_string());
+        let result = fs::remove_file(path.as_path()).map_err(|err| {
+            tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %path.display(), error = %err, context = "delete instance screenshot");
+            format!("failed to remove {}: {err}", path.display())
+        });
         let _ = tx.send((screenshot_key, file_name, result));
     });
 }
@@ -2210,40 +2214,37 @@ fn render_instance_settings_modal(
                             );
                         }
 
-                        let mut modloader_version_options: Vec<String> =
-                            Vec::with_capacity(resolved_modloader_versions.len() + 1);
-                        modloader_version_options.push("Latest available".to_owned());
-                        modloader_version_options.extend(resolved_modloader_versions.iter().cloned());
+                        let modloader_version_options: Vec<String> =
+                            resolved_modloader_versions.clone();
+
+                        // Auto-select the first (latest) version if none is currently set.
+                        if state.modloader_version_input.trim().is_empty() {
+                            if let Some(first) = modloader_version_options.first() {
+                                state.modloader_version_input = first.clone();
+                            }
+                        }
+
                         let option_refs: Vec<&str> = modloader_version_options
                             .iter()
                             .map(String::as_str)
                             .collect();
                         let current_modloader_version = state.modloader_version_input.trim().to_owned();
-                        let mut selected_index = if current_modloader_version.is_empty() {
-                            0
-                        } else {
-                            modloader_version_options
-                                .iter()
-                                .position(|entry| entry == &current_modloader_version)
-                                .unwrap_or(0)
-                        };
-                        if !current_modloader_version.is_empty() && selected_index == 0 {
-                            state.modloader_version_input.clear();
-                        }
+                        let mut selected_index = modloader_version_options
+                            .iter()
+                            .position(|entry| entry == &current_modloader_version)
+                            .unwrap_or(0);
                         if settings_widgets::full_width_dropdown_row(
                             text_ui,
                             ui,
                             ("instance_modloader_version_dropdown", instance_id),
                             "Modloader version",
-                            Some("Cataloged by loader+Minecraft compatibility and cached once per day. Pick Latest available for automatic selection."),
+                            Some("Cataloged by loader+Minecraft compatibility and cached once per day."),
                             &mut selected_index,
                             &option_refs,
                         )
                         .changed()
                         {
-                            if selected_index == 0 {
-                                state.modloader_version_input.clear();
-                            } else if let Some(selected) = modloader_version_options.get(selected_index) {
+                            if let Some(selected) = modloader_version_options.get(selected_index) {
                                 state.modloader_version_input = selected.clone();
                             }
                         }
@@ -2392,7 +2393,7 @@ fn render_instance_settings_modal(
                                         saved_instance.modloader_version.as_str(),
                                     );
                                     let installations_root =
-                                        PathBuf::from(config.minecraft_installations_root());
+                                        config.minecraft_installations_root_path().to_path_buf();
                                     let instance_root = instances::instance_root_path(
                                         &installations_root,
                                         &saved_instance,
@@ -2671,7 +2672,7 @@ fn render_instance_settings_modal(
                     {
                         if let Some(instance) = instances.find(instance_id) {
                             let installations_root =
-                                PathBuf::from(config.minecraft_installations_root());
+                                config.minecraft_installations_root_path().to_path_buf();
                             let instance_root =
                                 instances::instance_root_path(&installations_root, instance);
                             match desktop::open_in_file_manager(instance_root.as_path()) {
@@ -2755,7 +2756,7 @@ fn render_export_vtmpack_modal(
     let mut open = state.show_export_vtmpack_modal;
     let mut close_requested = false;
     let viewport_rect = ctx.input(|i| i.content_rect());
-    let installations_root = PathBuf::from(config.minecraft_installations_root());
+    let installations_root = config.minecraft_installations_root_path().to_path_buf();
     let instance_root = instances
         .find(instance_id)
         .map(|instance| instances::instance_root_path(&installations_root, instance));
@@ -3221,7 +3222,7 @@ fn render_export_server_modal(
     let mut open = state.show_export_server_modal;
     let mut close_requested = false;
     let viewport_rect = ctx.input(|i| i.content_rect());
-    let installations_root = PathBuf::from(config.minecraft_installations_root());
+    let installations_root = config.minecraft_installations_root_path().to_path_buf();
     let instance_root = instances
         .find(instance_id)
         .map(|instance| instances::instance_root_path(&installations_root, instance));
@@ -3500,16 +3501,21 @@ fn request_server_export(
     let instance_name = instance.name.clone();
     let output_path_for_task = output_path.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = export_instance_as_server_zip_with_progress(
-            &instance,
-            instance_root.as_path(),
-            output_path_for_task.as_path(),
-            &included_root_entries,
-            force_java_21_minimum,
-            |progress| {
-                let _ = progress_tx.send(progress);
-            },
-        );
+        let result = tokio_runtime::spawn_blocking(move || {
+            export_instance_as_server_zip_with_progress(
+                &instance,
+                instance_root.as_path(),
+                output_path_for_task.as_path(),
+                &included_root_entries,
+                force_java_21_minimum,
+                |progress| {
+                    let _ = progress_tx.send(progress);
+                },
+            )
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
         let _ = results_tx.send(ServerExportOutcome {
             instance_name,
             output_path,
@@ -3608,7 +3614,7 @@ fn default_server_export_output_path(
 ) -> PathBuf {
     let downloads_dir = UserDirs::new()
         .and_then(|dirs| dirs.download_dir().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(config.minecraft_installations_root()));
+        .unwrap_or_else(|| config.minecraft_installations_root_path().to_path_buf());
     let base_name = format!(
         "{}-server-{}-{}",
         sanitize_file_stem(instance.name.as_str()),

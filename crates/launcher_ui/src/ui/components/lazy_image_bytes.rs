@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 
@@ -111,7 +110,8 @@ impl LazyImageBytes {
         let key_for_task = key.clone();
         let path_label = path.display().to_string();
         let _ = tokio_runtime::spawn_detached(async move {
-            let result = fs::read(path.as_path())
+            let result = tokio::fs::read(path.as_path())
+                .await
                 .map(Arc::<[u8]>::from)
                 .map_err(|err| format!("failed to read '{path_label}': {err}"));
             let _ = tx.send((key_for_task, result));

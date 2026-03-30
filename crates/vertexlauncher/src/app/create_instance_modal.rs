@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -17,6 +17,7 @@ use launcher_ui::{
     },
 };
 use textui::{LabelOptions, TextUi};
+use url::Url;
 
 const MODLOADER_OPTIONS: [&str; 6] = ["Vanilla", "Fabric", "Forge", "NeoForge", "Quilt", "Custom"];
 const CUSTOM_MODLOADER_INDEX: usize = MODLOADER_OPTIONS.len() - 1;
@@ -24,6 +25,8 @@ const ACTION_BUTTON_MAX_WIDTH: f32 = 260.0;
 const MODAL_GAP_SM: f32 = 6.0;
 const MODAL_GAP_MD: f32 = 8.0;
 const MODAL_GAP_LG: f32 = 10.0;
+const VERSION_CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(75);
+const MODLOADER_VERSIONS_FETCH_TIMEOUT: Duration = Duration::from_secs(45);
 const PRIMARY_ACTION_WIDTH: f32 = 160.0;
 const SECONDARY_ACTION_WIDTH: f32 = 100.0;
 
@@ -103,7 +106,7 @@ impl CreateInstanceState {
 pub struct CreateInstanceDraft {
     pub name: String,
     pub description: Option<String>,
-    pub thumbnail_path: Option<String>,
+    pub thumbnail_path: Option<PathBuf>,
     pub modloader: String,
     pub game_version: String,
     pub modloader_version: String,
@@ -190,7 +193,12 @@ pub fn render(
                 ..LabelOptions::default()
             };
 
-            let _ = text_ui.label(ui, "instance_create_heading", "Create Instance", &heading_style);
+            let _ = text_ui.label(
+                ui,
+                "instance_create_heading",
+                "Create Instance",
+                &heading_style,
+            );
             let _ = text_ui.label(
                 ui,
                 "instance_create_subheading",
@@ -231,8 +239,7 @@ pub fn render(
                 })
                 .inner
                 .clicked();
-            if refresh_versions_clicked
-            {
+            if refresh_versions_clicked {
                 sync_version_catalog(state, include_snapshots_and_betas, true);
                 state.modloader_versions_cache.clear();
                 state.modloader_versions_status = None;
@@ -384,7 +391,8 @@ pub fn render(
                 let should_fetch_remote = state.selected_modloader != CUSTOM_MODLOADER_INDEX
                     && resolved_modloader_versions.is_empty();
                 if should_fetch_remote {
-                    if let Some(cached) = state.modloader_versions_cache.get(&modloader_versions_key)
+                    if let Some(cached) =
+                        state.modloader_versions_cache.get(&modloader_versions_key)
                     {
                         resolved_modloader_versions = cached.clone();
                     } else {
@@ -437,42 +445,37 @@ pub fn render(
                     );
                 }
 
-                let mut modloader_version_options: Vec<String> =
-                    Vec::with_capacity(resolved_modloader_versions.len() + 1);
-                modloader_version_options.push("Latest available".to_owned());
-                modloader_version_options.extend(resolved_modloader_versions.iter().cloned());
+                let modloader_version_options: Vec<String> = resolved_modloader_versions.clone();
+
+                // Auto-select the first (latest) version if none is currently set.
+                if state.modloader_version.trim().is_empty() {
+                    if let Some(first) = modloader_version_options.first() {
+                        state.modloader_version = first.clone();
+                    }
+                }
 
                 let option_refs: Vec<&str> = modloader_version_options
                     .iter()
                     .map(String::as_str)
                     .collect();
                 let current_modloader_version = state.modloader_version.trim().to_owned();
-                let mut selected_index = if current_modloader_version.is_empty() {
-                    0
-                } else {
-                    modloader_version_options
-                        .iter()
-                        .position(|entry| entry == &current_modloader_version)
-                        .unwrap_or(0)
-                };
-                if !current_modloader_version.is_empty() && selected_index == 0 {
-                    state.modloader_version.clear();
-                }
+                let mut selected_index = modloader_version_options
+                    .iter()
+                    .position(|entry| entry == &current_modloader_version)
+                    .unwrap_or(0);
 
                 let changed = settings_widgets::full_width_dropdown_row(
                     text_ui,
                     ui,
                     "instance_create_modloader_version_dropdown",
                     "Modloader version",
-                    Some("Cataloged by loader+Minecraft compatibility and cached once per day. Pick Latest available for automatic selection."),
+                    Some("Cataloged by loader+Minecraft compatibility and cached once per day."),
                     &mut selected_index,
                     &option_refs,
                 )
                 .changed();
                 if changed {
-                    if selected_index == 0 {
-                        state.modloader_version.clear();
-                    } else if let Some(selected) = modloader_version_options.get(selected_index) {
+                    if let Some(selected) = modloader_version_options.get(selected_index) {
                         state.modloader_version = selected.clone();
                     }
                 }
@@ -653,10 +656,47 @@ fn sync_version_catalog(
     state.version_catalog_in_flight = true;
     state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
     state.version_catalog_error = None;
+    tracing::info!(
+        target: "vertexlauncher/create_instance",
+        include_snapshots_and_betas,
+        force_refresh,
+        "Starting version catalog fetch for create-instance modal."
+    );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = fetch_version_catalog_with_refresh(include_snapshots_and_betas, force_refresh)
-            .map_err(|err| err.to_string());
+        let result = match tokio::time::timeout(
+            VERSION_CATALOG_FETCH_TIMEOUT,
+            tokio_runtime::spawn_blocking(move || {
+                fetch_version_catalog_with_refresh(include_snapshots_and_betas, force_refresh)
+                    .map_err(|err| err.to_string())
+            }),
+        )
+        .await
+        {
+            Ok(join_result) => join_result
+                .map_err(|err| err.to_string())
+                .and_then(|result| result),
+            Err(_) => Err(format!(
+                "version catalog request timed out after {}s",
+                VERSION_CATALOG_FETCH_TIMEOUT.as_secs()
+            )),
+        };
+        match &result {
+            Ok(catalog) => tracing::info!(
+                target: "vertexlauncher/create_instance",
+                include_snapshots_and_betas,
+                force_refresh,
+                game_versions = catalog.game_versions.len(),
+                "Create-instance version catalog fetch completed."
+            ),
+            Err(error) => tracing::warn!(
+                target: "vertexlauncher/create_instance",
+                include_snapshots_and_betas,
+                force_refresh,
+                error = %error,
+                "Create-instance version catalog fetch failed."
+            ),
+        }
         let _ = tx.send((include_snapshots_and_betas, result));
     });
 }
@@ -838,16 +878,18 @@ fn render_thumbnail_picker(
         }
 
         if should_open_picker && let Some(path) = pick_thumbnail_path(state.thumbnail_path.trim()) {
-            state.thumbnail_path = path;
+            state.thumbnail_path = path.as_os_str().to_string_lossy().into_owned();
         }
     });
 }
 
 fn file_uri_from_path(path: &Path) -> String {
-    format!("file://{}", path.to_string_lossy())
+    Url::from_file_path(path)
+        .map(|url| url.into())
+        .unwrap_or_else(|_| "file:///".to_owned())
 }
 
-fn pick_thumbnail_path(current_path: &str) -> Option<String> {
+fn pick_thumbnail_path(current_path: &str) -> Option<PathBuf> {
     let mut dialog =
         rfd::FileDialog::new().add_filter("Image", &["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
     let current = Path::new(current_path);
@@ -858,9 +900,7 @@ fn pick_thumbnail_path(current_path: &str) -> Option<String> {
     } else if current.is_dir() {
         dialog = dialog.set_directory(current);
     }
-    dialog
-        .pick_file()
-        .map(|path| path.to_string_lossy().into_owned())
+    dialog.pick_file()
 }
 
 fn selected_modloader_versions<'a>(
@@ -941,16 +981,50 @@ fn request_modloader_versions(
     state.modloader_versions_status = Some(format!(
         "Fetching {loader_label} versions for Minecraft {game_version}..."
     ));
+    tracing::info!(
+        target: "vertexlauncher/create_instance",
+        loader = loader_label,
+        game_version,
+        force_refresh,
+        "Starting create-instance modloader version fetch."
+    );
 
     let loader = loader_label.to_owned();
     let game = game_version.to_owned();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = installation::fetch_loader_versions_for_game(
-            loader.as_str(),
-            game.as_str(),
-            force_refresh,
+        let result = match tokio::time::timeout(
+            MODLOADER_VERSIONS_FETCH_TIMEOUT,
+            tokio_runtime::spawn_blocking(move || {
+                installation::fetch_loader_versions_for_game(
+                    loader.as_str(),
+                    game.as_str(),
+                    force_refresh,
+                )
+                .map_err(|err| err.to_string())
+            }),
         )
-        .map_err(|err| err.to_string());
+        .await
+        {
+            Ok(join_result) => join_result
+                .map_err(|err| err.to_string())
+                .and_then(|result| result),
+            Err(_) => Err(format!(
+                "modloader version request timed out after {}s",
+                MODLOADER_VERSIONS_FETCH_TIMEOUT.as_secs()
+            )),
+        };
+        match &result {
+            Ok(versions) => tracing::info!(
+                target: "vertexlauncher/create_instance",
+                versions = versions.len(),
+                "Create-instance modloader version fetch completed."
+            ),
+            Err(error) => tracing::warn!(
+                target: "vertexlauncher/create_instance",
+                error = %error,
+                "Create-instance modloader version fetch failed."
+            ),
+        }
         let _ = tx.send((key, result));
     });
 }
@@ -1083,7 +1157,7 @@ fn build_draft(state: &CreateInstanceState) -> Result<CreateInstanceDraft, Strin
         if trimmed.is_empty() {
             None
         } else {
-            Some(trimmed.to_owned())
+            Some(PathBuf::from(trimmed))
         }
     };
     let description = {
@@ -1160,4 +1234,29 @@ fn resolve_latest_modloader_version_from_state(
         .modloader_versions_cache
         .get(&key)
         .and_then(|versions| versions.first().cloned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_uri_from_path;
+    use std::path::Path;
+
+    #[test]
+    fn file_uri_from_path_percent_encodes_spaces() {
+        assert_eq!(
+            file_uri_from_path(Path::new("/tmp/vertex launcher/image preview.png")),
+            "file:///tmp/vertex%20launcher/image%20preview.png"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn file_uri_from_windows_path_uses_valid_file_url() {
+        assert_eq!(
+            file_uri_from_path(Path::new(
+                r"C:\Users\clove\AppData\Local\vertex launcher\preview.png"
+            )),
+            "file:///C:/Users/clove/AppData/Local/vertex%20launcher/preview.png"
+        );
+    }
 }

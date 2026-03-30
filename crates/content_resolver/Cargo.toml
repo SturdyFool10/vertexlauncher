@@ -10,4 +10,4 @@ managed_content.workspace = true
 modprovider.workspace = true
 modrinth.workspace = true
 curseforge.workspace = true
-
+tracing.workspace = true

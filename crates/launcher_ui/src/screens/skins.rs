@@ -7272,17 +7272,18 @@ impl SkinManagerState {
         self.pick_skin_results_rx = Some(Arc::new(Mutex::new(rx)));
         let path_for_result = path.display().to_string();
         let _ = tokio_runtime::spawn_detached(async move {
-            let result: Result<(String, Vec<u8>), String> = (|| {
-                let bytes = std::fs::read(path.as_path())
-                    .map_err(|err| format!("Failed to read image: {err}"))?;
-                if decode_skin_rgba(&bytes).is_none() {
-                    return Err(
-                        "Selected image must be a valid PNG skin (expected 64x64 or 64x32)."
-                            .to_owned(),
-                    );
-                }
-                Ok((path_for_result, bytes))
-            })();
+            let result =
+                tokio::fs::read(path.as_path())
+                    .await
+                    .map_err(|err| format!("Failed to read image: {err}"))
+                    .and_then(|bytes| {
+                        if decode_skin_rgba(&bytes).is_none() {
+                            Err("Selected image must be a valid PNG skin (expected 64x64 or 64x32)."
+                            .to_owned())
+                        } else {
+                            Ok((path_for_result, bytes))
+                        }
+                    });
             let _ = tx.send(result);
         });
     }
@@ -7337,7 +7338,7 @@ impl SkinManagerState {
             .active_player_name
             .clone()
             .unwrap_or_else(|| "unknown".to_owned());
-        let _ = tokio_runtime::spawn_detached(async move {
+        tokio_runtime::spawn_blocking_detached(move || {
             let result = fetch_and_cache_profile(profile_id, &token, display_name_for_log.as_str());
             let _ = tx.send(WorkerEvent::Refreshed(
                 result.map(|loaded| (profile_id_for_result, loaded)),

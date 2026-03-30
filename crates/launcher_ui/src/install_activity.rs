@@ -79,6 +79,20 @@ pub fn clear_instance(instance_id: &str) {
     }
 }
 
+pub fn is_instance_installing(instance_id: &str) -> bool {
+    let Ok(mut guard) = store().lock() else {
+        return false;
+    };
+    if let Some(active) = guard.active.as_ref() {
+        if active.updated_at.elapsed() > Duration::from_secs(15) {
+            guard.active = None;
+            return false;
+        }
+        return active.instance_id == instance_id;
+    }
+    false
+}
+
 pub fn snapshot() -> Option<InstallActivitySnapshot> {
     let mut guard = store().lock().ok()?;
     if let Some(active) = guard.active.as_ref()

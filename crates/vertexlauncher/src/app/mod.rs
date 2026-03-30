@@ -724,7 +724,7 @@ impl VertexApp {
         self.discord_presence.update(
             &self.config,
             &self.instance_store,
-            Path::new(self.config.minecraft_installations_root()),
+            self.config.minecraft_installations_root_path(),
             menu_presence_context,
             self.selected_instance_id.as_deref(),
         );
@@ -782,7 +782,10 @@ impl VertexApp {
             return;
         };
 
-        let installations_root = PathBuf::from(self.config.minecraft_installations_root());
+        let installations_root = self
+            .config
+            .minecraft_installations_root_path()
+            .to_path_buf();
         let instance_root = instance_root_path(installations_root.as_path(), &instance);
         if let Err(err) = launcher_ui::desktop::open_in_file_manager(&instance_root) {
             notification::error!(
@@ -1113,7 +1116,7 @@ fn start_create_instance_task(
     app.create_instance_state.error = None;
     app.create_instance_state.create_in_flight = true;
     let mut store = app.instance_store.clone();
-    let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+    let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
     let _ = tokio_runtime::spawn_detached(async move {
         let result = create_instance(
             &mut store,
@@ -1151,7 +1154,7 @@ fn poll_create_instance_result(app: &mut VertexApp) {
     app.create_instance_state.create_in_flight = false;
     match result {
         Ok((store, instance)) => {
-            let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+            let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
             app.instance_store = store;
             start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
             app.selected_instance_id = Some(instance.id);
@@ -1227,7 +1230,12 @@ fn start_curseforge_manual_download_preflight(
     app.curseforge_manual_download_preflight_request = Some(request.clone());
     app.curseforge_manual_download_preflight_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = import_instance_modal::prepare_curseforge_manual_downloads(&request);
+        let result = tokio_runtime::spawn_blocking(move || {
+            import_instance_modal::prepare_curseforge_manual_downloads(&request)
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
         let _ = tx.send(result);
     });
 }
@@ -1252,7 +1260,7 @@ fn poll_curseforge_manual_download_preflight(app: &mut VertexApp) {
                 ManualDownloadContinuation::Import(request),
                 requirements,
                 HashMap::new(),
-                app.config.minecraft_installations_root(),
+                app.config.minecraft_installations_root_path(),
             ) {
                 Ok(mut pending) => {
                     if let Err(err) = scan_curseforge_manual_downloads(&mut pending) {
@@ -1316,7 +1324,7 @@ fn spawn_import_instance_task(app: &mut VertexApp, request: import_instance_moda
     app.import_instance_state.import_latest_progress = None;
     app.in_flight_import_request = Some(request.clone());
     let store = app.instance_store.clone();
-    let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+    let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
     let _ = tokio_runtime::spawn_detached(async move {
         let result = import_package_in_background(store, installations_root, request, progress_tx);
         let _ = tx.send(result);
@@ -1361,7 +1369,7 @@ fn poll_import_instance_result(app: &mut VertexApp) {
     let original_request = app.in_flight_import_request.take();
     match result {
         Ok((store, instance)) => {
-            let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+            let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
             app.instance_store = store;
             cleanup_pending_curseforge_manual_download(
                 app.pending_curseforge_manual_download.take(),
@@ -1386,7 +1394,7 @@ fn poll_import_instance_result(app: &mut VertexApp) {
                     ManualDownloadContinuation::Import(request),
                     requirements,
                     staged_files,
-                    app.config.minecraft_installations_root(),
+                    app.config.minecraft_installations_root_path(),
                 ) {
                     Ok(mut pending) => {
                         if let Err(scan_err) = scan_curseforge_manual_downloads(&mut pending) {
@@ -1452,7 +1460,7 @@ impl PendingCurseForgeManualDownloadState {
         continuation: ManualDownloadContinuation,
         pending_files: Vec<import_instance_modal::CurseForgeManualDownloadRequirement>,
         initial_staged_files: HashMap<u64, PathBuf>,
-        installations_root: &str,
+        installations_root: &Path,
     ) -> Result<Self, String> {
         let downloads_dir = default_downloads_dir(installations_root);
         let staging_dir = std::env::temp_dir().join(format!(
@@ -1463,8 +1471,10 @@ impl PendingCurseForgeManualDownloadState {
                 .unwrap_or_default()
                 .as_millis()
         ));
-        fs::create_dir_all(staging_dir.as_path())
-            .map_err(|err| format!("failed to create staging directory: {err}"))?;
+        fs::create_dir_all(staging_dir.as_path()).map_err(|err| {
+            tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %staging_dir.display(), error = %err, context = "create manual CurseForge staging");
+            format!("failed to create staging directory: {err}")
+        })?;
         let mut staged_files = HashMap::new();
         for (file_id, source_path) in initial_staged_files {
             let file_name = source_path
@@ -1479,6 +1489,7 @@ impl PendingCurseForgeManualDownloadState {
             let destination = staging_dir.join(file_name);
             if source_path != destination {
                 fs::copy(source_path.as_path(), destination.as_path()).map_err(|err| {
+                    tracing::warn!(target: "vertexlauncher/io", op = "copy", from = %source_path.display(), to = %destination.display(), error = %err, context = "stage CurseForge retry file");
                     format!(
                         "failed to copy staged CurseForge retry file {} into {}: {err}",
                         source_path.display(),
@@ -1758,6 +1769,7 @@ fn scan_curseforge_manual_downloads(
         };
         let staged_path = state.staging_dir.join(requirement.file_name.as_str());
         fs::copy(source_path, staged_path.as_path()).map_err(|err| {
+            tracing::warn!(target: "vertexlauncher/io", op = "copy", from = %source_path.display(), to = %staged_path.display(), error = %err, context = "stage manual CurseForge file");
             format!(
                 "failed to stage {} from downloads folder: {err}",
                 requirement.file_name
@@ -1811,7 +1823,9 @@ fn cleanup_pending_curseforge_manual_download(
     let Some(pending) = pending else {
         return;
     };
-    let _ = fs::remove_dir_all(pending.staging_dir.as_path());
+    if let Err(err) = fs::remove_dir_all(pending.staging_dir.as_path()) {
+        tracing::warn!(target: "vertexlauncher/io", op = "remove_dir_all", path = %pending.staging_dir.display(), error = %err, context = "cleanup manual CurseForge staging");
+    }
 }
 
 fn cancel_pending_curseforge_manual_download(app: &mut VertexApp) {
@@ -1836,7 +1850,7 @@ fn cancel_pending_curseforge_manual_download(app: &mut VertexApp) {
     }
 }
 
-fn default_downloads_dir(installations_root: &str) -> PathBuf {
+fn default_downloads_dir(installations_root: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Some(profile_dir) = std::env::var_os("USERPROFILE") {
@@ -1857,7 +1871,7 @@ fn default_downloads_dir(installations_root: &str) -> PathBuf {
         }
     }
 
-    PathBuf::from(installations_root)
+    installations_root.to_path_buf()
 }
 
 fn ensure_discover_install_channel(app: &mut VertexApp) {
@@ -1945,8 +1959,12 @@ fn start_discover_curseforge_manual_download_preflight(
     app.discover_curseforge_manual_download_preflight_request = Some(request);
     app.discover_curseforge_manual_download_preflight_in_flight = true;
     let _ = tokio_runtime::spawn_detached(async move {
-        let result =
-            import_instance_modal::prepare_curseforge_manual_download_for_file(project_id, file_id);
+        let result = tokio_runtime::spawn_blocking(move || {
+            import_instance_modal::prepare_curseforge_manual_download_for_file(project_id, file_id)
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
         let _ = tx.send(result);
     });
 }
@@ -1974,7 +1992,7 @@ fn poll_discover_curseforge_manual_download_preflight(app: &mut VertexApp) {
                 ManualDownloadContinuation::DiscoverInstall(request),
                 vec![requirement],
                 HashMap::new(),
-                app.config.minecraft_installations_root(),
+                app.config.minecraft_installations_root_path(),
             ) {
                 Ok(mut pending) => {
                     if let Err(err) = scan_curseforge_manual_downloads(&mut pending) {
@@ -2037,7 +2055,7 @@ fn spawn_discover_install_task(app: &mut VertexApp, request: screens::DiscoverIn
     app.discover_state
         .begin_install(format!("Downloading {}...", request.version_name));
     let store = app.instance_store.clone();
-    let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+    let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
     let _ = tokio_runtime::spawn_detached(async move {
         let result =
             install_discover_modpack_in_background(store, installations_root, request, progress_tx);
@@ -2074,7 +2092,7 @@ fn poll_discover_install_result(app: &mut VertexApp) {
 
     match result {
         Ok((store, instance)) => {
-            let installations_root = PathBuf::from(app.config.minecraft_installations_root());
+            let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
             app.instance_store = store;
             cleanup_pending_curseforge_manual_download(
                 app.pending_curseforge_manual_download.take(),
@@ -2132,7 +2150,9 @@ fn install_discover_modpack_in_background(
                 import_request,
                 progress_tx,
             );
-            let _ = fs::remove_file(temp_path.as_path());
+            if let Err(err) = fs::remove_file(temp_path.as_path()) {
+                tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %temp_path.display(), error = %err, context = "cleanup discover temp package");
+            }
             finalize_discover_instance(
                 result,
                 installations_root.as_path(),
@@ -2196,7 +2216,9 @@ fn install_discover_modpack_in_background(
                 )?;
                 Ok((store, instance))
             });
-            let _ = fs::remove_file(temp_path.as_path());
+            if let Err(err) = fs::remove_file(temp_path.as_path()) {
+                tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %temp_path.display(), error = %err, context = "cleanup discover temp package");
+            }
             finalize_discover_instance(
                 final_result,
                 installations_root.as_path(),
@@ -2294,6 +2316,7 @@ fn download_discover_modpack_file(
         sanitize_temp_file_name(file_name)
     ));
     let mut file = fs::File::create(temp_path.as_path()).map_err(|err| {
+        tracing::warn!(target: "vertexlauncher/io", op = "file_create", path = %temp_path.display(), error = %err, context = "create discover temp package");
         format!(
             "failed to create temp package {}: {err}",
             temp_path.display()
@@ -2348,8 +2371,10 @@ fn download_discover_thumbnail(
     let path = instance_root.join(format!(
         ".vertex-discover-thumbnail-{instance_id}.{extension}"
     ));
-    fs::write(path.as_path(), bytes)
-        .map_err(|err| format!("failed to write thumbnail {}: {err}", path.display()))?;
+    fs::write(path.as_path(), bytes).map_err(|err| {
+        tracing::warn!(target: "vertexlauncher/io", op = "write", path = %path.display(), error = %err, context = "write discover thumbnail");
+        format!("failed to write thumbnail {}: {err}", path.display())
+    })?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
@@ -2488,20 +2513,20 @@ fn start_initial_instance_install(
         max_download_bps: config.parsed_download_speed_limit_bps(),
     };
     let java_8 = config
-        .java_runtime_path(JavaRuntimeVersion::Java8)
-        .map(str::to_owned);
+        .java_runtime_path_ref(JavaRuntimeVersion::Java8)
+        .map(|path| path.as_os_str().to_string_lossy().into_owned());
     let java_16 = config
-        .java_runtime_path(JavaRuntimeVersion::Java16)
-        .map(str::to_owned);
+        .java_runtime_path_ref(JavaRuntimeVersion::Java16)
+        .map(|path| path.as_os_str().to_string_lossy().into_owned());
     let java_17 = config
-        .java_runtime_path(JavaRuntimeVersion::Java17)
-        .map(str::to_owned);
+        .java_runtime_path_ref(JavaRuntimeVersion::Java17)
+        .map(|path| path.as_os_str().to_string_lossy().into_owned());
     let java_21 = config
-        .java_runtime_path(JavaRuntimeVersion::Java21)
-        .map(str::to_owned);
+        .java_runtime_path_ref(JavaRuntimeVersion::Java21)
+        .map(|path| path.as_os_str().to_string_lossy().into_owned());
     let java_25 = config
-        .java_runtime_path(JavaRuntimeVersion::Java25)
-        .map(str::to_owned);
+        .java_runtime_path_ref(JavaRuntimeVersion::Java25)
+        .map(|path| path.as_os_str().to_string_lossy().into_owned());
 
     let notification_source = format!("installation/{instance_name}");
     install_activity::set_progress(
@@ -2630,6 +2655,16 @@ fn start_initial_instance_install(
             }
             Err(err) => {
                 install_activity::clear_instance(activity_instance.as_str());
+                tracing::error!(
+                    target: "vertexlauncher/app/initial_install",
+                    instance_name = %instance_name,
+                    instance_root = %instance_root.display(),
+                    game_version = %game_version,
+                    modloader = %modloader,
+                    requested_modloader_version = %modloader_version.as_deref().unwrap_or(""),
+                    error = %err,
+                    "Initial install failed for newly created instance."
+                );
                 notification::error!(
                     notification_source,
                     "{}: initial install failed: {}",
