@@ -87,6 +87,9 @@ fn login_begin_with_endpoints(
         query.append_pair("response_type", "code");
         query.append_pair("redirect_uri", &redirect_uri);
         query.append_pair("scope", &scope);
+        if authorize_url.contains("/oauth2/v2.0/authorize") {
+            query.append_pair("response_mode", "query");
+        }
         query.append_pair("code_challenge", &challenge);
         query.append_pair("code_challenge_method", "S256");
         query.append_pair("state", &state);

@@ -7,8 +7,9 @@ use std::{
 pub fn open_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        return std::process::Command::new("cmd")
-            .args(["/c", "start", "", url])
+        return std::process::Command::new("rundll32")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(url)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

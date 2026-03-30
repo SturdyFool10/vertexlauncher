@@ -36,11 +36,53 @@ pub(crate) fn detect_cpu_name() -> String {
 
     #[cfg(target_os = "windows")]
     {
-        return std::env::var("PROCESSOR_IDENTIFIER").unwrap_or_else(|_| "Unknown".to_owned());
+        return detect_windows_cpu_name()
+            .or_else(|| std::env::var("PROCESSOR_IDENTIFIER").ok())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "Unknown".to_owned());
     }
 
     #[allow(unreachable_code)]
     "Unknown".to_owned()
+}
+
+#[cfg(target_os = "windows")]
+fn detect_windows_cpu_name() -> Option<String> {
+    use std::process::Command;
+
+    let output = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            "/v",
+            "ProcessorNameString",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    stdout.lines().find_map(|line| {
+        if !line.contains("ProcessorNameString") {
+            return None;
+        }
+
+        let mut parts = line.split_whitespace();
+        let _value_name = parts.next()?;
+        let value_type = parts.next()?;
+        if !value_type.eq_ignore_ascii_case("REG_SZ") {
+            return None;
+        }
+        let value = parts.collect::<Vec<_>>().join(" ");
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
 }
 
 pub(crate) fn detect_total_memory() -> String {
