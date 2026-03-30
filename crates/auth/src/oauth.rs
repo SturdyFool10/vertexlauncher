@@ -161,10 +161,9 @@ pub(crate) fn extract_authorization_code(
     expected_redirect_uri: &str,
     expected_state: &str,
 ) -> Result<String, AuthError> {
-    let parsed = Url::parse(callback_url)
-        .map_err(|err| AuthError::OAuth(format!("Failed to parse callback URL: {err}")))?;
     let expected = Url::parse(expected_redirect_uri)
         .map_err(|err| AuthError::OAuth(format!("Failed to parse expected redirect URI: {err}")))?;
+    let parsed = parse_callback_url(callback_url, &expected)?;
     if parsed.scheme() != expected.scheme()
         || parsed.host_str() != expected.host_str()
         || parsed.port_or_known_default() != expected.port_or_known_default()
@@ -224,6 +223,18 @@ pub(crate) fn extract_authorization_code(
     code.ok_or_else(|| {
         AuthError::OAuth("Microsoft callback did not include an auth code".to_owned())
     })
+}
+
+fn parse_callback_url(callback_url: &str, expected_redirect_uri: &Url) -> Result<Url, AuthError> {
+    match Url::parse(callback_url) {
+        Ok(url) => Ok(url),
+        Err(url::ParseError::RelativeUrlWithoutBase) => expected_redirect_uri
+            .join(callback_url)
+            .map_err(|err| AuthError::OAuth(format!("Failed to parse callback URL: {err}"))),
+        Err(err) => Err(AuthError::OAuth(format!(
+            "Failed to parse callback URL: {err}"
+        ))),
+    }
 }
 
 fn capture_oauth_pair(
