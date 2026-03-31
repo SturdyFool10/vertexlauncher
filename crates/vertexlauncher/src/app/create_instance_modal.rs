@@ -358,8 +358,9 @@ pub fn render(
                         response = response.on_hover_text(reason);
                     }
 
-                    if available && response.clicked() {
+                    if available && response.clicked() && state.selected_modloader != index {
                         state.selected_modloader = index;
+                        state.modloader_version.clear();
                     }
                 }
             });

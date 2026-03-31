@@ -4089,9 +4089,11 @@ fn apply_color_to_svg(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {
 
 fn ensure_selected_modloader_is_supported(state: &mut InstanceScreenState, game_version: &str) {
     if !support_catalog_ready(state) {
+        state.incompatible_modloader_version_warning_key = None;
         return;
     }
     if state.selected_modloader == CUSTOM_MODLOADER_INDEX {
+        state.incompatible_modloader_version_warning_key = None;
         return;
     }
 
@@ -4103,20 +4105,32 @@ fn ensure_selected_modloader_is_supported(state: &mut InstanceScreenState, game_
     if entered_modloader_version.is_empty()
         || is_latest_modloader_version_alias(entered_modloader_version)
     {
+        state.incompatible_modloader_version_warning_key = None;
         return;
     }
     let Some(known_versions) = state
         .loader_versions
         .versions_for_loader(selected_label, game_version)
     else {
+        state.incompatible_modloader_version_warning_key = None;
         return;
     };
     if known_versions
         .iter()
         .any(|version| version.eq_ignore_ascii_case(entered_modloader_version))
     {
+        state.incompatible_modloader_version_warning_key = None;
         return;
     }
+
+    let warning_key = format!(
+        "{}\n{}\n{}",
+        selected_label, game_version, entered_modloader_version
+    );
+    if state.incompatible_modloader_version_warning_key.as_deref() == Some(warning_key.as_str()) {
+        return;
+    }
+    state.incompatible_modloader_version_warning_key = Some(warning_key);
 
     tracing::warn!(
         target: "vertexlauncher/ui/instance",

@@ -277,6 +277,13 @@ impl LoaderVersionIndex {
             LoaderKind::Vanilla | LoaderKind::Custom => None,
         }
     }
+
+    fn sort_desc(&mut self) {
+        sort_loader_version_map_desc(&mut self.fabric);
+        sort_loader_version_map_desc(&mut self.forge);
+        sort_loader_version_map_desc(&mut self.neoforge);
+        sort_loader_version_map_desc(&mut self.quilt);
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -496,7 +503,9 @@ pub fn fetch_version_catalog_with_refresh(
         && !is_cache_expired(cached.fetched_at_unix_secs)
         && catalog_has_loader_version_data(&cached.catalog)
     {
-        return Ok(cached.catalog.clone());
+        let mut catalog = cached.catalog.clone();
+        normalize_version_catalog_ordering(&mut catalog);
+        return Ok(catalog);
     }
 
     match fetch_version_catalog_uncached(include_snapshots_and_betas) {
@@ -506,7 +515,9 @@ pub fn fetch_version_catalog_with_refresh(
         }
         Err(err) => {
             if let Some(cached) = cached {
-                Ok(cached.catalog)
+                let mut catalog = cached.catalog;
+                normalize_version_catalog_ordering(&mut catalog);
+                Ok(catalog)
             } else {
                 Err(err)
             }
@@ -578,7 +589,7 @@ pub fn fetch_loader_versions_for_game(
         && !is_cache_expired(cached.fetched_at_unix_secs)
         && let Some(versions) = cached.versions_by_game_version.get(game_version)
     {
-        return Ok(versions.clone());
+        return Ok(sort_loader_versions_desc(versions.clone()));
     }
 
     match fetch_loader_versions_for_game_uncached(loader_kind, game_version) {
@@ -603,14 +614,15 @@ pub fn fetch_loader_versions_for_game(
                     .entry(game_version.to_owned())
                     .or_insert_with(|| selected_versions.clone());
             }
+            sort_loader_version_map_desc(&mut updated_cache.versions_by_game_version);
             let _ = write_cached_loader_versions(loader_kind, &updated_cache);
-            Ok(selected_versions)
+            Ok(sort_loader_versions_desc(selected_versions))
         }
         Err(err) => {
             if let Some(cached) = cached
                 && let Some(versions) = cached.versions_by_game_version.get(game_version)
             {
-                Ok(versions.clone())
+                Ok(sort_loader_versions_desc(versions.clone()))
             } else {
                 Err(err)
             }
@@ -652,7 +664,7 @@ fn fetch_version_catalog_uncached(
         Ok::<_, InstallationError>((manifest, fabric, forge, neoforge, quilt))
     })?;
 
-    let game_versions: Vec<MinecraftVersionEntry> = manifest
+    let mut game_versions_with_release_time: Vec<(String, MinecraftVersionEntry)> = manifest
         .versions
         .into_iter()
         .filter_map(|entry| {
@@ -665,14 +677,22 @@ fn fetch_version_catalog_uncached(
                 MinecraftVersionType::Unknown => include_snapshots_and_betas,
             };
             if include {
-                Some(MinecraftVersionEntry {
-                    id: entry.id,
-                    version_type,
-                })
+                Some((
+                    entry.release_time,
+                    MinecraftVersionEntry {
+                        id: entry.id,
+                        version_type,
+                    },
+                ))
             } else {
                 None
             }
         })
+        .collect();
+    game_versions_with_release_time.sort_by(|left, right| right.0.cmp(&left.0));
+    let game_versions: Vec<MinecraftVersionEntry> = game_versions_with_release_time
+        .into_iter()
+        .map(|(_, entry)| entry)
         .collect();
 
     let loader_support = LoaderSupportIndex {
@@ -681,12 +701,13 @@ fn fetch_version_catalog_uncached(
         neoforge: neoforge.supported_game_versions,
         quilt: quilt.supported_game_versions,
     };
-    let loader_versions = LoaderVersionIndex {
+    let mut loader_versions = LoaderVersionIndex {
         fabric: fabric.versions_by_game_version,
         forge: forge.versions_by_game_version,
         neoforge: neoforge.versions_by_game_version,
         quilt: quilt.versions_by_game_version,
     };
+    loader_versions.sort_desc();
 
     Ok(VersionCatalog {
         game_versions,
@@ -4142,6 +4163,13 @@ fn catalog_has_loader_version_data(catalog: &VersionCatalog) -> bool {
     })
 }
 
+fn normalize_version_catalog_ordering(catalog: &mut VersionCatalog) {
+    catalog
+        .game_versions
+        .sort_by(|left, right| compare_version_like_desc(left.id.as_str(), right.id.as_str()));
+    catalog.loader_versions.sort_desc();
+}
+
 fn fetch_fabric_versions() -> Result<HashSet<String>, InstallationError> {
     let versions: Vec<FabricGameVersion> = get_json(FABRIC_GAME_VERSIONS_URL)?;
     Ok(versions
@@ -4160,6 +4188,7 @@ struct LoaderVersionCatalog {
 impl LoaderVersionCatalog {
     fn finalize(mut self) -> Self {
         self.supported_game_versions = self.versions_by_game_version.keys().cloned().collect();
+        sort_loader_version_map_desc(&mut self.versions_by_game_version);
         self
     }
 }
@@ -4383,7 +4412,7 @@ fn parse_global_loader_versions(matrix: &serde_json::Value) -> Vec<String> {
         _ => {}
     }
 
-    versions
+    sort_loader_versions_desc(versions)
 }
 
 fn collect_global_loader_versions_from_entries<F>(
@@ -4676,6 +4705,99 @@ fn push_unique_loader_version(
     if !versions.iter().any(|existing| existing == &loader_version) {
         versions.push(loader_version);
     }
+}
+
+fn sort_loader_version_map_desc(versions_by_game_version: &mut BTreeMap<String, Vec<String>>) {
+    for versions in versions_by_game_version.values_mut() {
+        sort_loader_versions_desc_in_place(versions);
+    }
+}
+
+fn sort_loader_versions_desc(mut versions: Vec<String>) -> Vec<String> {
+    sort_loader_versions_desc_in_place(&mut versions);
+    versions
+}
+
+fn sort_loader_versions_desc_in_place(versions: &mut [String]) {
+    versions.sort_by(|left, right| compare_version_like_desc(left.as_str(), right.as_str()));
+}
+
+fn compare_version_like_desc(left: &str, right: &str) -> std::cmp::Ordering {
+    compare_version_like(left, right).reverse()
+}
+
+fn compare_version_like(left: &str, right: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    let left_tokens = version_like_tokens(left);
+    let right_tokens = version_like_tokens(right);
+
+    for (left_token, right_token) in left_tokens.iter().zip(right_tokens.iter()) {
+        let ordering = match (left_token, right_token) {
+            (VersionToken::Number(left), VersionToken::Number(right)) => left.cmp(right),
+            (VersionToken::Text(left), VersionToken::Text(right)) => {
+                left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase())
+            }
+            (VersionToken::Number(_), VersionToken::Text(_)) => Ordering::Greater,
+            (VersionToken::Text(_), VersionToken::Number(_)) => Ordering::Less,
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+
+    left_tokens
+        .len()
+        .cmp(&right_tokens.len())
+        .then_with(|| left.cmp(right))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum VersionToken {
+    Number(u64),
+    Text(String),
+}
+
+fn version_like_tokens(raw: &str) -> Vec<VersionToken> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut current_is_digit = None;
+
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            let is_digit = ch.is_ascii_digit();
+            match current_is_digit {
+                Some(previous) if previous != is_digit => {
+                    push_version_token(&mut tokens, &mut current, previous);
+                    current_is_digit = Some(is_digit);
+                }
+                None => current_is_digit = Some(is_digit),
+                _ => {}
+            }
+            current.push(ch);
+        } else if let Some(previous) = current_is_digit.take() {
+            push_version_token(&mut tokens, &mut current, previous);
+        }
+    }
+
+    if let Some(previous) = current_is_digit {
+        push_version_token(&mut tokens, &mut current, previous);
+    }
+
+    tokens
+}
+
+fn push_version_token(tokens: &mut Vec<VersionToken>, current: &mut String, was_digit: bool) {
+    if current.is_empty() {
+        return;
+    }
+    let token = if was_digit {
+        VersionToken::Number(current.parse::<u64>().unwrap_or(0))
+    } else {
+        VersionToken::Text(current.clone())
+    };
+    tokens.push(token);
+    current.clear();
 }
 
 fn merge_loader_catalog(target: &mut LoaderVersionCatalog, source: LoaderVersionCatalog) {
@@ -4983,16 +5105,33 @@ mod tests {
     fn parses_global_loader_versions_when_matrix_has_no_game_mapping() {
         let payload = serde_json::json!([
             {
-                "loader": { "version": "0.16.10" }
+                "loader": { "version": "0.16.9" }
             },
             {
-                "loader": { "version": "0.16.9" }
+                "loader": { "version": "0.16.10" }
             }
         ]);
 
         let versions = parse_global_loader_versions(&payload);
-        assert!(versions.iter().any(|entry| entry == "0.16.10"));
-        assert!(versions.iter().any(|entry| entry == "0.16.9"));
+        assert_eq!(versions, vec!["0.16.10".to_owned(), "0.16.9".to_owned()]);
+    }
+
+    #[test]
+    fn sorts_loader_versions_descending() {
+        let versions = sort_loader_versions_desc(vec![
+            "21.0.1-beta".to_owned(),
+            "21.0.10".to_owned(),
+            "21.0.2".to_owned(),
+        ]);
+
+        assert_eq!(
+            versions,
+            vec![
+                "21.0.10".to_owned(),
+                "21.0.2".to_owned(),
+                "21.0.1-beta".to_owned(),
+            ]
+        );
     }
 
     #[test]
@@ -5133,6 +5272,7 @@ struct MojangVersionEntry {
     id: String,
     #[serde(rename = "type")]
     version_type: String,
+    release_time: String,
     url: String,
 }
 

@@ -461,8 +461,10 @@ pub(super) fn render_modloader_selector(
                 );
             }
 
-            if available && response.clicked() {
+            if available && response.clicked() && state.selected_modloader != index {
                 state.selected_modloader = index;
+                state.modloader_version_input.clear();
+                state.incompatible_modloader_version_warning_key = None;
             }
         }
     });
