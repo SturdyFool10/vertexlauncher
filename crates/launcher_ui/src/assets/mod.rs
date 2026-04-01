@@ -36,6 +36,7 @@ pub const SHARE_SVG: &[u8] = include_bytes!("share.svg");
 pub const SHOPPING_CART_SVG: &[u8] = include_bytes!("shopping-cart.svg");
 pub const SKIN_SELECTOR_SVG: &[u8] = include_bytes!("skin_selector.svg");
 pub const STAR_SVG: &[u8] = include_bytes!("star.svg");
+pub const STEAM_SVG: &[u8] = include_bytes!("brand-steam.svg");
 pub const STOP_SVG: &[u8] = include_bytes!("stop.svg");
 pub const TERMINAL_2_SVG: &[u8] = include_bytes!("terminal-2.svg");
 pub const TERMINAL_SVG: &[u8] = include_bytes!("terminal.svg");

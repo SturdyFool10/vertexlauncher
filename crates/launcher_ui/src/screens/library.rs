@@ -26,7 +26,10 @@ use crate::{
     ui::{modal, style},
 };
 
-use super::{AppScreen, LaunchAuthContext, peek_launch_intent};
+use super::{
+    AppScreen, LaunchAuthContext, QuickLaunchCommandMode, build_quick_launch_command,
+    build_quick_launch_steam_options, peek_launch_intent, selected_quick_launch_user,
+};
 use crate::ui::instance_context_menu::{self, InstanceContextAction};
 
 const TILE_WIDTH: f32 = 300.0;
@@ -267,6 +270,22 @@ pub fn render(
                                 );
                             }
                         }
+                        RuntimeAction::CopyCommandRequested => {
+                            copy_instance_launch_command(
+                                ui.ctx(),
+                                instance.id.as_str(),
+                                active_username,
+                                active_launch_auth,
+                            );
+                        }
+                        RuntimeAction::CopySteamOptionsRequested => {
+                            copy_instance_steam_launch_options(
+                                ui.ctx(),
+                                instance.id.as_str(),
+                                active_username,
+                                active_launch_auth,
+                            );
+                        }
                         RuntimeAction::OpenInstanceRequested => {
                             output.selected_instance_id = Some(instance.id.clone());
                             output.requested_screen = Some(AppScreen::Instance);
@@ -503,6 +522,8 @@ fn render_instance_tile(
         action = match action_id {
             InstanceContextAction::OpenInstance => RuntimeAction::OpenInstanceRequested,
             InstanceContextAction::OpenFolder => RuntimeAction::OpenFolderRequested,
+            InstanceContextAction::CopyLaunchCommand => RuntimeAction::CopyCommandRequested,
+            InstanceContextAction::CopySteamLaunchOptions => RuntimeAction::CopySteamOptionsRequested,
             InstanceContextAction::Delete => RuntimeAction::DeleteRequested,
         };
     }
@@ -906,6 +927,60 @@ fn apply_color_to_svg(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {
     svg.into_bytes()
 }
 
+fn copy_instance_launch_command(
+    ctx: &egui::Context,
+    instance_id: &str,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+) {
+    let Some(user) = selected_quick_launch_user(active_username, active_launch_auth) else {
+        notification::warn!(
+            "library/quick_launch",
+            "Sign in before copying an instance command line."
+        );
+        return;
+    };
+    let command = build_quick_launch_command(
+        QuickLaunchCommandMode::Pack,
+        instance_id,
+        user.as_str(),
+        None,
+        None,
+    );
+    ctx.copy_text(command);
+    notification::info!(
+        "library/quick_launch",
+        "Copied instance command line to clipboard."
+    );
+}
+
+fn copy_instance_steam_launch_options(
+    ctx: &egui::Context,
+    instance_id: &str,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+) {
+    let Some(user) = selected_quick_launch_user(active_username, active_launch_auth) else {
+        notification::warn!(
+            "library/quick_launch",
+            "Sign in before copying Steam launch options."
+        );
+        return;
+    };
+    let options = build_quick_launch_steam_options(
+        QuickLaunchCommandMode::Pack,
+        instance_id,
+        user.as_str(),
+        None,
+        None,
+    );
+    ctx.copy_text(options);
+    notification::info!(
+        "library/quick_launch",
+        "Copied Steam launch options to clipboard."
+    );
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeAction {
     None,
@@ -913,6 +988,8 @@ enum RuntimeAction {
     StopRequested,
     DeleteRequested,
     OpenFolderRequested,
+    CopyCommandRequested,
+    CopySteamOptionsRequested,
     OpenInstanceRequested,
 }
 

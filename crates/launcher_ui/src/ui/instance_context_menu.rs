@@ -10,6 +10,8 @@ use crate::{
 pub enum InstanceContextAction {
     OpenInstance,
     OpenFolder,
+    CopyLaunchCommand,
+    CopySteamLaunchOptions,
     Delete,
 }
 
@@ -18,6 +20,8 @@ impl InstanceContextAction {
         match self {
             Self::OpenInstance => "open_instance_screen",
             Self::OpenFolder => "open_instance_folder",
+            Self::CopyLaunchCommand => "copy_instance_launch_command",
+            Self::CopySteamLaunchOptions => "copy_instance_steam_launch_options",
             Self::Delete => "delete_instance",
         }
     }
@@ -30,6 +34,8 @@ impl InstanceContextAction {
         match action_id {
             "open_instance_screen" => Some(Self::OpenInstance),
             "open_instance_folder" => Some(Self::OpenFolder),
+            "copy_instance_launch_command" => Some(Self::CopyLaunchCommand),
+            "copy_instance_steam_launch_options" => Some(Self::CopySteamLaunchOptions),
             "delete_instance" => Some(Self::Delete),
             _ => None,
         }
@@ -47,6 +53,16 @@ pub fn items(include_delete: bool) -> Vec<ContextMenuItem> {
             InstanceContextAction::OpenFolder.action_id(),
             "Open folder",
             assets::FOLDER_SVG,
+        ),
+        ContextMenuItem::new_with_icon(
+            InstanceContextAction::CopyLaunchCommand.action_id(),
+            "Copy command line",
+            assets::TERMINAL_SVG,
+        ),
+        ContextMenuItem::new_with_icon(
+            InstanceContextAction::CopySteamLaunchOptions.action_id(),
+            "Copy Steam launch options",
+            assets::STEAM_SVG,
         ),
     ];
 

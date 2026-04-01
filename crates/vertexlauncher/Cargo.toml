@@ -16,6 +16,7 @@ fontloader.workspace = true
 config.workspace = true
 textui.workspace = true
 auth.workspace = true
+content_resolver.workspace = true
 instances.workspace = true
 installation.workspace = true
 launcher_runtime.workspace = true

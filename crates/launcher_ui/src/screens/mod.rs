@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, env};
 
 use config::{Config, UiFontFamily};
 use curseforge::set_api_key_override as set_curseforge_api_key_override;
@@ -113,6 +113,96 @@ pub(crate) struct PendingLaunchIntent {
     pub quick_play_multiplayer: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuickLaunchCommandMode {
+    Pack,
+    World,
+    Server,
+}
+
+pub fn selected_quick_launch_user(
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+) -> Option<String> {
+    active_launch_auth
+        .map(|auth| auth.player_uuid.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            active_username
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        })
+}
+
+pub fn build_quick_launch_command(
+    mode: QuickLaunchCommandMode,
+    instance: &str,
+    user: &str,
+    world: Option<&str>,
+    server: Option<&str>,
+) -> String {
+    let executable = env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "vertexlauncher".to_owned());
+    let mut args = vec![shell_escape(executable.as_str())];
+    args.extend(build_quick_launch_args(mode, instance, user, world, server));
+    args.join(" ")
+}
+
+pub fn build_quick_launch_steam_options(
+    mode: QuickLaunchCommandMode,
+    instance: &str,
+    user: &str,
+    world: Option<&str>,
+    server: Option<&str>,
+) -> String {
+    build_quick_launch_args(mode, instance, user, world, server).join(" ")
+}
+
+fn build_quick_launch_args(
+    mode: QuickLaunchCommandMode,
+    instance: &str,
+    user: &str,
+    world: Option<&str>,
+    server: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![match mode {
+        QuickLaunchCommandMode::Pack => "--quick-launch-pack".to_owned(),
+        QuickLaunchCommandMode::World => "--quick-launch-world".to_owned(),
+        QuickLaunchCommandMode::Server => "--quick-launch-server".to_owned(),
+    }];
+    args.push("--instance".to_owned());
+    args.push(shell_escape(instance));
+    args.push("--user".to_owned());
+    args.push(shell_escape(user));
+    if let Some(world) = world.filter(|value| !value.trim().is_empty()) {
+        args.push("--world".to_owned());
+        args.push(shell_escape(world));
+    }
+    if let Some(server) = server.filter(|value| !value.trim().is_empty()) {
+        args.push("--server".to_owned());
+        args.push(shell_escape(server));
+    }
+    args
+}
+
+fn shell_escape(value: &str) -> String {
+    if value.is_empty() {
+        return "\"\"".to_owned();
+    }
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/' | '\\'))
+    {
+        return value.to_owned();
+    }
+    format!("\"{}\"", value.replace('"', "\\\""))
+}
+
 pub(crate) fn queue_launch_intent(ctx: &egui::Context, intent: PendingLaunchIntent) {
     let id = egui::Id::new("pending_launch_intent");
     ctx.data_mut(|data| data.insert_temp(id, intent));
@@ -190,7 +280,15 @@ pub fn render(
 
     let output = match screen {
         AppScreen::Home => {
-            let output = home::render(ui, text_ui, instances, config, streamer_mode);
+            let output = home::render(
+                ui,
+                text_ui,
+                instances,
+                config,
+                active_username,
+                active_launch_auth,
+                streamer_mode,
+            );
             ScreenOutput {
                 instances_changed: false,
                 requested_screen: output.requested_screen,

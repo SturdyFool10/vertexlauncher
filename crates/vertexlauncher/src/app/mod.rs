@@ -10,8 +10,8 @@ use installation::{
     running_instance_roots,
 };
 use instances::{
-    InstanceRecord, InstanceStore, create_instance, instance_root_path, load_store,
-    save_store as save_instance_store,
+    InstanceRecord, InstanceStore, create_instance, delete_instance, instance_root_path,
+    load_store, save_store as save_instance_store,
 };
 use launcher_runtime as tokio_runtime;
 use launcher_ui::ui::svg_aa;
@@ -132,9 +132,20 @@ struct VertexApp {
     pending_instance_store_save: Option<InstanceStore>,
     instance_store_save_results_tx: Option<mpsc::Sender<Result<(), String>>>,
     instance_store_save_results_rx: Option<mpsc::Receiver<Result<(), String>>>,
+    initial_install_results_tx: Option<mpsc::Sender<InitialInstanceInstallResult>>,
+    initial_install_results_rx: Option<mpsc::Receiver<InitialInstanceInstallResult>>,
     discord_presence: DiscordPresenceManager,
     last_frame_end: Option<Instant>,
     last_rendered_screen: Option<screens::AppScreen>,
+}
+
+#[derive(Debug)]
+enum InitialInstanceInstallResult {
+    Failed {
+        instance_id: String,
+        instance_name: String,
+        error: String,
+    },
 }
 
 impl VertexApp {
@@ -257,6 +268,8 @@ impl VertexApp {
             pending_instance_store_save: None,
             instance_store_save_results_tx: None,
             instance_store_save_results_rx: None,
+            initial_install_results_tx: None,
+            initial_install_results_rx: None,
             discord_presence: DiscordPresenceManager::default(),
             last_frame_end: None,
             last_rendered_screen: None,
@@ -295,6 +308,7 @@ impl VertexApp {
         poll_pending_curseforge_manual_download(self);
         poll_discover_install_progress(self);
         poll_discover_install_result(self);
+        poll_initial_instance_install_results(self);
         self.sync_theme_from_config();
         self.theme
             .apply(ctx, effective_ui_opacity_percent(&self.config));
@@ -468,6 +482,76 @@ impl VertexApp {
                 }
                 InstanceContextAction::OpenFolder => {
                     self.open_instance_folder(&instance_id);
+                }
+                InstanceContextAction::CopyLaunchCommand => {
+                    let active_launch_auth = self.auth.active_launch_context().map(|context| {
+                        screens::LaunchAuthContext {
+                            account_key: context.account_key,
+                            player_name: context.player_name,
+                            player_uuid: context.player_uuid,
+                            access_token: context.access_token,
+                            xuid: context.xuid,
+                            user_type: context.user_type,
+                        }
+                    });
+                    let active_username = self.auth.display_name();
+                    if let Some(user) = screens::selected_quick_launch_user(
+                        active_username,
+                        active_launch_auth.as_ref(),
+                    ) {
+                        let command = screens::build_quick_launch_command(
+                            screens::QuickLaunchCommandMode::Pack,
+                            instance_id.as_str(),
+                            user.as_str(),
+                            None,
+                            None,
+                        );
+                        ctx.copy_text(command);
+                        notification::info!(
+                            "sidebar/quick_launch",
+                            "Copied instance command line to clipboard."
+                        );
+                    } else {
+                        notification::warn!(
+                            "sidebar/quick_launch",
+                            "Sign in before copying an instance command line."
+                        );
+                    }
+                }
+                InstanceContextAction::CopySteamLaunchOptions => {
+                    let active_launch_auth = self.auth.active_launch_context().map(|context| {
+                        screens::LaunchAuthContext {
+                            account_key: context.account_key,
+                            player_name: context.player_name,
+                            player_uuid: context.player_uuid,
+                            access_token: context.access_token,
+                            xuid: context.xuid,
+                            user_type: context.user_type,
+                        }
+                    });
+                    let active_username = self.auth.display_name();
+                    if let Some(user) = screens::selected_quick_launch_user(
+                        active_username,
+                        active_launch_auth.as_ref(),
+                    ) {
+                        let options = screens::build_quick_launch_steam_options(
+                            screens::QuickLaunchCommandMode::Pack,
+                            instance_id.as_str(),
+                            user.as_str(),
+                            None,
+                            None,
+                        );
+                        ctx.copy_text(options);
+                        notification::info!(
+                            "sidebar/quick_launch",
+                            "Copied Steam launch options to clipboard."
+                        );
+                    } else {
+                        notification::warn!(
+                            "sidebar/quick_launch",
+                            "Sign in before copying Steam launch options."
+                        );
+                    }
                 }
                 InstanceContextAction::Delete => {
                     tracing::info!(
@@ -1062,6 +1146,15 @@ fn queue_instance_store_save(app: &mut VertexApp) {
     start_pending_instance_store_save(app);
 }
 
+fn ensure_initial_instance_install_channel(app: &mut VertexApp) {
+    if app.initial_install_results_tx.is_some() && app.initial_install_results_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<InitialInstanceInstallResult>();
+    app.initial_install_results_tx = Some(tx);
+    app.initial_install_results_rx = Some(rx);
+}
+
 fn poll_instance_store_save_results(app: &mut VertexApp) {
     let mut should_reset_channel = false;
     let mut saw_result = false;
@@ -1103,6 +1196,86 @@ fn poll_instance_store_save_results(app: &mut VertexApp) {
     }
     if saw_result || !app.instance_store_save_in_flight {
         start_pending_instance_store_save(app);
+    }
+}
+
+fn poll_initial_instance_install_results(app: &mut VertexApp) {
+    let mut updates = Vec::new();
+    let mut should_reset_channel = false;
+    loop {
+        let Some(result) = app
+            .initial_install_results_rx
+            .as_ref()
+            .map(|rx| rx.try_recv())
+        else {
+            return;
+        };
+        match result {
+            Ok(update) => updates.push(update),
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                tracing::error!(
+                    target: "vertexlauncher/app/initial_install",
+                    "Initial-install result worker disconnected unexpectedly."
+                );
+                should_reset_channel = true;
+                break;
+            }
+        }
+    }
+
+    if should_reset_channel {
+        app.initial_install_results_tx = None;
+        app.initial_install_results_rx = None;
+    }
+
+    for update in updates {
+        match update {
+            InitialInstanceInstallResult::Failed {
+                instance_id,
+                instance_name,
+                error,
+            } => {
+                tracing::warn!(
+                    target: "vertexlauncher/app/initial_install",
+                    instance_id,
+                    instance_name = %instance_name,
+                    "Rolling back failed initial install."
+                );
+                match delete_instance(
+                    &mut app.instance_store,
+                    instance_id.as_str(),
+                    app.config.minecraft_installations_root_path(),
+                ) {
+                    Ok(_) => {
+                        queue_instance_store_save(app);
+                        app.refresh_instance_shortcuts();
+                        if app.selected_instance_id.as_deref() == Some(instance_id.as_str()) {
+                            app.selected_instance_id =
+                                app.instance_shortcuts.first().map(|s| s.id.clone());
+                            if app.active_screen == screens::AppScreen::Instance {
+                                app.active_screen = screens::AppScreen::Home;
+                            }
+                        }
+                        notification::error!(
+                            format!("installation/{instance_name}"),
+                            "{}: initial install failed and the incomplete instance was removed: {}",
+                            instance_name,
+                            error
+                        );
+                    }
+                    Err(delete_err) => {
+                        notification::error!(
+                            format!("installation/{instance_name}"),
+                            "{}: initial install failed: {}. Cleanup also failed: {}",
+                            instance_name,
+                            error,
+                            delete_err
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1185,8 +1358,9 @@ fn poll_create_instance_result(app: &mut VertexApp) {
     match result {
         Ok((store, instance)) => {
             let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
+            let config = app.config.clone();
             app.instance_store = store;
-            start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
+            start_initial_instance_install(app, &instance, installations_root.as_path(), &config);
             app.selected_instance_id = Some(instance.id);
             app.active_screen = screens::AppScreen::Instance;
             app.show_create_instance_modal = false;
@@ -1317,11 +1491,12 @@ fn poll_curseforge_manual_download_preflight(app: &mut VertexApp) {
                         return;
                     }
                     if pending.pending_files.is_empty() {
-                        let request = match &pending.continuation {
+                        let mut request = match &pending.continuation {
                             ManualDownloadContinuation::Import(request) => request.clone(),
                             ManualDownloadContinuation::DiscoverInstall(_) => return,
                         };
-                        cleanup_pending_curseforge_manual_download(Some(pending));
+                        request.manual_curseforge_files = pending.staged_files.clone();
+                        request.manual_curseforge_staging_dir = Some(pending.staging_dir.clone());
                         spawn_import_instance_task(app, request);
                     } else {
                         app.pending_curseforge_manual_download = Some(pending);
@@ -1393,6 +1568,23 @@ fn spawn_import_instance_task(app: &mut VertexApp, request: import_instance_moda
     });
 }
 
+fn cleanup_import_request_manual_staging(request: Option<&import_instance_modal::ImportRequest>) {
+    let Some(request) = request else {
+        return;
+    };
+    if let Some(staging_dir) = request.manual_curseforge_staging_dir.as_ref() {
+        if let Err(err) = fs::remove_dir_all(staging_dir.as_path()) {
+            tracing::warn!(
+                target: "vertexlauncher/io",
+                op = "remove_dir_all",
+                path = %staging_dir.display(),
+                error = %err,
+                context = "cleanup import manual CurseForge staging"
+            );
+        }
+    }
+}
+
 fn poll_import_instance_progress(app: &mut VertexApp) {
     let Some(rx) = app
         .import_instance_state
@@ -1436,15 +1628,17 @@ fn poll_import_instance_result(app: &mut VertexApp) {
 
     app.import_instance_state.import_in_flight = false;
     app.import_instance_state.import_latest_progress = None;
-    let original_request = app.in_flight_import_request.take();
+    let mut original_request = app.in_flight_import_request.take();
     match result {
         Ok((store, instance)) => {
             let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
+            let config = app.config.clone();
             app.instance_store = store;
+            cleanup_import_request_manual_staging(original_request.as_ref());
             cleanup_pending_curseforge_manual_download(
                 app.pending_curseforge_manual_download.take(),
             );
-            start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
+            start_initial_instance_install(app, &instance, installations_root.as_path(), &config);
             app.selected_instance_id = Some(instance.id);
             app.active_screen = screens::AppScreen::Instance;
             app.show_import_instance_modal = false;
@@ -1458,8 +1652,9 @@ fn poll_import_instance_result(app: &mut VertexApp) {
                     requirements,
                     staged_files,
                 },
-            ) = (original_request, err.clone())
+            ) = (original_request.take(), err.clone())
             {
+                cleanup_import_request_manual_staging(Some(&request));
                 match PendingCurseForgeManualDownloadState::new(
                     ManualDownloadContinuation::Import(request),
                     requirements,
@@ -1485,7 +1680,8 @@ fn poll_import_instance_result(app: &mut VertexApp) {
                                 ManualDownloadContinuation::DiscoverInstall(_) => return,
                             };
                             request.manual_curseforge_files = pending.staged_files.clone();
-                            app.pending_curseforge_manual_download = Some(pending);
+                            request.manual_curseforge_staging_dir =
+                                Some(pending.staging_dir.clone());
                             spawn_import_instance_task(app, request);
                         } else {
                             app.pending_curseforge_manual_download = Some(pending);
@@ -1505,6 +1701,7 @@ fn poll_import_instance_result(app: &mut VertexApp) {
                     }
                 }
             }
+            cleanup_import_request_manual_staging(original_request.as_ref());
             cleanup_pending_curseforge_manual_download(
                 app.pending_curseforge_manual_download.take(),
             );
@@ -1802,9 +1999,9 @@ fn poll_pending_curseforge_manual_download(app: &mut VertexApp) {
     match &mut pending.continuation {
         ManualDownloadContinuation::Import(request) => {
             request.manual_curseforge_files = pending.staged_files.clone();
+            request.manual_curseforge_staging_dir = Some(pending.staging_dir.clone());
             let request = request.clone();
             spawn_import_instance_task(app, request);
-            app.pending_curseforge_manual_download = Some(pending);
         }
         ManualDownloadContinuation::DiscoverInstall(request) => {
             let Some(staged_path) = pending.staged_files.values().next().cloned() else {
@@ -2223,11 +2420,12 @@ fn poll_discover_install_result(app: &mut VertexApp) {
     match result {
         Ok((store, instance)) => {
             let installations_root = app.config.minecraft_installations_root_path().to_path_buf();
+            let config = app.config.clone();
             app.instance_store = store;
             cleanup_pending_curseforge_manual_download(
                 app.pending_curseforge_manual_download.take(),
             );
-            start_initial_instance_install(&instance, installations_root.as_path(), &app.config);
+            start_initial_instance_install(app, &instance, installations_root.as_path(), &config);
             app.selected_instance_id = Some(instance.id);
             app.active_screen = screens::AppScreen::Instance;
             app.discover_state
@@ -2272,6 +2470,7 @@ fn install_discover_modpack_in_background(
                 source: import_instance_modal::ImportSource::ManifestFile(temp_path.clone()),
                 instance_name: instance_name.clone(),
                 manual_curseforge_files: HashMap::new(),
+                manual_curseforge_staging_dir: None,
                 max_concurrent_downloads: 4,
             };
             let result = import_package_in_background(
@@ -2327,6 +2526,7 @@ fn install_discover_modpack_in_background(
                 source: import_instance_modal::ImportSource::ManifestFile(temp_path.clone()),
                 instance_name: instance_name.clone(),
                 manual_curseforge_files: HashMap::new(),
+                manual_curseforge_staging_dir: None,
                 max_concurrent_downloads: 4,
             };
             let result = import_package_in_background(
@@ -2630,10 +2830,14 @@ fn apply_install_activity_os_feedback(ctx: &egui::Context, frame: &eframe::Frame
 }
 
 fn start_initial_instance_install(
+    app: &mut VertexApp,
     instance: &InstanceRecord,
     installations_root: &Path,
     config: &Config,
 ) {
+    ensure_initial_instance_install_channel(app);
+    let initial_install_results_tx = app.initial_install_results_tx.as_ref().cloned();
+    let instance_id = instance.id.clone();
     let instance_name = instance.name.clone();
     let activity_instance = instance_name.clone();
     let game_version = instance.game_version.trim().to_owned();
@@ -2814,6 +3018,19 @@ fn start_initial_instance_install(
                     instance_name,
                     err
                 );
+                if let Some(tx) = initial_install_results_tx {
+                    if let Err(send_err) = tx.send(InitialInstanceInstallResult::Failed {
+                        instance_id,
+                        instance_name,
+                        error: err,
+                    }) {
+                        tracing::error!(
+                            target: "vertexlauncher/app/initial_install",
+                            error = %send_err,
+                            "Failed to deliver initial-install failure result."
+                        );
+                    }
+                }
             }
         }
     });

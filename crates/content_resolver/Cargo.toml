@@ -12,3 +12,4 @@ modrinth.workspace = true
 curseforge.workspace = true
 tracing.workspace = true
 vertex_constants.workspace = true
+zip = { version = "*", default-features = false, features = ["deflate"] }

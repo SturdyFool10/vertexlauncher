@@ -1,6 +1,7 @@
 use super::content_lookup_result::ContentLookupResultEntry;
 use super::*;
-use std::collections::HashSet;
+use content_resolver::detect_installed_content_kind;
+use std::collections::{BTreeMap, HashSet};
 
 const CONTENT_HASH_CACHE_FLUSH_DEBOUNCE: Duration = Duration::from_millis(750);
 const CONTENT_LOOKUP_REPAINT_INTERVAL: Duration = Duration::from_millis(100);
@@ -12,6 +13,7 @@ const CONTENT_UPDATE_LOG_TARGET: &str = "vertexlauncher/content_update";
 pub(super) struct ContentApplyResult {
     pub(super) kind: InstalledContentKind,
     pub(super) focus_lookup_keys: Vec<String>,
+    pub(super) refresh_all_content: bool,
     pub(super) status_message: Result<String, String>,
 }
 
@@ -34,90 +36,60 @@ pub(super) fn render_installed_content_section(
     poll_content_apply_results(state, instance_root);
     ensure_content_hash_cache_loaded(state, instance_root);
 
-    let add_button_style = style::neutral_button_with_min_size(
-        ui,
-        egui::vec2((ui.available_width() - 30.0).max(160.0), 34.0),
-    );
+    let (open_browser_response, add_menu_button) =
+        render_joined_content_browser_controls(ui, text_ui, instance_id, !content_browser_locked);
+    if content_browser_locked {
+        let _ = open_browser_response
+            .clone()
+            .on_disabled_hover_text(content_browser_locked_reason);
+    }
+    if open_browser_response.clicked() {
+        output.requested_screen = Some(AppScreen::ContentBrowser);
+    }
 
-    ui.horizontal(|ui| {
-        let open_browser_response = ui
-            .add_enabled_ui(!content_browser_locked, |ui| {
-                text_ui.button(
-                    ui,
-                    ("instance_add_content_label", instance_id),
-                    "Open Content Browser",
-                    &add_button_style,
-                )
-            })
-            .inner;
-        if content_browser_locked {
-            let _ = open_browser_response
-                .clone()
-                .on_disabled_hover_text(content_browser_locked_reason);
-        }
-        if open_browser_response.clicked() {
-            output.requested_screen = Some(AppScreen::ContentBrowser);
-        }
-
-        let plus_button_id = format!("instance_add_content_plus_{instance_id}");
-        let add_menu_button = icon_button::svg(
-            ui,
-            plus_button_id.as_str(),
-            assets::PLUS_SVG,
-            "Add content options",
-            false,
-            20.0,
-        );
-
-        let popup_id = ui.id().with(("instance_add_content_popup", instance_id));
-        let _ = egui::Popup::menu(&add_menu_button)
-            .id(popup_id)
-            .width(220.0)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
-            .show(|ui| {
-                let popup_button_style = style::neutral_button_with_min_size(
-                    ui,
-                    egui::vec2(ui.available_width().max(120.0), style::CONTROL_HEIGHT),
-                );
-                if text_ui
-                    .button(
+    let popup_id = ui.id().with(("instance_add_content_popup", instance_id));
+    let _ = egui::Popup::menu(&add_menu_button)
+        .id(popup_id)
+        .width(240.0)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            let popup_button_style = style::neutral_button_with_min_size(
+                ui,
+                egui::vec2(ui.available_width().max(120.0), style::CONTROL_HEIGHT),
+            );
+            let add_local_response = ui
+                .add_enabled_ui(!state.content_apply_in_flight, |ui| {
+                    text_ui.button(
                         ui,
-                        ("instance_content_popup_local", instance_id),
-                        "Refresh local files",
+                        ("instance_content_popup_add_local_files", instance_id),
+                        "Add local file(s)",
                         &popup_button_style,
                     )
-                    .clicked()
+                })
+                .inner;
+            if add_local_response.clicked() {
+                if let Some(selected_paths) = rfd::FileDialog::new()
+                    .set_title("Add Local Content")
+                    .pick_files()
                 {
-                    state.invalidate_installed_content_cache();
-                    state.content_metadata_cache.clear();
-                    state.content_lookup_in_flight.clear();
-                    state.content_lookup_latest_serial_by_key.clear();
-                    state.content_lookup_retry_after_by_key.clear();
-                    state.content_lookup_failure_count_by_key.clear();
-                    clear_content_hash_cache(state, instance_root);
-                    state.status_message =
-                        Some("Refreshed installed content metadata and hash cache.".to_owned());
+                    request_local_content_import(state, instance_root, selected_paths);
                 }
-                let open_popup_browser_response = ui
-                    .add_enabled_ui(!content_browser_locked, |ui| {
-                        text_ui.button(
-                            ui,
-                            ("instance_content_popup_mods", instance_id),
-                            "Open content browser",
-                            &popup_button_style,
-                        )
-                    })
-                    .inner;
-                if content_browser_locked {
-                    let _ = open_popup_browser_response
-                        .clone()
-                        .on_disabled_hover_text(content_browser_locked_reason);
-                }
-                if open_popup_browser_response.clicked() {
-                    output.requested_screen = Some(AppScreen::ContentBrowser);
-                }
-            });
-    });
+            }
+
+            if text_ui
+                .button(
+                    ui,
+                    ("instance_content_popup_local", instance_id),
+                    "Refresh local files",
+                    &popup_button_style,
+                )
+                .clicked()
+            {
+                refresh_installed_content_state(state, instance_root);
+                state.status_message =
+                    Some("Refreshed installed content metadata and hash cache.".to_owned());
+            }
+        });
 
     ui.add_space(10.0);
     let item_spacing = 6.0;
@@ -1587,6 +1559,7 @@ fn request_content_update(
         if let Err(err) = tx.send(ContentApplyResult {
             kind,
             focus_lookup_keys,
+            refresh_all_content: false,
             status_message: result,
         }) {
             tracing::error!(
@@ -1599,6 +1572,263 @@ fn request_content_update(
             );
         }
     });
+}
+
+fn render_joined_content_browser_controls(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    instance_id: &str,
+    open_browser_enabled: bool,
+) -> (egui::Response, egui::Response) {
+    let total_width = ui.available_width().max(1.0);
+    let control_height = 34.0;
+    let icon_button_width = control_height;
+    let label_width = (total_width - icon_button_width).max(120.0);
+    let button_style =
+        style::neutral_button_with_min_size(ui, egui::vec2(label_width, control_height));
+    let cr = style::CORNER_RADIUS_SM;
+    let label_radius = egui::CornerRadius {
+        nw: cr,
+        sw: cr,
+        ne: 0,
+        se: 0,
+    };
+    let icon_radius = egui::CornerRadius {
+        nw: 0,
+        sw: 0,
+        ne: cr,
+        se: cr,
+    };
+    let (outer_rect, _) = ui.allocate_exact_size(
+        egui::vec2(total_width, control_height),
+        egui::Sense::hover(),
+    );
+    let label_rect =
+        egui::Rect::from_min_size(outer_rect.min, egui::vec2(label_width, control_height));
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(label_rect.max.x, outer_rect.min.y),
+        egui::vec2(icon_button_width, control_height),
+    );
+
+    let label_response = ui.interact(
+        label_rect,
+        ui.id().with(("instance_add_content_label", instance_id)),
+        if open_browser_enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    let label_visuals = if open_browser_enabled {
+        ui.style().interact(&label_response)
+    } else {
+        &ui.visuals().widgets.inactive
+    };
+    ui.painter().rect(
+        label_rect,
+        label_radius,
+        label_visuals.bg_fill,
+        label_visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let label_inner = label_rect.shrink2(egui::vec2(button_style.padding.x, 0.0));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(label_inner), |ui| {
+        ui.with_layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                let label_options = LabelOptions {
+                    font_size: button_style.font_size,
+                    line_height: button_style.line_height,
+                    weight: 700,
+                    color: if open_browser_enabled {
+                        button_style.text_color
+                    } else {
+                        ui.visuals().weak_text_color()
+                    },
+                    wrap: false,
+                    ..LabelOptions::default()
+                };
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_add_content_label", instance_id),
+                    "Open Content Browser",
+                    &label_options,
+                );
+            },
+        );
+    });
+
+    let icon_response = ui.interact(
+        icon_rect,
+        ui.id().with(("instance_add_content_plus", instance_id)),
+        egui::Sense::click(),
+    );
+    let icon_visuals = ui.style().interact(&icon_response);
+    ui.painter().rect(
+        icon_rect,
+        icon_radius,
+        icon_visuals.bg_fill,
+        icon_visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let icon_color = ui.visuals().text_color();
+    let themed_svg = apply_color_to_svg(assets::PLUS_SVG, icon_color);
+    let uri = format!(
+        "bytes://instance/content-plus/{instance_id}-{:02x}{:02x}{:02x}.svg",
+        icon_color.r(),
+        icon_color.g(),
+        icon_color.b()
+    );
+    let icon_size = (control_height - style::SPACE_MD * 2.0).clamp(12.0, 18.0);
+    let icon_draw_rect =
+        egui::Rect::from_center_size(icon_rect.center(), egui::vec2(icon_size, icon_size));
+    egui::Image::from_bytes(uri, themed_svg).paint_at(ui, icon_draw_rect);
+
+    (label_response, icon_response)
+}
+
+fn refresh_installed_content_state(state: &mut InstanceScreenState, instance_root: &Path) {
+    state.invalidate_installed_content_cache();
+    state.content_metadata_cache.clear();
+    state.content_lookup_in_flight.clear();
+    state.content_lookup_latest_serial_by_key.clear();
+    state.content_lookup_retry_after_by_key.clear();
+    state.content_lookup_failure_count_by_key.clear();
+    clear_content_hash_cache(state, instance_root);
+}
+
+fn request_local_content_import(
+    state: &mut InstanceScreenState,
+    instance_root: &Path,
+    selected_paths: Vec<PathBuf>,
+) {
+    if state.content_apply_in_flight || selected_paths.is_empty() {
+        return;
+    }
+
+    ensure_content_apply_channel(state);
+    let Some(tx) = state.content_apply_results_tx.as_ref().cloned() else {
+        return;
+    };
+
+    let instance_root = instance_root.to_path_buf();
+    let instance_name = state.name_input.clone();
+    state.content_apply_in_flight = true;
+    state.status_message = Some(format!(
+        "Adding {} local content file{}...",
+        selected_paths.len(),
+        if selected_paths.len() == 1 { "" } else { "s" }
+    ));
+    install_activity::set_status(
+        instance_name.as_str(),
+        InstallStage::DownloadingCore,
+        "Adding local content files...".to_owned(),
+    );
+
+    let _ = tokio_runtime::spawn_detached(async move {
+        let result = import_local_content_files(instance_root.as_path(), selected_paths.as_slice());
+        let focus_lookup_keys = selected_paths
+            .iter()
+            .filter_map(|path| {
+                path.file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+            })
+            .collect();
+        if let Err(err) = tx.send(ContentApplyResult {
+            kind: InstalledContentKind::Mods,
+            focus_lookup_keys,
+            refresh_all_content: true,
+            status_message: result,
+        }) {
+            tracing::error!(
+                target: CONTENT_UPDATE_LOG_TARGET,
+                instance = %instance_name,
+                error = %err,
+                "Failed to deliver local content import result."
+            );
+        }
+    });
+}
+
+fn import_local_content_files(
+    instance_root: &Path,
+    selected_paths: &[PathBuf],
+) -> Result<String, String> {
+    let mut imported_total = 0usize;
+    let mut counts_by_kind = BTreeMap::new();
+    let mut skipped = Vec::new();
+    let mut failures = Vec::new();
+
+    for source_path in selected_paths {
+        let Some(file_name) = source_path.file_name() else {
+            skipped.push(source_path.display().to_string());
+            continue;
+        };
+
+        let Some(kind) = detect_installed_content_kind(source_path.as_path()) else {
+            skipped.push(source_path.display().to_string());
+            continue;
+        };
+
+        let destination_dir = instance_root.join(kind.folder_name());
+        if let Err(err) = fs::create_dir_all(destination_dir.as_path()) {
+            failures.push(format!(
+                "{} -> {} ({err})",
+                source_path.display(),
+                destination_dir.display()
+            ));
+            continue;
+        }
+
+        let destination_path = destination_dir.join(file_name);
+        if let Err(err) = fs::copy(source_path.as_path(), destination_path.as_path()) {
+            failures.push(format!(
+                "{} -> {} ({err})",
+                source_path.display(),
+                destination_path.display()
+            ));
+            continue;
+        }
+
+        imported_total += 1;
+        *counts_by_kind.entry(kind.label()).or_insert(0usize) += 1;
+    }
+
+    let mut summary = counts_by_kind
+        .into_iter()
+        .map(|(label, count)| format!("{count} {label}"))
+        .collect::<Vec<_>>();
+    if summary.is_empty() {
+        summary.push("no files".to_owned());
+    }
+
+    if imported_total == 0 {
+        if !failures.is_empty() {
+            return Err(format!(
+                "Failed to add local content: {}.",
+                failures.join("; ")
+            ));
+        }
+        if !skipped.is_empty() {
+            return Err(format!(
+                "Could not determine where to place: {}.",
+                skipped.join(", ")
+            ));
+        }
+    }
+
+    let mut message = format!("Added {}.", summary.join(", "));
+    if !failures.is_empty() {
+        message.push_str(" Failed to copy: ");
+        message.push_str(failures.join("; ").as_str());
+        message.push('.');
+    }
+    if !skipped.is_empty() {
+        message.push_str(" Skipped unrecognized files: ");
+        message.push_str(skipped.join(", ").as_str());
+        message.push('.');
+    }
+    Ok(message)
 }
 
 fn request_content_delete(
@@ -1658,6 +1888,7 @@ fn request_content_delete(
         if let Err(err) = tx.send(ContentApplyResult {
             kind,
             focus_lookup_keys: vec![lookup_key],
+            refresh_all_content: false,
             status_message: result,
         }) {
             tracing::error!(
@@ -1756,6 +1987,7 @@ fn request_bulk_content_update(
         if let Err(err) = tx.send(ContentApplyResult {
             kind,
             focus_lookup_keys: Vec::new(),
+            refresh_all_content: false,
             status_message: result,
         }) {
             tracing::error!(
@@ -2840,13 +3072,17 @@ fn poll_content_apply_results(state: &mut InstanceScreenState, instance_root: &P
         install_activity::clear_instance(state.name_input.as_str());
         match result.status_message {
             Ok(message) => {
-                state.invalidate_installed_content_cache();
-                refresh_cached_metadata_after_apply(
-                    state,
-                    instance_root,
-                    result.kind,
-                    result.focus_lookup_keys.as_slice(),
-                );
+                if result.refresh_all_content {
+                    refresh_installed_content_state(state, instance_root);
+                } else {
+                    state.invalidate_installed_content_cache();
+                    refresh_cached_metadata_after_apply(
+                        state,
+                        instance_root,
+                        result.kind,
+                        result.focus_lookup_keys.as_slice(),
+                    );
+                }
                 state.status_message = Some(message);
             }
             Err(err) => {

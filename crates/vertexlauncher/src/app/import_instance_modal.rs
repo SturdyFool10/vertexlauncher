@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use content_resolver::{InstalledContentKind, detect_installed_content_kind};
 use curseforge::Client as CurseForgeClient;
 use eframe::egui;
 use instances::{
@@ -147,6 +148,7 @@ pub struct ImportRequest {
     pub source: ImportSource,
     pub instance_name: String,
     pub manual_curseforge_files: HashMap<u64, PathBuf>,
+    pub manual_curseforge_staging_dir: Option<PathBuf>,
     pub max_concurrent_downloads: u32,
 }
 
@@ -825,6 +827,7 @@ pub fn render(
                             },
                             instance_name,
                             manual_curseforge_files: HashMap::new(),
+                            manual_curseforge_staging_dir: None,
                             max_concurrent_downloads: 4,
                         });
                     }
@@ -3569,12 +3572,6 @@ fn populate_curseforge_pack_instance(
                 manifest_file.file_id, manifest_file.project_id
             ))
         })?;
-        let destination = instance_root.join("mods").join(file.file_name.as_str());
-        if let Some(parent) = destination.parent() {
-            fs_create_dir_all_logged(parent).map_err(|err| {
-                ImportPackageError::message(format!("failed to create {}: {err}", parent.display()))
-            })?;
-        }
         let source_path = manual_curseforge_files
             .get(&manifest_file.file_id)
             .ok_or_else(|| {
@@ -3583,11 +3580,30 @@ fn populate_curseforge_pack_instance(
                     manifest_file.file_id
                 ))
             })?;
+        let detected_kind =
+            detect_installed_content_kind(source_path.as_path()).unwrap_or_else(|| {
+                tracing::warn!(
+                    target: "vertexlauncher/import",
+                    curseforge_project_id = manifest_file.project_id,
+                    curseforge_file_id = manifest_file.file_id,
+                    file_name = %file.file_name,
+                    "Could not detect installed content kind for staged CurseForge file; defaulting to mods."
+                );
+                InstalledContentKind::Mods
+            });
+        let target_dir = instance_root.join(detected_kind.folder_name());
+        let destination = target_dir.join(file.file_name.as_str());
+        if let Some(parent) = destination.parent() {
+            fs_create_dir_all_logged(parent).map_err(|err| {
+                ImportPackageError::message(format!("failed to create {}: {err}", parent.display()))
+            })?;
+        }
         completed_steps += 1;
         applied_mods += 1;
         progress(import_progress(
             &format!(
-                "Applying staged file for {} ({applied_mods}/{total_mods} mods)",
+                "Applying staged {} for {} ({applied_mods}/{total_mods} files)",
+                detected_kind.content_type_key(),
                 file.display_name
             ),
             completed_steps,

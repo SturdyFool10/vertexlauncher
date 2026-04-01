@@ -21,8 +21,13 @@ use textui::{
 
 use crate::{
     assets, desktop, install_activity, notification,
+    screens::{
+        LaunchAuthContext, QuickLaunchCommandMode, build_quick_launch_command,
+        build_quick_launch_steam_options, selected_quick_launch_user,
+    },
     ui::{
         components::lazy_image_bytes::{LazyImageBytes, LazyImageBytesStatus},
+        context_menu::{self, ContextMenuItem, ContextMenuRequest},
         instance_context_menu::{self, InstanceContextAction},
         modal, style,
     },
@@ -755,6 +760,8 @@ pub fn render(
     text_ui: &mut TextUi,
     instances: &mut InstanceStore,
     config: &Config,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
     streamer_mode: bool,
 ) -> HomeOutput {
     let mut output = HomeOutput::default();
@@ -790,13 +797,24 @@ pub fn render(
             }
 
             let mut requested_rescan = false;
-            render_instance_usage(ui, text_ui, instances, config, &mut state, &mut output);
+            render_instance_usage(
+                ui,
+                text_ui,
+                instances,
+                config,
+                active_username,
+                active_launch_auth,
+                &mut state,
+                &mut output,
+            );
             ui.add_space(12.0);
             render_activity_feed(
                 ui,
                 text_ui,
                 instances,
                 &state,
+                active_username,
+                active_launch_auth,
                 streamer_mode,
                 &mut output,
                 &mut requested_rescan,
@@ -1831,6 +1849,8 @@ fn render_instance_usage(
     text_ui: &mut TextUi,
     instances: &InstanceStore,
     config: &Config,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
     state: &mut HomeState,
     output: &mut HomeOutput,
 ) {
@@ -1979,6 +1999,22 @@ fn render_instance_usage(
                                 );
                             }
                         }
+                        InstanceContextAction::CopyLaunchCommand => {
+                            copy_instance_launch_command(
+                                ui.ctx(),
+                                instance.id.as_str(),
+                                active_username,
+                                active_launch_auth,
+                            );
+                        }
+                        InstanceContextAction::CopySteamLaunchOptions => {
+                            copy_instance_steam_launch_options(
+                                ui.ctx(),
+                                instance.id.as_str(),
+                                active_username,
+                                active_launch_auth,
+                            );
+                        }
                         InstanceContextAction::Delete => {
                             output.delete_requested_instance_id = Some(instance.id.clone());
                         }
@@ -2086,6 +2122,8 @@ fn render_activity_feed(
     text_ui: &mut TextUi,
     instances: &mut InstanceStore,
     state: &HomeState,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
     streamer_mode: bool,
     output: &mut HomeOutput,
     requested_rescan: &mut bool,
@@ -2181,6 +2219,8 @@ fn render_activity_feed(
                             instances,
                             output,
                             requested_rescan,
+                            active_username,
+                            active_launch_auth,
                         ),
                         HomeEntryRef::Server(server) => render_server_row(
                             ui,
@@ -2195,6 +2235,8 @@ fn render_activity_feed(
                             instances,
                             output,
                             requested_rescan,
+                            active_username,
+                            active_launch_auth,
                         ),
                     }
                     ui.add_space(2.0);
@@ -2241,6 +2283,8 @@ fn render_activity_feed(
                             instances,
                             output,
                             requested_rescan,
+                            active_username,
+                            active_launch_auth,
                         );
                     }
                     HomeEntryRef::Server(server) => {
@@ -2257,6 +2301,8 @@ fn render_activity_feed(
                             instances,
                             output,
                             requested_rescan,
+                            active_username,
+                            active_launch_auth,
                         );
                     }
                 }
@@ -2274,6 +2320,8 @@ fn render_world_row(
     instances: &mut InstanceStore,
     output: &mut HomeOutput,
     requested_rescan: &mut bool,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
 ) {
     let mut star_clicked = false;
     let row_response =
@@ -2359,6 +2407,30 @@ fn render_world_row(
         output.selected_instance_id = Some(world.instance_id.clone());
         output.requested_screen = Some(AppScreen::Library);
     }
+    let context_id = ui.make_persistent_id((id_source, "world_context"));
+    if row_response.secondary_clicked() {
+        let anchor = row_response
+            .interact_pointer_pos()
+            .or_else(|| ui.ctx().pointer_latest_pos())
+            .unwrap_or(row_response.rect.left_bottom());
+        context_menu::request(
+            ui.ctx(),
+            ContextMenuRequest::new(
+                context_id,
+                anchor,
+                vec![ContextMenuItem::new_with_icon(
+                    "copy_world_launch_command",
+                    "Copy command line",
+                    assets::TERMINAL_SVG,
+                )],
+            ),
+        );
+    }
+    if context_menu::take_invocation(ui.ctx(), context_id).as_deref()
+        == Some("copy_world_launch_command")
+    {
+        copy_world_launch_command(ui.ctx(), world, active_username, active_launch_auth);
+    }
 }
 
 fn world_meta_line(world: &WorldEntry, now_ms: u64) -> String {
@@ -2407,6 +2479,8 @@ fn render_server_row(
     instances: &mut InstanceStore,
     output: &mut HomeOutput,
     requested_rescan: &mut bool,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
 ) {
     let server_meta_full = server_meta_line(server, ping, now_ms, streamer_mode);
     let mut star_clicked = false;
@@ -2496,6 +2570,30 @@ fn render_server_row(
         output.selected_instance_id = Some(server.instance_id.clone());
         output.requested_screen = Some(AppScreen::Library);
     }
+    let context_id = ui.make_persistent_id((id_source, "server_context"));
+    if row_response.secondary_clicked() {
+        let anchor = row_response
+            .interact_pointer_pos()
+            .or_else(|| ui.ctx().pointer_latest_pos())
+            .unwrap_or(row_response.rect.left_bottom());
+        context_menu::request(
+            ui.ctx(),
+            ContextMenuRequest::new(
+                context_id,
+                anchor,
+                vec![ContextMenuItem::new_with_icon(
+                    "copy_server_launch_command",
+                    "Copy command line",
+                    assets::TERMINAL_SVG,
+                )],
+            ),
+        );
+    }
+    if context_menu::take_invocation(ui.ctx(), context_id).as_deref()
+        == Some("copy_server_launch_command")
+    {
+        copy_server_launch_command(ui.ctx(), server, active_username, active_launch_auth);
+    }
 }
 
 fn server_meta_line(
@@ -2539,6 +2637,114 @@ fn server_meta_line(
         ping_text,
         format_time_ago(server.last_used_at_ms, now_ms)
     )
+}
+
+fn copy_instance_launch_command(
+    ctx: &egui::Context,
+    instance_id: &str,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+) {
+    let Some(user) = selected_quick_launch_user(active_username, active_launch_auth) else {
+        notification::warn!(
+            "home/quick_launch",
+            "Sign in before copying an instance command line."
+        );
+        return;
+    };
+    let command = build_quick_launch_command(
+        QuickLaunchCommandMode::Pack,
+        instance_id,
+        user.as_str(),
+        None,
+        None,
+    );
+    ctx.copy_text(command);
+    notification::info!(
+        "home/quick_launch",
+        "Copied instance command line to clipboard."
+    );
+}
+
+fn copy_instance_steam_launch_options(
+    ctx: &egui::Context,
+    instance_id: &str,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+) {
+    let Some(user) = selected_quick_launch_user(active_username, active_launch_auth) else {
+        notification::warn!(
+            "home/quick_launch",
+            "Sign in before copying Steam launch options."
+        );
+        return;
+    };
+    let options = build_quick_launch_steam_options(
+        QuickLaunchCommandMode::Pack,
+        instance_id,
+        user.as_str(),
+        None,
+        None,
+    );
+    ctx.copy_text(options);
+    notification::info!(
+        "home/quick_launch",
+        "Copied Steam launch options to clipboard."
+    );
+}
+
+fn copy_world_launch_command(
+    ctx: &egui::Context,
+    world: &WorldEntry,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+) {
+    let Some(user) = selected_quick_launch_user(active_username, active_launch_auth) else {
+        notification::warn!(
+            "home/quick_launch",
+            "Sign in before copying a world command line."
+        );
+        return;
+    };
+    let command = build_quick_launch_command(
+        QuickLaunchCommandMode::World,
+        world.instance_id.as_str(),
+        user.as_str(),
+        Some(world.world_id.as_str()),
+        None,
+    );
+    ctx.copy_text(command);
+    notification::info!(
+        "home/quick_launch",
+        "Copied world command line to clipboard."
+    );
+}
+
+fn copy_server_launch_command(
+    ctx: &egui::Context,
+    server: &ServerEntry,
+    active_username: Option<&str>,
+    active_launch_auth: Option<&LaunchAuthContext>,
+) {
+    let Some(user) = selected_quick_launch_user(active_username, active_launch_auth) else {
+        notification::warn!(
+            "home/quick_launch",
+            "Sign in before copying a server command line."
+        );
+        return;
+    };
+    let command = build_quick_launch_command(
+        QuickLaunchCommandMode::Server,
+        server.instance_id.as_str(),
+        user.as_str(),
+        None,
+        Some(server.address.as_str()),
+    );
+    ctx.copy_text(command);
+    notification::info!(
+        "home/quick_launch",
+        "Copied server command line to clipboard."
+    );
 }
 
 fn render_clickable_entry_row(
