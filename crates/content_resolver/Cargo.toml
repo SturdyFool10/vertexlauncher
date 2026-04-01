@@ -11,3 +11,4 @@ modprovider.workspace = true
 modrinth.workspace = true
 curseforge.workspace = true
 tracing.workspace = true
+vertex_constants.workspace = true

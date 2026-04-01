@@ -5,14 +5,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
-use std::time::Duration;
-
-const SINGLE_INSTANCE_PORT: u16 = 38457;
-const HELLO_MESSAGE: &[u8] = b"vertexlauncher:hello:v1";
-const PRESENT_MESSAGE: &[u8] = b"vertexlauncher:present:v1";
-const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
-const PROBE_ATTEMPTS: usize = 3;
-const RETRY_DELAY: Duration = Duration::from_millis(50);
+use vertex_constants::launcher::single_instance::{
+    HELLO_MESSAGE, PORT as SINGLE_INSTANCE_PORT, PRESENT_MESSAGE, PROBE_ATTEMPTS, PROBE_TIMEOUT,
+    RETRY_DELAY,
+};
 
 #[derive(Debug)]
 pub enum SingleInstanceError {

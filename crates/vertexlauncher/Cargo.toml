@@ -37,6 +37,7 @@ ureq.workspace = true
 tar = "*"
 xz2 = "*"
 vtmpack.workspace = true
+vertex_constants.workspace = true
 zip = { version = "*", default-features = false, features = ["deflate"] }
 discord-rich-presence = "1.1.0"
 

@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 directories.workspace = true
-
+vertex_constants.workspace = true

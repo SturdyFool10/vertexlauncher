@@ -11,36 +11,18 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-const DEFAULT_USER_AGENT: &str =
-    "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
-const MOJANG_VERSION_MANIFEST_URL: &str =
-    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
-const FABRIC_VERSION_MATRIX_URL: &str = "https://meta.fabricmc.net/v2/versions/loader";
-const FABRIC_GAME_VERSIONS_URL: &str = "https://meta.fabricmc.net/v2/versions/game";
-const QUILT_VERSION_MATRIX_URL: &str = "https://meta.quiltmc.org/v3/versions/loader";
-const QUILT_GAME_VERSIONS_URL: &str = "https://meta.quiltmc.org/v3/versions/game";
-const FORGE_MAVEN_METADATA_URL: &str =
-    "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
-const NEOFORGE_MAVEN_METADATA_URL: &str =
-    "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
-const NEOFORGE_LEGACY_FORGE_METADATA_URL: &str =
-    "https://maven.neoforged.net/releases/net/neoforged/forge/maven-metadata.xml";
-const CACHE_VERSION_CATALOG_RELEASES_FILE: &str = "version_catalog_release_only.json";
-const CACHE_VERSION_CATALOG_ALL_FILE: &str = "version_catalog_with_snapshots.json";
-const CACHE_LOADER_VERSIONS_DIR_NAME: &str = "loader_versions";
-const VERSION_CATALOG_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-const HTTP_RETRY_ATTEMPTS: u32 = 4;
-const HTTP_RETRY_BASE_DELAY_MS: u64 = 350;
-const HTTP_TIMEOUT_GLOBAL: Duration = Duration::from_secs(45);
-const HTTP_TIMEOUT_CONNECT: Duration = Duration::from_secs(15);
-const HTTP_TIMEOUT_RECV_RESPONSE: Duration = Duration::from_secs(20);
-const HTTP_TIMEOUT_RECV_BODY: Duration = Duration::from_secs(45);
-const MAX_CONTENT_LENGTH_PROBES_PER_BATCH: usize = 32;
-const OPENJDK_USER_AGENT: &str =
-    "VertexLauncher-JavaProvisioner/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
 #[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use vertex_constants::installation::CREATE_NO_WINDOW;
+use vertex_constants::installation::{
+    CACHE_LOADER_VERSIONS_DIR_NAME, CACHE_VERSION_CATALOG_ALL_FILE,
+    CACHE_VERSION_CATALOG_RELEASES_FILE, FABRIC_GAME_VERSIONS_URL, FABRIC_VERSION_MATRIX_URL,
+    FORGE_MAVEN_METADATA_URL, HTTP_RETRY_ATTEMPTS, HTTP_RETRY_BASE_DELAY_MS, HTTP_TIMEOUT_CONNECT,
+    HTTP_TIMEOUT_GLOBAL, HTTP_TIMEOUT_RECV_BODY, HTTP_TIMEOUT_RECV_RESPONSE,
+    MAX_CONTENT_LENGTH_PROBES_PER_BATCH, MOJANG_VERSION_MANIFEST_URL,
+    NEOFORGE_LEGACY_FORGE_METADATA_URL, NEOFORGE_MAVEN_METADATA_URL, OPENJDK_USER_AGENT,
+    QUILT_GAME_VERSIONS_URL, QUILT_VERSION_MATRIX_URL, USER_AGENT as DEFAULT_USER_AGENT,
+    VERSION_CATALOG_CACHE_TTL,
+};
 
 pub fn display_user_path(path: &Path) -> String {
     #[cfg(target_os = "windows")]

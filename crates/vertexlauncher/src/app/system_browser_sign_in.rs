@@ -5,10 +5,9 @@ use std::time::{Duration, Instant};
 
 use launcher_ui::ui::theme::{Oklch, Theme};
 use url::Url;
-
-const CALLBACK_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const AUTO_CLOSE_DELAY_SECS: u64 = 4;
+use vertex_constants::launcher::system_browser_sign_in::{
+    ACCEPT_POLL_INTERVAL, AUTO_CLOSE_DELAY_SECS, CALLBACK_TIMEOUT,
+};
 const CALLBACK_PAGE_TEMPLATE: &str = include_str!("callback_page_template.html");
 
 pub struct CallbackPageColors {

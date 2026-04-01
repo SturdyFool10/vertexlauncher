@@ -1,8 +1,9 @@
 use directories::ProjectDirs;
 use std::path::PathBuf;
-
-const APP_DIR_NAME: &str = "vertexlauncher";
-const LEGACY_APP_DIR_NAME: &str = "vertex-launcher";
+use vertex_constants::app_paths::{
+    APP_DIR_NAME, CACHE_DIR_NAME, CONFIG_DIR_NAME, INSTANCES_DIR_NAME, INSTANCES_FILENAME,
+    LEGACY_APP_DIR_NAME, LOGS_DIR_NAME, THEMES_DIR_NAME,
+};
 
 pub fn portable_root() -> Option<PathBuf> {
     explicit_portable_root().or_else(appimage_portable_root)
@@ -46,12 +47,12 @@ fn fallback_root() -> PathBuf {
 
 pub fn config_base_path() -> PathBuf {
     if let Some(root) = portable_root() {
-        return root.join("config");
+        return root.join(CONFIG_DIR_NAME);
     }
     if let Some(project_dirs) = project_dirs() {
-        return project_dirs.config_dir().join("config");
+        return project_dirs.config_dir().join(CONFIG_DIR_NAME);
     }
-    fallback_root().join("config")
+    fallback_root().join(CONFIG_DIR_NAME)
 }
 
 pub fn config_root() -> PathBuf {
@@ -66,56 +67,56 @@ pub fn config_root() -> PathBuf {
 
 pub fn instances_store_path() -> PathBuf {
     if let Some(root) = portable_root() {
-        return root.join("instances.json");
+        return root.join(INSTANCES_FILENAME);
     }
     if let Some(project_dirs) = project_dirs() {
-        return project_dirs.config_dir().join("instances.json");
+        return project_dirs.config_dir().join(INSTANCES_FILENAME);
     }
-    fallback_root().join("instances.json")
+    fallback_root().join(INSTANCES_FILENAME)
 }
 
 pub fn installations_root() -> PathBuf {
     if let Some(root) = portable_root() {
-        return root.join("instances");
+        return root.join(INSTANCES_DIR_NAME);
     }
     if let Some(project_dirs) = project_dirs() {
-        return project_dirs.data_local_dir().join("instances");
+        return project_dirs.data_local_dir().join(INSTANCES_DIR_NAME);
     }
-    fallback_root().join("instances")
+    fallback_root().join(INSTANCES_DIR_NAME)
 }
 
 pub fn cache_root() -> PathBuf {
     if let Some(root) = portable_root() {
-        return root.join("cache");
+        return root.join(CACHE_DIR_NAME);
     }
     if let Some(project_dirs) = project_dirs() {
         return project_dirs.cache_dir().to_path_buf();
     }
-    fallback_root().join("cache")
+    fallback_root().join(CACHE_DIR_NAME)
 }
 
 pub fn logs_dir() -> PathBuf {
     if let Some(root) = portable_root() {
-        return root.join("logs");
+        return root.join(LOGS_DIR_NAME);
     }
     if let Some(project_dirs) = project_dirs() {
-        return project_dirs.data_local_dir().join("logs");
+        return project_dirs.data_local_dir().join(LOGS_DIR_NAME);
     }
-    fallback_root().join("logs")
+    fallback_root().join(LOGS_DIR_NAME)
 }
 
 pub fn themes_dir() -> PathBuf {
     if let Some(root) = portable_root() {
-        return root.join("themes");
+        return root.join(THEMES_DIR_NAME);
     }
     if let Some(project_dirs) = project_dirs() {
-        return project_dirs.config_dir().join("themes");
+        return project_dirs.config_dir().join(THEMES_DIR_NAME);
     }
-    fallback_root().join("themes")
+    fallback_root().join(THEMES_DIR_NAME)
 }
 
 pub fn legacy_config_base_path() -> Option<PathBuf> {
-    legacy_project_dirs().map(|project_dirs| project_dirs.config_dir().join("config"))
+    legacy_project_dirs().map(|project_dirs| project_dirs.config_dir().join(CONFIG_DIR_NAME))
 }
 
 pub fn legacy_instances_store_path() -> Option<PathBuf> {

@@ -9,6 +9,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 ureq.workspace = true
+vertex_constants.workspace = true
 sha1 = "*"
 sha2 = "*"
-

@@ -2,13 +2,9 @@ use config::Config;
 use eframe::{self, egui};
 use launcher_ui::window_effects;
 use std::sync::Arc;
+use vertex_constants::branding::DESKTOP_APP_ID;
 
 use super::{app_icon, app_metadata, platform};
-
-#[cfg(target_os = "linux")]
-const LINUX_APP_ID: &str = "io.github.SturdyFool10.VertexLauncher";
-#[cfg(not(target_os = "linux"))]
-const LINUX_APP_ID: &str = "vertexlauncher";
 
 pub fn build(startup_config: &Config) -> eframe::NativeOptions {
     let startup_power_preference = if startup_config.low_power_gpu_preferred() {
@@ -28,7 +24,7 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
     eframe::NativeOptions {
         viewport: egui::ViewportBuilder {
             title: Some("Vertex Launcher".into()),
-            app_id: Some(LINUX_APP_ID.into()),
+            app_id: Some(DESKTOP_APP_ID.into()),
             inner_size: Some(egui::vec2(1280.0, 800.0)),
             min_inner_size: Some(egui::vec2(900.0, 460.0)),
             resizable: Some(true),

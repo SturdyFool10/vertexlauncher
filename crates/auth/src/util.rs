@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{self, Read};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
@@ -14,10 +14,8 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use url::Url;
 
+use crate::constants::{AUTH_REQUEST_MIN_INTERVAL, MAX_LOG_MESSAGE_CHARS};
 use crate::error::AuthError;
-
-const AUTH_REQUEST_MIN_INTERVAL: Duration = Duration::from_secs(2);
-const MAX_LOG_MESSAGE_CHARS: usize = 240;
 
 fn auth_request_gate() -> &'static Mutex<Option<Instant>> {
     static GATE: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();

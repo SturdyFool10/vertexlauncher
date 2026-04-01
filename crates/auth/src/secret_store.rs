@@ -1,21 +1,16 @@
 use std::{
     sync::{LazyLock, Mutex},
     thread,
-    time::Duration,
 };
 
 use keyring::{Entry, Error as KeyringError};
 
+use crate::constants::{
+    ACCOUNTS_STATE_ACCOUNT, ACCOUNTS_STATE_SERVICE, LEGACY_REFRESH_TOKEN_SERVICE,
+    REFRESH_TOKEN_SERVICE, REFRESH_TOKEN_STORE_ATTEMPTS, REFRESH_TOKEN_VERIFY_ATTEMPTS,
+    SECURE_STORE_RETRY_ATTEMPTS, SECURE_STORE_RETRY_DELAY,
+};
 use crate::error::AuthError;
-
-const ACCOUNTS_STATE_SERVICE: &str = "vertexlauncher.accounts_state.v1";
-const ACCOUNTS_STATE_ACCOUNT: &str = "cached_accounts";
-const REFRESH_TOKEN_SERVICE: &str = "vertexlauncher.microsoft_refresh_token.v2";
-const LEGACY_REFRESH_TOKEN_SERVICE: &str = "vertexlauncher.microsoft_refresh_token";
-const SECURE_STORE_RETRY_ATTEMPTS: usize = 5;
-const SECURE_STORE_RETRY_DELAY: Duration = Duration::from_millis(75);
-const REFRESH_TOKEN_VERIFY_ATTEMPTS: usize = 5;
-const REFRESH_TOKEN_STORE_ATTEMPTS: usize = 3;
 
 static SECURE_STORE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 

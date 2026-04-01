@@ -1,36 +1,14 @@
-pub(crate) const OAUTH_BASE_URL: &str = "https://login.microsoftonline.com";
-pub(crate) const LIVE_AUTHORIZE_URL: &str = "https://login.live.com/oauth20_authorize.srf";
-pub(crate) const LIVE_TOKEN_URL: &str = "https://login.live.com/oauth20_token.srf";
-pub(crate) const LIVE_REDIRECT_URI: &str = "https://login.live.com/oauth20_desktop.srf";
-pub(crate) const LIVE_SCOPE: &str = "service::user.auth.xboxlive.com::MBI_SSL offline_access";
-pub(crate) const DEVICE_CODE_SCOPE: &str = "XboxLive.signin offline_access";
-
-pub(crate) const XBOX_USER_AUTH_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
-pub(crate) const XSTS_AUTH_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
-pub(crate) const MINECRAFT_LOGIN_URL: &str = "https://api.minecraftservices.com/launcher/login";
-pub(crate) const MINECRAFT_LOGIN_LEGACY_URL: &str =
-    "https://api.minecraftservices.com/authentication/login_with_xbox";
-pub(crate) const MINECRAFT_ENTITLEMENTS_URL: &str =
-    "https://api.minecraftservices.com/entitlements/mcstore";
-pub(crate) const MINECRAFT_PROFILE_URL: &str =
-    "https://api.minecraftservices.com/minecraft/profile";
-pub(crate) const MINECRAFT_PROFILE_SKINS_URL: &str =
-    "https://api.minecraftservices.com/minecraft/profile/skins";
-pub(crate) const MINECRAFT_PROFILE_CAPE_ACTIVE_URL: &str =
-    "https://api.minecraftservices.com/minecraft/profile/capes/active";
-
-pub(crate) const ACCOUNT_CACHE_FILENAME: &str = "account_cache.json";
-pub(crate) const ACCOUNT_CACHE_APP_DIR: &str = "vertexlauncher";
-pub(crate) const LEGACY_ACCOUNT_CACHE_APP_DIR: &str = "vertex-launcher";
-pub(crate) const LEGACY_ACCOUNT_CACHE_PATH: &str = "account_cache.json";
-
-/// Built-in Microsoft OAuth client id used when `VERTEX_MSA_CLIENT_ID` is not set.
-/// Leave empty to force env-based configuration.
-pub const BUILTIN_MICROSOFT_CLIENT_ID: &str = "00000000402b5328";
-/// Built-in OAuth tenant used when `VERTEX_MSA_TENANT` is not set.
-pub const BUILTIN_MICROSOFT_TENANT: &str = "consumers";
-
-/// Built-in client ID for device code sign-in. Overridden by `VERTEX_DEVICE_CODE_CLIENT_ID`.
-pub const BUILTIN_DEVICE_CODE_CLIENT_ID: &str = "2a674004-0bc7-4136-b863-def55befdfa2";
-/// Built-in tenant for device code sign-in. Overridden by `VERTEX_DEVICE_CODE_TENANT`.
-pub const BUILTIN_DEVICE_CODE_TENANT: &str = "consumers";
+pub(crate) use vertex_constants::auth::{
+    ACCOUNT_CACHE_APP_DIR, ACCOUNT_CACHE_FILENAME, ACCOUNTS_STATE_ACCOUNT, ACCOUNTS_STATE_SERVICE,
+    AUTH_REQUEST_MIN_INTERVAL, DEVICE_CODE_SCOPE, LEGACY_ACCOUNT_CACHE_APP_DIR,
+    LEGACY_ACCOUNT_CACHE_PATH, LEGACY_REFRESH_TOKEN_SERVICE, LIVE_AUTHORIZE_URL, LIVE_REDIRECT_URI,
+    LIVE_SCOPE, LIVE_TOKEN_URL, MAX_LOG_MESSAGE_CHARS, MINECRAFT_ENTITLEMENTS_URL,
+    MINECRAFT_LOGIN_LEGACY_URL, MINECRAFT_LOGIN_URL, MINECRAFT_PROFILE_CAPE_ACTIVE_URL,
+    MINECRAFT_PROFILE_SKINS_URL, MINECRAFT_PROFILE_URL, OAUTH_BASE_URL, REFRESH_TOKEN_SERVICE,
+    REFRESH_TOKEN_STORE_ATTEMPTS, REFRESH_TOKEN_VERIFY_ATTEMPTS, SECURE_STORE_RETRY_ATTEMPTS,
+    SECURE_STORE_RETRY_DELAY, XBOX_USER_AUTH_URL, XSTS_AUTH_URL,
+};
+pub use vertex_constants::auth::{
+    BUILTIN_DEVICE_CODE_CLIENT_ID, BUILTIN_DEVICE_CODE_TENANT, BUILTIN_MICROSOFT_CLIENT_ID,
+    BUILTIN_MICROSOFT_TENANT,
+};

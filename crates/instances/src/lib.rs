@@ -5,11 +5,9 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-const INSTANCES_FILENAME: &str = "instances.json";
-const DEFAULT_INSTANCE_NAME: &str = "Instance";
-const DEFAULT_MODLOADER: &str = "Vanilla";
-const DEFAULT_GAME_VERSION: &str = "latest";
+use vertex_constants::instances::{
+    DEFAULT_GAME_VERSION, DEFAULT_INSTANCE_NAME, DEFAULT_MODLOADER, STORE_FILENAME,
+};
 
 static NEXT_INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -677,7 +675,7 @@ fn load_store_path() -> PathBuf {
         return legacy_path;
     }
 
-    let legacy_path = PathBuf::from(INSTANCES_FILENAME);
+    let legacy_path = PathBuf::from(STORE_FILENAME);
     if legacy_path != default_path && legacy_path.exists() {
         return legacy_path;
     }

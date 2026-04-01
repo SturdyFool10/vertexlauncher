@@ -6,15 +6,12 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
-
-const DEFAULT_CURSEFORGE_API_BASE_URL: &str = "https://api.curseforge.com";
-const DEFAULT_USER_AGENT: &str =
-    "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
-const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);
-const DEFAULT_MIN_REQUEST_SPACING: Duration = Duration::from_millis(500);
-const DOWNLOAD_URL_LOOKUP_MAX_ATTEMPTS: usize = 3;
-const DOWNLOAD_URL_LOOKUP_RETRY_BASE_DELAY: Duration = Duration::from_millis(750);
-pub const MINECRAFT_GAME_ID: u32 = 432;
+pub use vertex_constants::curseforge::MINECRAFT_GAME_ID;
+use vertex_constants::curseforge::{
+    API_BASE_URL as DEFAULT_CURSEFORGE_API_BASE_URL, DOWNLOAD_URL_LOOKUP_MAX_ATTEMPTS,
+    DOWNLOAD_URL_LOOKUP_RETRY_BASE_DELAY, MIN_REQUEST_SPACING as DEFAULT_MIN_REQUEST_SPACING,
+    RATE_LIMIT_COOLDOWN as DEFAULT_RATE_LIMIT_COOLDOWN, USER_AGENT as DEFAULT_USER_AGENT,
+};
 static API_KEY_OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug)]

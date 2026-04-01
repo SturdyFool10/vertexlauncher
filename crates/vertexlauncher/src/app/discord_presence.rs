@@ -14,8 +14,7 @@ use instances::{InstanceStore, instance_root_path};
 use launcher_ui::screens::{
     AppScreen, HomePresenceSection, InstancePresenceSection, MenuPresenceContext,
 };
-
-const DISCORD_APPLICATION_ID: &str = "1486469547073601627";
+use vertex_constants::branding::DISCORD_APPLICATION_ID;
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const PRESENCE_RESYNC_INTERVAL: Duration = Duration::from_secs(15);
 

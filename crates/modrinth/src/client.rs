@@ -6,15 +6,14 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
+use vertex_constants::modrinth::{
+    API_BASE_URL as DEFAULT_MODRINTH_API_BASE_URL,
+    MIN_REQUEST_SPACING as DEFAULT_MIN_REQUEST_SPACING,
+    RATE_LIMIT_COOLDOWN as DEFAULT_RATE_LIMIT_COOLDOWN, USER_AGENT as DEFAULT_USER_AGENT,
+};
 
 use crate::response_records::{ProjectRecord, ProjectVersionRecord, SearchResponse};
 use crate::{ModrinthError, Project, ProjectVersion, SearchProject};
-
-const DEFAULT_MODRINTH_API_BASE_URL: &str = "https://api.modrinth.com/v2";
-const DEFAULT_USER_AGENT: &str =
-    "VertexLauncher/0.1 (+https://github.com/SturdyFool10/vertexlauncher)";
-const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);
-const DEFAULT_MIN_REQUEST_SPACING: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug)]
 struct RateLimitState {

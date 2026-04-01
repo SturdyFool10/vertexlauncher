@@ -6,18 +6,15 @@ use curseforge::Client as CurseForgeClient;
 use managed_content::InstalledContentIdentity;
 use modprovider::{ContentSource, UnifiedContentEntry, search_minecraft_content};
 use modrinth::{Client as ModrinthClient, ModrinthError};
+use vertex_constants::content_resolver::{
+    HASH_CACHE_DIR_NAME, HASH_CACHE_FILE_NAME, HEURISTIC_WARNING_MESSAGE, LOOKUP_CACHE_KEY_PREFIX,
+};
 
 use crate::{
     InstalledContentFile, InstalledContentHashCache, InstalledContentHashCacheUpdate,
     InstalledContentKind, InstalledContentResolutionKind, InstalledContentUpdate,
     ResolveInstalledContentRequest, ResolveInstalledContentResult, ResolvedInstalledContent,
 };
-
-const CONTENT_HASH_CACHE_DIR_NAME: &str = "cache";
-const CONTENT_HASH_CACHE_FILE_NAME: &str = "content_hash_cache.json";
-const LOOKUP_CACHE_KEY_PREFIX: &str = "lookup::";
-const HEURISTIC_WARNING_MESSAGE: &str =
-    "Resolved from filename search. This match is heuristic and may be wrong.";
 
 #[track_caller]
 fn fs_read_dir(path: &Path) -> std::io::Result<std::fs::ReadDir> {
@@ -1027,8 +1024,8 @@ fn file_name_matches(left: &str, right: &str) -> bool {
 
 fn content_hash_cache_path(instance_root: &Path) -> PathBuf {
     instance_root
-        .join(CONTENT_HASH_CACHE_DIR_NAME)
-        .join(CONTENT_HASH_CACHE_FILE_NAME)
+        .join(HASH_CACHE_DIR_NAME)
+        .join(HASH_CACHE_FILE_NAME)
 }
 
 fn normalize_lookup_key(value: &str) -> String {

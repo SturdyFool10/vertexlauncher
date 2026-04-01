@@ -17,6 +17,7 @@ members = [
     "crates/modrinth",
     "crates/runtime_bootstrap",
     "crates/textui",
+    "crates/vertex_constants",
     "crates/vtmpack",
 ]
 default-members = [
@@ -66,6 +67,7 @@ fontloader = { path = "crates/fontloader" }
 runtime_bootstrap = { path = "crates/runtime_bootstrap" }
 textui = { path = "crates/textui" }
 vtmpack = { path = "crates/vtmpack" }
+vertex_constants = { path = "crates/vertex_constants" }
 
 [profile.dev]
 # Your crates (workspace members): keep normal dev behavior

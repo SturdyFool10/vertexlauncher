@@ -1,2 +1,1 @@
-pub const VTMPACK_EXTENSION: &str = "vtmpack";
-pub const VTMPACK_MANIFEST_VERSION: u32 = 1;
+pub use vertex_constants::vtmpack::{VTMPACK_EXTENSION, VTMPACK_MANIFEST_VERSION};
