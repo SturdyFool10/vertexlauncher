@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use egui::{
     self, Align, Context, CursorIcon, Layout, ResizeDirection, Sense, TopBottomPanel,
@@ -29,6 +29,7 @@ const PROFILE_POPUP_MIN_WIDTH_COMPACT: f32 = 220.0;
 const RESIZE_GRAB_THICKNESS: f32 = 6.0;
 const PROFILE_BUTTON_CORNER_RADIUS: u8 = 10;
 const TOP_BAR_COMPACT_THRESHOLD: f32 = 720.0;
+const ROUNDED_AVATAR_CACHE_MAX_ENTRIES: usize = 32;
 
 #[derive(Debug, Clone, Default)]
 pub struct TopBarOutput {
@@ -434,20 +435,40 @@ fn render_profile_pending_button(ui: &mut egui::Ui, button_size: f32) -> egui::R
     response
 }
 
-fn rounded_profile_avatar_png(cache_key: u64, avatar_png: &[u8], radius: u8) -> Vec<u8> {
-    static CACHE: OnceLock<Mutex<HashMap<u64, Vec<u8>>>> = OnceLock::new();
+fn rounded_profile_avatar_png(cache_key: u64, avatar_png: &[u8], radius: u8) -> Arc<[u8]> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, (Arc<[u8]>, u64)>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-
-    if let Ok(cache) = cache.lock()
-        && let Some(bytes) = cache.get(&cache_key)
-    {
-        return bytes.clone();
-    }
-
-    let rounded = round_avatar_png_bytes(avatar_png, radius).unwrap_or_else(|| avatar_png.to_vec());
+    let mut next_tick = 0u64;
 
     if let Ok(mut cache) = cache.lock() {
-        cache.insert(cache_key, rounded.clone());
+        next_tick = cache.values().map(|(_, tick)| *tick).max().unwrap_or(0) + 1;
+        if let Some((bytes, tick)) = cache.get_mut(&cache_key) {
+            *tick = next_tick;
+            return Arc::clone(bytes);
+        }
+    }
+
+    let rounded = Arc::<[u8]>::from(
+        round_avatar_png_bytes(avatar_png, radius).unwrap_or_else(|| avatar_png.to_vec()),
+    );
+
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(cache_key, (Arc::clone(&rounded), next_tick));
+        if cache.len() > ROUNDED_AVATAR_CACHE_MAX_ENTRIES {
+            let mut eviction_order = cache
+                .iter()
+                .map(|(key, (_, tick))| (*key, *tick))
+                .collect::<Vec<_>>();
+            eviction_order.sort_by_key(|(_, tick)| *tick);
+            while cache.len() > ROUNDED_AVATAR_CACHE_MAX_ENTRIES {
+                if let Some((key, _)) = eviction_order.first().copied() {
+                    cache.remove(&key);
+                    eviction_order.remove(0);
+                } else {
+                    break;
+                }
+            }
+        }
     }
 
     rounded

@@ -571,11 +571,10 @@ fn spawn_screenshot_load_page(state: &mut HomeState, request_id: u64, page_size:
     let result_tx = channel.tx.clone();
     drop(channel);
 
-    let page: Vec<ScreenshotCandidate> = state.screenshot_candidates[start..end].to_vec();
     state.screenshot_loaded_count = end;
-    state.screenshot_tasks_total += page.len();
+    state.screenshot_tasks_total += end - start;
 
-    for candidate in page {
+    for candidate in state.screenshot_candidates[start..end].iter().cloned() {
         let tx = result_tx.clone();
         let _ = tokio_runtime::spawn(async move {
             let entry = (|| {
@@ -1005,26 +1004,27 @@ fn render_screenshot_gallery(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(style::SPACE_SM);
+            let screenshots = &state.screenshots;
+            let screenshot_images = &mut state.screenshot_images;
             ui.columns(column_count, |columns| {
                 for (column_ui, items) in columns.iter_mut().zip(assignments.iter()) {
                     column_ui.spacing_mut().item_spacing.y = SCREENSHOT_TILE_GAP;
                     let preload_rect = screenshot_preload_rect(column_ui);
                     for &(index, tile_height) in items {
-                        let screenshot = state.screenshots[index].clone();
                         let action = render_screenshot_tile(
                             column_ui,
-                            &mut state.screenshot_images,
-                            &screenshot,
+                            screenshot_images,
+                            &screenshots[index],
                             tile_height,
                             preload_rect,
                             retained_image_keys,
                             metrics,
                         );
                         if action.open_viewer {
-                            open_screenshot_key = Some(screenshot.key());
+                            open_screenshot_key = Some(screenshots[index].key());
                         }
                         if action.request_delete {
-                            delete_screenshot_key = Some(screenshot.key());
+                            delete_screenshot_key = Some(screenshots[index].key());
                         }
                     }
                 }
@@ -1252,7 +1252,6 @@ fn retain_home_viewer_image(state: &mut HomeState, retained_image_keys: &mut Has
         .screenshots
         .iter()
         .find(|entry| entry.key() == viewer_key)
-        .cloned()
     else {
         return;
     };
@@ -1940,7 +1939,7 @@ fn render_instance_usage(
     let _ = text_ui.label(ui, "home_usage_title", "Most Used Instances", &title_style);
     ui.add_space(6.0);
 
-    let mut items = instances.instances.clone();
+    let mut items = instances.instances.iter().collect::<Vec<_>>();
     items.sort_by(|a, b| {
         b.launch_count
             .cmp(&a.launch_count)
@@ -1967,7 +1966,7 @@ fn render_instance_usage(
         .id_salt("home_instances_scroll")
         .max_height(max_height)
         .show(ui, |ui| {
-            for (index, instance) in items.iter().enumerate() {
+            for (index, instance) in items.into_iter().enumerate() {
                 let thumbnail_png = instance
                     .thumbnail_path
                     .as_deref()

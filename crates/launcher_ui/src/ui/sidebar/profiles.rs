@@ -86,7 +86,7 @@ pub fn render(
                             icon_id.as_str(),
                             profile.name.as_str(),
                             max_icon_width,
-                            thumbnail.as_deref(),
+                            thumbnail,
                         )
                     },
                 )
@@ -118,7 +118,7 @@ fn render_profile_icon(
     icon_id: &str,
     tooltip: &str,
     max_icon_width: f32,
-    thumbnail_bytes: Option<&[u8]>,
+    thumbnail_bytes: Option<Arc<[u8]>>,
 ) -> egui::Response {
     if let Some(bytes) = thumbnail_bytes {
         let button_size = ui.available_width().min(max_icon_width).max(1.0);
@@ -128,7 +128,7 @@ fn render_profile_icon(
         bytes.hash(&mut hasher);
         let image = egui::Image::from_bytes(
             format!("bytes://sidebar/profile-thumb/{}", hasher.finish()),
-            bytes.to_vec(),
+            bytes,
         )
         .fit_to_exact_size(egui::vec2(icon_size, icon_size));
         return ui.add_sized(

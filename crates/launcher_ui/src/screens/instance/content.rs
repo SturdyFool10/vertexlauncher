@@ -353,7 +353,7 @@ pub(super) fn render_installed_content_section(
                     if let Some(version_id) = update_version_id {
                         pending_update = Some((
                             entry.lookup_key.clone(),
-                            version_id,
+                            version_id.to_owned(),
                             entry.file_path.clone(),
                         ));
                     }

@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     hash::{Hash, Hasher},
     mem,
-    sync::mpsc,
+    sync::{Arc, mpsc},
 };
 
 use cosmic_text::{
@@ -342,7 +342,7 @@ pub struct TextUi {
     frame_events: Vec<egui::Event>,
     /// Cache for parsed markdown blocks: Id → (fingerprint, blocks).
     /// Prevents re-parsing unchanged markdown every frame.
-    markdown_cache: HashMap<Id, (u64, Vec<MarkdownBlock>)>,
+    markdown_cache: HashMap<Id, (u64, Arc<[MarkdownBlock]>)>,
 }
 
 impl Default for TextUi {
@@ -1256,17 +1256,17 @@ impl TextUi {
 
         let blocks = if let Some((fp, cached)) = self.markdown_cache.get(&cache_id) {
             if *fp == md_fingerprint {
-                cached.clone()
+                Arc::clone(cached)
             } else {
-                let b = parse_markdown_blocks(markdown);
+                let b = Arc::<[MarkdownBlock]>::from(parse_markdown_blocks(markdown));
                 self.markdown_cache
-                    .insert(cache_id, (md_fingerprint, b.clone()));
+                    .insert(cache_id, (md_fingerprint, Arc::clone(&b)));
                 b
             }
         } else {
-            let b = parse_markdown_blocks(markdown);
+            let b = Arc::<[MarkdownBlock]>::from(parse_markdown_blocks(markdown));
             self.markdown_cache
-                .insert(cache_id, (md_fingerprint, b.clone()));
+                .insert(cache_id, (md_fingerprint, Arc::clone(&b)));
             b
         };
 
@@ -1293,15 +1293,16 @@ impl TextUi {
                             italic: false,
                             padding: egui::Vec2::ZERO,
                         };
-                        let _ = self.label(ui, ("md_h", index), text, &heading_style);
+                        let _ = self.label(ui, ("md_h", index), text.as_str(), &heading_style);
                     }
                     MarkdownBlock::Paragraph(text) => {
-                        let _ = self.label(ui, ("md_p", index), text, &options.body);
+                        let _ = self.label(ui, ("md_p", index), text.as_str(), &options.body);
                     }
                     MarkdownBlock::Code { language, text } => {
                         let mut code_options = options.code.clone();
                         code_options.language = language.clone();
-                        let _ = self.code_block(ui, ("md_code", index), text, &code_options);
+                        let _ =
+                            self.code_block(ui, ("md_code", index), text.as_str(), &code_options);
                     }
                 }
 
