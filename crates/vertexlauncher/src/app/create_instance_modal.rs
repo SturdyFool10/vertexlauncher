@@ -148,6 +148,10 @@ pub fn render(
         dialog_options("create_instance_modal_window", DialogPreset::Form),
         |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(MODAL_GAP_MD, MODAL_GAP_MD);
+            let modal_max_height = ui.max_rect().height();
+            let action_width = ui.available_width();
+            let compact_actions = action_width < 320.0;
+            let footer_reserve = if compact_actions { 152.0 } else { 110.0 };
             let text_color = ui.visuals().text_color();
             let heading_style = LabelOptions {
                 font_size: 34.0,
@@ -165,364 +169,366 @@ pub fn render(
                 ..LabelOptions::default()
             };
 
-            let _ = text_ui.label(
-                ui,
-                "instance_create_heading",
-                "Create Instance",
-                &heading_style,
-            );
-            let _ = text_ui.label(
-                ui,
-                "instance_create_subheading",
-                "Choose name, thumbnail, modloader, and versions.",
-                &body_style,
-            );
-            render_thumbnail_picker(text_ui, ui, state);
-
-            let _ = settings_widgets::full_width_text_input_row(
-                text_ui,
-                ui,
-                "instance_create_name",
-                "Instance name",
-                Some("Display name shown in the sidebar."),
-                &mut state.name,
-            );
-            ui.add_space(MODAL_GAP_SM);
-            let _ = settings_widgets::full_width_text_input_row(
-                text_ui,
-                ui,
-                "instance_create_description",
-                "Description (optional)",
-                Some("Optional note shown in the library tile."),
-                &mut state.description,
-            );
-            ui.add_space(MODAL_GAP_SM);
-
-            let refresh_versions_clicked = ui
-                .add_enabled_ui(!state.version_catalog_in_flight, |ui| {
-                    settings_widgets::full_width_button(
-                        text_ui,
-                        ui,
-                        "instance_create_refresh_versions",
-                        "Refresh version list",
-                        ui.available_width().clamp(1.0, ACTION_BUTTON_MAX_WIDTH),
-                        false,
-                    )
-                })
-                .inner
-                .clicked();
-            if refresh_versions_clicked {
-                sync_version_catalog(state, include_snapshots_and_betas, true);
-                state.modloader_versions_cache.clear();
-                state.modloader_versions_status = None;
-                state.modloader_versions_status_key = None;
-            }
-            if state.version_catalog_in_flight {
-                ui.horizontal(|ui| {
-                    ui.spinner();
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .max_height((modal_max_height - footer_reserve).max(220.0))
+                .show(ui, |ui| {
                     let _ = text_ui.label(
                         ui,
-                        "instance_create_catalog_fetching",
-                        "Fetching version catalog...",
-                        &LabelOptions {
-                            color: ui.visuals().weak_text_color(),
-                            wrap: true,
-                            ..LabelOptions::default()
-                        },
+                        "instance_create_heading",
+                        "Create Instance",
+                        &heading_style,
                     );
-                });
-            }
-
-            if let Some(catalog_error) = state.version_catalog_error.as_deref() {
-                let _ = text_ui.label(
-                    ui,
-                    "instance_create_version_catalog_error",
-                    catalog_error,
-                    &LabelOptions {
-                        color: ui.visuals().error_fg_color,
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
-                );
-            }
-
-            let version_labels: Vec<String> = state
-                .available_game_versions
-                .iter()
-                .map(MinecraftVersionEntry::display_label)
-                .collect();
-            let version_refs: Vec<&str> = version_labels.iter().map(String::as_str).collect();
-            if !version_refs.is_empty() {
-                let mut selected_index = state
-                    .selected_game_version_index
-                    .min(version_refs.len().saturating_sub(1));
-                let changed = settings_widgets::full_width_dropdown_row(
-                    text_ui,
-                    ui,
-                    "instance_create_game_version_dropdown",
-                    "Minecraft game version",
-                    Some("Choose from fetched Minecraft versions."),
-                    &mut selected_index,
-                    &version_refs,
-                )
-                .changed();
-                if changed {
-                    state.selected_game_version_index = selected_index;
-                    if let Some(version) = state.available_game_versions.get(selected_index) {
-                        state.game_version = version.id.clone();
-                    }
-                }
-            } else {
-                let _ = text_ui.label(
-                    ui,
-                    "instance_create_no_game_versions",
-                    "No game versions available yet.",
-                    &body_style,
-                );
-            }
-
-            ui.add_space(MODAL_GAP_SM);
-
-            let _ = text_ui.label(
-                ui,
-                "instance_create_modloader_label",
-                "Modloader",
-                &LabelOptions {
-                    font_size: 18.0,
-                    line_height: 24.0,
-                    color: text_color,
-                    wrap: false,
-                    ..LabelOptions::default()
-                },
-            );
-            ui.add_space(4.0);
-
-            let selected_game_version = state
-                .available_game_versions
-                .get(state.selected_game_version_index)
-                .map(|entry| entry.id.as_str())
-                .unwrap_or_else(|| state.game_version.as_str())
-                .to_owned();
-            ensure_selected_modloader_is_supported(state, selected_game_version.as_str());
-
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for (index, option) in MODLOADER_OPTIONS.iter().enumerate() {
-                    let unavailable_reason = if index == CUSTOM_MODLOADER_INDEX {
-                        None
-                    } else {
-                        state
-                            .loader_support
-                            .unavailable_reason(option, selected_game_version.as_str())
-                    };
-                    let available = unavailable_reason.is_none();
-
-                    let mut response = settings_widgets::selectable_chip_button(
-                        text_ui,
-                        ui,
-                        ("instance_create_modloader", index),
-                        option,
-                        state.selected_modloader == index,
-                        88.0,
-                        available,
-                    );
-                    if let Some(reason) = unavailable_reason.as_deref() {
-                        response = response.on_hover_text(reason);
-                    }
-
-                    if available && response.clicked() && state.selected_modloader != index {
-                        state.selected_modloader = index;
-                        state.modloader_version.clear();
-                    }
-                }
-            });
-
-            if state.selected_modloader == CUSTOM_MODLOADER_INDEX {
-                ui.add_space(MODAL_GAP_SM);
-                let _ = settings_widgets::full_width_text_input_row(
-                    text_ui,
-                    ui,
-                    "instance_create_custom_modloader",
-                    "Custom modloader id",
-                    Some("Use any custom loader name."),
-                    &mut state.custom_modloader,
-                );
-            }
-
-            ui.add_space(MODAL_GAP_SM);
-            let selected_modloader_label = selected_modloader_label(state);
-            let modloader_versions_key = modloader_versions_cache_key(
-                selected_modloader_label.as_str(),
-                selected_game_version.as_str(),
-            );
-            let available_modloader_versions =
-                selected_modloader_versions(state, selected_game_version.as_str()).to_vec();
-            if state.selected_modloader == 0 {
-                state.modloader_version.clear();
-            } else {
-                let mut resolved_modloader_versions = available_modloader_versions;
-                let should_fetch_remote = state.selected_modloader != CUSTOM_MODLOADER_INDEX
-                    && resolved_modloader_versions.is_empty();
-                if should_fetch_remote {
-                    if let Some(cached) =
-                        state.modloader_versions_cache.get(&modloader_versions_key)
-                    {
-                        resolved_modloader_versions = cached.clone();
-                    } else {
-                        request_modloader_versions(
-                            state,
-                            selected_modloader_label.as_str(),
-                            selected_game_version.as_str(),
-                            false,
-                        );
-                    }
-                }
-
-                let in_flight = state
-                    .modloader_versions_in_flight
-                    .contains(&modloader_versions_key);
-                if in_flight {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        let _ = text_ui.label(
-                            ui,
-                            "instance_create_modloader_versions_fetching",
-                            "Fetching modloader versions...",
-                            &LabelOptions {
-                                color: ui.visuals().weak_text_color(),
-                                wrap: true,
-                                ..LabelOptions::default()
-                            },
-                        );
-                    });
-                }
-
-                if state.modloader_versions_status_key.as_deref()
-                    == Some(modloader_versions_key.as_str())
-                    && let Some(status) = state.modloader_versions_status.as_deref()
-                {
-                    let is_error = status.starts_with("Failed");
                     let _ = text_ui.label(
                         ui,
-                        "instance_create_modloader_versions_status",
-                        status,
-                        &LabelOptions {
-                            color: if is_error {
-                                ui.visuals().error_fg_color
-                            } else {
-                                ui.visuals().weak_text_color()
-                            },
-                            wrap: true,
-                            ..LabelOptions::default()
-                        },
+                        "instance_create_subheading",
+                        "Choose name, thumbnail, modloader, and versions.",
+                        &body_style,
                     );
-                }
+                    render_thumbnail_picker(text_ui, ui, state);
 
-                let modloader_version_options: Vec<String> = resolved_modloader_versions.clone();
+                    let _ = settings_widgets::full_width_text_input_row(
+                        text_ui,
+                        ui,
+                        "instance_create_name",
+                        "Instance name",
+                        Some("Display name shown in the sidebar."),
+                        &mut state.name,
+                    );
+                    ui.add_space(MODAL_GAP_SM);
+                    let _ = settings_widgets::full_width_text_input_row(
+                        text_ui,
+                        ui,
+                        "instance_create_description",
+                        "Description (optional)",
+                        Some("Optional note shown in the library tile."),
+                        &mut state.description,
+                    );
+                    ui.add_space(MODAL_GAP_SM);
 
-                // Auto-select the first (latest) version if none is currently set.
-                if state.modloader_version.trim().is_empty() {
-                    if let Some(first) = modloader_version_options.first() {
-                        state.modloader_version = first.clone();
-                    }
-                }
-
-                let option_refs: Vec<&str> = modloader_version_options
-                    .iter()
-                    .map(String::as_str)
-                    .collect();
-                let current_modloader_version = state.modloader_version.trim().to_owned();
-                let mut selected_index = modloader_version_options
-                    .iter()
-                    .position(|entry| entry == &current_modloader_version)
-                    .unwrap_or(0);
-
-                let changed = settings_widgets::full_width_dropdown_row(
-                    text_ui,
-                    ui,
-                    "instance_create_modloader_version_dropdown",
-                    "Modloader version",
-                    Some("Cataloged by loader+Minecraft compatibility and cached once per day."),
-                    &mut selected_index,
-                    &option_refs,
-                )
-                .changed();
-                if changed {
-                    if let Some(selected) = modloader_version_options.get(selected_index) {
-                        state.modloader_version = selected.clone();
-                    }
-                }
-
-                if state.selected_modloader != CUSTOM_MODLOADER_INDEX {
-                    let refresh_clicked = ui
-                        .add_enabled_ui(!in_flight, |ui| {
+                    let refresh_versions_clicked = ui
+                        .add_enabled_ui(!state.version_catalog_in_flight, |ui| {
                             settings_widgets::full_width_button(
                                 text_ui,
                                 ui,
-                                "instance_create_modloader_versions_refresh",
-                                "Refresh modloader versions",
+                                "instance_create_refresh_versions",
+                                "Refresh version list",
                                 ui.available_width().clamp(1.0, ACTION_BUTTON_MAX_WIDTH),
                                 false,
                             )
                         })
                         .inner
                         .clicked();
-                    if refresh_clicked {
-                        request_modloader_versions(
-                            state,
-                            selected_modloader_label.as_str(),
-                            selected_game_version.as_str(),
-                            true,
+                    if refresh_versions_clicked {
+                        sync_version_catalog(state, include_snapshots_and_betas, true);
+                        state.modloader_versions_cache.clear();
+                        state.modloader_versions_status = None;
+                        state.modloader_versions_status_key = None;
+                    }
+                    if state.version_catalog_in_flight {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            let _ = text_ui.label(
+                                ui,
+                                "instance_create_catalog_fetching",
+                                "Fetching version catalog...",
+                                &LabelOptions {
+                                    color: ui.visuals().weak_text_color(),
+                                    wrap: true,
+                                    ..LabelOptions::default()
+                                },
+                            );
+                        });
+                    }
+
+                    if let Some(catalog_error) = state.version_catalog_error.as_deref() {
+                        let _ = text_ui.label(
+                            ui,
+                            "instance_create_version_catalog_error",
+                            catalog_error,
+                            &LabelOptions {
+                                color: ui.visuals().error_fg_color,
+                                wrap: true,
+                                ..LabelOptions::default()
+                            },
                         );
                     }
-                }
 
-                if resolved_modloader_versions.is_empty()
-                    && state.selected_modloader != CUSTOM_MODLOADER_INDEX
-                {
+                    let version_labels: Vec<String> = state
+                        .available_game_versions
+                        .iter()
+                        .map(MinecraftVersionEntry::display_label)
+                        .collect();
+                    let version_refs: Vec<&str> = version_labels.iter().map(String::as_str).collect();
+                    if !version_refs.is_empty() {
+                        let mut selected_index = state
+                            .selected_game_version_index
+                            .min(version_refs.len().saturating_sub(1));
+                        let changed = settings_widgets::full_width_dropdown_row(
+                            text_ui,
+                            ui,
+                            "instance_create_game_version_dropdown",
+                            "Minecraft game version",
+                            Some("Choose from fetched Minecraft versions."),
+                            &mut selected_index,
+                            &version_refs,
+                        )
+                        .changed();
+                        if changed {
+                            state.selected_game_version_index = selected_index;
+                            if let Some(version) = state.available_game_versions.get(selected_index) {
+                                state.game_version = version.id.clone();
+                            }
+                        }
+                    } else {
+                        let _ = text_ui.label(
+                            ui,
+                            "instance_create_no_game_versions",
+                            "No game versions available yet.",
+                            &body_style,
+                        );
+                    }
+
+                    ui.add_space(MODAL_GAP_SM);
+
                     let _ = text_ui.label(
                         ui,
-                        "instance_create_modloader_versions_unavailable",
-                        "No cataloged modloader versions were found for this Minecraft version.",
+                        "instance_create_modloader_label",
+                        "Modloader",
                         &LabelOptions {
-                            color: ui.visuals().weak_text_color(),
-                            wrap: true,
+                            font_size: 18.0,
+                            line_height: 24.0,
+                            color: text_color,
+                            wrap: false,
                             ..LabelOptions::default()
                         },
                     );
-                }
-            }
+                    ui.add_space(4.0);
 
-            if let Some(error) = state.error.as_deref() {
-                ui.add_space(MODAL_GAP_MD);
-                let _ = text_ui.label(
-                    ui,
-                    "instance_create_error",
-                    error,
-                    &LabelOptions {
-                        color: ui.visuals().error_fg_color,
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
-                );
-            }
+                    let selected_game_version = state
+                        .available_game_versions
+                        .get(state.selected_game_version_index)
+                        .map(|entry| entry.id.as_str())
+                        .unwrap_or_else(|| state.game_version.as_str())
+                        .to_owned();
+                    ensure_selected_modloader_is_supported(state, selected_game_version.as_str());
 
-            if state.create_in_flight {
-                ui.add_space(MODAL_GAP_MD);
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    let _ = text_ui.label(
-                        ui,
-                        "instance_create_in_progress",
-                        "Creating instance in the background...",
-                        &LabelOptions {
-                            color: ui.visuals().weak_text_color(),
-                            wrap: true,
-                            ..LabelOptions::default()
-                        },
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                        for (index, option) in MODLOADER_OPTIONS.iter().enumerate() {
+                            let unavailable_reason = if index == CUSTOM_MODLOADER_INDEX {
+                                None
+                            } else {
+                                state
+                                    .loader_support
+                                    .unavailable_reason(option, selected_game_version.as_str())
+                            };
+                            let available = unavailable_reason.is_none();
+
+                            let mut response = settings_widgets::selectable_chip_button(
+                                text_ui,
+                                ui,
+                                ("instance_create_modloader", index),
+                                option,
+                                state.selected_modloader == index,
+                                88.0,
+                                available,
+                            );
+                            if let Some(reason) = unavailable_reason.as_deref() {
+                                response = response.on_hover_text(reason);
+                            }
+
+                            if available && response.clicked() && state.selected_modloader != index {
+                                state.selected_modloader = index;
+                                state.modloader_version.clear();
+                            }
+                        }
+                    });
+
+                    if state.selected_modloader == CUSTOM_MODLOADER_INDEX {
+                        ui.add_space(MODAL_GAP_SM);
+                        let _ = settings_widgets::full_width_text_input_row(
+                            text_ui,
+                            ui,
+                            "instance_create_custom_modloader",
+                            "Custom modloader id",
+                            Some("Use any custom loader name."),
+                            &mut state.custom_modloader,
+                        );
+                    }
+
+                    ui.add_space(MODAL_GAP_SM);
+                    let selected_modloader_label = selected_modloader_label(state);
+                    let modloader_versions_key = modloader_versions_cache_key(
+                        selected_modloader_label.as_str(),
+                        selected_game_version.as_str(),
                     );
+                    let available_modloader_versions =
+                        selected_modloader_versions(state, selected_game_version.as_str()).to_vec();
+                    if state.selected_modloader == 0 {
+                        state.modloader_version.clear();
+                    } else {
+                        let mut resolved_modloader_versions = available_modloader_versions;
+                        let should_fetch_remote = state.selected_modloader != CUSTOM_MODLOADER_INDEX
+                            && resolved_modloader_versions.is_empty();
+                        if should_fetch_remote {
+                            if let Some(cached) =
+                                state.modloader_versions_cache.get(&modloader_versions_key)
+                            {
+                                resolved_modloader_versions = cached.clone();
+                            } else {
+                                request_modloader_versions(
+                                    state,
+                                    selected_modloader_label.as_str(),
+                                    selected_game_version.as_str(),
+                                    false,
+                                );
+                            }
+                        }
+
+                        let in_flight = state
+                            .modloader_versions_in_flight
+                            .contains(&modloader_versions_key);
+                        if in_flight {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                let _ = text_ui.label(
+                                    ui,
+                                    "instance_create_modloader_versions_fetching",
+                                    "Fetching modloader versions...",
+                                    &LabelOptions {
+                                        color: ui.visuals().weak_text_color(),
+                                        wrap: true,
+                                        ..LabelOptions::default()
+                                    },
+                                );
+                            });
+                        }
+
+                        if state.modloader_versions_status_key.as_deref()
+                            == Some(modloader_versions_key.as_str())
+                            && let Some(status) = state.modloader_versions_status.as_deref()
+                        {
+                            let is_error = status.starts_with("Failed");
+                            let _ = text_ui.label(
+                                ui,
+                                "instance_create_modloader_versions_status",
+                                status,
+                                &LabelOptions {
+                                    color: if is_error {
+                                        ui.visuals().error_fg_color
+                                    } else {
+                                        ui.visuals().weak_text_color()
+                                    },
+                                    wrap: true,
+                                    ..LabelOptions::default()
+                                },
+                            );
+                        }
+
+                        let modloader_version_options: Vec<String> = resolved_modloader_versions.clone();
+
+                        if state.modloader_version.trim().is_empty() {
+                            if let Some(first) = modloader_version_options.first() {
+                                state.modloader_version = first.clone();
+                            }
+                        }
+
+                        let option_refs: Vec<&str> =
+                            modloader_version_options.iter().map(String::as_str).collect();
+                        let current_modloader_version = state.modloader_version.trim().to_owned();
+                        let mut selected_index = modloader_version_options
+                            .iter()
+                            .position(|entry| entry == &current_modloader_version)
+                            .unwrap_or(0);
+
+                        let changed = settings_widgets::full_width_dropdown_row(
+                            text_ui,
+                            ui,
+                            "instance_create_modloader_version_dropdown",
+                            "Modloader version",
+                            Some("Cataloged by loader+Minecraft compatibility and cached once per day."),
+                            &mut selected_index,
+                            &option_refs,
+                        )
+                        .changed();
+                        if changed {
+                            if let Some(selected) = modloader_version_options.get(selected_index) {
+                                state.modloader_version = selected.clone();
+                            }
+                        }
+
+                        if state.selected_modloader != CUSTOM_MODLOADER_INDEX {
+                            let refresh_clicked = ui
+                                .add_enabled_ui(!in_flight, |ui| {
+                                    settings_widgets::full_width_button(
+                                        text_ui,
+                                        ui,
+                                        "instance_create_modloader_versions_refresh",
+                                        "Refresh modloader versions",
+                                        ui.available_width().clamp(1.0, ACTION_BUTTON_MAX_WIDTH),
+                                        false,
+                                    )
+                                })
+                                .inner
+                                .clicked();
+                            if refresh_clicked {
+                                request_modloader_versions(
+                                    state,
+                                    selected_modloader_label.as_str(),
+                                    selected_game_version.as_str(),
+                                    true,
+                                );
+                            }
+                        }
+
+                        if resolved_modloader_versions.is_empty()
+                            && state.selected_modloader != CUSTOM_MODLOADER_INDEX
+                        {
+                            let _ = text_ui.label(
+                                ui,
+                                "instance_create_modloader_versions_unavailable",
+                                "No cataloged modloader versions were found for this Minecraft version.",
+                                &LabelOptions {
+                                    color: ui.visuals().weak_text_color(),
+                                    wrap: true,
+                                    ..LabelOptions::default()
+                                },
+                            );
+                        }
+                    }
+
+                    if let Some(error) = state.error.as_deref() {
+                        ui.add_space(MODAL_GAP_MD);
+                        let _ = text_ui.label(
+                            ui,
+                            "instance_create_error",
+                            error,
+                            &LabelOptions {
+                                color: ui.visuals().error_fg_color,
+                                wrap: true,
+                                ..LabelOptions::default()
+                            },
+                        );
+                    }
+
+                    if state.create_in_flight {
+                        ui.add_space(MODAL_GAP_MD);
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            let _ = text_ui.label(
+                                ui,
+                                "instance_create_in_progress",
+                                "Creating instance in the background...",
+                                &LabelOptions {
+                                    color: ui.visuals().weak_text_color(),
+                                    wrap: true,
+                                    ..LabelOptions::default()
+                                },
+                            );
+                        });
+                    }
                 });
-            }
 
             ui.add_space(MODAL_GAP_LG);
             ui.separator();
@@ -530,8 +536,6 @@ pub fn render(
 
             let mut create_clicked = false;
             let mut cancel_clicked = false;
-            let action_width = ui.available_width();
-            let compact_actions = action_width < 320.0;
 
             if compact_actions {
                 create_clicked = ui

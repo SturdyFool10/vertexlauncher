@@ -328,7 +328,12 @@ fn drain_notifications() {
     }
 }
 
-pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi, expiry_bars_empty_left: bool) {
+pub fn render_popups(
+    ctx: &egui::Context,
+    text_ui: &mut TextUi,
+    expiry_bars_empty_left: bool,
+    suppressed_progress_source: Option<&str>,
+) {
     drain_notifications();
 
     let entries = {
@@ -338,8 +343,22 @@ pub fn render_popups(ctx: &egui::Context, text_ui: &mut TextUi, expiry_bars_empt
         if store.entries.is_empty() {
             return;
         }
-        store.entries.clone()
+        store
+            .entries
+            .iter()
+            .filter(|entry| {
+                suppressed_progress_source.is_none_or(|source| {
+                    let suppressible = entry.progress.is_some() || entry.spinner;
+                    !suppressible
+                        || (entry.source != source && entry.replace_key.as_deref() != Some(source))
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>()
     };
+    if entries.is_empty() {
+        return;
+    }
 
     egui::Area::new(egui::Id::new("notification_stack_area"))
         .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-14.0, 48.0))

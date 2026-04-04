@@ -1544,6 +1544,7 @@ pub(super) fn poll_runtime_prepare(
 
     for (game_version, instance_root_display, result) in updates {
         let prepare_user_key = state.runtime_prepare_user_key.take();
+        let had_install_progress = state.runtime_latest_progress.is_some();
         state.runtime_prepare_instance_root = None;
         console::set_instance_tab_loading(
             instance_root_display.as_str(),
@@ -1605,6 +1606,13 @@ pub(super) fn poll_runtime_prepare(
                         launch.pid,
                         setup.downloaded_files
                     );
+                    if had_install_progress {
+                        notification::info!(
+                            format!("Installation Complete {}", state.name_input),
+                            "{} finished installing files and launched successfully.",
+                            state.name_input
+                        );
+                    }
                 } else {
                     state.running = false;
                     install_activity::clear_instance(state.name_input.as_str());
@@ -1626,6 +1634,13 @@ pub(super) fn poll_runtime_prepare(
                                 game_version,
                                 setup.downloaded_files
                             );
+                            if had_install_progress {
+                                notification::info!(
+                                    format!("Installation Complete {}", state.name_input),
+                                    "{} finished installing successfully.",
+                                    state.name_input
+                                );
+                            }
                         }
                         RuntimePrepareOperation::Launch => {
                             state.status_message = Some(format!(
@@ -1640,6 +1655,13 @@ pub(super) fn poll_runtime_prepare(
                                 game_version,
                                 setup.downloaded_files
                             );
+                            if had_install_progress {
+                                notification::info!(
+                                    format!("Installation Complete {}", state.name_input),
+                                    "{} finished installing successfully.",
+                                    state.name_input
+                                );
+                            }
                         }
                     }
                 }

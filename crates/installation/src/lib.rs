@@ -6,7 +6,7 @@ use std::io::{ErrorKind, Read, Write};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -310,6 +310,14 @@ pub struct LaunchResult {
     pub pid: u32,
     pub profile_id: String,
     pub launch_log_path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinishedInstanceProcess {
+    pub instance_root: String,
+    pub account_key: Option<String>,
+    pub pid: u32,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -950,9 +958,44 @@ struct RunningInstanceProcess {
 
 static RUNNING_INSTANCE_PROCESSES: OnceLock<Mutex<HashMap<String, Vec<RunningInstanceProcess>>>> =
     OnceLock::new();
+static FINISHED_INSTANCE_PROCESSES: OnceLock<Mutex<Vec<FinishedInstanceProcess>>> = OnceLock::new();
 
 fn process_registry() -> &'static Mutex<HashMap<String, Vec<RunningInstanceProcess>>> {
     RUNNING_INSTANCE_PROCESSES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn finished_process_queue() -> &'static Mutex<Vec<FinishedInstanceProcess>> {
+    FINISHED_INSTANCE_PROCESSES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn push_finished_instance_process(process: FinishedInstanceProcess) {
+    if let Ok(mut finished) = finished_process_queue().lock() {
+        finished.push(process);
+    }
+}
+
+fn finished_instance_process(
+    instance_root: &str,
+    process: RunningInstanceProcess,
+    status: ExitStatus,
+) -> FinishedInstanceProcess {
+    let pid = process.child.id();
+    FinishedInstanceProcess {
+        instance_root: instance_root.to_owned(),
+        account_key: process.account_key,
+        pid,
+        exit_code: status.code(),
+    }
+}
+
+pub fn take_finished_instance_processes() -> Vec<FinishedInstanceProcess> {
+    if let Ok(mut processes) = process_registry().lock() {
+        prune_finished_processes(&mut processes);
+    }
+    match finished_process_queue().lock() {
+        Ok(mut finished) => std::mem::take(&mut *finished),
+        Err(_) => Vec::new(),
+    }
 }
 
 pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, InstallationError> {
@@ -1328,8 +1371,24 @@ pub fn running_instance_roots() -> Vec<String> {
 }
 
 fn prune_finished_processes(processes: &mut HashMap<String, Vec<RunningInstanceProcess>>) {
-    processes.retain(|_, instance_processes| {
-        instance_processes.retain_mut(|process| matches!(process.child.try_wait(), Ok(None)));
+    processes.retain(|instance_root, instance_processes| {
+        let mut index = 0usize;
+        while index < instance_processes.len() {
+            match instance_processes[index].child.try_wait() {
+                Ok(None) => index += 1,
+                Ok(Some(status)) => {
+                    let process = instance_processes.remove(index);
+                    push_finished_instance_process(finished_instance_process(
+                        instance_root,
+                        process,
+                        status,
+                    ));
+                }
+                Err(_) => {
+                    let _ = instance_processes.remove(index);
+                }
+            }
+        }
         !instance_processes.is_empty()
     });
 }

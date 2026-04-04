@@ -6,8 +6,8 @@ use eframe::{self, egui};
 use egui::CentralPanel;
 use installation::{
     DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, display_user_path,
-    ensure_game_files, ensure_openjdk_runtime, running_instance_for_account,
-    running_instance_roots,
+    ensure_game_files, ensure_openjdk_runtime, normalize_path_key, running_instance_for_account,
+    running_instance_roots, take_finished_instance_processes,
 };
 use instances::{
     InstanceRecord, InstanceStore, create_instance, delete_instance, instance_root_path,
@@ -348,6 +348,7 @@ impl VertexApp {
         poll_config_save_results(self);
         poll_instance_store_save_results(self);
         self.auth.poll();
+        poll_finished_instance_process_notifications(self);
         console::prune_instance_tabs(&running_instance_roots());
         apply_install_activity_os_feedback(ctx, frame);
         if self.auth.should_request_repaint() {
@@ -438,13 +439,20 @@ impl VertexApp {
                 device_code_prompt: self.auth.device_code_prompt(),
             },
         );
-        if self.active_screen != screens::AppScreen::Instance {
-            notification::render_popups(
-                ctx,
-                &mut self.text_ui,
-                self.config.notification_expiry_bars_empty_left(),
-            );
-        }
+        let suppressed_progress_source = if self.active_screen == screens::AppScreen::Instance {
+            self.selected_instance_id
+                .as_deref()
+                .and_then(|id| self.instance_store.find(id))
+                .map(|instance| format!("installation/{}", instance.name))
+        } else {
+            None
+        };
+        notification::render_popups(
+            ctx,
+            &mut self.text_ui,
+            self.config.notification_expiry_bars_empty_left(),
+            suppressed_progress_source.as_deref(),
+        );
 
         if top_bar_output.start_webview_sign_in {
             self.auth.start_webview_sign_in();
@@ -1427,6 +1435,35 @@ fn poll_initial_instance_install_results(app: &mut VertexApp) {
                     }
                 }
             }
+        }
+    }
+}
+
+fn poll_finished_instance_process_notifications(app: &mut VertexApp) {
+    for process in take_finished_instance_processes() {
+        if process.exit_code != Some(1) {
+            continue;
+        }
+
+        let instance_name = app.instance_store.instances.iter().find_map(|instance| {
+            let instance_root =
+                instance_root_path(app.config.minecraft_installations_root_path(), instance);
+            (normalize_path_key(instance_root.as_path()) == process.instance_root)
+                .then(|| instance.name.as_str())
+        });
+
+        if let Some(instance_name) = instance_name {
+            notification::error!(
+                format!("instance/crash/{}", process.pid),
+                "{} crashed with exit code 1.",
+                instance_name
+            );
+        } else {
+            notification::error!(
+                format!("instance/crash/{}", process.pid),
+                "An instance crashed with exit code 1: {}",
+                process.instance_root
+            );
         }
     }
 }
@@ -3134,11 +3171,16 @@ fn start_initial_instance_install(
                 install_activity::clear_instance(activity_instance.as_str());
                 notification::progress!(
                     notification::Severity::Info,
-                    notification_source,
+                    notification_source.clone(),
                     1.0f32,
                     "Initial install complete ({} files, loader {}).",
                     setup.downloaded_files,
                     setup.resolved_modloader_version.as_deref().unwrap_or("n/a")
+                );
+                notification::info!(
+                    format!("Installation Complete {}", instance_name),
+                    "{} installed successfully.",
+                    instance_name
                 );
             }
             Err(err) => {
