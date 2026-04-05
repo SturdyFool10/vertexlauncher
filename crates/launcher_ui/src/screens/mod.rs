@@ -33,6 +33,9 @@ pub use library::{
     request_delete_instance,
 };
 pub use skins::purge_inactive_state as purge_inactive_skins_state;
+pub use skins::set_gamepad_orbit_input as set_skins_gamepad_orbit_input;
+pub use skins::request_motion_focus as request_skins_motion_focus;
+pub use settings::request_theme_focus as request_settings_theme_focus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppScreen {

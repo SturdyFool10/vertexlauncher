@@ -352,10 +352,18 @@ impl VertexApp {
     fn update_inner(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let calibrations = self.config.gamepad_calibrations().clone();
         let gamepad_update = if let Some(gamepad) = &mut self.gamepad {
-            gamepad.update(ctx, &calibrations)
+            gamepad.update(ctx, &calibrations, self.active_screen)
         } else {
             gamepad::GamepadUpdate::default()
         };
+        screens::set_skins_gamepad_orbit_input(
+            ctx,
+            if self.active_screen == screens::AppScreen::Skins {
+                gamepad_update.skins_preview_orbit
+            } else {
+                0.0
+            },
+        );
         if let Some(device) = gamepad_update.calibration_requested
             && !self.show_gamepad_calibration_modal
         {
@@ -487,6 +495,14 @@ impl VertexApp {
             self.auth.start_system_browser_sign_in(&self.theme);
         }
         let previous_active_screen = self.active_screen;
+        if self.active_screen == screens::AppScreen::Settings
+            && self.last_rendered_screen != Some(screens::AppScreen::Settings)
+        {
+            if let Some(focused_id) = ctx.memory(|memory| memory.focused()) {
+                ctx.memory_mut(|memory| memory.surrender_focus(focused_id));
+            }
+            screens::request_settings_theme_focus(ctx);
+        }
         let previous_selected_instance_id = self.selected_instance_id.clone();
         let mut account_switched = false;
         if let Some(profile_id) = top_bar_output.select_account_id.as_deref() {

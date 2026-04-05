@@ -11,6 +11,12 @@ use crate::{
     ui::{components::icon_button, text_input_theme},
 };
 
+const GAMEPAD_SLIDER_EDIT_ID: &str = "settings_widgets_gamepad_slider_edit";
+const GAMEPAD_SLIDER_STEP_DELTA_ID: &str = "settings_widgets_gamepad_slider_step_delta";
+const GAMEPAD_ACTIVATE_TARGET_ID: &str = "settings_widgets_gamepad_activate_target";
+const GAMEPAD_CUSTOM_ACTIVATE_IDS: &str = "settings_widgets_gamepad_custom_activate_ids";
+const SETTINGS_DEFAULT_FOCUS_REQUEST_ID: &str = "settings_widgets_default_focus_request";
+
 #[derive(Clone, Copy, Debug)]
 struct ControlMetrics {
     right_padding: f32,
@@ -45,6 +51,100 @@ struct SearchableDropdownState {
     query: String,
 }
 
+fn paint_focus_outline(ui: &Ui, rect: egui::Rect) {
+    ui.painter().rect_stroke(
+        rect.expand2(egui::vec2(2.0, 2.0)),
+        egui::CornerRadius::same(8),
+        ui.visuals().selection.stroke,
+        egui::StrokeKind::Outside,
+    );
+}
+
+pub fn set_gamepad_slider_step_delta(ctx: &egui::Context, delta: i32) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(GAMEPAD_SLIDER_STEP_DELTA_ID), delta));
+}
+
+pub fn gamepad_active_slider(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data_mut(|data| data.get_temp::<egui::Id>(egui::Id::new(GAMEPAD_SLIDER_EDIT_ID)))
+}
+
+pub fn set_gamepad_active_slider(ctx: &egui::Context, slider_id: Option<egui::Id>) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new(GAMEPAD_SLIDER_EDIT_ID);
+        if let Some(slider_id) = slider_id {
+            data.insert_temp(key, slider_id);
+        } else {
+            data.remove::<egui::Id>(key);
+        }
+    });
+}
+
+pub fn set_gamepad_activate_target(ctx: &egui::Context, target: Option<egui::Id>) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new(GAMEPAD_ACTIVATE_TARGET_ID);
+        if let Some(target) = target {
+            data.insert_temp(key, target);
+        } else {
+            data.remove::<egui::Id>(key);
+        }
+    });
+}
+
+pub fn clear_gamepad_custom_activate_ids(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<Vec<egui::Id>>(egui::Id::new(GAMEPAD_CUSTOM_ACTIVATE_IDS)));
+}
+
+pub fn register_gamepad_custom_activate_id(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new(GAMEPAD_CUSTOM_ACTIVATE_IDS);
+        let mut ids = data.get_temp::<Vec<egui::Id>>(key).unwrap_or_default();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+        data.insert_temp(key, ids);
+    });
+}
+
+pub fn is_gamepad_custom_activate_id(ctx: &egui::Context, id: egui::Id) -> bool {
+    ctx.data_mut(|data| {
+        data.get_temp::<Vec<egui::Id>>(egui::Id::new(GAMEPAD_CUSTOM_ACTIVATE_IDS))
+            .is_some_and(|ids| ids.contains(&id))
+    })
+}
+
+pub fn request_default_focus(ctx: &egui::Context, requested: bool) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new(SETTINGS_DEFAULT_FOCUS_REQUEST_ID);
+        if requested {
+            data.insert_temp(key, true);
+        } else {
+            data.remove::<bool>(key);
+        }
+    });
+}
+
+fn gamepad_slider_step_delta(ctx: &egui::Context) -> i32 {
+    ctx.data_mut(|data| {
+        data.get_temp::<i32>(egui::Id::new(GAMEPAD_SLIDER_STEP_DELTA_ID))
+            .unwrap_or(0)
+    })
+}
+
+fn gamepad_activate_target(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data_mut(|data| data.get_temp::<egui::Id>(egui::Id::new(GAMEPAD_ACTIVATE_TARGET_ID)))
+}
+
+fn maybe_request_default_focus(ctx: &egui::Context, response: &egui::Response) {
+    let requested = ctx.data_mut(|data| {
+        data.get_temp::<bool>(egui::Id::new(SETTINGS_DEFAULT_FOCUS_REQUEST_ID))
+            .unwrap_or(false)
+    });
+    if requested {
+        response.request_focus();
+        request_default_focus(ctx, false);
+    }
+}
+
 pub fn toggle_row(
     text_ui: &mut TextUi,
     ui: &mut Ui,
@@ -54,10 +154,14 @@ pub fn toggle_row(
 ) -> Response {
     let metrics = control_metrics(ui);
     let label_options = row_label_options(ui);
+    let toggle_id = ui.make_persistent_id(("toggle_switch", label));
+    let activate_target = gamepad_activate_target(ui.ctx());
 
     ui.horizontal(|ui| {
         let mut label_response =
             text_ui.clickable_label(ui, ("toggle_label", label), label, &label_options);
+        register_gamepad_custom_activate_id(ui.ctx(), label_response.id);
+        register_gamepad_custom_activate_id(ui.ctx(), toggle_id);
         if label_response.clicked() {
             *value = !*value;
             label_response.mark_changed();
@@ -72,9 +176,27 @@ pub fn toggle_row(
             .with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.add_space(metrics.right_padding);
-                switch(ui, value, metrics)
+                switch(ui, value, metrics, toggle_id)
             })
             .inner;
+        maybe_request_default_focus(ui.ctx(), &switch_response);
+        textui::apply_gamepad_scroll_if_focused(ui, &switch_response);
+
+        if activate_target == Some(toggle_id)
+            || activate_target.is_some_and(|id| id == label_response.id)
+        {
+            *value = !*value;
+            label_response.mark_changed();
+        }
+
+        if label_response.has_focus() || switch_response.has_focus() {
+            ui.painter().rect_stroke(
+                ui.min_rect(),
+                egui::CornerRadius::same(8),
+                ui.visuals().selection.stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
 
         switch_response.union(label_response)
     })
@@ -95,7 +217,7 @@ pub fn dropdown_row(
     let compact_layout = ui.available_width() < 460.0;
 
     if compact_layout {
-        return ui
+        let response = ui
             .vertical(|ui| {
                 let label_response =
                     text_ui.label(ui, ("dropdown_label", label), label, &label_options);
@@ -110,13 +232,18 @@ pub fn dropdown_row(
                 let dropdown_response = ui.push_id(id_source, |ui| {
                     dropdown(text_ui, ui, selected_index, options, compact_metrics)
                 });
+                maybe_request_default_focus(ui.ctx(), &dropdown_response.inner);
 
                 label_response.union(dropdown_response.inner)
             })
             .inner;
+        if response.has_focus() {
+            paint_focus_outline(ui, response.rect);
+        }
+        return response;
     }
 
-    ui.horizontal(|ui| {
+    let response = ui.horizontal(|ui| {
         let label_response = text_ui.label(ui, ("dropdown_label", label), label, &label_options);
 
         if info_tooltip.is_some() {
@@ -134,10 +261,15 @@ pub fn dropdown_row(
                 .inner
             })
             .inner;
+        maybe_request_default_focus(ui.ctx(), &dropdown_response);
 
         dropdown_response.union(label_response)
     })
-    .inner
+    .inner;
+    if response.has_focus() {
+        paint_focus_outline(ui, response.rect);
+    }
+    response
 }
 
 pub fn searchable_dropdown_row(
@@ -154,7 +286,7 @@ pub fn searchable_dropdown_row(
     let compact_layout = ui.available_width() < 460.0;
 
     if compact_layout {
-        return ui
+        let response = ui
             .vertical(|ui| {
                 let label_response = text_ui.label(
                     ui,
@@ -178,13 +310,18 @@ pub fn searchable_dropdown_row(
                 let dropdown_response = ui.push_id(id_source, |ui| {
                     searchable_dropdown(text_ui, ui, selected_index, options, compact_metrics)
                 });
+                maybe_request_default_focus(ui.ctx(), &dropdown_response.inner);
 
                 label_response.union(dropdown_response.inner)
             })
             .inner;
+        if response.has_focus() {
+            paint_focus_outline(ui, response.rect);
+        }
+        return response;
     }
 
-    ui.horizontal(|ui| {
+    let response = ui.horizontal(|ui| {
         let label_response = text_ui.label(
             ui,
             ("searchable_dropdown_label", label),
@@ -212,10 +349,15 @@ pub fn searchable_dropdown_row(
                 .inner
             })
             .inner;
+        maybe_request_default_focus(ui.ctx(), &dropdown_response);
 
         dropdown_response.union(label_response)
     })
-    .inner
+    .inner;
+    if response.has_focus() {
+        paint_focus_outline(ui, response.rect);
+    }
+    response
 }
 
 pub fn float_stepper_row(
@@ -688,7 +830,19 @@ pub fn u128_slider_with_input_row(
                     let slider_id = id.with("u128_slider_drag");
                     let mut slider_response =
                         ui.interact(slider_inner_rect, slider_id, Sense::click_and_drag());
+                    register_gamepad_custom_activate_id(ui.ctx(), slider_id);
+                    maybe_request_default_focus(ui.ctx(), &slider_response);
+                    let activate_target = gamepad_activate_target(ui.ctx());
+                    let slider_editing = gamepad_active_slider(ui.ctx()) == Some(slider_id);
+                    if slider_editing && !slider_response.has_focus() {
+                        set_gamepad_active_slider(ui.ctx(), None);
+                    }
                     let mut slider_changed = false;
+
+                    if activate_target == Some(slider_id) {
+                        slider_response.request_focus();
+                        set_gamepad_active_slider(ui.ctx(), Some(slider_id));
+                    }
 
                     if (slider_response.dragged() || slider_response.clicked())
                         && let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.interact_pos())
@@ -714,6 +868,31 @@ pub fn u128_slider_with_input_row(
                         }
                     }
 
+                    let gamepad_step_delta = if slider_editing && slider_response.has_focus() {
+                        gamepad_slider_step_delta(ui.ctx())
+                    } else {
+                        0
+                    };
+                    if gamepad_step_delta != 0 {
+                        let step_u64 = step.min(u64::MAX as u128) as u64;
+                        let step_u64 = step_u64.max(1);
+                        let delta = if gamepad_step_delta > 0 {
+                            step_u64
+                        } else {
+                            step_u64.saturating_mul((-gamepad_step_delta) as u64)
+                        };
+                        let next = if gamepad_step_delta > 0 {
+                            slider_value.saturating_add(delta).min(slider_max)
+                        } else {
+                            slider_value.saturating_sub(delta).max(slider_min)
+                        };
+                        if next != slider_value {
+                            slider_value = next;
+                            slider_changed = true;
+                        }
+                    }
+                    textui::apply_gamepad_scroll_if_focused(ui, &slider_response);
+
                     let progress = if slider_max > slider_min {
                         (slider_value - slider_min) as f32 / (slider_max - slider_min) as f32
                     } else {
@@ -735,11 +914,16 @@ pub fn u128_slider_with_input_row(
                     let knob_center = egui::pos2(knob_x, rail_rect.center().y);
                     let knob_radius = (slider_inner_rect.height() * 0.34).clamp(6.0, 11.0);
 
+                    let rail_stroke = if slider_response.has_focus() || slider_editing {
+                        ui.visuals().selection.stroke
+                    } else {
+                        ui.visuals().widgets.inactive.bg_stroke
+                    };
                     ui.painter().rect(
                         rail_rect,
                         egui::CornerRadius::same((rail_height * 0.5).round() as u8),
                         ui.visuals().widgets.inactive.bg_fill,
-                        ui.visuals().widgets.inactive.bg_stroke,
+                        rail_stroke,
                         egui::StrokeKind::Inside,
                     );
                     ui.painter().rect(
@@ -753,7 +937,7 @@ pub fn u128_slider_with_input_row(
                         knob_center,
                         knob_radius,
                         ui.visuals().widgets.noninteractive.fg_stroke.color,
-                        egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color),
+                        egui::Stroke::new(1.0, rail_stroke.color),
                     );
 
                     if slider_changed {
@@ -860,6 +1044,18 @@ pub fn float_slider_row(
                     let slider_inner_rect = slider_outer_rect.shrink2(egui::vec2(8.0, 6.0));
                     let mut slider_response =
                         ui.interact(slider_inner_rect, id, Sense::click_and_drag());
+                    register_gamepad_custom_activate_id(ui.ctx(), id);
+                    maybe_request_default_focus(ui.ctx(), &slider_response);
+                    let activate_target = gamepad_activate_target(ui.ctx());
+                    let slider_editing = gamepad_active_slider(ui.ctx()) == Some(id);
+                    if slider_editing && !slider_response.has_focus() {
+                        set_gamepad_active_slider(ui.ctx(), None);
+                    }
+
+                    if activate_target == Some(id) {
+                        slider_response.request_focus();
+                        set_gamepad_active_slider(ui.ctx(), Some(id));
+                    }
 
                     if (slider_response.dragged() || slider_response.clicked())
                         && let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.interact_pos())
@@ -873,6 +1069,22 @@ pub fn float_slider_row(
                             slider_response.mark_changed();
                         }
                     }
+
+                    let gamepad_step_delta = if slider_editing && slider_response.has_focus() {
+                        gamepad_slider_step_delta(ui.ctx())
+                    } else {
+                        0
+                    };
+                    if gamepad_step_delta != 0 {
+                        let step = ((max - min) / 50.0).abs().max(0.001);
+                        let next =
+                            (*value + step * gamepad_step_delta as f32).clamp(min, max);
+                        if (next - *value).abs() > f32::EPSILON {
+                            *value = next;
+                            slider_response.mark_changed();
+                        }
+                    }
+                    textui::apply_gamepad_scroll_if_focused(ui, &slider_response);
 
                     let progress = if max > min {
                         (*value - min) / (max - min)
@@ -895,11 +1107,16 @@ pub fn float_slider_row(
                     let knob_center = egui::pos2(knob_x, rail_rect.center().y);
                     let knob_radius = (slider_inner_rect.height() * 0.34).clamp(6.0, 11.0);
 
+                    let rail_stroke = if slider_response.has_focus() || slider_editing {
+                        ui.visuals().selection.stroke
+                    } else {
+                        ui.visuals().widgets.inactive.bg_stroke
+                    };
                     ui.painter().rect(
                         rail_rect,
                         egui::CornerRadius::same((rail_height * 0.5).round() as u8),
                         ui.visuals().widgets.inactive.bg_fill,
-                        ui.visuals().widgets.inactive.bg_stroke,
+                        rail_stroke,
                         egui::StrokeKind::Inside,
                     );
                     ui.painter().rect(
@@ -913,7 +1130,7 @@ pub fn float_slider_row(
                         knob_center,
                         knob_radius,
                         ui.visuals().widgets.noninteractive.fg_stroke.color,
-                        egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color),
+                        egui::Stroke::new(1.0, rail_stroke.color),
                     );
 
                     let value_text = if show_percentage {
@@ -966,9 +1183,10 @@ pub fn info_hint(
     response
 }
 
-fn switch(ui: &mut Ui, value: &mut bool, metrics: ControlMetrics) -> Response {
+fn switch(ui: &mut Ui, value: &mut bool, metrics: ControlMetrics, id: egui::Id) -> Response {
     let desired_size = egui::vec2(metrics.switch_width, metrics.control_height);
-    let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click());
+    let rect = ui.allocate_exact_size(desired_size, Sense::hover()).0;
+    let mut response = ui.interact(rect, id, Sense::click());
 
     if response.clicked() {
         *value = !*value;
@@ -985,7 +1203,11 @@ fn switch(ui: &mut Ui, value: &mut bool, metrics: ControlMetrics) -> Response {
         let on_bg = ui.visuals().selection.bg_fill;
         let bg_fill: egui::Color32 =
             egui::lerp(egui::Rgba::from(off_bg)..=egui::Rgba::from(on_bg), how_on).into();
-        let bg_stroke = ui.visuals().widgets.inactive.bg_stroke;
+        let bg_stroke = if response.has_focus() {
+            ui.visuals().selection.stroke
+        } else {
+            ui.visuals().widgets.inactive.bg_stroke
+        };
         let corner_radius = rect.height() / 2.0;
         ui.painter().rect(
             rect,
@@ -1039,6 +1261,7 @@ fn dropdown(
     metrics: ControlMetrics,
 ) -> Response {
     let open_id = ui.id().with("settings_dropdown_open");
+    let was_open = egui::Popup::is_id_open(ui.ctx(), open_id);
 
     let mut label_style = row_label_options(ui);
     label_style.wrap = false;
@@ -1100,7 +1323,7 @@ fn dropdown(
             let max_popup_height = (ui.ctx().available_rect().height() * 0.58)
                 .clamp(metrics.control_height * 4.0, metrics.control_height * 14.0);
             let row_height = metrics.control_height + ui.spacing().item_spacing.y;
-            egui::ScrollArea::vertical()
+            let scroll_output = egui::ScrollArea::vertical()
                 .id_salt(("settings_dropdown_scroll", open_id))
                 .max_height(max_popup_height)
                 .auto_shrink([false, false])
@@ -1115,6 +1338,9 @@ fn dropdown(
                             *selected_index == index,
                             &button_options,
                         );
+                        if !was_open && index == 0 {
+                            option_response.request_focus();
+                        }
                         if option_response.clicked() {
                             *selected_index = index;
                             popup_changed = true;
@@ -1122,6 +1348,7 @@ fn dropdown(
                         }
                     }
                 });
+            textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
 
             if popup_changed {
                 ui.ctx().request_repaint();
@@ -1133,6 +1360,9 @@ fn dropdown(
     let is_open = egui::Popup::is_id_open(ui.ctx(), open_id);
     if is_open {
         interacted = &ui.visuals().widgets.open;
+        text_color = interacted.text_color();
+    } else if response.has_focus() {
+        interacted = &ui.visuals().widgets.active;
         text_color = interacted.text_color();
     }
 
@@ -1313,7 +1543,7 @@ fn searchable_dropdown(
                     &empty_style,
                 );
             } else {
-                egui::ScrollArea::vertical()
+                let scroll_output = egui::ScrollArea::vertical()
                     .id_salt(("settings_searchable_dropdown_scroll", open_id))
                     .max_height(max_popup_height)
                     .auto_shrink([false, false])
@@ -1336,6 +1566,7 @@ fn searchable_dropdown(
                             }
                         }
                     });
+                textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
             }
 
             if popup_changed {
@@ -1349,6 +1580,9 @@ fn searchable_dropdown(
     let is_open = egui::Popup::is_id_open(ui.ctx(), open_id);
     if is_open {
         interacted = &ui.visuals().widgets.open;
+        text_color = interacted.text_color();
+    } else if response.has_focus() {
+        interacted = &ui.visuals().widgets.active;
         text_color = interacted.text_color();
     } else {
         state.query.clear();

@@ -16,6 +16,7 @@ use crate::ui::{components::settings_widgets, style, theme::Theme};
 
 const RESERVED_SYSTEM_MEMORY_MIB: u128 = 4 * 1024;
 const FALLBACK_TOTAL_MEMORY_MIB: u128 = 20 * 1024;
+const FORCE_THEME_FOCUS_ID: &str = "settings_force_theme_focus";
 
 #[derive(Default)]
 struct MemorySliderMaxState {
@@ -32,10 +33,12 @@ pub fn render(
     available_themes: &[Theme],
     settings_info: &SettingsInfo,
 ) {
-    egui::ScrollArea::vertical()
-        .id_salt("settings_page_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
+    textui::gamepad_scroll(
+        egui::ScrollArea::vertical()
+            .id_salt("settings_page_scroll")
+            .auto_shrink([false, false]),
+        ui,
+        |ui| {
             render_settings_contents(
                 ui,
                 text_ui,
@@ -44,7 +47,13 @@ pub fn render(
                 available_themes,
                 settings_info,
             );
-        });
+        },
+    );
+}
+
+pub fn request_theme_focus(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(FORCE_THEME_FOCUS_ID), true));
+    settings_widgets::request_default_focus(ctx, true);
 }
 
 fn render_settings_contents(
@@ -311,6 +320,15 @@ fn render_theme_setting(
         &mut selected_theme_index,
         &theme_labels,
     );
+    let should_force_focus = ui.ctx().data_mut(|data| {
+        data.get_temp::<bool>(egui::Id::new(FORCE_THEME_FOCUS_ID))
+            .unwrap_or(false)
+    });
+    if should_force_focus || ui.ctx().memory(|memory| memory.focused().is_none()) {
+        response.request_focus();
+        ui.ctx()
+            .data_mut(|data| data.remove::<bool>(egui::Id::new(FORCE_THEME_FOCUS_ID)));
+    }
     if response.changed() {
         if let Some(theme) = available_themes.get(selected_theme_index) {
             config.set_theme_id(theme.id.clone());

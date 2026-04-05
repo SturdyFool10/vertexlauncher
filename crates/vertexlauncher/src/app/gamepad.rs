@@ -10,21 +10,26 @@ use config::GamepadCalibration;
 use egui::FocusDirection;
 use gilrs::{Axis, Button, EventType, Gamepad, GamepadId, Gilrs};
 use launcher_ui::notification;
+use launcher_ui::screens::{self, AppScreen};
+use launcher_ui::ui::{components::settings_widgets, sidebar};
+use textui::{apply_gamepad_scroll_to_focused_target, set_gamepad_scroll_delta};
 
 /// How long to wait after the first press before starting to repeat navigation.
 const INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(350);
 /// How quickly to repeat while a direction is held.
 const REPEAT_INTERVAL: Duration = Duration::from_millis(110);
-/// Points scrolled per frame at full right-stick deflection (~8 pts @ 60 fps ≈ 480 pts/s).
-const RIGHT_STICK_SCROLL_SPEED: f32 = 8.0;
+/// Points scrolled per second at full right-stick deflection.
+const RIGHT_STICK_SCROLL_SPEED: f32 = 1100.0;
 /// Minimum right-stick deflection before scrolling begins.
 const RIGHT_STICK_SCROLL_DEADZONE: f32 = 0.15;
 
-/// Whether to tab forward or backward.
+/// Direction to move focus within egui's spatial navigation graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NavDir {
-    Forward,
-    Backward,
+    Up,
+    Right,
+    Down,
+    Left,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +56,7 @@ pub struct GamepadStickSample {
 #[derive(Debug, Default, Clone)]
 pub struct GamepadUpdate {
     pub calibration_requested: Option<GamepadDeviceIdentity>,
+    pub skins_preview_orbit: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +112,7 @@ impl Default for DeviceState {
 pub struct GamepadNavigator {
     gilrs: Gilrs,
     device_states: HashMap<GamepadId, DeviceState>,
+    last_scroll_update: Instant,
     known_gamepads: HashSet<GamepadId>,
     prompted_uncalibrated: HashSet<String>,
     pending_calibration_request: Option<GamepadDeviceIdentity>,
@@ -121,6 +128,7 @@ impl GamepadNavigator {
             Ok(gilrs) => Some(Self {
                 gilrs,
                 device_states: HashMap::new(),
+                last_scroll_update: Instant::now(),
                 known_gamepads: HashSet::new(),
                 prompted_uncalibrated: HashSet::new(),
                 pending_calibration_request: None,
@@ -146,16 +154,31 @@ impl GamepadNavigator {
         &mut self,
         ctx: &egui::Context,
         calibrations: &BTreeMap<String, GamepadCalibration>,
+        active_screen: AppScreen,
     ) -> GamepadUpdate {
+        let now = Instant::now();
+        let dt = now
+            .duration_since(self.last_scroll_update)
+            .as_secs_f32()
+            .clamp(1.0 / 240.0, 0.05);
+        self.last_scroll_update = now;
         self.detect_startup_gamepads(calibrations);
         self.maybe_log_linux_input_probe();
         self.maybe_warn_about_linux_input_access();
+        settings_widgets::set_gamepad_slider_step_delta(ctx, 0);
+        settings_widgets::set_gamepad_activate_target(ctx, None);
+        sidebar::request_home_focus(ctx, false);
+        set_gamepad_scroll_delta(ctx, egui::Vec2::ZERO);
 
         let mut activate = false;
         let mut back = false;
         let mut scroll_delta: f32 = 0.0;
         let mut h_scroll_delta: f32 = 0.0;
+        let mut skins_preview_orbit: f32 = 0.0;
+        let mut slider_step_delta: i32 = 0;
         let mut nav_actions = Vec::new();
+        let active_slider = settings_widgets::gamepad_active_slider(ctx);
+        let focused_id = ctx.memory(|memory| memory.focused());
 
         // Drain all pending events from gilrs.
         while let Some(ev) = self.gilrs.next_event() {
@@ -194,15 +217,33 @@ impl GamepadNavigator {
                     }
                 }
                 EventType::ButtonPressed(button, _) => match button {
-                    // D-pad up/left = tab backward; down/right = tab forward.
-                    Button::DPadUp | Button::DPadLeft => {
-                        nav_actions.push((ev.id, NavDir::Backward, HoldSource::Dpad))
+                    Button::DPadUp => nav_actions.push((ev.id, NavDir::Up, HoldSource::Dpad)),
+                    Button::DPadRight => {
+                        if active_slider.is_some() && active_slider == focused_id {
+                            slider_step_delta += 1;
+                        } else {
+                            nav_actions.push((ev.id, NavDir::Right, HoldSource::Dpad))
+                        }
                     }
-                    Button::DPadDown | Button::DPadRight => {
-                        nav_actions.push((ev.id, NavDir::Forward, HoldSource::Dpad))
+                    Button::DPadDown => nav_actions.push((ev.id, NavDir::Down, HoldSource::Dpad)),
+                    Button::DPadLeft => {
+                        if active_slider.is_some() && active_slider == focused_id {
+                            slider_step_delta -= 1;
+                        } else {
+                            nav_actions.push((ev.id, NavDir::Left, HoldSource::Dpad))
+                        }
                     }
-                    Button::South => activate = true,
+                    Button::South => {
+                        settings_widgets::set_gamepad_activate_target(ctx, focused_id);
+                        activate = focused_id
+                            .map(|id| !settings_widgets::is_gamepad_custom_activate_id(ctx, id))
+                            .unwrap_or(true);
+                    }
                     Button::East => back = true,
+                    Button::LeftThumb => {
+                        settings_widgets::set_gamepad_active_slider(ctx, None);
+                        sidebar::request_home_focus(ctx, true);
+                    }
                     // Bumpers: coarse scroll
                     Button::LeftTrigger => scroll_delta += 200.0,
                     Button::RightTrigger => scroll_delta -= 200.0,
@@ -223,11 +264,33 @@ impl GamepadNavigator {
         }
 
         self.poll_current_axes(calibrations, &mut nav_actions);
+        if active_slider.is_some() && active_slider == focused_id {
+            if let Some(dir) = nav_actions
+                .iter()
+                .rev()
+                .find_map(|(_, dir, source)| (*source == HoldSource::Analog).then_some(*dir))
+            {
+                match dir {
+                    NavDir::Left => slider_step_delta -= 1,
+                    NavDir::Right => slider_step_delta += 1,
+                    NavDir::Up | NavDir::Down => {}
+                }
+            }
+            nav_actions.retain(|(_, dir, _)| !matches!(dir, NavDir::Left | NavDir::Right));
+        }
+        settings_widgets::set_gamepad_slider_step_delta(ctx, slider_step_delta);
 
         // --- Hold-to-navigate ---
-        let now = Instant::now();
-
         for (id, dir, source) in nav_actions {
+            if Self::handle_explicit_screen_focus_bridge(ctx, active_screen, dir) {
+                if let Some(state) = self.device_states.get_mut(&id) {
+                    state.held_dir = Some(dir);
+                    state.held_source = Some(source);
+                    state.held_since = Some(now);
+                    state.last_repeat = None;
+                }
+                continue;
+            }
             Self::fire_nav(ctx, dir);
             if let Some(state) = self.device_states.get_mut(&id) {
                 state.held_dir = Some(dir);
@@ -244,7 +307,9 @@ impl GamepadNavigator {
                         .last_repeat
                         .unwrap_or(held_since + INITIAL_REPEAT_DELAY);
                     if now.duration_since(repeat_base) >= REPEAT_INTERVAL {
-                        Self::fire_nav(ctx, dir);
+                        if !Self::handle_explicit_screen_focus_bridge(ctx, active_screen, dir) {
+                            Self::fire_nav(ctx, dir);
+                        }
                         state.last_repeat = Some(now);
                     }
                 }
@@ -256,10 +321,16 @@ impl GamepadNavigator {
             if state.right_stick_y.abs() > RIGHT_STICK_SCROLL_DEADZONE {
                 scroll_delta += state.right_stick_y * RIGHT_STICK_SCROLL_SPEED;
             }
-            if state.right_stick_x.abs() > RIGHT_STICK_SCROLL_DEADZONE {
+            if active_screen == AppScreen::Skins {
+                if state.right_stick_x.abs() > RIGHT_STICK_SCROLL_DEADZONE {
+                    skins_preview_orbit += state.right_stick_x;
+                }
+            } else if state.right_stick_x.abs() > RIGHT_STICK_SCROLL_DEADZONE {
                 h_scroll_delta -= state.right_stick_x * RIGHT_STICK_SCROLL_SPEED;
             }
         }
+
+        let scroll_delta = egui::vec2(h_scroll_delta, scroll_delta) * dt;
 
         // --- Activate (A / South button) ---
         if activate {
@@ -272,15 +343,17 @@ impl GamepadNavigator {
         }
 
         // --- Scroll ---
-        if scroll_delta != 0.0 || h_scroll_delta != 0.0 {
-            ctx.input_mut(|i| {
-                i.smooth_scroll_delta.y += scroll_delta;
-                i.smooth_scroll_delta.x += h_scroll_delta;
-            });
+        if scroll_delta != egui::Vec2::ZERO {
+            if apply_gamepad_scroll_to_focused_target(ctx, scroll_delta) {
+                ctx.request_repaint();
+            }
+        } else if skins_preview_orbit.abs() > 0.0 {
+            ctx.request_repaint();
         }
 
         GamepadUpdate {
             calibration_requested: self.pending_calibration_request.take(),
+            skins_preview_orbit: skins_preview_orbit.clamp(-1.0, 1.0),
         }
     }
 
@@ -359,10 +432,10 @@ impl GamepadNavigator {
         }
 
         if state.stick_x_armed && !was_right && now_right {
-            nav_actions.push((gamepad_id, NavDir::Forward, HoldSource::Analog));
+            nav_actions.push((gamepad_id, NavDir::Right, HoldSource::Analog));
             state.stick_x_armed = false;
         } else if state.stick_x_armed && !was_left && now_left {
-            nav_actions.push((gamepad_id, NavDir::Backward, HoldSource::Analog));
+            nav_actions.push((gamepad_id, NavDir::Left, HoldSource::Analog));
             state.stick_x_armed = false;
         } else if center && released {
             Self::clear_hold(state);
@@ -399,10 +472,10 @@ impl GamepadNavigator {
         }
 
         if state.stick_y_armed && !was_up && now_up {
-            nav_actions.push((gamepad_id, NavDir::Backward, HoldSource::Analog));
+            nav_actions.push((gamepad_id, NavDir::Up, HoldSource::Analog));
             state.stick_y_armed = false;
         } else if state.stick_y_armed && !was_down && now_down {
-            nav_actions.push((gamepad_id, NavDir::Forward, HoldSource::Analog));
+            nav_actions.push((gamepad_id, NavDir::Down, HoldSource::Analog));
             state.stick_y_armed = false;
         } else if center && released {
             Self::clear_hold(state);
@@ -602,11 +675,57 @@ impl GamepadNavigator {
     /// Advance egui keyboard focus in the requested direction.
     fn fire_nav(ctx: &egui::Context, dir: NavDir) {
         let direction = match dir {
-            NavDir::Forward => FocusDirection::Next,
-            NavDir::Backward => FocusDirection::Previous,
+            NavDir::Up => FocusDirection::Up,
+            NavDir::Right => FocusDirection::Right,
+            NavDir::Down => FocusDirection::Down,
+            NavDir::Left => FocusDirection::Left,
         };
         ctx.memory_mut(|memory| memory.move_focus(direction));
         ctx.request_repaint();
+    }
+
+    fn handle_explicit_screen_focus_bridge(
+        ctx: &egui::Context,
+        active_screen: AppScreen,
+        dir: NavDir,
+    ) -> bool {
+        if active_screen == AppScreen::Settings
+            && dir == NavDir::Right
+            && Self::focused_widget_is_in_sidebar(ctx)
+        {
+            if let Some(focused_id) = ctx.memory(|memory| memory.focused()) {
+                ctx.memory_mut(|memory| memory.surrender_focus(focused_id));
+            }
+            screens::request_settings_theme_focus(ctx);
+            ctx.request_repaint();
+            return true;
+        }
+
+        if active_screen == AppScreen::Skins
+            && dir == NavDir::Right
+            && Self::focused_widget_is_in_sidebar(ctx)
+        {
+            if let Some(focused_id) = ctx.memory(|memory| memory.focused()) {
+                ctx.memory_mut(|memory| memory.surrender_focus(focused_id));
+            }
+            screens::request_skins_motion_focus(ctx);
+            ctx.request_repaint();
+            return true;
+        }
+
+        false
+    }
+
+    fn focused_widget_is_in_sidebar(ctx: &egui::Context) -> bool {
+        let Some(focused_id) = ctx.memory(|memory| memory.focused()) else {
+            return false;
+        };
+        let Some(response) = ctx.read_response(focused_id) else {
+            return false;
+        };
+        let viewport_width = ctx.input(|input| input.content_rect().width());
+        let sidebar_boundary = (viewport_width * 0.2).clamp(72.0, 180.0);
+        response.rect.center().x <= sidebar_boundary
     }
 
     /// Inject a key press+release pair.

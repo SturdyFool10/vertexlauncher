@@ -25,6 +25,8 @@ const PREVIEW_ORBIT_SECONDS: f64 = 45.0;
 const PREVIEW_TARGET_FPS: f32 = 60.0;
 const PREVIEW_HEIGHT: f32 = 460.0;
 const CAMERA_DRAG_SENSITIVITY_RAD_PER_POINT: f32 = 0.0046;
+const GAMEPAD_ORBIT_MAX_RAD_PER_SEC: f32 = 3.4;
+const GAMEPAD_ORBIT_DEADZONE: f32 = 0.18;
 const CAMERA_INERTIA_FRICTION_PER_SEC: f32 = 2.0;
 const CAMERA_INERTIA_STOP_THRESHOLD_RAD_PER_SEC: f32 = 0.015;
 const UV_EDGE_INSET_BASE_TEXELS: f32 = 0.08;
@@ -35,10 +37,20 @@ const SKIN_PREVIEW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Dept
 const SKIN_PREVIEW_NEAR: f32 = 1.5;
 const SKIN_PREVIEW_ANISOTROPY_CLAMP: u16 = 16;
 const MOTION_BLUR_MIN_ANGULAR_SPAN: f32 = 0.015;
+const FORCE_MOTION_FOCUS_ID: &str = "skins_force_motion_focus";
 
 pub fn purge_inactive_state(ctx: &egui::Context) {
     let state_id = egui::Id::new("skins_screen_state");
     ctx.data_mut(|data| data.insert_temp(state_id, SkinManagerState::default()));
+}
+
+pub fn set_gamepad_orbit_input(ctx: &egui::Context, input: f32) {
+    let input_id = egui::Id::new("skins_screen_gamepad_orbit_input");
+    ctx.data_mut(|data| data.insert_temp(input_id, input.clamp(-1.0, 1.0)));
+}
+
+pub fn request_motion_focus(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(FORCE_MOTION_FOCUS_ID), true));
 }
 
 pub fn render(
@@ -127,12 +139,11 @@ pub fn render(
         ui.ctx().request_repaint_after(Duration::from_millis(50));
     }
 
-    egui::ScrollArea::vertical()
-        .id_salt("skins_screen_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            render_contents(ui, text_ui, &mut state, streamer_mode);
-        });
+    textui::gamepad_scroll(
+        egui::ScrollArea::vertical().auto_shrink([false, false]),
+        ui,
+        |ui| render_contents(ui, text_ui, &mut state, streamer_mode),
+    );
 
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
 }
@@ -305,6 +316,12 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
 
     let now = ui.input(|i| i.time);
     let dt = state.consume_frame_dt(now);
+    let gamepad_orbit_input = ui
+        .ctx()
+        .data_mut(|data| {
+            data.get_temp::<f32>(egui::Id::new("skins_screen_gamepad_orbit_input"))
+        })
+        .unwrap_or(0.0);
 
     if response.drag_started() {
         state.begin_manual_camera_control(now);
@@ -338,6 +355,21 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
         if state.camera_inertial_velocity.abs() < CAMERA_INERTIA_STOP_THRESHOLD_RAD_PER_SEC {
             state.camera_inertial_velocity = 0.0;
             state.finish_manual_camera_control(now);
+        }
+    }
+
+    if !state.camera_drag_active {
+        let orbit_strength = if gamepad_orbit_input.abs() > GAMEPAD_ORBIT_DEADZONE {
+            let normalized = (gamepad_orbit_input.abs() - GAMEPAD_ORBIT_DEADZONE)
+                / (1.0 - GAMEPAD_ORBIT_DEADZONE);
+            normalized.clamp(0.0, 1.0) * gamepad_orbit_input.signum()
+        } else {
+            0.0
+        };
+        if orbit_strength.abs() > 0.0 {
+            state.begin_manual_camera_control(now);
+            state.camera_inertial_velocity = orbit_strength * GAMEPAD_ORBIT_MAX_RAD_PER_SEC;
+            state.camera_yaw_offset += state.camera_inertial_velocity * dt;
         }
     }
 
@@ -459,6 +491,15 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
         let mut toggle_style = style::neutral_button(ui);
         toggle_style.min_size = motion_rect.size();
         let response = text_ui.button(ui, "skins_toggle_motion_mode", motion_text, &toggle_style);
+        let should_force_focus = ui.ctx().data_mut(|data| {
+            data.get_temp::<bool>(egui::Id::new(FORCE_MOTION_FOCUS_ID))
+                .unwrap_or(false)
+        });
+        if should_force_focus {
+            response.request_focus();
+            ui.ctx()
+                .data_mut(|data| data.remove::<bool>(egui::Id::new(FORCE_MOTION_FOCUS_ID)));
+        }
         if response.clicked() {
             state.preview_motion_mode = match state.preview_motion_mode {
                 PreviewMotionMode::Idle => PreviewMotionMode::Walk,
@@ -6591,12 +6632,13 @@ fn draw_cape_tile(
     let selected_t = ui
         .ctx()
         .animate_bool(response.id.with("cape_tile_selected"), selected);
+    let focused = response.has_focus();
 
-    let fill = if selected {
+    let fill = if selected || focused {
         ui.visuals()
             .selection
             .bg_fill
-            .gamma_multiply(0.24 + hover_t * 0.06 + press_t * 0.04)
+            .gamma_multiply(0.24 + hover_t * 0.06 + press_t * 0.04 + if focused { 0.08 } else { 0.0 })
     } else {
         ui.visuals()
             .widgets
@@ -6604,9 +6646,9 @@ fn draw_cape_tile(
             .bg_fill
             .gamma_multiply(1.0 + hover_t * 0.08 + press_t * 0.04)
     };
-    let stroke = if selected {
+    let stroke = if selected || focused {
         let mut stroke = ui.visuals().selection.stroke;
-        stroke.width += hover_t * 0.5;
+        stroke.width += hover_t * 0.5 + if focused { 0.75 } else { 0.0 };
         stroke
     } else {
         let mut stroke = ui.visuals().widgets.inactive.bg_stroke;
@@ -6627,7 +6669,7 @@ fn draw_cape_tile(
         response.hover_pos().or(response.interact_pointer_pos()),
         hover_t,
         press_t,
-        selected_t,
+        selected_t.max(if focused { 1.0 } else { 0.0 }),
     );
 
     let preview_rect = Rect::from_min_size(

@@ -9,7 +9,7 @@ use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
 use installation::{MinecraftVersionEntry, fetch_version_catalog};
 use modrinth::Client as ModrinthClient;
-use textui::{InputOptions, LabelOptions, TextUi};
+use textui::{InputOptions, LabelOptions, TextUi, make_gamepad_scrollable};
 use ui_foundation::{UiMetrics, responsive_columns, themed_text_input};
 
 use crate::{
@@ -669,7 +669,7 @@ fn render_discover_browse_content(
     ui.add_space(style::SPACE_MD);
     let mut should_load_more = false;
     let results_height = ui.available_height().max(1.0);
-    egui::ScrollArea::vertical()
+    let scroll_output = egui::ScrollArea::vertical()
         .id_salt("discover_results_scroll")
         .auto_shrink([false, false])
         .max_height(results_height)
@@ -700,6 +700,7 @@ fn render_discover_browse_content(
                 && !state.search_in_flight
                 && viewport.bottom() >= content_bottom - 320.0;
         });
+    make_gamepad_scrollable(ui.ctx(), &scroll_output);
 
     if should_load_more {
         request_search(state, false, SearchMode::Append);
@@ -1247,6 +1248,34 @@ fn render_discover_tile(
     entry: &DiscoverEntry,
     metrics: DiscoverUiMetrics,
 ) -> DiscoverTileRenderResult {
+    let id = ui.make_persistent_id(("discover_tile_click", entry.dedupe_key.as_str()));
+
+    // Read last frame's hover/focus state so the frame is styled before it renders.
+    let (was_hovered, was_focused): (bool, bool) =
+        ui.ctx().data(|d| d.get_temp(id).unwrap_or_default());
+
+    let base_stroke_width = ui.visuals().widgets.noninteractive.bg_stroke.width;
+    let sel_color = ui.visuals().selection.bg_fill;
+    let (fill, stroke) = if was_focused {
+        (
+            sel_color.gamma_multiply(0.15),
+            egui::Stroke::new(base_stroke_width, sel_color),
+        )
+    } else if was_hovered {
+        (
+            ui.visuals().window_fill,
+            egui::Stroke::new(
+                base_stroke_width,
+                ui.visuals().widgets.hovered.bg_stroke.color,
+            ),
+        )
+    } else {
+        (
+            ui.visuals().window_fill,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+        )
+    };
+
     let heading_style = LabelOptions {
         font_size: 20.0,
         line_height: 24.0,
@@ -1261,12 +1290,12 @@ fn render_discover_tile(
     let badge_stroke = ui.visuals().widgets.inactive.bg_stroke;
 
     let response = egui::Frame::new()
-        .fill(ui.visuals().window_fill)
-        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        .fill(fill)
+        .stroke(stroke)
         .corner_radius(egui::CornerRadius::same(style::CORNER_RADIUS_MD))
         .inner_margin(egui::Margin::same(style::SPACE_MD as i8))
         .show(ui, |ui| {
-            let mut page_link_clicked = false;
+            let page_link_clicked = false;
             if let Some(icon_url) = entry.icon_url.as_deref() {
                 remote_tiled_image::show(
                     ui,
@@ -1356,17 +1385,20 @@ fn render_discover_tile(
                     &muted_style,
                 );
             }
-            if let Some(url) = entry.primary_url.as_deref() {
-                ui.add_space(style::SPACE_XS);
-                page_link_clicked = ui.hyperlink_to("Open project page", url).clicked();
-            }
             page_link_clicked
         });
-    let interaction = ui.interact(
-        response.response.rect,
-        ui.make_persistent_id(("discover_tile_click", entry.dedupe_key.as_str())),
-        egui::Sense::click(),
-    );
+    let interaction = ui.interact(response.response.rect, id, egui::Sense::click());
+
+    // Persist state for the next frame so the frame fill/stroke can be set
+    // correctly before the frame renders (egui renders before interact returns).
+    let now_hovered = interaction.hovered();
+    let now_focused = interaction.has_focus();
+    let state_changed = now_hovered != was_hovered || now_focused != was_focused;
+    if state_changed {
+        ui.ctx().data_mut(|d| d.insert_temp(id, (now_hovered, now_focused)));
+        ui.ctx().request_repaint();
+    }
+
     DiscoverTileRenderResult {
         clicked: interaction.clicked() && !response.inner,
         measured_height: response.response.rect.height(),

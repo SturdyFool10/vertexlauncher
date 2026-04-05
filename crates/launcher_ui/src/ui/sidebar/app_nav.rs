@@ -7,6 +7,19 @@ use crate::ui::style;
 
 use super::SidebarOutput;
 
+const HOME_FOCUS_REQUEST_ID: &str = "sidebar_home_focus_request";
+
+pub fn request_home_focus(ctx: &egui::Context, requested: bool) {
+    let key = egui::Id::new(HOME_FOCUS_REQUEST_ID);
+    ctx.data_mut(|data| {
+        if requested {
+            data.insert_temp(key, true);
+        } else {
+            data.remove::<bool>(key);
+        }
+    });
+}
+
 pub fn render(
     ui: &mut Ui,
     active_screen: AppScreen,
@@ -36,6 +49,18 @@ pub fn render(
                     },
                 )
                 .inner;
+            let home_focus_requested = ui
+                .ctx()
+                .data_mut(|data| {
+                    data.get_temp::<bool>(egui::Id::new(HOME_FOCUS_REQUEST_ID))
+                        .unwrap_or(false)
+                });
+            if screen == AppScreen::Home
+                && (ui.ctx().memory(|memory| memory.focused().is_none()) || home_focus_requested)
+            {
+                response.request_focus();
+                request_home_focus(ui.ctx(), false);
+            }
             if response.clicked() {
                 output.selected_screen = Some(screen);
             }

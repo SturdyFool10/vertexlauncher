@@ -11,6 +11,10 @@ use crate::ui::style;
 mod app_nav;
 mod profiles;
 
+pub fn request_home_focus(ctx: &Context, requested: bool) {
+    app_nav::request_home_focus(ctx, requested);
+}
+
 #[derive(Debug, Clone, Copy)]
 struct SidebarLayout {
     nav_icon_width: f32,

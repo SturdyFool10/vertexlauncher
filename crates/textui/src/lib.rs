@@ -5,6 +5,213 @@ use std::{
     sync::{Arc, mpsc},
 };
 
+const GAMEPAD_SCROLL_DELTA_ID: &str = "textui_gamepad_scroll_delta";
+const GAMEPAD_SCROLL_TARGETS_ID: &str = "textui_gamepad_scroll_targets";
+const GAMEPAD_SCROLL_FRAME_ID: &str = "textui_gamepad_scroll_frame";
+
+#[derive(Clone, Copy)]
+struct GamepadScrollTarget {
+    id: Id,
+    /// Visible rect of the scroll area (inner_rect).
+    rect: Rect,
+    /// Full content size. Used to compute the max scroll offset and to
+    /// determine which axes are actually scrollable.
+    content_size: Vec2,
+}
+
+impl GamepadScrollTarget {
+    fn max_offset(&self) -> Vec2 {
+        Vec2::new(
+            (self.content_size.x - self.rect.width()).max(0.0),
+            (self.content_size.y - self.rect.height()).max(0.0),
+        )
+    }
+
+    fn can_scroll_h(&self) -> bool { self.max_offset().x > 0.5 }
+    fn can_scroll_v(&self) -> bool { self.max_offset().y > 0.5 }
+}
+
+pub fn set_gamepad_scroll_delta(ctx: &egui::Context, delta: egui::Vec2) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(GAMEPAD_SCROLL_DELTA_ID), delta));
+}
+
+pub fn gamepad_scroll_delta(ctx: &egui::Context) -> egui::Vec2 {
+    ctx.data_mut(|data| {
+        data.get_temp::<egui::Vec2>(egui::Id::new(GAMEPAD_SCROLL_DELTA_ID))
+            .unwrap_or(egui::Vec2::ZERO)
+    })
+}
+
+/// Called inside the gamepad_scroll wrappers to clear the target list at the
+/// start of each new render frame so stale scroll areas never linger.
+fn ensure_gamepad_scroll_targets_fresh(ctx: &egui::Context) {
+    let current = ctx.cumulative_frame_nr();
+    let frame_key = egui::Id::new(GAMEPAD_SCROLL_FRAME_ID);
+    let last = ctx.data(|d| d.get_temp::<u64>(frame_key).unwrap_or(u64::MAX));
+    if current != last {
+        ctx.data_mut(|d| {
+            d.remove::<Vec<GamepadScrollTarget>>(egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID));
+            d.insert_temp(frame_key, current);
+        });
+    }
+}
+
+fn register_gamepad_scroll_target(ctx: &egui::Context, id: Id, rect: Rect, content_size: Vec2) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID);
+        let mut targets = data
+            .get_temp::<Vec<GamepadScrollTarget>>(key)
+            .unwrap_or_default();
+        targets.retain(|target| target.id != id);
+        targets.push(GamepadScrollTarget { id, rect, content_size });
+        data.insert_temp(key, targets);
+    });
+}
+
+/// Mark a [`egui::ScrollArea`] output as a gamepad-scrollable container.
+///
+/// Call this immediately after [`egui::ScrollArea::show`] or
+/// [`egui::ScrollArea::show_rows`]. Horizontal and vertical capability are
+/// derived automatically from `content_size` vs `inner_rect`, so no axis
+/// flags need to be specified.
+///
+/// ```ignore
+/// let output = egui::ScrollArea::vertical().show(ui, |ui| { ... });
+/// textui::make_gamepad_scrollable(ui.ctx(), &output);
+/// ```
+pub fn make_gamepad_scrollable<R>(ctx: &egui::Context, output: &egui::scroll_area::ScrollAreaOutput<R>) {
+    ensure_gamepad_scroll_targets_fresh(ctx);
+    register_gamepad_scroll_target(ctx, output.id, output.inner_rect, output.content_size);
+}
+
+/// Convenience wrapper that calls [`egui::ScrollArea::show`] and immediately
+/// marks the result as gamepad-scrollable.
+///
+/// ```ignore
+/// textui::gamepad_scroll(egui::ScrollArea::vertical(), ui, |ui| { ... });
+/// ```
+pub fn gamepad_scroll<R>(
+    scroll_area: egui::ScrollArea,
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::scroll_area::ScrollAreaOutput<R> {
+    let output = scroll_area.show(ui, add_contents);
+    make_gamepad_scrollable(ui.ctx(), &output);
+    output
+}
+
+pub fn apply_gamepad_scroll_to_focused_target(ctx: &egui::Context, delta: Vec2) -> bool {
+    if delta == Vec2::ZERO {
+        return false;
+    }
+
+    let Some(focused_id) = ctx.memory(|memory| memory.focused()) else {
+        return false;
+    };
+
+    // Read the focused widget's screen rect if it was rendered this frame.
+    // It may be absent when the widget scrolled out of the visible range
+    // (e.g. with virtual/show_rows scrolling) or is otherwise off-screen.
+    let focused_screen_rect = ctx.read_response(focused_id).map(|r| r.rect);
+
+    let targets = ctx.data_mut(|data| {
+        data.get_temp::<Vec<GamepadScrollTarget>>(egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID))
+            .unwrap_or_default()
+    });
+
+    // Build candidate list: prefer targets that positionally contain the
+    // focused widget; fall back to all targets when the widget is off-screen.
+    let sort_by_area = |a: &GamepadScrollTarget, b: &GamepadScrollTarget| {
+        let a_area = a.rect.width() * a.rect.height();
+        let b_area = b.rect.width() * b.rect.height();
+        a_area.partial_cmp(&b_area).unwrap_or(std::cmp::Ordering::Equal)
+    };
+
+    let mut candidates: Vec<GamepadScrollTarget> = if let Some(fr) = focused_screen_rect {
+        let fp = fr.center();
+        let positional: Vec<_> = targets
+            .iter()
+            .copied()
+            .filter(|t| t.rect.contains(fp) || t.rect.intersects(fr))
+            .collect();
+        // If the focused widget is rendered but outside every registered rect
+        // (scrolled past the viewport edge in a non-virtual list), fall back
+        // to all targets so scrolling doesn't silently stop.
+        if positional.is_empty() { targets } else { positional }
+    } else {
+        // Widget is not rendered this frame (off-screen in a virtual list).
+        // Use all registered targets; area-sort will pick the innermost one.
+        targets
+    };
+    candidates.sort_by(sort_by_area);
+
+    // If the focused widget is itself a registered scroll container, promote it
+    // to the front so it is checked before any containing parents.
+    if let Some(pos) = candidates.iter().position(|t| t.id == focused_id) {
+        let direct = candidates.remove(pos);
+        candidates.insert(0, direct);
+    }
+
+    // Walk from the focused element outward. For each axis, consume it only
+    // when a container can actually scroll in that direction AND movement
+    // occurs (i.e. we're not already at the boundary). This lets the delta
+    // propagate outward when the inner container is fully scrolled.
+    let mut need_x = delta.x != 0.0;
+    let mut need_y = delta.y != 0.0;
+    let mut applied = false;
+
+    for target in &candidates {
+        if !need_x && !need_y {
+            break;
+        }
+
+        let max_offset = target.max_offset();
+        let can_x = need_x && target.can_scroll_h();
+        let can_y = need_y && target.can_scroll_v();
+
+        if !can_x && !can_y {
+            continue;
+        }
+
+        let mut state = egui::scroll_area::State::load(ctx, target.id).unwrap_or_default();
+        let mut changed = false;
+
+        if can_x {
+            let new_x = (state.offset.x - delta.x).clamp(0.0, max_offset.x);
+            if new_x != state.offset.x {
+                state.offset.x = new_x;
+                need_x = false;
+                applied = true;
+                changed = true;
+            }
+        }
+        if can_y {
+            let new_y = (state.offset.y - delta.y).clamp(0.0, max_offset.y);
+            if new_y != state.offset.y {
+                state.offset.y = new_y;
+                need_y = false;
+                applied = true;
+                changed = true;
+            }
+        }
+
+        if changed {
+            state.store(ctx, target.id);
+        }
+    }
+
+    applied
+}
+
+pub fn apply_gamepad_scroll_if_focused(ui: &Ui, response: &Response) {
+    if response.has_focus() {
+        let delta = gamepad_scroll_delta(ui.ctx());
+        if delta != egui::Vec2::ZERO {
+            ui.scroll_with_delta(delta);
+        }
+    }
+}
+
 use cosmic_text::{
     Action, Attrs, AttrsOwned, BorrowedWithFontSystem, Buffer, CacheKey, Color, Cursor, Edit,
     Editor, Family, FontFeatures, FontSystem, LayoutRun, Metrics, Motion, Selection, Shaping,
@@ -1061,30 +1268,48 @@ impl TextUi {
         );
 
         let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+        let has_focus = response.has_focus();
 
         let fill = if response.is_pointer_button_down_on() {
             options.fill_active
         } else if response.hovered() {
             options.fill_hovered
-        } else if selected {
+        } else if selected || has_focus {
             options.fill_selected
         } else {
             options.fill
         };
+        let stroke = if has_focus {
+            ui.visuals().selection.stroke
+        } else {
+            options.stroke
+        };
 
         ui.painter()
             .rect_filled(rect, CornerRadius::same(options.corner_radius), fill);
-        if options.stroke.width > 0.0 {
+        if stroke.width > 0.0 {
             ui.painter().rect_stroke(
                 rect,
                 CornerRadius::same(options.corner_radius),
-                options.stroke,
+                stroke,
                 egui::StrokeKind::Inside,
+            );
+        }
+        if has_focus {
+            ui.painter().rect_stroke(
+                rect.expand(2.0),
+                CornerRadius::same(options.corner_radius.saturating_add(2)),
+                egui::Stroke::new(
+                    (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                    ui.visuals().selection.stroke.color,
+                ),
+                egui::StrokeKind::Outside,
             );
         }
 
         let text_rect = Rect::from_center_size(rect.center(), text_size);
         texture.paint(ui, text_rect);
+        apply_gamepad_scroll_if_focused(ui, &response);
 
         response
     }
@@ -1546,6 +1771,7 @@ impl TextUi {
         if state_changed {
             response.mark_changed();
         }
+        apply_gamepad_scroll_if_focused(ui, &response);
 
         response
     }
@@ -1935,6 +2161,8 @@ impl TextUi {
             );
             placeholder.paint(ui, placeholder_rect);
         }
+
+        apply_gamepad_scroll_if_focused(ui, &response);
 
         response
     }
