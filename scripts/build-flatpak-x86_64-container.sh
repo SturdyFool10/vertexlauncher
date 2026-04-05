@@ -4,13 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 CONTAINER_IMAGE="${CONTAINER_IMAGE:-docker.io/library/rust:1-bookworm}"
-WORK_ROOT="${REPO_ROOT}/.cache/flatpak-arm64-container"
+WORK_ROOT="${REPO_ROOT}/.cache/flatpak-x86_64-container"
 
 mkdir -p "${WORK_ROOT}"
 
 podman run --rm \
   --privileged \
-  --arch=arm64 \
+  --arch=amd64 \
   -v "${REPO_ROOT}:/workspace" \
   -v "${WORK_ROOT}:/cache" \
   -w /workspace \
@@ -26,7 +26,7 @@ podman run --rm \
 
     mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_DATA_HOME}"
 
-    echo "[flatpak-arm64] installing build dependencies..."
+    echo "[flatpak-x86_64] installing build dependencies..."
     apt-get update >/dev/null
     apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -40,8 +40,8 @@ podman run --rm \
       xz-utils \
       zstd >/dev/null
 
-    echo "[flatpak-arm64] exporting aarch64 flatpak under emulation..."
-    export VERTEX_IN_ARM64_CONTAINER=1
-    export VERTEX_FLATPAK_ARCHES=aarch64
+    echo "[flatpak-x86_64] building x86_64 flatpak..."
+    export VERTEX_IN_X86_64_CONTAINER=1
+    export VERTEX_FLATPAK_ARCHES=x86_64
     bash /workspace/scripts/build-flatpak.sh
   '

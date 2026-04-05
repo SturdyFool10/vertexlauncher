@@ -113,7 +113,12 @@ pub(crate) fn sanitize_url_for_log(value: &str) -> String {
     let query_keys: BTreeSet<String> = parsed.query_pairs().map(|(key, _)| key.into()).collect();
     if !query_keys.is_empty() {
         out.push_str("?params=");
-        out.push_str(&query_keys.into_iter().collect::<Vec<_>>().join(","));
+        for (i, key) in query_keys.into_iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&key);
+        }
     }
 
     if parsed.fragment().is_some() {

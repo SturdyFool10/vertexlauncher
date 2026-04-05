@@ -77,9 +77,15 @@ pub(super) fn request_move_instance(
                 error = %err,
                 "failed to create destination root directory"
             );
-            let _ = results_tx.send(MoveInstanceResult::Failed {
+            if let Err(send_err) = results_tx.send(MoveInstanceResult::Failed {
                 reason: format!("Could not create destination folder: {err}"),
-            });
+            }) {
+                tracing::warn!(
+                    target: "vertexlauncher/move_instance",
+                    error = %send_err,
+                    "Failed to deliver move-instance failure result to UI."
+                );
+            }
             return;
         }
 
@@ -88,9 +94,15 @@ pub(super) fn request_move_instance(
         collect_files_recursively(&source_root, &mut files);
 
         if files.is_empty() {
-            let _ = results_tx.send(MoveInstanceResult::Complete {
+            if let Err(send_err) = results_tx.send(MoveInstanceResult::Complete {
                 dest_path: dest_root,
-            });
+            }) {
+                tracing::warn!(
+                    target: "vertexlauncher/move_instance",
+                    error = %send_err,
+                    "Failed to deliver move-instance completion result to UI."
+                );
+            }
             return;
         }
 
@@ -324,12 +336,17 @@ pub(super) fn request_move_instance(
                     Err(_) => break, // all children dropped their senders
                 }
             }
-            if let Some(reason) = first_error {
-                let _ = results_tx.send(MoveInstanceResult::Failed { reason });
+            let final_result = if let Some(reason) = first_error {
+                MoveInstanceResult::Failed { reason }
             } else {
-                let _ = results_tx.send(MoveInstanceResult::Complete {
-                    dest_path: dest_root,
-                });
+                MoveInstanceResult::Complete { dest_path: dest_root }
+            };
+            if let Err(send_err) = results_tx.send(final_result) {
+                tracing::warn!(
+                    target: "vertexlauncher/move_instance",
+                    error = %send_err,
+                    "Failed to deliver move-instance final result to UI."
+                );
             }
         })
         .await;

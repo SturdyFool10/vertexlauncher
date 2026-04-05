@@ -57,7 +57,13 @@ pub(crate) fn run_device_code_login(
             "device-code login completed without a Microsoft refresh token; cached session will not be renewable"
         );
     }
-    let _ = sender.send(LoginEvent::Completed(account));
+    if let Err(send_err) = sender.send(LoginEvent::Completed(account)) {
+        tracing::warn!(
+            target: "vertexlauncher/auth/device_code",
+            error = %send_err,
+            "Login completed but failed to deliver completion event to UI; receiver was dropped."
+        );
+    }
     tracing::info!(
         target: "vertexlauncher/auth/device_code",
         "device-code login worker completed successfully"

@@ -126,49 +126,28 @@ where
     }
 
     pub fn evict_to_budget(&mut self) -> Vec<(K, V)> {
-        let mut evicted = Vec::new();
-        if self.total_bytes <= self.max_bytes {
-            return evicted;
-        }
-
-        let mut eviction_order = self
-            .entries
-            .iter()
-            .map(|(key, entry)| (key.clone(), entry.last_used_tick))
-            .collect::<Vec<_>>();
-        eviction_order.sort_by_key(|(_, tick)| *tick);
-
-        for (key, _) in eviction_order {
-            if self.total_bytes <= self.max_bytes {
-                break;
-            }
-            if let Some(entry) = self.entries.remove(&key) {
-                self.total_bytes = self.total_bytes.saturating_sub(entry.approx_bytes);
-                evicted.push((key, entry.value));
-            }
-        }
-
-        evicted
+        self.evict_to_budget_where(|_, _| true)
     }
 
     pub fn evict_to_budget_where(
         &mut self,
         mut can_evict: impl FnMut(&K, &LruEntry<V>) -> bool,
     ) -> Vec<(K, V)> {
-        let mut evicted = Vec::new();
         if self.total_bytes <= self.max_bytes {
-            return evicted;
+            return Vec::new();
         }
 
-        let mut eviction_order = self
+        // Collect eligible keys sorted oldest-first in one pass.
+        let mut eviction_order: Vec<(K, u64)> = self
             .entries
             .iter()
             .filter_map(|(key, entry)| {
                 can_evict(key, entry).then_some((key.clone(), entry.last_used_tick))
             })
-            .collect::<Vec<_>>();
-        eviction_order.sort_by_key(|(_, tick)| *tick);
+            .collect();
+        eviction_order.sort_unstable_by_key(|(_, tick)| *tick);
 
+        let mut evicted = Vec::new();
         for (key, _) in eviction_order {
             if self.total_bytes <= self.max_bytes {
                 break;
@@ -178,7 +157,6 @@ where
                 evicted.push((key, entry.value));
             }
         }
-
         evicted
     }
 
@@ -207,6 +185,20 @@ where
             .drain()
             .map(|(key, entry)| (key, entry.value))
             .collect()
+    }
+
+    pub fn values_any(&self, mut pred: impl FnMut(&LruEntry<V>) -> bool) -> bool {
+        self.entries.values().any(|e| pred(e))
+    }
+
+    /// Look up an entry by any type that the stored key can borrow as.
+    /// This avoids an allocation when `K = String` and the caller has a `&str`.
+    pub fn get_borrowed<Q>(&self, key: &Q) -> Option<&LruEntry<V>>
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: std::hash::Hash + Eq + ?Sized,
+    {
+        self.entries.get(key)
     }
 
     pub fn keys_cloned(&self) -> Vec<K> {

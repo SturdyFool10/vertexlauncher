@@ -40,7 +40,7 @@ serde_json = "1.0.149"
 humantime = "2.3.0"
 directories = "6.0.0"
 image = "0.24.9"
-cosmic-text = "0.15.0"
+cosmic-text = "0.18"
 glyphon = "0.10.0"
 etagere = "0.2.15"
 pulldown-cmark = "0.13.3"
@@ -53,6 +53,7 @@ tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
 url = "2.5.8"
 ureq = { version = "3.3.0", features = ["json"] }
 qrcode = "0.14"
+gilrs = "0.11"
 
 # internal crates
 app_paths = { path = "crates/app_paths" }

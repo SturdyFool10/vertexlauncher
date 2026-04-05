@@ -1157,13 +1157,31 @@ fn request_content_metadata_lookup_batch(
     let game_version = game_version.trim().to_owned();
     let loader = loader.trim().to_owned();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = resolve_installed_content_lookup_batch(
-            work_items.as_slice(),
-            kind,
-            game_version.as_str(),
-            loader.as_str(),
-            hash_cache,
-        );
+        let join = tokio_runtime::spawn_blocking({
+            let game_version = game_version.clone();
+            let loader = loader.clone();
+            move || {
+                resolve_installed_content_lookup_batch(
+                    work_items.as_slice(),
+                    kind,
+                    game_version.as_str(),
+                    loader.as_str(),
+                    hash_cache,
+                )
+            }
+        });
+        let result = match join.await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::error!(
+                    target: "vertexlauncher/instance_content",
+                    kind = %kind.folder_name(),
+                    error = %err,
+                    "Content metadata lookup worker panicked."
+                );
+                return;
+            }
+        };
         if let Err(err) = tx.send(result) {
             tracing::error!(
                 target: "vertexlauncher/instance_content",
@@ -1527,14 +1545,29 @@ fn request_content_update(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = crate::screens::content_browser::update_installed_content_to_version(
-            instance_root.as_path(),
-            &entry,
-            installed_file_path.as_path(),
-            version_id.as_str(),
-            game_version.as_str(),
-            loader_label.as_str(),
-        );
+        let join = tokio_runtime::spawn_blocking(move || {
+            crate::screens::content_browser::update_installed_content_to_version(
+                instance_root.as_path(),
+                &entry,
+                installed_file_path.as_path(),
+                version_id.as_str(),
+                game_version.as_str(),
+                loader_label.as_str(),
+            )
+        });
+        let result = match join.await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::error!(
+                    target: CONTENT_UPDATE_LOG_TARGET,
+                    instance = %instance_name,
+                    lookup_key = %lookup_key,
+                    project = %project_name,
+                    "content update worker panicked: {err}"
+                );
+                return;
+            }
+        };
         match &result {
             Ok(message) => tracing::info!(
                 target: CONTENT_UPDATE_LOG_TARGET,
@@ -1722,7 +1755,23 @@ fn request_local_content_import(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = import_local_content_files(instance_root.as_path(), selected_paths.as_slice());
+        let join = tokio_runtime::spawn_blocking({
+            let instance_root = instance_root.clone();
+            let selected_paths = selected_paths.clone();
+            move || import_local_content_files(instance_root.as_path(), selected_paths.as_slice())
+        });
+        let result = match join.await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::error!(
+                    target: CONTENT_UPDATE_LOG_TARGET,
+                    instance = %instance_name,
+                    error = %err,
+                    "import_local_content_files task panicked."
+                );
+                return;
+            }
+        };
         let focus_lookup_keys = selected_paths
             .iter()
             .filter_map(|path| {

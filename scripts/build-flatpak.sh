@@ -117,6 +117,13 @@ generate_cargo_sources() {
         return
     fi
 
+    if ! python3 -c "import aiohttp" 2>/dev/null; then
+        log "Installing aiohttp for flatpak-cargo-generator..."
+        python3 -m pip install aiohttp --break-system-packages --quiet \
+            || python3 -m pip install aiohttp --quiet \
+            || die "Failed to install aiohttp — run: pip3 install aiohttp"
+    fi
+
     log "Generating cargo-sources.json"
     python3 "${GENERATOR_PATH}" "${SOURCE_TREE}/Cargo.lock" -o "${CARGO_SOURCES_PATH}"
     [[ -f "${CARGO_SOURCES_PATH}" ]] || die "Failed to generate cargo-sources.json"
@@ -150,7 +157,7 @@ finish-args:
 
   - --socket=pulseaudio
 
-  - --device=dri
+  - --device=all
 
   - --filesystem=home
 

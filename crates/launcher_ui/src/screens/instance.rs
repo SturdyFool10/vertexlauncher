@@ -693,13 +693,13 @@ fn render_instance_screenshot_tile(
         egui::Sense::click(),
     );
     let image_key = screenshot_uri(screenshot.path.as_path(), screenshot.modified_at_ms);
-    retained_image_keys.insert(image_key.clone());
     let image_status = screenshot_images.request(image_key.clone(), screenshot.path.clone());
     let image_bytes = screenshot_images.bytes(image_key.as_str());
+    retained_image_keys.insert(image_key.clone());
     if let Some(bytes) = image_bytes.as_ref() {
         match image_textures::request_texture(
             ui.ctx(),
-            image_key.clone(),
+            image_key,
             Arc::clone(bytes),
             TextureOptions::LINEAR,
         ) {

@@ -111,7 +111,13 @@ pub fn start_device_code_login_with_handle(
     let _ = handle;
     std::thread::spawn(move || {
         if let Err(err) = device_code::run_device_code_login(client_id, &sender_for_task) {
-            let _ = sender_for_task.send(LoginEvent::Failed(err.to_string()));
+            if let Err(send_err) = sender_for_task.send(LoginEvent::Failed(err.to_string())) {
+                tracing::warn!(
+                    target: "vertexlauncher/auth",
+                    error = %send_err,
+                    "Failed to deliver login failure event to UI; receiver was dropped."
+                );
+            }
         }
     });
 

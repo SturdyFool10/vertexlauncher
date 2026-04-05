@@ -968,9 +968,18 @@ fn finished_process_queue() -> &'static Mutex<Vec<FinishedInstanceProcess>> {
     FINISHED_INSTANCE_PROCESSES.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+/// Maximum number of finished-process entries held between polls.
+/// Under normal conditions the UI drains this every frame via
+/// `take_finished_instance_processes`. The cap protects against the
+/// (unlikely) case where polling is suspended for a long time while
+/// many short-lived instances complete.
+const MAX_FINISHED_PROCESS_BACKLOG: usize = 256;
+
 fn push_finished_instance_process(process: FinishedInstanceProcess) {
     if let Ok(mut finished) = finished_process_queue().lock() {
-        finished.push(process);
+        if finished.len() < MAX_FINISHED_PROCESS_BACKLOG {
+            finished.push(process);
+        }
     }
 }
 

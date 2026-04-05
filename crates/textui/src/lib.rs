@@ -7,9 +7,10 @@ use std::{
 
 use cosmic_text::{
     Action, Attrs, AttrsOwned, BorrowedWithFontSystem, Buffer, CacheKey, Color, Cursor, Edit,
-    Editor, Family, FontFeatures, FontSystem, Metrics, Motion, Selection, Shaping,
+    Editor, Family, FontFeatures, FontSystem, LayoutRun, Metrics, Motion, Selection, Shaping,
     Style as FontStyle, SwashCache, SwashContent, Weight, Wrap,
 };
+use unicode_segmentation::UnicodeSegmentation;
 use egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense,
     TextureHandle, TextureOptions, Ui, Vec2,
@@ -26,6 +27,7 @@ use syntect::highlighting::{FontStyle as SyntectFontStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use tracing::warn;
+use egui::PointerButton;
 
 mod button_options;
 mod code_block_options;
@@ -48,7 +50,6 @@ pub use tooltip_options::TooltipOptions;
 
 const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "liga, calt";
 const PREPARED_TEXT_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
-const EDITOR_TEXTURE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const ASYNC_RASTER_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
 const GLYPH_ATLAS_MAX_BYTES: usize = 64 * 1024 * 1024;
 const GLYPH_ATLAS_STALE_FRAMES: u64 = 900;
@@ -58,7 +59,7 @@ const GLYPH_ATLAS_FETCH_MAX_PER_FRAME: usize = 128;
 const GLYPH_ATLAS_UPLOAD_MAX_GLYPHS_PER_FRAME: usize = 64;
 const GLYPH_ATLAS_UPLOAD_MAX_BYTES_PER_FRAME: usize = 512 * 1024;
 const INPUT_STATE_STALE_FRAMES: u64 = 900;
-const TEXTURE_STALE_FRAMES: u64 = 600;
+const UNDO_STACK_MAX: usize = 200;
 
 // Width-bin size in device pixels.  Labels whose available width differs by
 // less than this will share the same cached texture, preventing mass cache
@@ -207,12 +208,6 @@ struct PreparedGlyph {
     color: Color32,
 }
 
-#[derive(Clone, Debug)]
-struct RasterizedTile {
-    image: ColorImage,
-    offset_points: Vec2,
-    size_points: Vec2,
-}
 
 #[derive(Clone)]
 struct TextTextureGlyph {
@@ -278,13 +273,6 @@ struct PreparedAtlasGlyph {
     approx_bytes: usize,
 }
 
-struct TextureEntry {
-    fingerprint: u64,
-    texture: TextureHandle,
-    size_points: Vec2,
-    last_used_frame: u64,
-    approx_bytes: usize,
-}
 
 #[derive(Clone, Debug)]
 enum AsyncRasterKind {
@@ -349,6 +337,25 @@ struct GlyphAtlasWorkerResponse {
     glyph: Option<PreparedAtlasGlyph>,
 }
 
+/// Coarse operation kind used to group consecutive edits into a single undo
+/// entry (so typing a word is one undo step rather than per-char).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum UndoOpKind {
+    #[default]
+    None,
+    TextInsert,
+    Delete,
+    Paste,
+    Cut,
+}
+
+#[derive(Clone, Debug)]
+struct UndoEntry {
+    text: String,
+    cursor: Cursor,
+    selection: Selection,
+}
+
 #[derive(Debug)]
 struct InputState {
     editor: Editor<'static>,
@@ -357,6 +364,9 @@ struct InputState {
     multiline: bool,
     scroll_metrics: EditorScrollMetrics,
     last_used_frame: u64,
+    undo_stack: Vec<UndoEntry>,
+    redo_stack: Vec<UndoEntry>,
+    last_undo_op: UndoOpKind,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -400,7 +410,6 @@ pub struct TextUi {
     syntax_set: SyntaxSet,
     code_theme: Theme,
     prepared_texts: ThreadSafeLru<Id, PreparedTextCacheEntry>,
-    textures: HashMap<Id, TextureEntry>,
     glyph_atlas: GlyphAtlas,
     empty_text_texture: Option<TextureHandle>,
     input_states: HashMap<Id, InputState>,
@@ -457,7 +466,6 @@ impl TextUi {
             syntax_set,
             code_theme,
             prepared_texts: ThreadSafeLru::new(PREPARED_TEXT_CACHE_MAX_BYTES),
-            textures: HashMap::new(),
             glyph_atlas,
             empty_text_texture: None,
             input_states: HashMap::new(),
@@ -494,21 +502,17 @@ impl TextUi {
         }
         self.prepared_texts.write(|state| {
             state.retain(|_, entry| {
-                current_frame.saturating_sub(entry.value.last_used_frame) <= TEXTURE_STALE_FRAMES
+                current_frame.saturating_sub(entry.value.last_used_frame) <= INPUT_STATE_STALE_FRAMES
             });
         });
-        self.textures.retain(|_, entry| {
-            current_frame.saturating_sub(entry.last_used_frame) <= TEXTURE_STALE_FRAMES
-        });
         self.markdown_cache.retain(|_, (_, last_used_frame, _)| {
-            current_frame.saturating_sub(*last_used_frame) <= TEXTURE_STALE_FRAMES
+            current_frame.saturating_sub(*last_used_frame) <= INPUT_STATE_STALE_FRAMES
         });
         self.input_states.retain(|_, state| {
             current_frame.saturating_sub(state.last_used_frame) <= INPUT_STATE_STALE_FRAMES
         });
         self.glyph_atlas.trim_stale(current_frame);
         self.enforce_prepared_text_cache_budget();
-        self.enforce_texture_cache_budget();
         self.enforce_async_raster_cache_budget();
         self.swash_cache.image_cache.clear();
         self.swash_cache.outline_command_cache.clear();
@@ -1385,9 +1389,23 @@ impl TextUi {
             .max(min_height);
 
         let desired_size = egui::vec2(width, height);
-        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
+        let rect = ui.allocate_space(desired_size).1;
+        let mut response = ui.interact(rect, id, Sense::click_and_drag());
 
         let has_focus = response.has_focus();
+        if has_focus {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        tab: true,
+                        escape: false,
+                    },
+                );
+            });
+        }
         let scale = ui.ctx().pixels_per_point();
         let content_rect = rect.shrink2(options.padding);
         let content_width_px = (content_rect.width() * scale).max(1.0);
@@ -1509,36 +1527,10 @@ impl TextUi {
         ui.painter()
             .rect_stroke(rect, corner_radius, frame_stroke, egui::StrokeKind::Inside);
 
-        let base_fingerprint =
-            rich_viewer_texture_fingerprint(&state.editor, &text, spans, options, false, wrap);
-        for (tile_index, tile) in self
-            .rasterize_editor_tiled(
-                &state.editor,
-                options,
-                content_width_px as usize,
-                content_height_px as usize,
-                scale,
-                false,
-                true,
-            )
-            .into_iter()
-            .enumerate()
+        // --- GPU mesh rendering: atlas glyphs + Shape::Rect for selection ---
         {
-            let texture = self.update_texture(
-                ui.ctx(),
-                id.with(("tile", tile_index)),
-                {
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    base_fingerprint.hash(&mut hasher);
-                    tile_index.hash(&mut hasher);
-                    hasher.finish()
-                },
-                tile.image,
-                tile.size_points,
-            );
-            let tile_rect =
-                Rect::from_min_size(content_rect.min + tile.offset_points, tile.size_points);
-            paint_texture(ui, &texture, tile_rect);
+            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            self.paint_editor_gpu(&painter, content_rect, &state.editor, options, scale, false, true);
         }
 
         state_changed |= self.sync_viewer_scrollbars(
@@ -1581,9 +1573,10 @@ impl TextUi {
         };
 
         let desired_size = egui::vec2(width, height);
-        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
+        let rect = ui.allocate_space(desired_size).1;
+        let mut response = ui.interact(rect, id, Sense::click_and_drag());
 
-        if response.hovered() || response.has_focus() {
+        if response.hovered() {
             ui.output_mut(|o| {
                 o.cursor_icon = egui::CursorIcon::Text;
                 o.mutable_text_under_cursor = true;
@@ -1595,6 +1588,19 @@ impl TextUi {
         }
 
         let has_focus = response.has_focus();
+        if has_focus {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        tab: multiline,
+                        escape: false,
+                    },
+                );
+            });
+        }
         let scale = ui.ctx().pixels_per_point();
         let content_rect = rect.shrink2(options.padding);
         let content_width_px = (content_rect.width() * scale).max(1.0);
@@ -1642,20 +1648,209 @@ impl TextUi {
 
         let mut changed = false;
         if has_focus || pointer_interacted {
-            changed = self.handle_input_events(
-                ui,
-                &response,
-                &mut state.editor,
-                multiline,
-                content_rect,
-                scale,
-                has_focus,
-                &mut state.scroll_metrics,
-            );
+            // --- undo / redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z) ---
+            let (undo_pressed, redo_pressed) = if has_focus {
+                ui.input(|i| {
+                    let undo = i.key_pressed(Key::Z) && i.modifiers.command && !i.modifiers.shift;
+                    let redo = (i.key_pressed(Key::Y) && i.modifiers.command)
+                        || (i.key_pressed(Key::Z) && i.modifiers.command && i.modifiers.shift);
+                    (undo, redo)
+                })
+            } else {
+                (false, false)
+            };
+
+            if undo_pressed {
+                if let Some(UndoEntry {
+                    text: undo_text,
+                    cursor: undo_cursor,
+                    selection: undo_sel,
+                }) = state.undo_stack.pop()
+                {
+                    let snap = UndoEntry {
+                        text: editor_to_string(&state.editor),
+                        cursor: state.editor.cursor(),
+                        selection: state.editor.selection(),
+                    };
+                    state.redo_stack.push(snap);
+                    state.scroll_metrics = self.replace_editor_text(
+                        &mut state.editor,
+                        &undo_text,
+                        options,
+                        multiline,
+                        content_width_px,
+                        content_height_px,
+                        scale,
+                    );
+                    state
+                        .editor
+                        .set_cursor(clamp_cursor_to_editor(&state.editor, undo_cursor));
+                    state
+                        .editor
+                        .set_selection(clamp_selection_to_editor(&state.editor, undo_sel));
+                    state.last_text = undo_text;
+                    state.last_undo_op = UndoOpKind::None;
+                    changed = true;
+                }
+            } else if redo_pressed {
+                if let Some(UndoEntry {
+                    text: redo_text,
+                    cursor: redo_cursor,
+                    selection: redo_sel,
+                }) = state.redo_stack.pop()
+                {
+                    let snap = UndoEntry {
+                        text: editor_to_string(&state.editor),
+                        cursor: state.editor.cursor(),
+                        selection: state.editor.selection(),
+                    };
+                    push_undo(&mut state.undo_stack, snap);
+                    state.scroll_metrics = self.replace_editor_text(
+                        &mut state.editor,
+                        &redo_text,
+                        options,
+                        multiline,
+                        content_width_px,
+                        content_height_px,
+                        scale,
+                    );
+                    state
+                        .editor
+                        .set_cursor(clamp_cursor_to_editor(&state.editor, redo_cursor));
+                    state
+                        .editor
+                        .set_selection(clamp_selection_to_editor(&state.editor, redo_sel));
+                    state.last_text = redo_text;
+                    state.last_undo_op = UndoOpKind::None;
+                    changed = true;
+                }
+            } else {
+                // --- snapshot for upcoming modification (undo grouping) ---
+                if has_focus {
+                    let pending_op = pending_modify_op(&self.frame_events);
+                    if pending_op != UndoOpKind::None {
+                        // Push a new snapshot when the operation type changes or for
+                        // atomic ops (Paste/Cut always get their own undo entry).
+                        let should_push = matches!(
+                            pending_op,
+                            UndoOpKind::Paste | UndoOpKind::Cut
+                        ) || state.last_undo_op != pending_op;
+                        if should_push {
+                            push_undo(
+                                &mut state.undo_stack,
+                                UndoEntry {
+                                    text: editor_to_string(&state.editor),
+                                    cursor: state.editor.cursor(),
+                                    selection: state.editor.selection(),
+                                },
+                            );
+                            state.redo_stack.clear();
+                        }
+                        state.last_undo_op = pending_op;
+                    } else if self.frame_events.iter().any(is_navigation_event) {
+                        // Navigation breaks the current insert/delete run so the
+                        // next edit starts a fresh undo group.
+                        state.last_undo_op = UndoOpKind::None;
+                    }
+                }
+
+                changed |= self.handle_input_events(
+                    ui,
+                    &response,
+                    &mut state.editor,
+                    multiline,
+                    content_rect,
+                    scale,
+                    has_focus,
+                    &mut state.scroll_metrics,
+                );
+            }
 
             if !multiline && ui.input(|i| i.key_pressed(Key::Enter)) {
                 response.surrender_focus();
             }
+        }
+
+        // --- context menu (right-click) ---
+        let mut ctx_cut = false;
+        let mut ctx_copy = false;
+        let mut ctx_paste = false;
+        let mut ctx_select_all = false;
+        response.context_menu(|menu| {
+            let has_selection = state.editor.selection() != Selection::None;
+            if menu
+                .add_enabled(has_selection, egui::Button::new("Cut"))
+                .clicked()
+            {
+                ctx_cut = true;
+                menu.close();
+            }
+            if menu
+                .add_enabled(has_selection, egui::Button::new("Copy"))
+                .clicked()
+            {
+                ctx_copy = true;
+                menu.close();
+            }
+            if menu.button("Paste").clicked() {
+                ctx_paste = true;
+                menu.close();
+            }
+            menu.separator();
+            if menu.button("Select All").clicked() {
+                ctx_select_all = true;
+                menu.close();
+            }
+        });
+        if ctx_cut {
+            if let Some(sel) = state.editor.copy_selection() {
+                push_undo(
+                    &mut state.undo_stack,
+                    UndoEntry {
+                        text: editor_to_string(&state.editor),
+                        cursor: state.editor.cursor(),
+                        selection: state.editor.selection(),
+                    },
+                );
+                state.redo_stack.clear();
+                state.last_undo_op = UndoOpKind::None;
+                ui.ctx().copy_text(sel);
+                state.editor.delete_selection();
+                changed = true;
+            }
+        }
+        if ctx_copy {
+            if let Some(sel) = state.editor.copy_selection() {
+                ui.ctx().copy_text(sel);
+            }
+        }
+        if ctx_paste {
+            if let Ok(mut cb) = arboard::Clipboard::new() {
+                if let Ok(paste_text) = cb.get_text() {
+                    let paste_text = if multiline {
+                        paste_text
+                    } else {
+                        paste_text.replace(['\n', '\r'], " ")
+                    };
+                    if !paste_text.is_empty() {
+                        push_undo(
+                            &mut state.undo_stack,
+                            UndoEntry {
+                                text: editor_to_string(&state.editor),
+                                cursor: state.editor.cursor(),
+                                selection: state.editor.selection(),
+                            },
+                        );
+                        state.redo_stack.clear();
+                        state.last_undo_op = UndoOpKind::None;
+                        state.editor.insert_string(&paste_text, None);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if ctx_select_all {
+            changed |= select_all(&mut state.editor);
         }
 
         let latest_text = editor_to_string(&state.editor);
@@ -1669,25 +1864,7 @@ impl TextUi {
             response.mark_changed();
         }
 
-        let image = self.rasterize_editor(
-            &state.editor,
-            options,
-            content_width_px as usize,
-            content_height_px as usize,
-            has_focus,
-        );
-
-        let fingerprint = input_texture_fingerprint(&state.editor, text, options, has_focus);
-
-        let texture = self.update_texture(
-            ui.ctx(),
-            id.with("tex"),
-            fingerprint,
-            image,
-            content_rect.size(),
-        );
         state.last_used_frame = self.current_frame;
-        self.input_states.insert(id, state);
 
         let frame_fill = if has_focus {
             options
@@ -1717,7 +1894,12 @@ impl TextUi {
         ui.painter()
             .rect_stroke(rect, corner_radius, frame_stroke, egui::StrokeKind::Inside);
 
-        paint_texture(ui, &texture, content_rect);
+        // --- GPU mesh rendering: atlas glyphs + Shape::Rect for cursor/selection ---
+        {
+            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            self.paint_editor_gpu(&painter, content_rect, &state.editor, options, scale, has_focus, false);
+        }
+        self.input_states.insert(id, state);
         if !has_focus
             && text.is_empty()
             && let Some(placeholder_text) = options
@@ -1777,6 +1959,9 @@ impl TextUi {
             multiline,
             scroll_metrics: EditorScrollMetrics::default(),
             last_used_frame: 0,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            last_undo_op: UndoOpKind::None,
         }
     }
 
@@ -2165,85 +2350,224 @@ impl TextUi {
         true
     }
 
-    fn rasterize_editor_tiled(
+    /// Paint an editor directly via GPU meshes (glyph atlas + `Shape::Rect` for cursor/selection).
+    /// This replaces the CPU pixel-blit path (`rasterize_editor` / `rasterize_editor_tiled`).
+    ///
+    /// Glyph positions come from `buffer.layout_runs()`, which already accounts for vertical
+    /// scroll.  The horizontal scroll is subtracted manually, matching the old CPU path.
+    fn paint_editor_gpu(
         &mut self,
+        painter: &egui::Painter,
+        content_rect: Rect,
         editor: &Editor<'static>,
         options: &InputOptions,
-        width_px: usize,
-        height_px: usize,
         scale: f32,
         has_focus: bool,
         show_selection_without_focus: bool,
-    ) -> Vec<RasterizedTile> {
-        let width_px = width_px.max(1);
-        let height_px = height_px.max(1);
-        let horizontal_scroll = editor_horizontal_scroll(editor).round() as i32;
-        let tile_max_dim_px = self.max_texture_side_px.max(1);
-        let tile_cols = width_px.div_ceil(tile_max_dim_px);
-        let tile_rows = height_px.div_ceil(tile_max_dim_px);
-        let tile_count = tile_cols * tile_rows;
+    ) {
+        let horizontal_scroll_px =
+            editor.with_buffer(|b| b.scroll().horizontal.max(0.0));
+        let selection_visible =
+            has_focus || (show_selection_without_focus && editor.selection() != Selection::None);
+        let selection_bounds = if selection_visible {
+            editor.selection_bounds()
+        } else {
+            None
+        };
 
-        let mut tiles = Vec::with_capacity(tile_count);
-        for row in 0..tile_rows {
-            for col in 0..tile_cols {
-                let origin_x = col * tile_max_dim_px;
-                let origin_y = row * tile_max_dim_px;
-                let tile_width = (width_px - origin_x).min(tile_max_dim_px);
-                let tile_height = (height_px - origin_y).min(tile_max_dim_px);
-                tiles.push((
-                    origin_x,
-                    origin_y,
-                    ColorImage::new(
-                        [tile_width, tile_height],
-                        vec![Color32::TRANSPARENT; tile_width * tile_height],
-                    ),
-                ));
+        let origin = content_rect.min;
+        let painter = painter.with_clip_rect(content_rect);
+
+        struct GlyphCmd {
+            cache_key: CacheKey,
+            /// Buffer-space x in device pixels (horizontal scroll already subtracted).
+            x_px: f32,
+            /// Buffer-space y in device pixels (`line_y + physical.y`; vertical scroll
+            /// is already baked into `line_y` by `layout_runs()`).
+            y_px: f32,
+            color: Color32,
+        }
+
+        let mut sel_rects: Vec<Rect> = Vec::new();
+        let mut cursor_rect: Option<Rect> = None;
+        let mut glyph_cmds: Vec<GlyphCmd> = Vec::new();
+
+        editor.with_buffer(|buffer| {
+            let buf_width = buffer.size().0.unwrap_or(0.0);
+
+            for run in buffer.layout_runs() {
+                let line_i = run.line_i;
+                let line_top = run.line_top; // already scroll-adjusted by LayoutRunIter
+                let line_y = run.line_y;
+                let line_height = run.line_height;
+
+                // --- Selection highlights ---
+                if let Some((start, end)) = selection_bounds {
+                    if line_i >= start.line && line_i <= end.line {
+                        let mut range_opt: Option<(i32, i32)> = None;
+
+                        for glyph in run.glyphs {
+                            let cluster = &run.text[glyph.start..glyph.end];
+                            let total = cluster.grapheme_indices(true).count().max(1);
+                            let mut c_x = glyph.x;
+                            let c_w = glyph.w / total as f32;
+
+                            for (i, c) in cluster.grapheme_indices(true) {
+                                let c_start = glyph.start + i;
+                                let c_end = glyph.start + i + c.len();
+                                if (start.line != line_i || c_end > start.index)
+                                    && (end.line != line_i || c_start < end.index)
+                                {
+                                    range_opt = match range_opt.take() {
+                                        Some((mn, mx)) => Some((
+                                            mn.min(c_x as i32),
+                                            mx.max((c_x + c_w) as i32),
+                                        )),
+                                        None => Some((c_x as i32, (c_x + c_w) as i32)),
+                                    };
+                                } else if let Some((mn, mx)) = range_opt.take() {
+                                    sel_rects.push(editor_sel_rect(
+                                        mn, mx,
+                                        line_top, line_height,
+                                        horizontal_scroll_px, origin, scale,
+                                    ));
+                                }
+                                c_x += c_w;
+                            }
+                        }
+
+                        if run.glyphs.is_empty() && end.line > line_i {
+                            // Highlight entire empty internal lines.
+                            range_opt = Some((0, buf_width as i32));
+                        }
+
+                        if let Some((mut mn, mut mx)) = range_opt.take() {
+                            if end.line > line_i {
+                                if run.rtl {
+                                    mn = 0;
+                                } else {
+                                    mx = buf_width as i32;
+                                }
+                            }
+                            sel_rects.push(editor_sel_rect(
+                                mn, mx,
+                                line_top, line_height,
+                                horizontal_scroll_px, origin, scale,
+                            ));
+                        }
+                    }
+                }
+
+                // --- Cursor ---
+                if has_focus {
+                    if let Some(cx) = editor_cursor_x_in_run(&editor.cursor(), &run) {
+                        let x_pts = (cx as f32 - horizontal_scroll_px) / scale + origin.x;
+                        let y_pts = line_top / scale + origin.y;
+                        let h_pts = line_height / scale;
+                        // 1 physical pixel wide, full line height
+                        cursor_rect = Some(Rect::from_min_size(
+                            Pos2::new(x_pts, y_pts),
+                            Vec2::new((1.0_f32 / scale).max(0.5), h_pts),
+                        ));
+                    }
+                }
+
+                // --- Glyph draw commands ---
+                for glyph in run.glyphs {
+                    let physical = glyph.physical((0.0, 0.0), 1.0);
+                    let color = if selection_visible {
+                        if let Some((start, end)) = selection_bounds {
+                            if line_i >= start.line
+                                && line_i <= end.line
+                                && (start.line != line_i || glyph.end > start.index)
+                                && (end.line != line_i || glyph.start < end.index)
+                            {
+                                options.selected_text_color
+                            } else {
+                                glyph.color_opt.map_or(options.text_color, cosmic_to_egui_color)
+                            }
+                        } else {
+                            glyph.color_opt.map_or(options.text_color, cosmic_to_egui_color)
+                        }
+                    } else {
+                        glyph.color_opt.map_or(options.text_color, cosmic_to_egui_color)
+                    };
+
+                    glyph_cmds.push(GlyphCmd {
+                        cache_key: physical.cache_key,
+                        x_px: physical.x as f32 - horizontal_scroll_px,
+                        y_px: line_y + physical.y as f32,
+                        color,
+                    });
+                }
+            }
+        });
+
+        // --- Paint selection rects (under glyphs) ---
+        for sel in sel_rects {
+            painter.add(egui::Shape::rect_filled(
+                sel,
+                CornerRadius::ZERO,
+                options.selection_color,
+            ));
+        }
+
+        // --- Resolve glyphs through the atlas and build GPU meshes ---
+        let mut meshes: Vec<(TextureHandle, egui::epaint::Mesh)> = Vec::new();
+        for cmd in glyph_cmds {
+            let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
+                painter.ctx(),
+                &mut self.font_system,
+                &mut self.swash_cache,
+                cmd.cache_key,
+                self.current_frame,
+            ) else {
+                continue;
+            };
+
+            let glyph_rect = Rect::from_min_size(
+                Pos2::new(
+                    (cmd.x_px + atlas_entry.placement_left_px as f32) / scale + origin.x,
+                    (cmd.y_px - atlas_entry.placement_top_px as f32) / scale + origin.y,
+                ),
+                Vec2::new(
+                    atlas_entry.size_px[0] as f32 / scale,
+                    atlas_entry.size_px[1] as f32 / scale,
+                ),
+            );
+
+            let tint = if atlas_entry.is_color {
+                Color32::WHITE
+            } else {
+                cmd.color
+            };
+
+            if let Some((_, mesh)) = meshes
+                .iter_mut()
+                .find(|(t, _)| t.id() == atlas_entry.texture.id())
+            {
+                mesh.add_rect_with_uv(glyph_rect, atlas_entry.uv, tint);
+            } else {
+                let mut mesh = egui::epaint::Mesh::with_texture(atlas_entry.texture.id());
+                mesh.add_rect_with_uv(glyph_rect, atlas_entry.uv, tint);
+                meshes.push((atlas_entry.texture, mesh));
             }
         }
 
-        let selection_visible =
-            has_focus || (show_selection_without_focus && editor.selection() != Selection::None);
-        editor.draw(
-            &mut self.font_system,
-            &mut self.swash_cache,
-            to_cosmic_color(options.text_color),
-            if has_focus {
-                to_cosmic_color(options.cursor_color)
-            } else {
-                to_cosmic_color(Color32::TRANSPARENT)
-            },
-            if selection_visible {
-                to_cosmic_color(options.selection_color)
-            } else {
-                to_cosmic_color(Color32::TRANSPARENT)
-            },
-            if selection_visible {
-                to_cosmic_color(options.selected_text_color)
-            } else {
-                to_cosmic_color(options.text_color)
-            },
-            |x, y, w, h, color| {
-                blend_rect_into_tiles(
-                    &mut tiles,
-                    width_px,
-                    height_px,
-                    x - horizontal_scroll,
-                    y,
-                    w as i32,
-                    h as i32,
-                    cosmic_to_egui_color(color),
-                );
-            },
-        );
+        for (_, mesh) in meshes {
+            if !mesh.is_empty() {
+                painter.add(egui::Shape::mesh(mesh));
+            }
+        }
 
-        tiles
-            .into_iter()
-            .map(|(origin_x, origin_y, image)| RasterizedTile {
-                offset_points: egui::vec2(origin_x as f32 / scale, origin_y as f32 / scale),
-                size_points: egui::vec2(image.size[0] as f32 / scale, image.size[1] as f32 / scale),
-                image,
-            })
-            .collect()
+        // --- Cursor on top of glyphs ---
+        if let Some(cursor_rect) = cursor_rect {
+            painter.add(egui::Shape::rect_filled(
+                cursor_rect,
+                CornerRadius::ZERO,
+                options.cursor_color,
+            ));
+        }
     }
 
     fn input_span_attrs_owned(
@@ -2386,6 +2710,27 @@ impl TextUi {
                             changed = true;
                         }
                     }
+                    // Middle-click paste (X11 primary selection convention)
+                    egui::Event::PointerButton {
+                        button: PointerButton::Middle,
+                        pressed: true,
+                        pos,
+                        ..
+                    } if content_rect.contains(*pos) => {
+                        if let Ok(mut cb) = arboard::Clipboard::new() {
+                            if let Ok(paste_text) = cb.get_text() {
+                                let paste_text = if multiline {
+                                    paste_text
+                                } else {
+                                    paste_text.replace(['\n', '\r'], " ")
+                                };
+                                if !paste_text.is_empty() {
+                                    editor.insert_string(&paste_text, None);
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
                     egui::Event::Key {
                         key,
                         pressed,
@@ -2418,52 +2763,6 @@ impl TextUi {
         }
 
         changed
-    }
-
-    fn rasterize_editor(
-        &mut self,
-        editor: &Editor<'static>,
-        options: &InputOptions,
-        width_px: usize,
-        height_px: usize,
-        has_focus: bool,
-    ) -> ColorImage {
-        let horizontal_scroll = editor_horizontal_scroll(editor).round() as i32;
-        let width_px = width_px.clamp(1, self.max_texture_side_px.max(1));
-        let height_px = height_px.clamp(1, self.max_texture_side_px.max(1));
-        let mut image = ColorImage::new(
-            [width_px.max(1), height_px.max(1)],
-            vec![Color32::TRANSPARENT; width_px.max(1) * height_px.max(1)],
-        );
-
-        editor.draw(
-            &mut self.font_system,
-            &mut self.swash_cache,
-            to_cosmic_color(options.text_color),
-            if has_focus {
-                to_cosmic_color(options.cursor_color)
-            } else {
-                to_cosmic_color(Color32::TRANSPARENT)
-            },
-            if has_focus {
-                to_cosmic_color(options.selection_color)
-            } else {
-                to_cosmic_color(Color32::TRANSPARENT)
-            },
-            to_cosmic_color(options.selected_text_color),
-            |x, y, w, h, color| {
-                blend_rect(
-                    &mut image,
-                    x - horizontal_scroll,
-                    y,
-                    w as i32,
-                    h as i32,
-                    cosmic_to_egui_color(color),
-                );
-            },
-        );
-
-        image
     }
 
     fn highlight_code_spans(
@@ -2787,7 +3086,6 @@ impl TextUi {
 
     fn invalidate_text_caches(&mut self, clear_input_states: bool) {
         let _ = self.prepared_texts.write(|state| state.clear());
-        self.textures.clear();
         let _ = self.async_raster.cache.write(|state| state.clear());
         self.async_raster.pending.clear();
         self.glyph_atlas.clear();
@@ -2804,15 +3102,6 @@ impl TextUi {
         self.prepared_texts.write(|state| {
             let _ = state.evict_to_budget();
         });
-    }
-
-    fn enforce_texture_cache_budget(&mut self) {
-        trim_cache_by_budget(
-            &mut self.textures,
-            EDITOR_TEXTURE_CACHE_MAX_BYTES,
-            |entry| entry.approx_bytes,
-            |entry| entry.last_used_frame,
-        );
     }
 
     fn enforce_async_raster_cache_budget(&mut self) {
@@ -2926,39 +3215,6 @@ impl TextUi {
             }
         }
         None
-    }
-
-    fn update_texture(
-        &mut self,
-        ctx: &Context,
-        id: Id,
-        fingerprint: u64,
-        image: ColorImage,
-        size_points: Vec2,
-    ) -> TextureHandle {
-        let entry = self.textures.entry(id).or_insert_with(|| TextureEntry {
-            fingerprint: 0,
-            texture: ctx.load_texture(
-                format!("textui_texture_{id:?}"),
-                image.clone(),
-                TextureOptions::LINEAR,
-            ),
-            size_points,
-            last_used_frame: self.current_frame,
-            approx_bytes: color_image_byte_size(&image),
-        });
-
-        if entry.fingerprint != fingerprint || entry.texture.size() != image.size {
-            entry
-                .texture
-                .set(egui::ImageData::Color(image.into()), TextureOptions::LINEAR);
-            entry.fingerprint = fingerprint;
-        }
-
-        entry.size_points = size_points;
-        entry.last_used_frame = self.current_frame;
-        entry.approx_bytes = color_image_byte_size_from_size(entry.texture.size());
-        entry.texture.clone()
     }
 
     fn empty_text_texture(&mut self, ctx: &Context) -> &TextureHandle {
@@ -3425,25 +3681,26 @@ impl GlyphAtlas {
     }
 
     fn try_add_page(&mut self, ctx: &Context) -> bool {
-        let page_bytes = self
-            .page_side_px
-            .saturating_mul(self.page_side_px)
-            .saturating_mul(mem::size_of::<Color32>());
-        let next_total_bytes = page_bytes.saturating_mul(self.pages.len().saturating_add(1));
-        if next_total_bytes > GLYPH_ATLAS_MAX_BYTES {
-            return false;
+        let side = self.page_side_px;
+        let side_i = side as i32;
+
+        // Reuse any page that has been fully evicted — reset its allocator in place.
+        // The GPU texture is kept as-is; stale pixels at unreachable UVs are harmless.
+        for page in &mut self.pages {
+            if page.live_glyphs == 0 {
+                page.allocator = AtlasAllocator::new(size2(side_i, side_i));
+                return true;
+            }
         }
 
+        // No reusable page; allocate a fresh GPU texture.
         let texture = ctx.load_texture(
             format!("textui_glyph_atlas_{}", self.pages.len()),
-            ColorImage::filled([self.page_side_px, self.page_side_px], Color32::TRANSPARENT),
+            ColorImage::filled([side, side], Color32::TRANSPARENT),
             TextureOptions::LINEAR,
         );
         self.pages.push(GlyphAtlasPage {
-            allocator: AtlasAllocator::new(size2(
-                self.page_side_px as i32,
-                self.page_side_px as i32,
-            )),
+            allocator: AtlasAllocator::new(size2(side_i, side_i)),
             texture,
             live_glyphs: 0,
         });
@@ -3466,9 +3723,8 @@ impl GlyphAtlas {
         };
         page.allocator.deallocate(entry.allocation_id);
         page.live_glyphs = page.live_glyphs.saturating_sub(1);
-        if page.live_glyphs == 0 && entry.page_index + 1 == self.pages.len() {
-            self.pages.pop();
-        }
+        // Empty pages are reclaimed by try_add_page on the next allocation demand;
+        // we do not remove them here so that existing page_index values stay valid.
     }
 
     fn resolve_entry(&self, entry: &GlyphAtlasEntry) -> ResolvedGlyphAtlasEntry {
@@ -3787,35 +4043,6 @@ fn multiply_color32(a: Color32, b: Color32) -> Color32 {
     )
 }
 
-fn trim_cache_by_budget<K, V>(
-    cache: &mut HashMap<K, V>,
-    max_bytes: usize,
-    approx_bytes: impl Fn(&V) -> usize,
-    last_used_frame: impl Fn(&V) -> u64,
-) where
-    K: Clone + Eq + std::hash::Hash,
-{
-    let mut total_bytes = cache.values().map(&approx_bytes).sum::<usize>();
-    if total_bytes <= max_bytes {
-        return;
-    }
-
-    let mut eviction_order = cache
-        .iter()
-        .map(|(key, value)| (key.clone(), last_used_frame(value), approx_bytes(value)))
-        .collect::<Vec<_>>();
-    eviction_order.sort_by_key(|(_, last_used_frame, _)| *last_used_frame);
-
-    for (key, _, entry_bytes) in eviction_order {
-        if total_bytes <= max_bytes {
-            break;
-        }
-        if cache.remove(&key).is_some() {
-            total_bytes = total_bytes.saturating_sub(entry_bytes);
-        }
-    }
-}
-
 fn editor_to_string(editor: &Editor<'static>) -> String {
     let mut out = String::new();
     editor.with_buffer(|buffer| {
@@ -3825,92 +4052,6 @@ fn editor_to_string(editor: &Editor<'static>) -> String {
         }
     });
     out
-}
-
-fn input_texture_fingerprint(
-    editor: &Editor<'static>,
-    text: &str,
-    options: &InputOptions,
-    has_focus: bool,
-) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    "input".hash(&mut hasher);
-    text.hash(&mut hasher);
-    options.font_size.to_bits().hash(&mut hasher);
-    options.line_height.to_bits().hash(&mut hasher);
-    options.text_color.hash(&mut hasher);
-    options.cursor_color.hash(&mut hasher);
-    options.selection_color.hash(&mut hasher);
-    options.selected_text_color.hash(&mut hasher);
-    has_focus.hash(&mut hasher);
-    hash_cursor(editor.cursor(), &mut hasher);
-    hash_selection(editor.selection(), &mut hasher);
-    editor.with_buffer(|buffer| hash_scroll(buffer.scroll(), &mut hasher));
-    hasher.finish()
-}
-
-fn rich_viewer_texture_fingerprint(
-    editor: &Editor<'static>,
-    text: &str,
-    spans: &[RichTextSpan],
-    options: &InputOptions,
-    has_focus: bool,
-    wrap: bool,
-) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    "rich_viewer".hash(&mut hasher);
-    text.hash(&mut hasher);
-    options.font_size.to_bits().hash(&mut hasher);
-    options.line_height.to_bits().hash(&mut hasher);
-    options.text_color.hash(&mut hasher);
-    options.cursor_color.hash(&mut hasher);
-    options.selection_color.hash(&mut hasher);
-    options.selected_text_color.hash(&mut hasher);
-    wrap.hash(&mut hasher);
-    has_focus.hash(&mut hasher);
-    for span in spans {
-        span.text.hash(&mut hasher);
-        span.style.color.hash(&mut hasher);
-        span.style.monospace.hash(&mut hasher);
-        span.style.italic.hash(&mut hasher);
-        span.style.weight.hash(&mut hasher);
-    }
-    hash_cursor(editor.cursor(), &mut hasher);
-    hash_selection(editor.selection(), &mut hasher);
-    editor.with_buffer(|buffer| hash_scroll(buffer.scroll(), &mut hasher));
-    hasher.finish()
-}
-
-fn hash_cursor<H: Hasher>(cursor: Cursor, state: &mut H) {
-    cursor.line.hash(state);
-    cursor.index.hash(state);
-    format!("{:?}", cursor.affinity).hash(state);
-}
-
-fn hash_scroll<H: Hasher>(scroll: cosmic_text::Scroll, state: &mut H) {
-    scroll.line.hash(state);
-    scroll.vertical.to_bits().hash(state);
-    scroll.horizontal.to_bits().hash(state);
-}
-
-fn hash_selection<H: Hasher>(selection: Selection, state: &mut H) {
-    match selection {
-        Selection::None => {
-            0_u8.hash(state);
-        }
-        Selection::Normal(cursor) => {
-            1_u8.hash(state);
-            hash_cursor(cursor, state);
-        }
-        Selection::Line(cursor) => {
-            2_u8.hash(state);
-            hash_cursor(cursor, state);
-        }
-        Selection::Word(cursor) => {
-            3_u8.hash(state);
-            hash_cursor(cursor, state);
-        }
-    }
 }
 
 fn editor_horizontal_scroll(editor: &Editor<'static>) -> f32 {
@@ -3971,6 +4112,76 @@ fn select_all(editor: &mut Editor<'static>) -> bool {
     editor.set_selection(Selection::Normal(Cursor::new(0, 0)));
     editor.set_cursor(end);
     true
+}
+
+/// Classify a frame event as a text-modifying operation for undo grouping.
+/// Returns `UndoOpKind::None` for non-modifying events (navigation, etc.).
+fn classify_modify_op(event: &egui::Event) -> UndoOpKind {
+    match event {
+        egui::Event::Text(t) if !t.is_empty() => UndoOpKind::TextInsert,
+        egui::Event::Paste(p) if !p.is_empty() => UndoOpKind::Paste,
+        egui::Event::Cut => UndoOpKind::Cut,
+        egui::Event::Key {
+            key,
+            pressed: true,
+            modifiers,
+            ..
+        } => {
+            let word_delete = (modifiers.alt || modifiers.ctrl || modifiers.mac_cmd)
+                && matches!(key, Key::Backspace | Key::Delete);
+            let emacs_delete =
+                modifiers.ctrl && matches!(key, Key::H | Key::K | Key::U | Key::W);
+            if matches!(key, Key::Backspace | Key::Delete) || word_delete || emacs_delete {
+                UndoOpKind::Delete
+            } else {
+                UndoOpKind::None
+            }
+        }
+        // Middle-click paste counts as Paste
+        egui::Event::PointerButton {
+            button: PointerButton::Middle,
+            pressed: true,
+            ..
+        } => UndoOpKind::Paste,
+        _ => UndoOpKind::None,
+    }
+}
+
+/// True if the event is a cursor-navigation key (resets undo grouping so the
+/// next insertion starts a new undo entry).
+fn is_navigation_event(event: &egui::Event) -> bool {
+    matches!(
+        event,
+        egui::Event::Key {
+            key: Key::ArrowLeft
+                | Key::ArrowRight
+                | Key::ArrowUp
+                | Key::ArrowDown
+                | Key::Home
+                | Key::End
+                | Key::PageUp
+                | Key::PageDown,
+            pressed: true,
+            ..
+        }
+    )
+}
+
+/// Returns the first modifying op kind found in the event list, or None.
+fn pending_modify_op(events: &[egui::Event]) -> UndoOpKind {
+    events
+        .iter()
+        .map(classify_modify_op)
+        .find(|op| *op != UndoOpKind::None)
+        .unwrap_or(UndoOpKind::None)
+}
+
+/// Push an undo entry, capping the stack at UNDO_STACK_MAX.
+fn push_undo(stack: &mut Vec<UndoEntry>, entry: UndoEntry) {
+    if stack.len() >= UNDO_STACK_MAX {
+        stack.remove(0);
+    }
+    stack.push(entry);
 }
 
 fn handle_editor_key_event(
@@ -4536,15 +4747,6 @@ fn viewer_visible_text_rect(
     }
 }
 
-fn paint_texture(ui: &Ui, texture: &TextureHandle, rect: Rect) {
-    ui.painter().image(
-        texture.id(),
-        rect,
-        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-        Color32::WHITE,
-    );
-}
-
 fn to_cosmic_color(color: Color32) -> Color {
     Color::rgba(color.r(), color.g(), color.b(), color.a())
 }
@@ -4553,105 +4755,79 @@ fn cosmic_to_egui_color(color: Color) -> Color32 {
     Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), color.a())
 }
 
-fn blend_rect(image: &mut ColorImage, x: i32, y: i32, w: i32, h: i32, src: Color32) {
-    let width = image.size[0] as i32;
-    let height = image.size[1] as i32;
-
-    let x0 = x.max(0).min(width);
-    let y0 = y.max(0).min(height);
-    let x1 = (x + w).max(0).min(width);
-    let y1 = (y + h).max(0).min(height);
-
-    if x0 >= x1 || y0 >= y1 {
-        return;
+/// Find the glyph index and x-offset within that glyph for a cursor on the given layout run.
+/// Replicates cosmic-text's private `cursor_glyph_opt` function.
+fn editor_cursor_glyph_opt(cursor: &Cursor, run: &LayoutRun<'_>) -> Option<(usize, f32)> {
+    if cursor.line != run.line_i {
+        return None;
     }
-
-    for py in y0..y1 {
-        for px in x0..x1 {
-            let index = (py as usize) * image.size[0] + px as usize;
-            let dst = image.pixels[index];
-            image.pixels[index] = alpha_blend(src, dst);
+    for (glyph_i, glyph) in run.glyphs.iter().enumerate() {
+        if cursor.index == glyph.start {
+            return Some((glyph_i, 0.0));
+        } else if cursor.index > glyph.start && cursor.index < glyph.end {
+            let cluster = &run.text[glyph.start..glyph.end];
+            let total = cluster.grapheme_indices(true).count().max(1);
+            let before = run.text[glyph.start..cursor.index]
+                .grapheme_indices(true)
+                .count();
+            return Some((glyph_i, glyph.w * before as f32 / total as f32));
         }
     }
-}
-
-fn blend_rect_into_tiles(
-    tiles: &mut [(usize, usize, ColorImage)],
-    total_width: usize,
-    total_height: usize,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    src: Color32,
-) {
-    let total_width = total_width as i32;
-    let total_height = total_height as i32;
-    let x0 = x.max(0).min(total_width);
-    let y0 = y.max(0).min(total_height);
-    let x1 = (x + w).max(0).min(total_width);
-    let y1 = (y + h).max(0).min(total_height);
-
-    if x0 >= x1 || y0 >= y1 {
-        return;
-    }
-
-    for (origin_x, origin_y, image) in tiles.iter_mut() {
-        let tile_x0 = *origin_x as i32;
-        let tile_y0 = *origin_y as i32;
-        let tile_x1 = tile_x0 + image.size[0] as i32;
-        let tile_y1 = tile_y0 + image.size[1] as i32;
-
-        let overlap_x0 = x0.max(tile_x0);
-        let overlap_y0 = y0.max(tile_y0);
-        let overlap_x1 = x1.min(tile_x1);
-        let overlap_y1 = y1.min(tile_y1);
-        if overlap_x0 >= overlap_x1 || overlap_y0 >= overlap_y1 {
-            continue;
+    if let Some(last) = run.glyphs.last() {
+        if cursor.index == last.end {
+            return Some((run.glyphs.len(), 0.0));
         }
-
-        blend_rect(
-            image,
-            overlap_x0 - tile_x0,
-            overlap_y0 - tile_y0,
-            overlap_x1 - overlap_x0,
-            overlap_y1 - overlap_y0,
-            src,
-        );
+    } else {
+        // Empty run — cursor is at the start
+        return Some((0, 0.0));
     }
+    None
 }
 
-fn alpha_blend(src: Color32, dst: Color32) -> Color32 {
-    if src.a() == 255 {
-        return src;
-    }
-    if src.a() == 0 {
-        return dst;
-    }
+/// Pixel x-coordinate of the cursor within a layout run (in buffer-space, before scroll).
+/// Returns None if the cursor is not on this run.
+fn editor_cursor_x_in_run(cursor: &Cursor, run: &LayoutRun<'_>) -> Option<i32> {
+    let (cursor_glyph, cursor_glyph_offset) = editor_cursor_glyph_opt(cursor, run)?;
+    let x = run.glyphs.get(cursor_glyph).map_or_else(
+        || {
+            run.glyphs.last().map_or(0, |g| {
+                if g.level.is_rtl() {
+                    g.x as i32
+                } else {
+                    (g.x + g.w) as i32
+                }
+            })
+        },
+        |g| {
+            if g.level.is_rtl() {
+                (g.x + g.w - cursor_glyph_offset) as i32
+            } else {
+                (g.x + cursor_glyph_offset) as i32
+            }
+        },
+    );
+    Some(x)
+}
 
-    let sa = src.a() as f32 / 255.0;
-    let da = dst.a() as f32 / 255.0;
-    let out_a = sa + da * (1.0 - sa);
-    if out_a <= f32::EPSILON {
-        return Color32::TRANSPARENT;
-    }
-
-    let sr = src.r() as f32 / 255.0;
-    let sg = src.g() as f32 / 255.0;
-    let sb = src.b() as f32 / 255.0;
-
-    let dr = dst.r() as f32 / 255.0;
-    let dg = dst.g() as f32 / 255.0;
-    let db = dst.b() as f32 / 255.0;
-
-    let out_r = (sr * sa + dr * da * (1.0 - sa)) / out_a;
-    let out_g = (sg * sa + dg * da * (1.0 - sa)) / out_a;
-    let out_b = (sb * sa + db * da * (1.0 - sa)) / out_a;
-
-    Color32::from_rgba_unmultiplied(
-        (out_r.clamp(0.0, 1.0) * 255.0) as u8,
-        (out_g.clamp(0.0, 1.0) * 255.0) as u8,
-        (out_b.clamp(0.0, 1.0) * 255.0) as u8,
-        (out_a.clamp(0.0, 1.0) * 255.0) as u8,
+/// Convert a selection pixel range on a single layout run to an egui Rect in screen space.
+/// `line_top` is already scroll-adjusted (as returned by `layout_runs()`).
+fn editor_sel_rect(
+    min_x: i32,
+    max_x: i32,
+    line_top: f32,
+    line_height: f32,
+    horiz_scroll_px: f32,
+    origin: Pos2,
+    scale: f32,
+) -> Rect {
+    Rect::from_min_size(
+        Pos2::new(
+            (min_x as f32 - horiz_scroll_px) / scale + origin.x,
+            line_top / scale + origin.y,
+        ),
+        Vec2::new(
+            (max_x - min_x).max(0) as f32 / scale,
+            line_height / scale,
+        ),
     )
 }

@@ -9,7 +9,7 @@ command: vertexlauncher
 finish-args:
   - --socket=wayland
   - --socket=x11
-  - --device=dri
+  - --device=all
   - --share=ipc
   - --share=network
   - --socket=pulseaudio

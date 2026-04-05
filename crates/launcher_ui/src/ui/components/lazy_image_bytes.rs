@@ -159,38 +159,28 @@ impl LazyImageBytes {
 
     pub fn has_in_flight(&self) -> bool {
         self.states.read(|state| {
-            state
-                .entries_cloned()
-                .into_iter()
-                .any(|(_, entry)| matches!(entry.value.state, LazyImageBytesState::Loading))
+            state.values_any(|entry| matches!(entry.value.state, LazyImageBytesState::Loading))
         })
     }
 
     pub fn status(&self, key: &str) -> LazyImageBytesStatus {
-        match self
-            .states
-            .read(|state| state.get(&key.to_owned()).cloned())
-        {
-            Some(entry) => match entry.value.state {
-                LazyImageBytesState::Loading => LazyImageBytesStatus::Loading,
-                LazyImageBytesState::Ready(_) => LazyImageBytesStatus::Ready,
-                LazyImageBytesState::Failed => LazyImageBytesStatus::Failed,
-            },
-            None => LazyImageBytesStatus::Unrequested,
-        }
+        self.states.read(|state| {
+            match state.get_borrowed(key).map(|e| &e.value.state) {
+                Some(LazyImageBytesState::Loading) => LazyImageBytesStatus::Loading,
+                Some(LazyImageBytesState::Ready(_)) => LazyImageBytesStatus::Ready,
+                Some(LazyImageBytesState::Failed) => LazyImageBytesStatus::Failed,
+                None => LazyImageBytesStatus::Unrequested,
+            }
+        })
     }
 
     pub fn bytes(&self, key: &str) -> Option<Arc<[u8]>> {
-        match self
-            .states
-            .read(|state| state.get(&key.to_owned()).cloned())
-        {
-            Some(entry) => match entry.value.state {
-                LazyImageBytesState::Ready(bytes) => Some(bytes),
+        self.states.read(|state| {
+            match state.get_borrowed(key).map(|e| &e.value.state) {
+                Some(LazyImageBytesState::Ready(bytes)) => Some(Arc::clone(bytes)),
                 _ => None,
-            },
-            _ => None,
-        }
+            }
+        })
     }
 
     pub fn request(&mut self, key: impl Into<String>, path: PathBuf) -> LazyImageBytesStatus {

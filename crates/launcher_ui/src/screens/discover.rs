@@ -1715,7 +1715,7 @@ fn build_snapshot_entries(
                         (None, right) => right,
                         (left, None) => left,
                     };
-                existing.updated_at = existing.updated_at.clone().or(entry.updated_at.clone());
+                existing.updated_at = existing.updated_at.take().or_else(|| entry.updated_at.clone());
                 existing.relevance_rank = existing.relevance_rank.min(entry.relevance_rank);
             }
             None => {

@@ -5,10 +5,12 @@ edition = "2024"
 
 [dependencies]
 egui.workspace = true # works with 0.33.x
-cosmic-text = "*"
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+cosmic-text.workspace = true
 glyphon = "*"
 pulldown-cmark = "*"
 syntect = "*"
+unicode-segmentation = "1"
 skrifa = "*"
 tracing.workspace = true
 launcher_runtime.workspace = true

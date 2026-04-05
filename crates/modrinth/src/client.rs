@@ -577,6 +577,7 @@ impl Client {
 
     fn reserve_next_request_slot(&self) -> Option<Duration> {
         let Ok(mut guard) = rate_limit_store().lock() else {
+            warn!(target: "vertexlauncher/modrinth", "rate_limit_store mutex was poisoned");
             return None;
         };
         let now = Instant::now();
@@ -596,12 +597,14 @@ impl Client {
     fn note_rate_limit(&self, path: &str, retry_after_secs: Option<u64>) {
         let cooldown = Duration::from_secs(retry_after_secs.unwrap_or(60).max(1));
         let until = Instant::now() + cooldown.max(DEFAULT_RATE_LIMIT_COOLDOWN);
-        if let Ok(mut guard) = rate_limit_store().lock() {
-            if guard.cooldown_until.is_none_or(|existing| existing < until) {
-                guard.cooldown_until = Some(until);
-            }
-            guard.next_request_at = guard.next_request_at.max(until);
+        let Ok(mut guard) = rate_limit_store().lock() else {
+            warn!(target: "vertexlauncher/modrinth", "rate_limit_store mutex was poisoned");
+            return;
+        };
+        if guard.cooldown_until.is_none_or(|existing| existing < until) {
+            guard.cooldown_until = Some(until);
         }
+        guard.next_request_at = guard.next_request_at.max(until);
         warn!(
             target: "vertexlauncher/modrinth",
             path,
@@ -618,19 +621,21 @@ impl Client {
             return;
         };
         let wait = rate_limit_wait_from_budget(reset_secs, remaining);
-        if let Ok(mut guard) = rate_limit_store().lock() {
-            let next_request_at = Instant::now() + wait;
-            if guard.next_request_at < next_request_at {
-                guard.next_request_at = next_request_at;
-            }
-            if remaining == 0 {
-                let cooldown_until = Instant::now() + Duration::from_secs(reset_secs.max(1));
-                if guard
-                    .cooldown_until
-                    .is_none_or(|existing| existing < cooldown_until)
-                {
-                    guard.cooldown_until = Some(cooldown_until);
-                }
+        let Ok(mut guard) = rate_limit_store().lock() else {
+            warn!(target: "vertexlauncher/modrinth", "rate_limit_store mutex was poisoned");
+            return;
+        };
+        let next_request_at = Instant::now() + wait;
+        if guard.next_request_at < next_request_at {
+            guard.next_request_at = next_request_at;
+        }
+        if remaining == 0 {
+            let cooldown_until = Instant::now() + Duration::from_secs(reset_secs.max(1));
+            if guard
+                .cooldown_until
+                .is_none_or(|existing| existing < cooldown_until)
+            {
+                guard.cooldown_until = Some(cooldown_until);
             }
         }
     }
@@ -656,10 +661,11 @@ fn string_slice_is_empty(values: &[String]) -> bool {
     values.is_empty()
 }
 
+// HTTP header names are case-insensitive; HeaderMap::get normalises to
+// lowercase internally, so there is no need for a case-variant fallback.
 fn parse_retry_after_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
     headers
         .get("retry-after")
-        .or_else(|| headers.get("Retry-After"))
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
 }
@@ -667,7 +673,6 @@ fn parse_retry_after_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
 fn parse_ratelimit_remaining(headers: &ureq::http::HeaderMap) -> Option<u64> {
     headers
         .get("x-ratelimit-remaining")
-        .or_else(|| headers.get("X-Ratelimit-Remaining"))
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
 }
@@ -675,7 +680,6 @@ fn parse_ratelimit_remaining(headers: &ureq::http::HeaderMap) -> Option<u64> {
 fn parse_ratelimit_reset_seconds(headers: &ureq::http::HeaderMap) -> Option<u64> {
     headers
         .get("x-ratelimit-reset")
-        .or_else(|| headers.get("X-Ratelimit-Reset"))
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
 }

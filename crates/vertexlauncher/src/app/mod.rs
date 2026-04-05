@@ -44,6 +44,7 @@ mod cli;
 mod config_format_modal;
 mod create_instance_modal;
 mod discord_presence;
+mod gamepad;
 mod fonts;
 mod import_instance_modal;
 mod native_options;
@@ -184,6 +185,7 @@ struct VertexApp {
     initial_install_results_tx: Option<mpsc::Sender<InitialInstanceInstallResult>>,
     initial_install_results_rx: Option<mpsc::Receiver<InitialInstanceInstallResult>>,
     discord_presence: DiscordPresenceManager,
+    gamepad: Option<gamepad::GamepadNavigator>,
     last_frame_end: Option<Instant>,
     last_rendered_screen: Option<screens::AppScreen>,
 }
@@ -326,6 +328,7 @@ impl VertexApp {
             initial_install_results_tx: None,
             initial_install_results_rx: None,
             discord_presence: DiscordPresenceManager::default(),
+            gamepad: gamepad::GamepadNavigator::new(),
             last_frame_end: None,
             last_rendered_screen: None,
         };
@@ -342,6 +345,9 @@ impl VertexApp {
     }
 
     fn update_inner(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if let Some(gamepad) = &mut self.gamepad {
+            gamepad.update(ctx);
+        }
         self.apply_frame_limiter();
         self.text_ui.begin_frame(ctx);
         launcher_ui::ui::components::image_textures::begin_frame(ctx);

@@ -154,7 +154,12 @@ fn sanitize_url_for_log(value: &str) -> String {
         .collect();
     if !query_keys.is_empty() {
         out.push_str("?params=");
-        out.push_str(&query_keys.into_iter().collect::<Vec<_>>().join(","));
+        for (i, key) in query_keys.into_iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str(&key);
+        }
     }
 
     if fragment.is_some() {

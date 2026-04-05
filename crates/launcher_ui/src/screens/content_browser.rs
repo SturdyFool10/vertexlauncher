@@ -445,6 +445,8 @@ pub struct ContentBrowserState {
     status_message: Option<String>,
     search_notification_active: bool,
     download_notification_active: bool,
+    cached_manifest: Option<ContentInstallManifest>,
+    manifest_dirty: bool,
 }
 
 impl Default for ContentBrowserState {
@@ -496,6 +498,8 @@ impl Default for ContentBrowserState {
             status_message: None,
             search_notification_active: false,
             download_notification_active: false,
+            cached_manifest: None,
+            manifest_dirty: true,
         }
     }
 }
@@ -628,6 +632,8 @@ pub fn render(
         state.download_queue.clear();
         state.download_in_flight = false;
         state.active_download = None;
+        state.cached_manifest = None;
+        state.manifest_dirty = true;
         state.current_page = 1;
         state.current_view = ContentBrowserPage::Browse;
         state.detail_entry = None;
@@ -706,7 +712,11 @@ pub fn render(
     ui.add_space(style::SPACE_MD);
     match state.current_view {
         ContentBrowserPage::Browse => {
-            let manifest = load_content_manifest(instance_root.as_path());
+            if state.manifest_dirty || state.cached_manifest.is_none() {
+                state.cached_manifest = Some(load_content_manifest(instance_root.as_path()));
+                state.manifest_dirty = false;
+            }
+            let manifest = state.cached_manifest.clone().expect("just populated");
             render_controls(ui, text_ui, instance.id.as_str(), state);
 
             if state.auto_populated_instance_id.as_deref() != Some(instance.id.as_str())
@@ -1643,7 +1653,11 @@ fn render_detail_page(
     };
 
     request_detail_versions(state);
-    let manifest = load_content_manifest(instance_root);
+    if state.manifest_dirty || state.cached_manifest.is_none() {
+        state.cached_manifest = Some(load_content_manifest(instance_root));
+        state.manifest_dirty = false;
+    }
+    let manifest = state.cached_manifest.clone().expect("just populated");
     let installed_project =
         installed_project_for_entry(&manifest, &entry).map(|(_, project)| project);
 
@@ -2620,7 +2634,11 @@ fn request_identify_file(state: &mut ContentBrowserState, selected_path: PathBuf
     ));
     let _ = tokio_runtime::spawn_detached(async move {
         let path_for_result = selected_path.clone();
-        let result = identify_mod_file_by_hash(selected_path.as_path());
+        let join = tokio_runtime::spawn_blocking(move || identify_mod_file_by_hash(selected_path.as_path()));
+        let result = match join.await {
+            Ok(r) => r,
+            Err(err) => Err(format!("content identification worker panicked: {err}")),
+        };
         if let Err(err) = tx.send((path_for_result.clone(), result)) {
             tracing::error!(
                 target: "vertexlauncher/content_browser",
@@ -2753,7 +2771,11 @@ fn request_search(state: &mut ContentBrowserState, request: BrowserSearchRequest
     let request_for_failure = request.clone();
     let _ = tokio_runtime::spawn_detached(async move {
         let worker_tx = tx.clone();
-        let result = run_search_request(request, worker_tx);
+        let join = tokio_runtime::spawn_blocking(move || run_search_request(request, worker_tx));
+        let result = match join.await {
+            Ok(r) => r,
+            Err(err) => Err(format!("content search worker panicked: {err}")),
+        };
         match result {
             Ok(()) => {}
             Err(err) => {
@@ -3987,7 +4009,11 @@ fn maybe_start_queued_download(
     let request = next.request.clone();
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = apply_content_install_request(root.as_path(), request);
+        let join = tokio_runtime::spawn_blocking(move || apply_content_install_request(root.as_path(), request));
+        let result = match join.await {
+            Ok(r) => r,
+            Err(err) => Err(format!("content install worker panicked: {err}")),
+        };
         if let Err(err) = tx.send(result) {
             tracing::error!(
                 target: "vertexlauncher/content_browser",
@@ -4051,6 +4077,7 @@ fn poll_downloads(state: &mut ContentBrowserState) {
         }
         match update {
             Ok(result) => {
+                state.manifest_dirty = true;
                 state.status_message = Some(format!(
                     "Applied {}: {} added, {} removed.",
                     result.project_name,

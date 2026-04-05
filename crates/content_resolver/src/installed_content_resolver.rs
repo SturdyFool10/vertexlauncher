@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use curseforge::Client as CurseForgeClient;
 use managed_content::InstalledContentIdentity;
@@ -66,33 +66,39 @@ fn fs_remove_file(path: &Path) -> std::io::Result<()> {
     result
 }
 
-fn modrinth_entry_cache() -> &'static Mutex<HashMap<String, Option<UnifiedContentEntry>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<UnifiedContentEntry>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+/// Maximum number of entries kept in each session-scoped lookup cache.
+/// Prevents unbounded growth when the user browses a very large mod library.
+const LOOKUP_CACHE_MAX_ENTRIES: usize = 4096;
+
+/// Insert `value` under `key` only when the map is below the entry cap.
+/// Existing entries are always overwritten regardless of size.
+fn bounded_cache_insert<K, V>(map: &mut HashMap<K, V>, key: K, value: V)
+where
+    K: Eq + std::hash::Hash,
+{
+    if map.len() < LOOKUP_CACHE_MAX_ENTRIES || map.contains_key(&key) {
+        map.insert(key, value);
+    }
 }
 
-fn modrinth_version_cache() -> &'static Mutex<HashMap<String, Option<modrinth::ProjectVersion>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<modrinth::ProjectVersion>>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+macro_rules! static_cache {
+    ($name:ident, $k:ty, $v:ty) => {
+        fn $name() -> &'static Mutex<HashMap<$k, Option<Arc<$v>>>> {
+            static CACHE: OnceLock<Mutex<HashMap<$k, Option<Arc<$v>>>>> = OnceLock::new();
+            CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+        }
+    };
 }
 
-fn modrinth_latest_version_cache()
--> &'static Mutex<HashMap<String, Option<modrinth::ProjectVersion>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<modrinth::ProjectVersion>>>> =
-        OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn curseforge_project_cache() -> &'static Mutex<HashMap<u64, Option<curseforge::Project>>> {
-    static CACHE: OnceLock<Mutex<HashMap<u64, Option<curseforge::Project>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn curseforge_file_cache() -> &'static Mutex<HashMap<u64, Option<curseforge::File>>> {
-    static CACHE: OnceLock<Mutex<HashMap<u64, Option<curseforge::File>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
+static_cache!(modrinth_entry_cache, String, UnifiedContentEntry);
+static_cache!(modrinth_version_cache, String, modrinth::ProjectVersion);
+static_cache!(
+    modrinth_latest_version_cache,
+    String,
+    modrinth::ProjectVersion
+);
+static_cache!(curseforge_project_cache, u64, curseforge::Project);
+static_cache!(curseforge_file_cache, u64, curseforge::File);
 
 fn should_cache_modrinth_absence(err: &ModrinthError) -> bool {
     matches!(err, ModrinthError::HttpStatus { status: 404, .. })
@@ -357,7 +363,7 @@ fn resolve_modrinth_hash_metadata(
         };
 
         let resolution = ResolvedInstalledContent {
-            entry,
+            entry: Arc::unwrap_or_clone(entry),
             installed_version_id: non_empty_owned(version.id.as_str()),
             installed_version_label: non_empty_owned(version.version_number.as_str()),
             resolution_kind: InstalledContentResolutionKind::ExactHash,
@@ -431,7 +437,7 @@ fn resolve_modrinth_hash_update(
 fn modrinth_entry_from_project_id(
     modrinth: &ModrinthClient,
     project_id: &str,
-) -> Option<UnifiedContentEntry> {
+) -> Option<Arc<UnifiedContentEntry>> {
     if let Ok(cache) = modrinth_entry_cache().lock()
         && let Some(cached) = cache.get(project_id)
     {
@@ -440,7 +446,7 @@ fn modrinth_entry_from_project_id(
 
     match modrinth.get_project(project_id) {
         Ok(project) => {
-            let entry = UnifiedContentEntry {
+            let entry = Arc::new(UnifiedContentEntry {
                 id: format!("modrinth:{}", project.project_id),
                 name: project.title,
                 summary: project.description.trim().to_owned(),
@@ -448,15 +454,15 @@ fn modrinth_entry_from_project_id(
                 source: ContentSource::Modrinth,
                 project_url: Some(project.project_url),
                 icon_url: project.icon_url,
-            };
+            });
             if let Ok(mut cache) = modrinth_entry_cache().lock() {
-                cache.insert(project_id.to_owned(), Some(entry.clone()));
+                bounded_cache_insert(&mut cache, project_id.to_owned(), Some(Arc::clone(&entry)));
             }
             Some(entry)
         }
         Err(err) if should_cache_modrinth_absence(&err) => {
             if let Ok(mut cache) = modrinth_entry_cache().lock() {
-                cache.insert(project_id.to_owned(), None);
+                bounded_cache_insert(&mut cache, project_id.to_owned(), None);
             }
             None
         }
@@ -494,8 +500,8 @@ fn managed_content_metadata(
             }
             let entry = modrinth_entry_from_project_id(&modrinth, project_id)?;
             Some(ResolvedInstalledContent {
-                entry,
-                installed_version_id: Some(version.id),
+                entry: Arc::unwrap_or_clone(entry),
+                installed_version_id: Some(version.id.clone()),
                 installed_version_label: non_empty_owned(version.version_number.as_str()),
                 resolution_kind: InstalledContentResolutionKind::Managed,
                 warning_message: None,
@@ -754,7 +760,7 @@ fn version_contains_file_name(
 fn cached_modrinth_version(
     modrinth: &ModrinthClient,
     version_id: &str,
-) -> Option<modrinth::ProjectVersion> {
+) -> Option<Arc<modrinth::ProjectVersion>> {
     if let Ok(cache) = modrinth_version_cache().lock()
         && let Some(cached) = cache.get(version_id)
     {
@@ -763,14 +769,15 @@ fn cached_modrinth_version(
 
     match modrinth.get_version(version_id) {
         Ok(version) => {
+            let arc = Arc::new(version);
             if let Ok(mut cache) = modrinth_version_cache().lock() {
-                cache.insert(version_id.to_owned(), Some(version.clone()));
+                bounded_cache_insert(&mut cache, version_id.to_owned(), Some(Arc::clone(&arc)));
             }
-            Some(version)
+            Some(arc)
         }
         Err(err) if should_cache_modrinth_absence(&err) => {
             if let Ok(mut cache) = modrinth_version_cache().lock() {
-                cache.insert(version_id.to_owned(), None);
+                bounded_cache_insert(&mut cache, version_id.to_owned(), None);
             }
             None
         }
@@ -783,7 +790,7 @@ fn cached_latest_modrinth_project_version(
     project_id: &str,
     loaders: &[String],
     game_versions: &[String],
-) -> Option<modrinth::ProjectVersion> {
+) -> Option<Arc<modrinth::ProjectVersion>> {
     let cache_key = format!(
         "{project_id}|{}|{}",
         loaders.join(","),
@@ -800,15 +807,16 @@ fn cached_latest_modrinth_project_version(
             let latest = versions
                 .into_iter()
                 .filter(|version| !version.files.is_empty())
-                .max_by(|left, right| left.date_published.cmp(&right.date_published));
+                .max_by(|left, right| left.date_published.cmp(&right.date_published))
+                .map(Arc::new);
             if let Ok(mut cache) = modrinth_latest_version_cache().lock() {
-                cache.insert(cache_key, latest.clone());
+                bounded_cache_insert(&mut cache, cache_key, latest.clone());
             }
             latest
         }
         Err(err) if should_cache_modrinth_absence(&err) => {
             if let Ok(mut cache) = modrinth_latest_version_cache().lock() {
-                cache.insert(cache_key, None);
+                bounded_cache_insert(&mut cache, cache_key, None);
             }
             None
         }
@@ -819,7 +827,7 @@ fn cached_latest_modrinth_project_version(
 fn cached_curseforge_project(
     client: &CurseForgeClient,
     project_id: u64,
-) -> Option<curseforge::Project> {
+) -> Option<Arc<curseforge::Project>> {
     if let Ok(cache) = curseforge_project_cache().lock()
         && let Some(cached) = cache.get(&project_id)
     {
@@ -828,14 +836,15 @@ fn cached_curseforge_project(
 
     match client.get_mod(project_id) {
         Ok(project) => {
+            let arc = Arc::new(project);
             if let Ok(mut cache) = curseforge_project_cache().lock() {
-                cache.insert(project_id, Some(project.clone()));
+                bounded_cache_insert(&mut cache, project_id, Some(Arc::clone(&arc)));
             }
-            Some(project)
+            Some(arc)
         }
         Err(err) if should_cache_curseforge_absence(&err) => {
             if let Ok(mut cache) = curseforge_project_cache().lock() {
-                cache.insert(project_id, None);
+                bounded_cache_insert(&mut cache, project_id, None);
             }
             None
         }
@@ -843,7 +852,10 @@ fn cached_curseforge_project(
     }
 }
 
-fn cached_curseforge_file(client: &CurseForgeClient, file_id: u64) -> Option<curseforge::File> {
+fn cached_curseforge_file(
+    client: &CurseForgeClient,
+    file_id: u64,
+) -> Option<Arc<curseforge::File>> {
     if let Ok(cache) = curseforge_file_cache().lock()
         && let Some(cached) = cache.get(&file_id)
     {
@@ -852,15 +864,15 @@ fn cached_curseforge_file(client: &CurseForgeClient, file_id: u64) -> Option<cur
 
     match client.get_files(&[file_id]) {
         Ok(files) => {
-            let file = files.into_iter().next();
+            let file = files.into_iter().next().map(Arc::new);
             if let Ok(mut cache) = curseforge_file_cache().lock() {
-                cache.insert(file_id, file.clone());
+                bounded_cache_insert(&mut cache, file_id, file.clone());
             }
             file
         }
         Err(err) if should_cache_curseforge_absence(&err) => {
             if let Ok(mut cache) = curseforge_file_cache().lock() {
-                cache.insert(file_id, None);
+                bounded_cache_insert(&mut cache, file_id, None);
             }
             None
         }
@@ -893,7 +905,7 @@ fn resolve_managed_modrinth_update(
     }
 
     Some(InstalledContentUpdate {
-        latest_version_id: latest.id,
+        latest_version_id: latest.id.clone(),
         latest_version_label: non_empty_owned(latest.version_number.as_str())
             .unwrap_or_else(|| "Unknown update".to_owned()),
     })
