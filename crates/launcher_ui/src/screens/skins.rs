@@ -266,6 +266,11 @@ fn render_contents(
     let model_button_gap = style::SPACE_XS;
     let half_width = ((ui.available_width() - model_button_gap) * 0.5).max(1.0);
     model_button_style.min_size = egui::vec2(half_width, style::CONTROL_HEIGHT);
+    model_button_style.fill = ui.visuals().widgets.inactive.weak_bg_fill;
+    model_button_style.fill_hovered = ui.visuals().widgets.hovered.bg_fill.gamma_multiply(1.05);
+    model_button_style.fill_active = ui.visuals().selection.bg_fill.gamma_multiply(0.92);
+    model_button_style.fill_selected = ui.visuals().selection.bg_fill.gamma_multiply(0.78);
+    model_button_style.stroke = ui.visuals().widgets.hovered.bg_stroke;
     let _ = text_ui.label(ui, "skins_model_label", "Model:", &body);
     ui.add_space(style::SPACE_XS);
     let model_focus_request = take_model_focus_request(ui.ctx());
@@ -565,7 +570,9 @@ fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinMana
         .min(ui.clip_rect().width().max(1.0))
         .max(1.0);
     let height = style::CONTROL_HEIGHT_LG * 3.4;
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    let drop_zone_id = ui.make_persistent_id("skins_drop_zone");
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    let response = ui.interact(rect, drop_zone_id, Sense::click());
     let hovered_files = ui.input(|input| input.raw.hovered_files.clone());
     let dropped_files = ui.input(|input| input.raw.dropped_files.clone());
     let hovering_drop = !hovered_files.is_empty()
@@ -579,8 +586,13 @@ fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinMana
             .pointer_latest_pos()
             .is_some_and(|pointer| rect.contains(pointer));
     let focused = response.has_focus();
+    let pressed = response.is_pointer_button_down_on();
     let fill = if hovering_drop {
         ui.visuals().selection.bg_fill.gamma_multiply(0.22)
+    } else if pressed {
+        ui.visuals().widgets.active.bg_fill.gamma_multiply(0.95)
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered.bg_fill.gamma_multiply(0.92)
     } else if focused {
         ui.visuals().selection.bg_fill.gamma_multiply(0.12)
     } else {
@@ -596,6 +608,8 @@ fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinMana
         rect.shrink(1.5),
         if hovering_drop || focused {
             ui.visuals().selection.stroke.color
+        } else if response.hovered() {
+            ui.visuals().widgets.hovered.bg_stroke.color
         } else {
             ui.visuals().weak_text_color()
         },
@@ -654,6 +668,13 @@ fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinMana
         egui::pos2(content_rect.center().x - button_size.x * 0.5, current_y),
         button_size,
     );
+    let button_text_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            button_rect.center().x - button_text_size.x * 0.5,
+            button_rect.center().y - button_text_size.y * 0.5,
+        ),
+        button_text_size,
+    );
 
     ui.scope_builder(
         egui::UiBuilder::new()
@@ -676,18 +697,58 @@ fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinMana
             let _ = text_ui.label(ui, "skins_drop_prompt_or", "or", &muted);
         },
     );
-    let choose_response = ui.scope_builder(
+    let button_fill = if pressed {
+        choose_style.fill_active
+    } else if response.hovered() {
+        choose_style.fill_hovered
+    } else if focused {
+        choose_style.fill_selected
+    } else {
+        choose_style.fill
+    };
+    let button_stroke = if focused {
+        ui.visuals().selection.stroke
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered.bg_stroke
+    } else {
+        choose_style.stroke
+    };
+    ui.painter().rect_filled(
+        button_rect,
+        CornerRadius::same(choose_style.corner_radius),
+        button_fill,
+    );
+    ui.painter().rect_stroke(
+        button_rect,
+        CornerRadius::same(choose_style.corner_radius),
+        button_stroke,
+        egui::StrokeKind::Inside,
+    );
+    if focused {
+        ui.painter().rect_stroke(
+            button_rect.expand(2.0),
+            CornerRadius::same(choose_style.corner_radius.saturating_add(2)),
+            Stroke::new(
+                (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                ui.visuals().selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
+    ui.scope_builder(
         egui::UiBuilder::new()
-            .max_rect(button_rect)
+            .max_rect(button_text_rect)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
-            ui.add_enabled_ui(!state.pick_skin_in_progress, |ui| {
-                text_ui.button(ui, "skins_pick_file", "Choose Skin Image", &choose_style)
-            })
-            .inner
+            let _ = text_ui.label(
+                ui,
+                "skins_pick_file_visual",
+                "Choose Skin Image",
+                &button_label_style,
+            );
         },
     );
-    if choose_response.inner.clicked() {
+    if response.clicked() && !state.pick_skin_in_progress && !received_drop {
         state.pick_skin_file();
     }
 
