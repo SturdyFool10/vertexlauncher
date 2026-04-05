@@ -3,7 +3,7 @@ use std::hash::Hash;
 use egui::{self, Align, Layout, Response, Sense, Ui};
 use textui::{
     ButtonOptions, InputOptions, LabelOptions, TextUi, TooltipOptions,
-    truncate_single_line_text_with_ellipsis,
+    apply_gamepad_scroll_to_registered_id, truncate_single_line_text_with_ellipsis,
 };
 
 use crate::{
@@ -16,6 +16,9 @@ const GAMEPAD_SLIDER_STEP_DELTA_ID: &str = "settings_widgets_gamepad_slider_step
 const GAMEPAD_ACTIVATE_TARGET_ID: &str = "settings_widgets_gamepad_activate_target";
 const GAMEPAD_CUSTOM_ACTIVATE_IDS: &str = "settings_widgets_gamepad_custom_activate_ids";
 const SETTINGS_DEFAULT_FOCUS_REQUEST_ID: &str = "settings_widgets_default_focus_request";
+const DROPDOWN_POPUP_FOCUS_PENDING_ID: &str = "settings_widgets_dropdown_popup_focus_pending";
+const DROPDOWN_OWNER_FOCUS_PENDING_ID: &str = "settings_widgets_dropdown_owner_focus_pending";
+const DROPDOWN_POPUP_HAD_FOCUS_ID: &str = "settings_widgets_dropdown_popup_had_focus";
 
 #[derive(Clone, Copy, Debug)]
 struct ControlMetrics {
@@ -58,6 +61,72 @@ fn paint_focus_outline(ui: &Ui, rect: egui::Rect) {
         ui.visuals().selection.stroke,
         egui::StrokeKind::Outside,
     );
+}
+
+fn set_popup_focus_pending(ctx: &egui::Context, open_id: egui::Id, pending: bool) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new((DROPDOWN_POPUP_FOCUS_PENDING_ID, open_id));
+        if pending {
+            data.insert_temp(key, true);
+        } else {
+            data.remove::<bool>(key);
+        }
+    });
+}
+
+fn take_popup_focus_pending(ctx: &egui::Context, open_id: egui::Id) -> bool {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new((DROPDOWN_POPUP_FOCUS_PENDING_ID, open_id));
+        let pending = data.get_temp::<bool>(key).unwrap_or(false);
+        if pending {
+            data.remove::<bool>(key);
+        }
+        pending
+    })
+}
+
+fn set_owner_focus_pending(ctx: &egui::Context, open_id: egui::Id, pending: bool) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new((DROPDOWN_OWNER_FOCUS_PENDING_ID, open_id));
+        if pending {
+            data.insert_temp(key, true);
+        } else {
+            data.remove::<bool>(key);
+        }
+    });
+}
+
+fn take_owner_focus_pending(ctx: &egui::Context, open_id: egui::Id) -> bool {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new((DROPDOWN_OWNER_FOCUS_PENDING_ID, open_id));
+        let pending = data.get_temp::<bool>(key).unwrap_or(false);
+        if pending {
+            data.remove::<bool>(key);
+        }
+        pending
+    })
+}
+
+fn set_popup_had_focus(ctx: &egui::Context, open_id: egui::Id, had_focus: bool) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new((DROPDOWN_POPUP_HAD_FOCUS_ID, open_id));
+        if had_focus {
+            data.insert_temp(key, true);
+        } else {
+            data.remove::<bool>(key);
+        }
+    });
+}
+
+fn take_popup_had_focus(ctx: &egui::Context, open_id: egui::Id) -> bool {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new((DROPDOWN_POPUP_HAD_FOCUS_ID, open_id));
+        let had_focus = data.get_temp::<bool>(key).unwrap_or(false);
+        if had_focus {
+            data.remove::<bool>(key);
+        }
+        had_focus
+    })
 }
 
 pub fn set_gamepad_slider_step_delta(ctx: &egui::Context, delta: i32) {
@@ -243,29 +312,31 @@ pub fn dropdown_row(
         return response;
     }
 
-    let response = ui.horizontal(|ui| {
-        let label_response = text_ui.label(ui, ("dropdown_label", label), label, &label_options);
+    let response = ui
+        .horizontal(|ui| {
+            let label_response =
+                text_ui.label(ui, ("dropdown_label", label), label, &label_options);
 
-        if info_tooltip.is_some() {
-            ui.add_space(6.0);
-            info_hint(text_ui, ui, ("dropdown_info", label), info_tooltip);
-        }
+            if info_tooltip.is_some() {
+                ui.add_space(6.0);
+                info_hint(text_ui, ui, ("dropdown_info", label), info_tooltip);
+            }
 
-        let dropdown_response = ui
-            .with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.add_space(metrics.right_padding);
-                ui.push_id(id_source, |ui| {
-                    dropdown(text_ui, ui, selected_index, options, metrics)
+            let dropdown_response = ui
+                .with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.add_space(metrics.right_padding);
+                    ui.push_id(id_source, |ui| {
+                        dropdown(text_ui, ui, selected_index, options, metrics)
+                    })
+                    .inner
                 })
-                .inner
-            })
-            .inner;
-        maybe_request_default_focus(ui.ctx(), &dropdown_response);
+                .inner;
+            maybe_request_default_focus(ui.ctx(), &dropdown_response);
 
-        dropdown_response.union(label_response)
-    })
-    .inner;
+            dropdown_response.union(label_response)
+        })
+        .inner;
     if response.has_focus() {
         paint_focus_outline(ui, response.rect);
     }
@@ -321,39 +392,40 @@ pub fn searchable_dropdown_row(
         return response;
     }
 
-    let response = ui.horizontal(|ui| {
-        let label_response = text_ui.label(
-            ui,
-            ("searchable_dropdown_label", label),
-            label,
-            &label_options,
-        );
-
-        if info_tooltip.is_some() {
-            ui.add_space(6.0);
-            info_hint(
-                text_ui,
+    let response = ui
+        .horizontal(|ui| {
+            let label_response = text_ui.label(
                 ui,
-                ("searchable_dropdown_info", label),
-                info_tooltip,
+                ("searchable_dropdown_label", label),
+                label,
+                &label_options,
             );
-        }
 
-        let dropdown_response = ui
-            .with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.add_space(metrics.right_padding);
-                ui.push_id(id_source, |ui| {
-                    searchable_dropdown(text_ui, ui, selected_index, options, metrics)
+            if info_tooltip.is_some() {
+                ui.add_space(6.0);
+                info_hint(
+                    text_ui,
+                    ui,
+                    ("searchable_dropdown_info", label),
+                    info_tooltip,
+                );
+            }
+
+            let dropdown_response = ui
+                .with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.add_space(metrics.right_padding);
+                    ui.push_id(id_source, |ui| {
+                        searchable_dropdown(text_ui, ui, selected_index, options, metrics)
+                    })
+                    .inner
                 })
-                .inner
-            })
-            .inner;
-        maybe_request_default_focus(ui.ctx(), &dropdown_response);
+                .inner;
+            maybe_request_default_focus(ui.ctx(), &dropdown_response);
 
-        dropdown_response.union(label_response)
-    })
-    .inner;
+            dropdown_response.union(label_response)
+        })
+        .inner;
     if response.has_focus() {
         paint_focus_outline(ui, response.rect);
     }
@@ -1077,8 +1149,7 @@ pub fn float_slider_row(
                     };
                     if gamepad_step_delta != 0 {
                         let step = ((max - min) / 50.0).abs().max(0.001);
-                        let next =
-                            (*value + step * gamepad_step_delta as f32).clamp(min, max);
+                        let next = (*value + step * gamepad_step_delta as f32).clamp(min, max);
                         if (next - *value).abs() > f32::EPSILON {
                             *value = next;
                             slider_response.mark_changed();
@@ -1262,6 +1333,9 @@ fn dropdown(
 ) -> Response {
     let open_id = ui.id().with("settings_dropdown_open");
     let was_open = egui::Popup::is_id_open(ui.ctx(), open_id);
+    if !was_open && response_will_open(ui) {
+        set_popup_focus_pending(ui.ctx(), open_id, true);
+    }
 
     let mut label_style = row_label_options(ui);
     label_style.wrap = false;
@@ -1307,6 +1381,8 @@ fn dropdown(
             ui.set_width(popup_width);
 
             let mut popup_changed = false;
+            let mut focus_first_option = take_popup_focus_pending(ui.ctx(), open_id);
+            let mut popup_had_focus = false;
             let button_options = ButtonOptions {
                 min_size: egui::vec2(popup_button_width, metrics.control_height),
                 corner_radius: 4,
@@ -1333,25 +1409,42 @@ fn dropdown(
                         let option = options[index];
                         let option_response = text_ui.selectable_button(
                             ui,
-                            ("dropdown_option", index),
+                            ("dropdown_option", open_id, index),
                             option,
                             *selected_index == index,
                             &button_options,
                         );
-                        if !was_open && index == 0 {
+                        popup_had_focus |= option_response.has_focus();
+                        if focus_first_option && index == 0 {
                             option_response.request_focus();
+                            popup_had_focus = true;
+                            focus_first_option = false;
                         }
                         if option_response.clicked() {
                             *selected_index = index;
                             popup_changed = true;
+                            set_owner_focus_pending(ui.ctx(), open_id, true);
                             egui::Popup::close_id(ui.ctx(), open_id);
                         }
                     }
                 });
             textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
+            let gamepad_scroll_delta = textui::gamepad_scroll_delta(ui.ctx());
+            if gamepad_scroll_delta != egui::Vec2::ZERO
+                && apply_gamepad_scroll_to_registered_id(
+                    ui.ctx(),
+                    scroll_output.id,
+                    gamepad_scroll_delta,
+                )
+            {
+                ui.ctx().request_repaint();
+            }
 
             if popup_changed {
                 ui.ctx().request_repaint();
+            }
+            if popup_had_focus {
+                set_popup_had_focus(ui.ctx(), open_id, true);
             }
 
             popup_changed
@@ -1414,6 +1507,15 @@ fn dropdown(
     {
         response.mark_changed();
     }
+    let restore_owner_focus = if !is_open {
+        take_owner_focus_pending(ui.ctx(), open_id)
+            || (was_open && take_popup_had_focus(ui.ctx(), open_id))
+    } else {
+        false
+    };
+    if restore_owner_focus {
+        response.request_focus();
+    }
 
     response
 }
@@ -1429,6 +1531,9 @@ fn searchable_dropdown(
     let state_id = ui.id().with("settings_searchable_dropdown_state");
     let input_id = ui.id().with("settings_searchable_dropdown_input");
     let was_open = egui::Popup::is_id_open(ui.ctx(), open_id);
+    if !was_open && response_will_open(ui) {
+        set_popup_focus_pending(ui.ctx(), open_id, true);
+    }
 
     let mut state = ui
         .ctx()
@@ -1482,6 +1587,8 @@ fn searchable_dropdown(
             ui.set_width(popup_width);
 
             let mut popup_changed = false;
+            let focus_popup_entry = take_popup_focus_pending(ui.ctx(), open_id);
+            let mut popup_had_focus = false;
             let mut search_label_style = row_label_options(ui);
             search_label_style.font_size = 14.0;
             search_label_style.line_height = 18.0;
@@ -1499,8 +1606,10 @@ fn searchable_dropdown(
             search_input_options.min_width = popup_button_width;
             let search_response =
                 text_ui.singleline_input(ui, input_id, &mut state.query, &search_input_options);
-            if !was_open {
+            popup_had_focus |= search_response.has_focus();
+            if focus_popup_entry {
                 search_response.request_focus();
+                popup_had_focus = true;
             }
             ui.add_space(6.0);
 
@@ -1511,6 +1620,7 @@ fn searchable_dropdown(
             {
                 *selected_index = match_index;
                 popup_changed = true;
+                set_owner_focus_pending(ui.ctx(), open_id, true);
                 egui::Popup::close_id(ui.ctx(), open_id);
             }
 
@@ -1554,24 +1664,39 @@ fn searchable_dropdown(
                             let option = options[option_index];
                             let option_response = text_ui.selectable_button(
                                 ui,
-                                ("searchable_dropdown_option", option_index),
+                                ("searchable_dropdown_option", open_id, option_index),
                                 option,
                                 *selected_index == option_index,
                                 &button_options,
                             );
+                            popup_had_focus |= option_response.has_focus();
                             if option_response.clicked() {
                                 *selected_index = option_index;
                                 popup_changed = true;
+                                set_owner_focus_pending(ui.ctx(), open_id, true);
                                 egui::Popup::close_id(ui.ctx(), open_id);
                             }
                         }
                     });
                 textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
+                let gamepad_scroll_delta = textui::gamepad_scroll_delta(ui.ctx());
+                if gamepad_scroll_delta != egui::Vec2::ZERO
+                    && apply_gamepad_scroll_to_registered_id(
+                        ui.ctx(),
+                        scroll_output.id,
+                        gamepad_scroll_delta,
+                    )
+                {
+                    ui.ctx().request_repaint();
+                }
             }
 
             if popup_changed {
                 state.query.clear();
                 ui.ctx().request_repaint();
+            }
+            if popup_had_focus {
+                set_popup_had_focus(ui.ctx(), open_id, true);
             }
 
             popup_changed
@@ -1641,9 +1766,26 @@ fn searchable_dropdown(
     {
         response.mark_changed();
     }
+    let restore_owner_focus = if !is_open {
+        take_owner_focus_pending(ui.ctx(), open_id)
+            || (was_open && take_popup_had_focus(ui.ctx(), open_id))
+    } else {
+        false
+    };
+    if restore_owner_focus {
+        response.request_focus();
+    }
 
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
     response
+}
+
+fn response_will_open(ui: &Ui) -> bool {
+    ui.input(|input| {
+        input.pointer.primary_clicked()
+            || input.key_pressed(egui::Key::Enter)
+            || input.key_pressed(egui::Key::Space)
+    })
 }
 
 fn searchable_dropdown_matches(options: &[&str], query: &str) -> Vec<usize> {

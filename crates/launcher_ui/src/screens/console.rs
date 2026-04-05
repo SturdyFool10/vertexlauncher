@@ -9,6 +9,27 @@ use crate::{
 };
 
 const ACTION_COPY_SELECTION: &str = "copy_selection";
+const FORCE_CONSOLE_TAB_FOCUS_KEY: &str = "console_force_tab_focus";
+const CONSOLE_LOG_SCROLL_ID_KEY: &str = "console_log_scroll_area_id";
+
+pub fn request_console_tab_focus(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(FORCE_CONSOLE_TAB_FOCUS_KEY), true));
+}
+
+fn take_console_tab_focus_request(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| {
+        let key = egui::Id::new(FORCE_CONSOLE_TAB_FOCUS_KEY);
+        let v = d.get_temp::<bool>(key).unwrap_or(false);
+        if v {
+            d.remove::<bool>(key);
+        }
+        v
+    })
+}
+
+pub fn console_log_scroll_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new(CONSOLE_LOG_SCROLL_ID_KEY)))
+}
 const ACTION_CLEAR_SELECTION: &str = "clear_selection";
 const ACTION_COPY_LINE: &str = "copy_line";
 const LOG_SELECTION_AUTOSCROLL_MARGIN: f32 = 32.0;
@@ -110,6 +131,7 @@ pub(crate) fn render_log_buffer(
 #[derive(Clone, Debug, Default)]
 struct VirtualLogViewerState {
     max_line_width: f32,
+    follow_bottom: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -361,6 +383,7 @@ fn render_virtualized_log_lines(
     let state_id = ui.make_persistent_id((text_base_id, "virtual_log_state"));
     let selection_id = ui.make_persistent_id((text_base_id, "virtual_log_selection"));
     let viewport_id = ui.make_persistent_id((text_base_id, "virtual_log_viewport"));
+    let scroll_id = ui.make_persistent_id((text_base_id, "virtual_log_scroll"));
     let menu_source_id = ui.make_persistent_id((text_base_id, "context_menu_source"));
     let menu_line_id = ui.make_persistent_id((text_base_id, "context_menu_line"));
 
@@ -402,11 +425,21 @@ fn render_virtualized_log_lines(
     let mut clear_selection = false;
     let mut viewport_has_focus = false;
     let selection_active = selection_state.dragging || selection_state.has_selection();
+    let previous_scroll_state =
+        egui::scroll_area::State::load(ui.ctx(), scroll_id).unwrap_or_default();
+    if !stick_to_bottom {
+        viewer_state.follow_bottom = false;
+    } else if viewer_state.follow_bottom == false
+        && previous_scroll_state.offset == egui::Vec2::ZERO
+    {
+        viewer_state.follow_bottom = true;
+    }
+    let allow_stick_to_bottom = stick_to_bottom && viewer_state.follow_bottom && !selection_active;
 
-    egui::ScrollArea::both()
+    let scroll_output = egui::ScrollArea::both()
         .id_salt((text_base_id, "virtual_log_scroll"))
         .auto_shrink([false, false])
-        .stick_to_bottom(stick_to_bottom && !selection_active)
+        .stick_to_bottom(allow_stick_to_bottom)
         .show_viewport(ui, |ui, viewport| {
             let total_rows = lines.len();
             let visible_rows = ((viewport.height() / row_height).ceil() as usize).max(1);
@@ -419,8 +452,7 @@ fn render_virtualized_log_lines(
             // causes it to land just above or just below the true bottom on alternating
             // frames, which flips first_row by ±1 and produces the visible jitter.
             let max_scroll_y = (total_rows as f32 * row_height - viewport.height()).max(0.0);
-            let at_bottom =
-                stick_to_bottom && !selection_active && viewport.min.y >= max_scroll_y - row_height;
+            let at_bottom = allow_stick_to_bottom && viewport.min.y >= max_scroll_y - row_height;
             let first_row = if at_bottom {
                 total_rows.saturating_sub(visible_rows)
             } else {
@@ -691,6 +723,21 @@ fn render_virtualized_log_lines(
 
             ui.add_space(bottom_space);
         });
+    textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
+    ui.ctx().data_mut(|d| {
+        d.insert_temp(egui::Id::new(CONSOLE_LOG_SCROLL_ID_KEY), scroll_output.id);
+    });
+    let max_offset_y = (scroll_output.content_size.y - scroll_output.inner_rect.height()).max(0.0);
+    let at_bottom_after_scroll = scroll_output.state.offset.y >= max_offset_y - row_height;
+    if selection_active {
+        viewer_state.follow_bottom = false;
+    } else if at_bottom_after_scroll {
+        viewer_state.follow_bottom = stick_to_bottom;
+    } else if scroll_output.state.offset != previous_scroll_state.offset {
+        viewer_state.follow_bottom = false;
+    } else if !stick_to_bottom {
+        viewer_state.follow_bottom = false;
+    }
 
     if clear_selection {
         selection_state.clear();
@@ -726,13 +773,14 @@ fn render_virtualized_log_lines(
 }
 
 fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::ConsoleSnapshot) {
+    let want_tab_focus = take_console_tab_focus_request(ui.ctx());
     egui::ScrollArea::horizontal()
         .id_salt("console_tabs")
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(style::SPACE_SM, style::SPACE_SM);
-                for tab in &snapshot.tabs {
+                for (tab_idx, tab) in snapshot.tabs.iter().enumerate() {
                     let selected = tab.id == snapshot.active_tab_id;
                     let fill = if selected {
                         ui.visuals().selection.bg_fill
@@ -763,6 +811,9 @@ fn render_tabs_row(ui: &mut Ui, text_ui: &mut TextUi, snapshot: &console::Consol
                                 );
                                 if label_response.clicked() {
                                     console::set_active_tab(tab.id.as_str());
+                                }
+                                if want_tab_focus && tab_idx == 0 {
+                                    label_response.request_focus();
                                 }
 
                                 if tab.can_close {

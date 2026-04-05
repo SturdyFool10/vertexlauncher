@@ -164,23 +164,23 @@ impl LazyImageBytes {
     }
 
     pub fn status(&self, key: &str) -> LazyImageBytesStatus {
-        self.states.read(|state| {
-            match state.get_borrowed(key).map(|e| &e.value.state) {
+        self.states.read(
+            |state| match state.get_borrowed(key).map(|e| &e.value.state) {
                 Some(LazyImageBytesState::Loading) => LazyImageBytesStatus::Loading,
                 Some(LazyImageBytesState::Ready(_)) => LazyImageBytesStatus::Ready,
                 Some(LazyImageBytesState::Failed) => LazyImageBytesStatus::Failed,
                 None => LazyImageBytesStatus::Unrequested,
-            }
-        })
+            },
+        )
     }
 
     pub fn bytes(&self, key: &str) -> Option<Arc<[u8]>> {
-        self.states.read(|state| {
-            match state.get_borrowed(key).map(|e| &e.value.state) {
+        self.states.read(
+            |state| match state.get_borrowed(key).map(|e| &e.value.state) {
                 Some(LazyImageBytesState::Ready(bytes)) => Some(Arc::clone(bytes)),
                 _ => None,
-            }
-        })
+            },
+        )
     }
 
     pub fn request(&mut self, key: impl Into<String>, path: PathBuf) -> LazyImageBytesStatus {

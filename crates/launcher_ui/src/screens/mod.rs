@@ -20,6 +20,8 @@ mod platform;
 mod settings;
 mod skins;
 
+pub use console::console_log_scroll_id;
+pub use console::request_console_tab_focus;
 pub use content_browser::ContentBrowserState;
 pub use discover::{DiscoverInstallRequest, DiscoverInstallSource, DiscoverState};
 pub use home::HomePresenceSection;
@@ -32,10 +34,13 @@ pub use library::{
     purge_inactive_state as purge_inactive_library_state, render_global_overlays,
     request_delete_instance,
 };
-pub use skins::purge_inactive_state as purge_inactive_skins_state;
-pub use skins::set_gamepad_orbit_input as set_skins_gamepad_orbit_input;
-pub use skins::request_motion_focus as request_skins_motion_focus;
 pub use settings::request_theme_focus as request_settings_theme_focus;
+pub use skins::classic_model_button_id as skins_classic_model_button_id;
+pub use skins::purge_inactive_state as purge_inactive_skins_state;
+pub use skins::request_model_focus as request_skins_model_focus;
+pub use skins::request_motion_focus as request_skins_motion_focus;
+pub use skins::set_gamepad_orbit_input as set_skins_gamepad_orbit_input;
+pub use skins::slim_model_button_id as skins_slim_model_button_id;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppScreen {

@@ -1265,7 +1265,8 @@ impl Config {
         normalize_optional_path(&mut self.java_17_jvm_path);
         normalize_optional_path(&mut self.java_21_jvm_path);
         normalize_optional_path(&mut self.java_25_jvm_path);
-        self.gamepad_calibrations.retain(|key, _| !key.trim().is_empty());
+        self.gamepad_calibrations
+            .retain(|key, _| !key.trim().is_empty());
         for calibration in self.gamepad_calibrations.values_mut() {
             calibration.normalize();
         }

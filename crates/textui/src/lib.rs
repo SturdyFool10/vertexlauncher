@@ -27,8 +27,12 @@ impl GamepadScrollTarget {
         )
     }
 
-    fn can_scroll_h(&self) -> bool { self.max_offset().x > 0.5 }
-    fn can_scroll_v(&self) -> bool { self.max_offset().y > 0.5 }
+    fn can_scroll_h(&self) -> bool {
+        self.max_offset().x > 0.5
+    }
+    fn can_scroll_v(&self) -> bool {
+        self.max_offset().y > 0.5
+    }
 }
 
 pub fn set_gamepad_scroll_delta(ctx: &egui::Context, delta: egui::Vec2) {
@@ -63,7 +67,11 @@ fn register_gamepad_scroll_target(ctx: &egui::Context, id: Id, rect: Rect, conte
             .get_temp::<Vec<GamepadScrollTarget>>(key)
             .unwrap_or_default();
         targets.retain(|target| target.id != id);
-        targets.push(GamepadScrollTarget { id, rect, content_size });
+        targets.push(GamepadScrollTarget {
+            id,
+            rect,
+            content_size,
+        });
         data.insert_temp(key, targets);
     });
 }
@@ -79,7 +87,10 @@ fn register_gamepad_scroll_target(ctx: &egui::Context, id: Id, rect: Rect, conte
 /// let output = egui::ScrollArea::vertical().show(ui, |ui| { ... });
 /// textui::make_gamepad_scrollable(ui.ctx(), &output);
 /// ```
-pub fn make_gamepad_scrollable<R>(ctx: &egui::Context, output: &egui::scroll_area::ScrollAreaOutput<R>) {
+pub fn make_gamepad_scrollable<R>(
+    ctx: &egui::Context,
+    output: &egui::scroll_area::ScrollAreaOutput<R>,
+) {
     ensure_gamepad_scroll_targets_fresh(ctx);
     register_gamepad_scroll_target(ctx, output.id, output.inner_rect, output.content_size);
 }
@@ -124,7 +135,9 @@ pub fn apply_gamepad_scroll_to_focused_target(ctx: &egui::Context, delta: Vec2) 
     let sort_by_area = |a: &GamepadScrollTarget, b: &GamepadScrollTarget| {
         let a_area = a.rect.width() * a.rect.height();
         let b_area = b.rect.width() * b.rect.height();
-        a_area.partial_cmp(&b_area).unwrap_or(std::cmp::Ordering::Equal)
+        a_area
+            .partial_cmp(&b_area)
+            .unwrap_or(std::cmp::Ordering::Equal)
     };
 
     let mut candidates: Vec<GamepadScrollTarget> = if let Some(fr) = focused_screen_rect {
@@ -137,7 +150,11 @@ pub fn apply_gamepad_scroll_to_focused_target(ctx: &egui::Context, delta: Vec2) 
         // If the focused widget is rendered but outside every registered rect
         // (scrolled past the viewport edge in a non-virtual list), fall back
         // to all targets so scrolling doesn't silently stop.
-        if positional.is_empty() { targets } else { positional }
+        if positional.is_empty() {
+            targets
+        } else {
+            positional
+        }
     } else {
         // Widget is not rendered this frame (off-screen in a virtual list).
         // Use all registered targets; area-sort will pick the innermost one.
@@ -203,6 +220,48 @@ pub fn apply_gamepad_scroll_to_focused_target(ctx: &egui::Context, delta: Vec2) 
     applied
 }
 
+/// Apply scroll delta directly to a specific registered scroll area, bypassing focus lookup.
+///
+/// Returns `true` if the scroll state was changed. Useful for hard-binding input to a
+/// specific scroll area (e.g. the console log) regardless of which widget has focus.
+pub fn apply_gamepad_scroll_to_registered_id(
+    ctx: &egui::Context,
+    scroll_id: egui::Id,
+    delta: Vec2,
+) -> bool {
+    if delta == Vec2::ZERO {
+        return false;
+    }
+    let targets = ctx.data(|d| {
+        d.get_temp::<Vec<GamepadScrollTarget>>(egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID))
+            .unwrap_or_default()
+    });
+    let Some(target) = targets.iter().find(|t| t.id == scroll_id).copied() else {
+        return false;
+    };
+    let max_offset = target.max_offset();
+    let mut state = egui::scroll_area::State::load(ctx, scroll_id).unwrap_or_default();
+    let mut changed = false;
+    if delta.x != 0.0 && target.can_scroll_h() {
+        let new_x = (state.offset.x - delta.x).clamp(0.0, max_offset.x);
+        if new_x != state.offset.x {
+            state.offset.x = new_x;
+            changed = true;
+        }
+    }
+    if delta.y != 0.0 && target.can_scroll_v() {
+        let new_y = (state.offset.y - delta.y).clamp(0.0, max_offset.y);
+        if new_y != state.offset.y {
+            state.offset.y = new_y;
+            changed = true;
+        }
+    }
+    if changed {
+        state.store(ctx, scroll_id);
+    }
+    changed
+}
+
 pub fn apply_gamepad_scroll_if_focused(ui: &Ui, response: &Response) {
     if response.has_focus() {
         let delta = gamepad_scroll_delta(ui.ctx());
@@ -217,7 +276,7 @@ use cosmic_text::{
     Editor, Family, FontFeatures, FontSystem, LayoutRun, Metrics, Motion, Selection, Shaping,
     Style as FontStyle, SwashCache, SwashContent, Weight, Wrap,
 };
-use unicode_segmentation::UnicodeSegmentation;
+use egui::PointerButton;
 use egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense,
     TextureHandle, TextureOptions, Ui, Vec2,
@@ -234,7 +293,7 @@ use syntect::highlighting::{FontStyle as SyntectFontStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use tracing::warn;
-use egui::PointerButton;
+use unicode_segmentation::UnicodeSegmentation;
 
 mod button_options;
 mod code_block_options;
@@ -415,7 +474,6 @@ struct PreparedGlyph {
     color: Color32,
 }
 
-
 #[derive(Clone)]
 struct TextTextureGlyph {
     texture: TextureHandle,
@@ -479,7 +537,6 @@ struct PreparedAtlasGlyph {
     is_color: bool,
     approx_bytes: usize,
 }
-
 
 #[derive(Clone, Debug)]
 enum AsyncRasterKind {
@@ -709,7 +766,8 @@ impl TextUi {
         }
         self.prepared_texts.write(|state| {
             state.retain(|_, entry| {
-                current_frame.saturating_sub(entry.value.last_used_frame) <= INPUT_STATE_STALE_FRAMES
+                current_frame.saturating_sub(entry.value.last_used_frame)
+                    <= INPUT_STATE_STALE_FRAMES
             });
         });
         self.markdown_cache.retain(|_, (_, last_used_frame, _)| {
@@ -1755,7 +1813,15 @@ impl TextUi {
         // --- GPU mesh rendering: atlas glyphs + Shape::Rect for selection ---
         {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
-            self.paint_editor_gpu(&painter, content_rect, &state.editor, options, scale, false, true);
+            self.paint_editor_gpu(
+                &painter,
+                content_rect,
+                &state.editor,
+                options,
+                scale,
+                false,
+                true,
+            );
         }
 
         state_changed |= self.sync_viewer_scrollbars(
@@ -1957,10 +2023,8 @@ impl TextUi {
                     if pending_op != UndoOpKind::None {
                         // Push a new snapshot when the operation type changes or for
                         // atomic ops (Paste/Cut always get their own undo entry).
-                        let should_push = matches!(
-                            pending_op,
-                            UndoOpKind::Paste | UndoOpKind::Cut
-                        ) || state.last_undo_op != pending_op;
+                        let should_push = matches!(pending_op, UndoOpKind::Paste | UndoOpKind::Cut)
+                            || state.last_undo_op != pending_op;
                         if should_push {
                             push_undo(
                                 &mut state.undo_stack,
@@ -2123,7 +2187,15 @@ impl TextUi {
         // --- GPU mesh rendering: atlas glyphs + Shape::Rect for cursor/selection ---
         {
             let painter = ui.painter().with_clip_rect(ui.clip_rect());
-            self.paint_editor_gpu(&painter, content_rect, &state.editor, options, scale, has_focus, false);
+            self.paint_editor_gpu(
+                &painter,
+                content_rect,
+                &state.editor,
+                options,
+                scale,
+                has_focus,
+                false,
+            );
         }
         self.input_states.insert(id, state);
         if !has_focus
@@ -2593,8 +2665,7 @@ impl TextUi {
         has_focus: bool,
         show_selection_without_focus: bool,
     ) {
-        let horizontal_scroll_px =
-            editor.with_buffer(|b| b.scroll().horizontal.max(0.0));
+        let horizontal_scroll_px = editor.with_buffer(|b| b.scroll().horizontal.max(0.0));
         let selection_visible =
             has_focus || (show_selection_without_focus && editor.selection() != Selection::None);
         let selection_bounds = if selection_visible {
@@ -2647,17 +2718,20 @@ impl TextUi {
                                     && (end.line != line_i || c_start < end.index)
                                 {
                                     range_opt = match range_opt.take() {
-                                        Some((mn, mx)) => Some((
-                                            mn.min(c_x as i32),
-                                            mx.max((c_x + c_w) as i32),
-                                        )),
+                                        Some((mn, mx)) => {
+                                            Some((mn.min(c_x as i32), mx.max((c_x + c_w) as i32)))
+                                        }
                                         None => Some((c_x as i32, (c_x + c_w) as i32)),
                                     };
                                 } else if let Some((mn, mx)) = range_opt.take() {
                                     sel_rects.push(editor_sel_rect(
-                                        mn, mx,
-                                        line_top, line_height,
-                                        horizontal_scroll_px, origin, scale,
+                                        mn,
+                                        mx,
+                                        line_top,
+                                        line_height,
+                                        horizontal_scroll_px,
+                                        origin,
+                                        scale,
                                     ));
                                 }
                                 c_x += c_w;
@@ -2678,9 +2752,13 @@ impl TextUi {
                                 }
                             }
                             sel_rects.push(editor_sel_rect(
-                                mn, mx,
-                                line_top, line_height,
-                                horizontal_scroll_px, origin, scale,
+                                mn,
+                                mx,
+                                line_top,
+                                line_height,
+                                horizontal_scroll_px,
+                                origin,
+                                scale,
                             ));
                         }
                     }
@@ -2712,13 +2790,19 @@ impl TextUi {
                             {
                                 options.selected_text_color
                             } else {
-                                glyph.color_opt.map_or(options.text_color, cosmic_to_egui_color)
+                                glyph
+                                    .color_opt
+                                    .map_or(options.text_color, cosmic_to_egui_color)
                             }
                         } else {
-                            glyph.color_opt.map_or(options.text_color, cosmic_to_egui_color)
+                            glyph
+                                .color_opt
+                                .map_or(options.text_color, cosmic_to_egui_color)
                         }
                     } else {
-                        glyph.color_opt.map_or(options.text_color, cosmic_to_egui_color)
+                        glyph
+                            .color_opt
+                            .map_or(options.text_color, cosmic_to_egui_color)
                     };
 
                     glyph_cmds.push(GlyphCmd {
@@ -4357,8 +4441,7 @@ fn classify_modify_op(event: &egui::Event) -> UndoOpKind {
         } => {
             let word_delete = (modifiers.alt || modifiers.ctrl || modifiers.mac_cmd)
                 && matches!(key, Key::Backspace | Key::Delete);
-            let emacs_delete =
-                modifiers.ctrl && matches!(key, Key::H | Key::K | Key::U | Key::W);
+            let emacs_delete = modifiers.ctrl && matches!(key, Key::H | Key::K | Key::U | Key::W);
             if matches!(key, Key::Backspace | Key::Delete) || word_delete || emacs_delete {
                 UndoOpKind::Delete
             } else {
@@ -5053,9 +5136,6 @@ fn editor_sel_rect(
             (min_x as f32 - horiz_scroll_px) / scale + origin.x,
             line_top / scale + origin.y,
         ),
-        Vec2::new(
-            (max_x - min_x).max(0) as f32 / scale,
-            line_height / scale,
-        ),
+        Vec2::new((max_x - min_x).max(0) as f32 / scale, line_height / scale),
     )
 }

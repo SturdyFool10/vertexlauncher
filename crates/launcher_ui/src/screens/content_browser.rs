@@ -2634,7 +2634,9 @@ fn request_identify_file(state: &mut ContentBrowserState, selected_path: PathBuf
     ));
     let _ = tokio_runtime::spawn_detached(async move {
         let path_for_result = selected_path.clone();
-        let join = tokio_runtime::spawn_blocking(move || identify_mod_file_by_hash(selected_path.as_path()));
+        let join = tokio_runtime::spawn_blocking(move || {
+            identify_mod_file_by_hash(selected_path.as_path())
+        });
         let result = match join.await {
             Ok(r) => r,
             Err(err) => Err(format!("content identification worker panicked: {err}")),
@@ -4009,7 +4011,9 @@ fn maybe_start_queued_download(
     let request = next.request.clone();
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let join = tokio_runtime::spawn_blocking(move || apply_content_install_request(root.as_path(), request));
+        let join = tokio_runtime::spawn_blocking(move || {
+            apply_content_install_request(root.as_path(), request)
+        });
         let result = match join.await {
             Ok(r) => r,
             Err(err) => Err(format!("content install worker panicked: {err}")),

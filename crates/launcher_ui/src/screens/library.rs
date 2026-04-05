@@ -640,7 +640,13 @@ fn render_runtime_action_button(
     running_avatar_png: Option<&[u8]>,
 ) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width().max(1.0), style::CONTROL_HEIGHT_LG);
-    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(("library_runtime_action_button", instance_id)),
+        egui::Sense::click(),
+    );
+    let has_focus = response.has_focus();
     let (fill_base, stroke, text_color) = if runtime_running_for_active_account {
         let error = ui.visuals().error_fg_color;
         (
@@ -669,7 +675,7 @@ fn render_runtime_action_button(
     };
     let fill = if response.is_pointer_button_down_on() {
         fill_base.gamma_multiply(0.9)
-    } else if response.hovered() {
+    } else if response.hovered() || has_focus {
         fill_base.gamma_multiply(1.1)
     } else {
         fill_base
@@ -680,9 +686,24 @@ fn render_runtime_action_button(
     ui.painter().rect_stroke(
         rect,
         egui::CornerRadius::same(8),
-        stroke,
+        if has_focus {
+            ui.visuals().selection.stroke
+        } else {
+            stroke
+        },
         egui::StrokeKind::Inside,
     );
+    if has_focus {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(10),
+            egui::Stroke::new(
+                (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                ui.visuals().selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
 
     let inner_rect = rect.shrink2(egui::vec2(8.0, 4.0));
     if runtime_running_for_active_account {
@@ -744,7 +765,13 @@ fn render_runtime_action_button(
 
 fn render_delete_instance_button(ui: &mut Ui, instance_id: &str, disabled: bool) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width().max(1.0), TILE_DELETE_BUTTON_HEIGHT);
-    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(("library_delete_instance_button", instance_id)),
+        egui::Sense::click(),
+    );
+    let has_focus = response.has_focus();
     let danger = ui.visuals().error_fg_color;
     let stroke_color = if disabled {
         ui.visuals().widgets.noninteractive.bg_stroke.color
@@ -755,7 +782,7 @@ fn render_delete_instance_button(ui: &mut Ui, instance_id: &str, disabled: bool)
         ui.visuals().widgets.noninteractive.bg_fill
     } else if response.is_pointer_button_down_on() {
         danger.gamma_multiply(0.88)
-    } else if response.hovered() {
+    } else if response.hovered() || has_focus {
         danger
     } else {
         ui.visuals().widgets.inactive.bg_fill.gamma_multiply(0.18)
@@ -773,9 +800,24 @@ fn render_delete_instance_button(ui: &mut Ui, instance_id: &str, disabled: bool)
     ui.painter().rect_stroke(
         rect,
         egui::CornerRadius::same(8),
-        egui::Stroke::new(1.0, stroke_color),
+        if has_focus {
+            ui.visuals().selection.stroke
+        } else {
+            egui::Stroke::new(1.0, stroke_color)
+        },
         egui::StrokeKind::Inside,
     );
+    if has_focus {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(10),
+            egui::Stroke::new(
+                (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                ui.visuals().selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -861,6 +903,8 @@ fn render_delete_instance_modal(
     let instance_root = instance_root_path(installations_root, &instance);
     let instance_running = is_instance_running(instance_root.as_path());
     let danger = ctx.style().visuals.error_fg_color;
+    let request_cancel_focus =
+        modal_default_focus_requested(ctx, ("library_delete_instance_modal", instance.id.as_str()));
     let response = show_dialog(
         ctx,
         dialog_options("library_delete_instance_modal", DialogPreset::Confirm),
@@ -932,14 +976,16 @@ fn render_delete_instance_modal(
                     })
                     .inner
                     .clicked();
-                let cancel_clicked = text_ui
-                    .button(
-                        ui,
-                        ("library_delete_cancel", instance.id.as_str()),
-                        "Cancel",
-                        &secondary_button(ui, egui::vec2(96.0, style::CONTROL_HEIGHT)),
-                    )
-                    .clicked();
+                let cancel_clicked = text_ui.button(
+                    ui,
+                    ("library_delete_cancel", instance.id.as_str()),
+                    "Cancel",
+                    &secondary_button(ui, egui::vec2(96.0, style::CONTROL_HEIGHT)),
+                );
+                if request_cancel_focus {
+                    cancel_clicked.request_focus();
+                }
+                let cancel_clicked = cancel_clicked.clicked();
 
                 if state.delete_in_flight {
                     ui.add_space(style::SPACE_SM);
@@ -965,6 +1011,16 @@ fn render_delete_instance_modal(
         state.delete_target_instance_id = None;
         state.delete_error = None;
     }
+}
+
+fn modal_default_focus_requested(ctx: &egui::Context, id_source: impl Hash) -> bool {
+    let key = egui::Id::new(("modal_default_focus_frame", id_source));
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|data| {
+        let last_seen = data.get_temp::<u64>(key);
+        data.insert_temp(key, frame);
+        !matches!(last_seen, Some(previous) if previous.saturating_add(1) >= frame)
+    })
 }
 
 fn apply_color_to_svg(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {

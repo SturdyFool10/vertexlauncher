@@ -339,7 +339,9 @@ pub(super) fn request_move_instance(
             let final_result = if let Some(reason) = first_error {
                 MoveInstanceResult::Failed { reason }
             } else {
-                MoveInstanceResult::Complete { dest_path: dest_root }
+                MoveInstanceResult::Complete {
+                    dest_path: dest_root,
+                }
             };
             if let Err(send_err) = results_tx.send(final_result) {
                 tracing::warn!(

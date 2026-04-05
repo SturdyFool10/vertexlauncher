@@ -1,9 +1,7 @@
 use config::GamepadCalibration;
 use eframe::egui;
 use textui::{LabelOptions, TextUi};
-use ui_foundation::{
-    DialogPreset, dialog_options, primary_button, secondary_button, show_dialog,
-};
+use ui_foundation::{DialogPreset, dialog_options, primary_button, secondary_button, show_dialog};
 
 use crate::app::gamepad::{GamepadDeviceIdentity, GamepadStickSample};
 
@@ -94,7 +92,12 @@ pub fn render(
                 ..LabelOptions::default()
             };
 
-            let _ = text_ui.label(ui, "gamepad_calibration_heading", "Calibrate Gamepad", &heading);
+            let _ = text_ui.label(
+                ui,
+                "gamepad_calibration_heading",
+                "Calibrate Gamepad",
+                &heading,
+            );
             let device_label = format!("Device: {}", device.name);
             let _ = text_ui.label(
                 ui,
@@ -115,12 +118,7 @@ pub fn render(
 
             if let Some(sample) = live_sample {
                 let live_label = format!("Live left stick: x={:.3}, y={:.3}", sample.x, sample.y);
-                let _ = text_ui.label(
-                    ui,
-                    "gamepad_calibration_live",
-                    live_label.as_str(),
-                    &body,
-                );
+                let _ = text_ui.label(ui, "gamepad_calibration_live", live_label.as_str(), &body);
             } else {
                 let _ = text_ui.label(
                     ui,

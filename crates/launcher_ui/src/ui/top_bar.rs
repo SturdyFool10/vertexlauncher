@@ -34,6 +34,8 @@ const RESIZE_GRAB_THICKNESS: f32 = 6.0;
 const PROFILE_BUTTON_CORNER_RADIUS: u8 = 10;
 const TOP_BAR_COMPACT_THRESHOLD: f32 = 720.0;
 const ROUNDED_AVATAR_CACHE_MAX_ENTRIES: usize = 32;
+const PROFILE_POPUP_FOCUS_FIRST_KEY: &str = "top_bar_profile_popup_focus_first";
+const PROFILE_POPUP_OWNER_FOCUS_KEY: &str = "top_bar_profile_popup_owner_focus";
 
 #[derive(Debug, Clone, Default)]
 pub struct TopBarOutput {
@@ -183,6 +185,7 @@ pub fn render(
                             egui::Popup::open_id(ui.ctx(), profile_popup_id);
                         }
                     }
+                    let popup_was_open = egui::Popup::is_id_open(ui.ctx(), profile_popup_id);
 
                     let _ = egui::Popup::menu(&profile_response)
                         .id(profile_popup_id)
@@ -198,15 +201,41 @@ pub fn render(
                         ))
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
+                            if !popup_was_open {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        egui::Id::new((
+                                            PROFILE_POPUP_FOCUS_FIRST_KEY,
+                                            profile_popup_id,
+                                        )),
+                                        true,
+                                    );
+                                });
+                            }
                             render_profile_popup(
                                 ui,
                                 text_ui,
                                 profile_ui,
                                 &mut output,
                                 profile_popup_id,
+                                profile_response.id,
                                 compact,
                             );
                         });
+                    let popup_is_open = egui::Popup::is_id_open(ui.ctx(), profile_popup_id);
+                    let should_restore_owner_focus = ui.ctx().data_mut(|data| {
+                        let key = egui::Id::new((PROFILE_POPUP_OWNER_FOCUS_KEY, profile_popup_id));
+                        let pending = data.get_temp::<bool>(key).unwrap_or(false);
+                        if pending && !popup_is_open {
+                            data.remove::<bool>(key);
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if should_restore_owner_focus {
+                        profile_response.request_focus();
+                    }
 
                     if active_user_visible {
                         ui.add_space(ACTIVE_USER_TO_PROFILE_GAP);
@@ -358,11 +387,12 @@ fn render_profile_button(
 
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(button_size, button_size), egui::Sense::click());
+        let has_focus = response.has_focus();
         let fill = if profile_ui.auth_busy {
             ui.visuals().widgets.active.weak_bg_fill
         } else if response.is_pointer_button_down_on() {
             ui.visuals().widgets.active.weak_bg_fill
-        } else if response.hovered() {
+        } else if response.hovered() || has_focus {
             ui.visuals().widgets.hovered.weak_bg_fill
         } else {
             ui.visuals().widgets.inactive.weak_bg_fill
@@ -375,9 +405,24 @@ fn render_profile_button(
         ui.painter().rect_stroke(
             rect,
             egui::CornerRadius::same(PROFILE_BUTTON_CORNER_RADIUS),
-            egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color),
+            if has_focus {
+                ui.visuals().selection.stroke
+            } else {
+                egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color)
+            },
             egui::StrokeKind::Inside,
         );
+        if has_focus {
+            ui.painter().rect_stroke(
+                rect.expand(2.0),
+                egui::CornerRadius::same(PROFILE_BUTTON_CORNER_RADIUS.saturating_add(2)),
+                egui::Stroke::new(
+                    (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                    ui.visuals().selection.stroke.color,
+                ),
+                egui::StrokeKind::Outside,
+            );
+        }
         if let image_textures::ManagedTextureStatus::Ready(texture) =
             image_textures::request_texture(ui.ctx(), key, rounded, egui::TextureOptions::LINEAR)
         {
@@ -1056,8 +1101,26 @@ fn render_profile_popup(
     profile_ui: ProfileUiModel<'_>,
     output: &mut TopBarOutput,
     popup_id: egui::Id,
+    _owner_id: egui::Id,
     compact: bool,
 ) {
+    let focus_first = ui.ctx().data_mut(|data| {
+        let key = egui::Id::new((PROFILE_POPUP_FOCUS_FIRST_KEY, popup_id));
+        let value = data.get_temp::<bool>(key).unwrap_or(false);
+        if value {
+            data.remove::<bool>(key);
+        }
+        value
+    });
+    let mut first_focus_applied = false;
+    let request_owner_focus = |ui: &egui::Ui| {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new((PROFILE_POPUP_OWNER_FOCUS_KEY, popup_id)),
+                true,
+            );
+        });
+    };
     ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_MD, style::SPACE_MD);
     let full_action_width = if compact {
         ui.available_width().max(160.0)
@@ -1190,8 +1253,8 @@ fn render_profile_popup(
                         egui::vec2(ui.available_width(), style::CONTROL_HEIGHT),
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            if account.is_failed
-                                && ui
+                            if account.is_failed {
+                                let refresh_response = ui
                                     .add_enabled_ui(!profile_ui.auth_busy, |ui| {
                                         text_ui.button(
                                             ui,
@@ -1200,22 +1263,30 @@ fn render_profile_popup(
                                             &refresh_button_style,
                                         )
                                     })
-                                    .inner
-                                    .clicked()
-                            {
-                                output.refresh_account_id = Some(account.profile_id.clone());
+                                    .inner;
+                                if focus_first && !first_focus_applied {
+                                    refresh_response.request_focus();
+                                    first_focus_applied = true;
+                                }
+                                if refresh_response.clicked() {
+                                    output.refresh_account_id = Some(account.profile_id.clone());
+                                    request_owner_focus(ui);
+                                }
                             }
 
-                            if text_ui
-                                .button(
-                                    ui,
-                                    ("profile_popup_account_remove", &account.profile_id),
-                                    "Remove",
-                                    &remove_button_style,
-                                )
-                                .clicked()
-                            {
+                            let remove_response = text_ui.button(
+                                ui,
+                                ("profile_popup_account_remove", &account.profile_id),
+                                "Remove",
+                                &remove_button_style,
+                            );
+                            if focus_first && !first_focus_applied {
+                                remove_response.request_focus();
+                                first_focus_applied = true;
+                            }
+                            if remove_response.clicked() {
                                 output.remove_account_id = Some(account.profile_id.clone());
+                                request_owner_focus(ui);
                             }
 
                             ui.with_layout(
@@ -1223,17 +1294,20 @@ fn render_profile_popup(
                                 |ui| {
                                     let mut fill_style = list_button_style.clone();
                                     fill_style.min_size.x = ui.available_width().max(1.0);
-                                    if text_ui
-                                        .selectable_button(
-                                            ui,
-                                            ("profile_popup_account_select", &account.profile_id),
-                                            &label,
-                                            account.is_active,
-                                            &fill_style,
-                                        )
-                                        .clicked()
-                                    {
+                                    let select_response = text_ui.selectable_button(
+                                        ui,
+                                        ("profile_popup_account_select", &account.profile_id),
+                                        &label,
+                                        account.is_active,
+                                        &fill_style,
+                                    );
+                                    if focus_first && !first_focus_applied {
+                                        select_response.request_focus();
+                                        first_focus_applied = true;
+                                    }
+                                    if select_response.clicked() {
                                         output.select_account_id = Some(account.profile_id.clone());
+                                        request_owner_focus(ui);
                                     }
                                 },
                             );
@@ -1280,28 +1354,32 @@ fn render_profile_popup(
             egui::vec2(full_action_width, style::CONTROL_HEIGHT),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
-                if text_ui
-                    .button(
-                        ui,
-                        "profile_popup_signin_webview",
-                        "Webview Sign-in",
-                        &half_button_style,
-                    )
-                    .clicked()
-                {
+                let webview_response = text_ui.button(
+                    ui,
+                    "profile_popup_signin_webview",
+                    "Webview Sign-in",
+                    &half_button_style,
+                );
+                if focus_first && !first_focus_applied {
+                    webview_response.request_focus();
+                    first_focus_applied = true;
+                }
+                if webview_response.clicked() {
                     output.start_webview_sign_in = true;
                     egui::Popup::open_id(ui.ctx(), popup_id);
                 }
 
-                if text_ui
-                    .button(
-                        ui,
-                        "profile_popup_signin_device_code",
-                        "Device Code Sign-in",
-                        &half_button_style,
-                    )
-                    .clicked()
-                {
+                let device_code_response = text_ui.button(
+                    ui,
+                    "profile_popup_signin_device_code",
+                    "Device Code Sign-in",
+                    &half_button_style,
+                );
+                if focus_first && !first_focus_applied {
+                    device_code_response.request_focus();
+                    first_focus_applied = true;
+                }
+                if device_code_response.clicked() {
                     output.start_device_code_sign_in = true;
                     egui::Popup::open_id(ui.ctx(), popup_id);
                 }

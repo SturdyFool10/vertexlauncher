@@ -1177,6 +1177,7 @@ fn render_screenshot_tile(
         ui.id().with(("home_screenshot_tile", screenshot.key())),
         egui::Sense::click(),
     );
+    let image_has_focus = image_response.has_focus();
     let image_key = screenshot.uri();
     retained_image_keys.insert(image_key.clone());
     let image_status = screenshot_images.request(image_key.clone(), screenshot.path.clone());
@@ -1240,6 +1241,8 @@ fn render_screenshot_tile(
         .data_mut(|data| data.insert_temp(overlay_memory_id, overlay_active));
     let stroke = if overlay_active {
         ui.visuals().widgets.hovered.bg_stroke
+    } else if image_has_focus {
+        ui.visuals().selection.stroke
     } else {
         ui.visuals().widgets.inactive.bg_stroke
     };
@@ -1377,6 +1380,10 @@ fn render_screenshot_viewer_modal(
     let now_ms = current_time_millis();
     let mut close_requested = false;
     let mut delete_requested = false;
+    let request_reset_focus = modal_default_focus_requested(
+        ctx,
+        ("home_screenshot_viewer_window", screenshot_key.as_str()),
+    );
     let response = show_dialog(
         ctx,
         dialog_options("home_screenshot_viewer_window", DialogPreset::Viewer),
@@ -1460,21 +1467,22 @@ fn render_screenshot_viewer_modal(
                             bytes,
                         );
                     }
-                    if text_ui
-                        .button(
+                    let reset_response = text_ui.button(
+                        ui,
+                        "home_screenshot_viewer_reset",
+                        "Reset",
+                        &secondary_button(
                             ui,
-                            "home_screenshot_viewer_reset",
-                            "Reset",
-                            &secondary_button(
-                                ui,
-                                egui::vec2(
-                                    (metrics.action_button_width - 10.0).max(80.0),
-                                    style::CONTROL_HEIGHT,
-                                ),
+                            egui::vec2(
+                                (metrics.action_button_width - 10.0).max(80.0),
+                                style::CONTROL_HEIGHT,
                             ),
-                        )
-                        .clicked()
-                    {
+                        ),
+                    );
+                    if request_reset_focus {
+                        reset_response.request_focus();
+                    }
+                    if reset_response.clicked() {
                         viewer_state.zoom = SCREENSHOT_VIEWER_MIN_ZOOM;
                         viewer_state.pan_uv = egui::Vec2::ZERO;
                     }
@@ -1712,6 +1720,10 @@ fn render_delete_screenshot_modal(
     let danger = ctx.style().visuals.error_fg_color;
     let mut cancel_requested = false;
     let mut delete_requested = false;
+    let request_cancel_focus = modal_default_focus_requested(
+        ctx,
+        ("home_delete_screenshot_modal", screenshot_key.as_str()),
+    );
     let response = show_dialog(
         ctx,
         dialog_options("home_delete_screenshot_modal", DialogPreset::Confirm),
@@ -1779,7 +1791,7 @@ fn render_delete_screenshot_modal(
                 {
                     delete_requested = true;
                 }
-                if ui
+                let cancel_response = ui
                     .add_enabled_ui(!state.delete_screenshot_in_flight, |ui| {
                         text_ui.button(
                             ui,
@@ -1791,9 +1803,11 @@ fn render_delete_screenshot_modal(
                             ),
                         )
                     })
-                    .inner
-                    .clicked()
-                {
+                    .inner;
+                if request_cancel_focus {
+                    cancel_response.request_focus();
+                }
+                if cancel_response.clicked() {
                     cancel_requested = true;
                 }
                 if state.delete_screenshot_in_flight {
@@ -1913,11 +1927,12 @@ fn render_screenshot_overlay_button(
             egui::Sense::hover()
         },
     );
+    let has_focus = response.has_focus();
     let button_contains_pointer = ui_pointer_over_rect(ui, button_rect);
     let button_pressed = button_contains_pointer && ui.input(|input| input.pointer.primary_down());
     let fill = if response.is_pointer_button_down_on() || button_pressed {
         ui.visuals().widgets.active.bg_fill
-    } else if button_contains_pointer {
+    } else if button_contains_pointer || has_focus {
         ui.visuals().widgets.hovered.bg_fill
     } else {
         Color32::from_rgba_premultiplied(12, 16, 24, 210)
@@ -1927,9 +1942,24 @@ fn render_screenshot_overlay_button(
     ui.painter().rect_stroke(
         button_rect,
         egui::CornerRadius::same(8),
-        ui.visuals().widgets.inactive.bg_stroke,
+        if has_focus {
+            ui.visuals().selection.stroke
+        } else {
+            ui.visuals().widgets.inactive.bg_stroke
+        },
         egui::StrokeKind::Inside,
     );
+    if has_focus {
+        ui.painter().rect_stroke(
+            button_rect.expand(2.0),
+            egui::CornerRadius::same(10),
+            egui::Stroke::new(
+                (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                ui.visuals().selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
     let icon_size = (metrics.screenshot_overlay_button_size * 0.5).clamp(12.0, 16.0);
     let icon_rect =
         egui::Rect::from_center_size(button_rect.center(), egui::vec2(icon_size, icon_size));
@@ -3156,16 +3186,24 @@ fn render_clickable_entry_row(
     add_contents: impl FnOnce(&mut Ui),
 ) -> egui::Response {
     let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(&id_source),
+        egui::Sense::click(),
+    );
     let visuals = ui.visuals();
+    let has_focus = response.has_focus();
     let fill = if response.is_pointer_button_down_on() {
         visuals.widgets.active.bg_fill
-    } else if response.hovered() {
+    } else if response.hovered() || has_focus {
         visuals.widgets.hovered.bg_fill
     } else {
         visuals.widgets.inactive.weak_bg_fill
     };
-    let stroke = if response.hovered() {
+    let stroke = if has_focus {
+        visuals.selection.stroke
+    } else if response.hovered() {
         visuals.widgets.hovered.bg_stroke
     } else {
         visuals.widgets.inactive.bg_stroke
@@ -3177,6 +3215,17 @@ fn render_clickable_entry_row(
         stroke,
         egui::StrokeKind::Inside,
     );
+    if has_focus {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(10),
+            egui::Stroke::new(
+                (visuals.selection.stroke.width + 1.0).max(2.0),
+                visuals.selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
     let inner = rect.shrink2(egui::vec2(
         ACTIVITY_ENTRY_ROW_HORIZONTAL_PADDING,
         ACTIVITY_ENTRY_ROW_VERTICAL_PADDING,
@@ -3268,10 +3317,12 @@ fn render_favorite_star_button(
     id_source: impl std::hash::Hash + Copy,
     active: bool,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(
+    let (rect, _) = ui.allocate_exact_size(
         egui::vec2(FAVORITE_STAR_BUTTON_SIZE, FAVORITE_STAR_BUTTON_SIZE),
-        egui::Sense::click(),
+        egui::Sense::hover(),
     );
+    let response = ui.interact(rect, ui.make_persistent_id(id_source), egui::Sense::click());
+    let has_focus = response.has_focus();
     let star_fill = if active {
         ui.visuals().warn_fg_color
     } else {
@@ -3293,6 +3344,36 @@ fn render_favorite_star_button(
         rect.center(),
         egui::vec2(FAVORITE_STAR_ICON_SIZE, FAVORITE_STAR_ICON_SIZE),
     );
+    let button_fill = if response.is_pointer_button_down_on() {
+        ui.visuals().widgets.active.bg_fill
+    } else if response.hovered() || has_focus {
+        ui.visuals().widgets.hovered.bg_fill
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(6), button_fill);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        if has_focus {
+            ui.visuals().selection.stroke
+        } else {
+            ui.visuals().widgets.inactive.bg_stroke
+        },
+        egui::StrokeKind::Inside,
+    );
+    if has_focus {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(8),
+            egui::Stroke::new(
+                (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                ui.visuals().selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
     let mut icon_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(icon_rect)
@@ -3305,6 +3386,16 @@ fn render_favorite_star_button(
     );
 
     response
+}
+
+fn modal_default_focus_requested(ctx: &egui::Context, id_source: impl std::hash::Hash) -> bool {
+    let key = egui::Id::new(("modal_default_focus_frame", id_source));
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|data| {
+        let last_seen = data.get_temp::<u64>(key);
+        data.insert_temp(key, frame);
+        !matches!(last_seen, Some(previous) if previous.saturating_add(1) >= frame)
+    })
 }
 
 fn ping_icon_for_status(

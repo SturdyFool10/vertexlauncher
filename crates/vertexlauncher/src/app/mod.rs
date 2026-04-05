@@ -44,9 +44,9 @@ mod cli;
 mod config_format_modal;
 mod create_instance_modal;
 mod discord_presence;
+mod fonts;
 mod gamepad;
 mod gamepad_calibration_modal;
-mod fonts;
 mod import_instance_modal;
 mod native_options;
 mod platform;
@@ -306,7 +306,8 @@ impl VertexApp {
             show_import_instance_modal: false,
             import_instance_state: import_instance_modal::ImportInstanceState::default(),
             show_gamepad_calibration_modal: false,
-            gamepad_calibration_state: gamepad_calibration_modal::GamepadCalibrationState::default(),
+            gamepad_calibration_state: gamepad_calibration_modal::GamepadCalibrationState::default(
+            ),
             in_flight_import_request: None,
             curseforge_manual_download_preflight_request: None,
             curseforge_manual_download_preflight_in_flight: false,
@@ -834,14 +835,11 @@ impl VertexApp {
             }
         }
         if self.show_gamepad_calibration_modal {
-            let live_sample = self
-                .gamepad
-                .as_ref()
-                .and_then(|gamepad| {
-                    self.gamepad_calibration_state
-                        .device_key()
-                        .and_then(|device_key| gamepad.current_left_stick(device_key))
-                });
+            let live_sample = self.gamepad.as_ref().and_then(|gamepad| {
+                self.gamepad_calibration_state
+                    .device_key()
+                    .and_then(|device_key| gamepad.current_left_stick(device_key))
+            });
             match gamepad_calibration_modal::render(
                 ctx,
                 &mut self.text_ui,
@@ -857,7 +855,8 @@ impl VertexApp {
                     device_key,
                     calibration,
                 } => {
-                    self.config.set_gamepad_calibration(device_key.clone(), calibration);
+                    self.config
+                        .set_gamepad_calibration(device_key.clone(), calibration);
                     if let Some(gamepad) = self.gamepad.as_mut() {
                         gamepad.reset_navigation_state(device_key.as_str());
                     }

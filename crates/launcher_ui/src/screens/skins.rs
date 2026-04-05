@@ -38,6 +38,9 @@ const SKIN_PREVIEW_NEAR: f32 = 1.5;
 const SKIN_PREVIEW_ANISOTROPY_CLAMP: u16 = 16;
 const MOTION_BLUR_MIN_ANGULAR_SPAN: f32 = 0.015;
 const FORCE_MOTION_FOCUS_ID: &str = "skins_force_motion_focus";
+const FORCE_MODEL_FOCUS_ID: &str = "skins_force_model_focus";
+const CLASSIC_MODEL_BUTTON_ID_KEY: &str = "skins_classic_model_button_id";
+const SLIM_MODEL_BUTTON_ID_KEY: &str = "skins_slim_model_button_id";
 
 pub fn purge_inactive_state(ctx: &egui::Context) {
     let state_id = egui::Id::new("skins_screen_state");
@@ -51,6 +54,29 @@ pub fn set_gamepad_orbit_input(ctx: &egui::Context, input: f32) {
 
 pub fn request_motion_focus(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(FORCE_MOTION_FOCUS_ID), true));
+}
+
+pub fn request_model_focus(ctx: &egui::Context, variant: MinecraftSkinVariant) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(FORCE_MODEL_FOCUS_ID), variant));
+}
+
+pub fn classic_model_button_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CLASSIC_MODEL_BUTTON_ID_KEY)))
+}
+
+pub fn slim_model_button_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(SLIM_MODEL_BUTTON_ID_KEY)))
+}
+
+fn take_model_focus_request(ctx: &egui::Context) -> Option<MinecraftSkinVariant> {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new(FORCE_MODEL_FOCUS_ID);
+        let value = data.get_temp::<MinecraftSkinVariant>(key);
+        if value.is_some() {
+            data.remove::<MinecraftSkinVariant>(key);
+        }
+        value
+    })
 }
 
 pub fn render(
@@ -185,20 +211,22 @@ fn render_contents(
 
     let button_style =
         style::neutral_button_with_min_size(ui, egui::vec2(160.0, style::CONTROL_HEIGHT));
+    let viewport_width = ui.clip_rect().width().max(1.0);
+    let full_width = ui.available_width().min(viewport_width).max(1.0);
+    let mut full_width_button_style = button_style.clone();
+    full_width_button_style.min_size = egui::vec2(full_width, style::CONTROL_HEIGHT);
 
-    ui.horizontal(|ui| {
-        if text_ui
-            .button(
-                ui,
-                "skins_refresh_profile",
-                "Refresh profile",
-                &button_style,
-            )
-            .clicked()
-        {
-            state.start_refresh();
-        }
-    });
+    if text_ui
+        .button(
+            ui,
+            "skins_refresh_profile",
+            "Refresh profile",
+            &full_width_button_style,
+        )
+        .clicked()
+    {
+        state.start_refresh();
+    }
 
     ui.add_space(style::SPACE_LG);
     let _ = text_ui.label(
@@ -208,15 +236,7 @@ fn render_contents(
         &style::section_heading(ui),
     );
 
-    if ui
-        .add_enabled_ui(!state.pick_skin_in_progress, |ui| {
-            text_ui.button(ui, "skins_pick_file", "Choose skin image", &button_style)
-        })
-        .inner
-        .clicked()
-    {
-        state.pick_skin_file();
-    }
+    render_skin_drop_zone(ui, text_ui, state);
 
     if state.pick_skin_in_progress {
         ui.add_space(style::SPACE_XS);
@@ -243,32 +263,47 @@ fn render_contents(
 
     ui.add_space(style::SPACE_SM);
     let mut model_button_style = button_style.clone();
-    model_button_style.min_size = egui::vec2(120.0, style::CONTROL_HEIGHT);
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_XS, style::SPACE_XS);
-        let _ = text_ui.label(ui, "skins_model_label", "Model:", &body);
-        if text_ui
-            .selectable_button(
-                ui,
-                "skins_model_classic",
-                "Classic",
-                state.pending_variant == MinecraftSkinVariant::Classic,
-                &model_button_style,
+    let model_button_gap = style::SPACE_XS;
+    let half_width = ((ui.available_width() - model_button_gap) * 0.5).max(1.0);
+    model_button_style.min_size = egui::vec2(half_width, style::CONTROL_HEIGHT);
+    let _ = text_ui.label(ui, "skins_model_label", "Model:", &body);
+    ui.add_space(style::SPACE_XS);
+    let model_focus_request = take_model_focus_request(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(model_button_gap, style::SPACE_XS);
+        let classic_response = text_ui.selectable_button(
+            ui,
+            "skins_model_classic",
+            "Classic",
+            state.pending_variant == MinecraftSkinVariant::Classic,
+            &model_button_style,
+        );
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new(CLASSIC_MODEL_BUTTON_ID_KEY),
+                classic_response.id,
             )
-            .clicked()
-        {
+        });
+        if model_focus_request == Some(MinecraftSkinVariant::Classic) {
+            classic_response.request_focus();
+        }
+        if classic_response.clicked() {
             state.pending_variant = MinecraftSkinVariant::Classic;
         }
-        if text_ui
-            .selectable_button(
-                ui,
-                "skins_model_slim",
-                "Slim (Alex)",
-                state.pending_variant == MinecraftSkinVariant::Slim,
-                &model_button_style,
-            )
-            .clicked()
-        {
+        let slim_response = text_ui.selectable_button(
+            ui,
+            "skins_model_slim",
+            "Slim (Alex)",
+            state.pending_variant == MinecraftSkinVariant::Slim,
+            &model_button_style,
+        );
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(egui::Id::new(SLIM_MODEL_BUTTON_ID_KEY), slim_response.id)
+        });
+        if model_focus_request == Some(MinecraftSkinVariant::Slim) {
+            slim_response.request_focus();
+        }
+        if slim_response.clicked() {
             state.pending_variant = MinecraftSkinVariant::Slim;
         }
     });
@@ -286,7 +321,6 @@ fn render_contents(
 
     ui.add_space(style::SPACE_MD);
     let mut save_style = button_style.clone();
-    let viewport_width = ui.clip_rect().width().max(1.0);
     let save_width = ui.available_width().min(viewport_width).max(1.0);
     save_style.min_size = egui::vec2(save_width, style::CONTROL_HEIGHT_LG);
     save_style.fill = ui.visuals().selection.bg_fill;
@@ -318,9 +352,7 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
     let dt = state.consume_frame_dt(now);
     let gamepad_orbit_input = ui
         .ctx()
-        .data_mut(|data| {
-            data.get_temp::<f32>(egui::Id::new("skins_screen_gamepad_orbit_input"))
-        })
+        .data_mut(|data| data.get_temp::<f32>(egui::Id::new("skins_screen_gamepad_orbit_input")))
         .unwrap_or(0.0);
 
     if response.drag_started() {
@@ -525,6 +557,203 @@ fn render_preview(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerStat
         button_clicked = response.clicked();
     });
     button_clicked
+}
+
+fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerState) {
+    let width = ui
+        .available_width()
+        .min(ui.clip_rect().width().max(1.0))
+        .max(1.0);
+    let height = style::CONTROL_HEIGHT_LG * 3.4;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    let hovered_files = ui.input(|input| input.raw.hovered_files.clone());
+    let dropped_files = ui.input(|input| input.raw.dropped_files.clone());
+    let hovering_drop = !hovered_files.is_empty()
+        && ui
+            .ctx()
+            .pointer_hover_pos()
+            .is_some_and(|pointer| rect.contains(pointer));
+    let received_drop = !dropped_files.is_empty()
+        && ui
+            .ctx()
+            .pointer_latest_pos()
+            .is_some_and(|pointer| rect.contains(pointer));
+    let focused = response.has_focus();
+    let fill = if hovering_drop {
+        ui.visuals().selection.bg_fill.gamma_multiply(0.22)
+    } else if focused {
+        ui.visuals().selection.bg_fill.gamma_multiply(0.12)
+    } else {
+        ui.visuals()
+            .widgets
+            .inactive
+            .weak_bg_fill
+            .gamma_multiply(0.7)
+    };
+    ui.painter().rect_filled(rect, CornerRadius::same(14), fill);
+    paint_dotted_drop_zone_stroke(
+        ui,
+        rect.shrink(1.5),
+        if hovering_drop || focused {
+            ui.visuals().selection.stroke.color
+        } else {
+            ui.visuals().weak_text_color()
+        },
+    );
+    if focused {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            CornerRadius::same(16),
+            Stroke::new(
+                (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                ui.visuals().selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
+
+    let mut choose_style =
+        style::neutral_button_with_min_size(ui, egui::vec2(220.0, style::CONTROL_HEIGHT));
+    choose_style.fill = ui.visuals().widgets.inactive.bg_fill;
+    choose_style.fill_hovered = ui.visuals().widgets.hovered.bg_fill;
+    choose_style.fill_active = ui.visuals().widgets.active.bg_fill;
+    choose_style.fill_selected = ui.visuals().selection.bg_fill.gamma_multiply(0.7);
+    let content_rect = rect.shrink2(egui::vec2(18.0, 18.0));
+    let title_style = style::section_heading(ui);
+    let muted = style::muted(ui);
+    let button_label_style = textui::LabelOptions {
+        font_size: choose_style.font_size,
+        line_height: choose_style.line_height,
+        color: choose_style.text_color,
+        wrap: false,
+        ..textui::LabelOptions::default()
+    };
+    let title_size = text_ui.measure_text_size(ui, "Drag Skin Image here", &title_style);
+    let or_size = text_ui.measure_text_size(ui, "or", &muted);
+    let button_text_size = text_ui.measure_text_size(ui, "Choose Skin Image", &button_label_style);
+    let button_size = egui::vec2(
+        (button_text_size.x + choose_style.padding.x * 2.0).max(choose_style.min_size.x),
+        (button_text_size.y + choose_style.padding.y * 2.0).max(choose_style.min_size.y),
+    );
+    let gap = style::SPACE_XS;
+    let total_height = title_size.y + gap + or_size.y + gap + button_size.y;
+    let mut current_y = content_rect.center().y - total_height * 0.5;
+
+    let title_rect = egui::Rect::from_min_size(
+        egui::pos2(content_rect.center().x - title_size.x * 0.5, current_y),
+        title_size,
+    );
+    current_y += title_size.y + gap;
+    let or_width = (or_size.x + 8.0).min(content_rect.width());
+    let or_rect = egui::Rect::from_min_size(
+        egui::pos2(content_rect.center().x - or_width * 0.5, current_y),
+        egui::vec2(or_width, or_size.y),
+    );
+    current_y += or_size.y + gap;
+    let button_rect = egui::Rect::from_min_size(
+        egui::pos2(content_rect.center().x - button_size.x * 0.5, current_y),
+        button_size,
+    );
+
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(title_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            let _ = text_ui.label(
+                ui,
+                "skins_drop_prompt",
+                "Drag Skin Image here",
+                &title_style,
+            );
+        },
+    );
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(or_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            let _ = text_ui.label(ui, "skins_drop_prompt_or", "or", &muted);
+        },
+    );
+    let choose_response = ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(button_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.add_enabled_ui(!state.pick_skin_in_progress, |ui| {
+                text_ui.button(ui, "skins_pick_file", "Choose Skin Image", &choose_style)
+            })
+            .inner
+        },
+    );
+    if choose_response.inner.clicked() {
+        state.pick_skin_file();
+    }
+
+    if received_drop && !state.pick_skin_in_progress {
+        if let Some(file) = dropped_files.into_iter().next() {
+            if let Some(path) = file.path {
+                state.begin_loading_skin_from_path(path);
+            } else if let Some(bytes) = file.bytes {
+                let name = if file.name.trim().is_empty() {
+                    "Dropped skin.png".to_owned()
+                } else {
+                    file.name
+                };
+                state.begin_loading_skin_from_bytes(PathBuf::from(name), bytes.as_ref().to_vec());
+            } else {
+                notification::error!(
+                    "skin_manager",
+                    "Dropped file did not include readable image data."
+                );
+            }
+        }
+    }
+}
+
+fn paint_dotted_drop_zone_stroke(ui: &Ui, rect: Rect, color: Color32) {
+    let dash_step = 10.0;
+    let dash_len = 4.0;
+    let stroke = Stroke::new(1.5, color);
+
+    let mut x = rect.left();
+    while x <= rect.right() {
+        ui.painter().line_segment(
+            [
+                egui::pos2(x, rect.top()),
+                egui::pos2((x + dash_len).min(rect.right()), rect.top()),
+            ],
+            stroke,
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(x, rect.bottom()),
+                egui::pos2((x + dash_len).min(rect.right()), rect.bottom()),
+            ],
+            stroke,
+        );
+        x += dash_step;
+    }
+
+    let mut y = rect.top();
+    while y <= rect.bottom() {
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.left(), y),
+                egui::pos2(rect.left(), (y + dash_len).min(rect.bottom())),
+            ],
+            stroke,
+        );
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.right(), y),
+                egui::pos2(rect.right(), (y + dash_len).min(rect.bottom())),
+            ],
+            stroke,
+        );
+        y += dash_step;
+    }
 }
 
 fn paint_preview_background(ui: &Ui, painter: &egui::Painter, rect: Rect) {
@@ -6539,7 +6768,10 @@ fn render_cape_grid(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerSt
         max_label_width = max_label_width.max(width);
     }
 
-    let available_width = ui.available_width().max(1.0);
+    let available_width = ui
+        .available_width()
+        .min(ui.clip_rect().width().max(1.0))
+        .max(1.0);
     let tile_gap = egui::vec2(style::SPACE_MD, style::SPACE_MD);
     let tile_width = (max_label_width + 24.0)
         .max(CAPE_TILE_WIDTH_MIN)
@@ -6547,56 +6779,73 @@ fn render_cape_grid(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinManagerSt
     let columns =
         (((available_width + tile_gap.x) / (tile_width + tile_gap.x)).floor() as usize).max(1);
     let total_items = state.available_capes.len() + 1;
-    let grid_columns = total_items.min(columns).max(1);
-    let grid_width =
-        (grid_columns as f32 * tile_width) + (grid_columns.saturating_sub(1) as f32 * tile_gap.x);
-    let grid_leading_space = ((available_width - grid_width) * 0.5).max(0.0);
-
     let mut pending_selection = None;
     for row_start in (0..total_items).step_by(columns) {
         let row_end = (row_start + columns).min(total_items);
+        let row_count = row_end.saturating_sub(row_start);
+        let fallback_row_width =
+            (row_count as f32 * tile_width) + (row_count.saturating_sub(1) as f32 * tile_gap.x);
+        let row_width_id = egui::Id::new(("skins_cape_row_width", row_start));
+        let measured_row_width = ui
+            .ctx()
+            .data(|data| data.get_temp::<f32>(row_width_id))
+            .unwrap_or(fallback_row_width)
+            .min(available_width);
+        let (row_rect, _) = ui.allocate_exact_size(
+            egui::vec2(available_width, CAPE_TILE_HEIGHT),
+            Sense::hover(),
+        );
+        let box_rect = Rect::from_center_size(
+            row_rect.center(),
+            egui::vec2(measured_row_width, CAPE_TILE_HEIGHT),
+        );
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = tile_gap.x;
-            if grid_leading_space > 0.0 {
-                ui.add_space(grid_leading_space);
-            }
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(box_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = tile_gap.x;
+                let content = ui.horizontal(|ui| {
+                    for item_index in row_start..row_end {
+                        if item_index == 0 {
+                            let no_cape_selected = state.pending_cape_id.is_none();
+                            if draw_cape_tile(
+                                ui,
+                                text_ui,
+                                tile_width,
+                                "No Cape",
+                                no_cape_selected,
+                                true,
+                                None,
+                                None,
+                            ) {
+                                pending_selection = Some(None);
+                            }
+                            continue;
+                        }
 
-            for item_index in row_start..row_end {
-                if item_index == 0 {
-                    let no_cape_selected = state.pending_cape_id.is_none();
-                    if draw_cape_tile(
-                        ui,
-                        text_ui,
-                        tile_width,
-                        "No Cape",
-                        no_cape_selected,
-                        true,
-                        None,
-                        None,
-                    ) {
-                        pending_selection = Some(None);
+                        let cape = &state.available_capes[item_index - 1];
+                        let selected = state.pending_cape_id.as_deref() == Some(cape.id.as_str());
+                        let preview = cape.texture_bytes.as_deref();
+                        if draw_cape_tile(
+                            ui,
+                            text_ui,
+                            tile_width,
+                            cape.label.as_str(),
+                            selected,
+                            false,
+                            preview,
+                            cape.texture_size,
+                        ) {
+                            pending_selection = Some(Some(cape.id.clone()));
+                        }
                     }
-                    continue;
-                }
-
-                let cape = &state.available_capes[item_index - 1];
-                let selected = state.pending_cape_id.as_deref() == Some(cape.id.as_str());
-                let preview = cape.texture_bytes.as_deref();
-                if draw_cape_tile(
-                    ui,
-                    text_ui,
-                    tile_width,
-                    cape.label.as_str(),
-                    selected,
-                    false,
-                    preview,
-                    cape.texture_size,
-                ) {
-                    pending_selection = Some(Some(cape.id.clone()));
-                }
-            }
-        });
+                });
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(row_width_id, content.response.rect.width()));
+            },
+        );
 
         if row_end < total_items {
             ui.add_space(tile_gap.y);
@@ -6620,7 +6869,7 @@ fn draw_cape_tile(
 ) -> bool {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(tile_width, CAPE_TILE_HEIGHT), Sense::click());
-    let tile_rect = rect.shrink2(egui::vec2(style::SPACE_XS * 0.5, style::SPACE_XS * 0.5));
+    let tile_rect = rect.shrink2(egui::vec2(0.0, style::SPACE_XS * 0.5));
 
     let hover_t = ui
         .ctx()
@@ -6635,10 +6884,9 @@ fn draw_cape_tile(
     let focused = response.has_focus();
 
     let fill = if selected || focused {
-        ui.visuals()
-            .selection
-            .bg_fill
-            .gamma_multiply(0.24 + hover_t * 0.06 + press_t * 0.04 + if focused { 0.08 } else { 0.0 })
+        ui.visuals().selection.bg_fill.gamma_multiply(
+            0.24 + hover_t * 0.06 + press_t * 0.04 + if focused { 0.08 } else { 0.0 },
+        )
     } else {
         ui.visuals()
             .widgets
@@ -7454,6 +7702,14 @@ impl SkinManagerState {
             return;
         };
 
+        self.begin_loading_skin_from_path(path);
+    }
+
+    fn begin_loading_skin_from_path(&mut self, path: PathBuf) {
+        if self.pick_skin_in_progress {
+            return;
+        }
+
         let (tx, rx) = mpsc::channel();
         self.pick_skin_in_progress = true;
         self.pick_skin_results_rx = Some(Arc::new(Mutex::new(rx)));
@@ -7475,6 +7731,30 @@ impl SkinManagerState {
                     target: "vertexlauncher/skins",
                     error = %err,
                     "Failed to deliver picked skin-file result."
+                );
+            }
+        });
+    }
+
+    fn begin_loading_skin_from_bytes(&mut self, path: PathBuf, bytes: Vec<u8>) {
+        if self.pick_skin_in_progress {
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel();
+        self.pick_skin_in_progress = true;
+        self.pick_skin_results_rx = Some(Arc::new(Mutex::new(rx)));
+        let _ = tokio_runtime::spawn_detached(async move {
+            let result = if decode_skin_rgba(&bytes).is_none() {
+                Err("Selected image must be a valid PNG skin (expected 64x64 or 64x32).".to_owned())
+            } else {
+                Ok((path, bytes))
+            };
+            if let Err(err) = tx.send(result) {
+                tracing::error!(
+                    target: "vertexlauncher/skins",
+                    error = %err,
+                    "Failed to deliver dropped skin-file result."
                 );
             }
         });

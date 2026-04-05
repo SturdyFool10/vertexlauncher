@@ -1,18 +1,21 @@
 use std::{
     collections::BTreeMap,
     collections::{HashMap, HashSet},
-    fs,
-    io,
+    fs, io,
     time::{Duration, Instant},
 };
 
+use auth::MinecraftSkinVariant;
 use config::GamepadCalibration;
 use egui::FocusDirection;
 use gilrs::{Axis, Button, EventType, Gamepad, GamepadId, Gilrs};
 use launcher_ui::notification;
 use launcher_ui::screens::{self, AppScreen};
 use launcher_ui::ui::{components::settings_widgets, sidebar};
-use textui::{apply_gamepad_scroll_to_focused_target, set_gamepad_scroll_delta};
+use textui::{
+    apply_gamepad_scroll_to_focused_target, apply_gamepad_scroll_to_registered_id,
+    set_gamepad_scroll_delta,
+};
 
 /// How long to wait after the first press before starting to repeat navigation.
 const INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(350);
@@ -344,7 +347,17 @@ impl GamepadNavigator {
 
         // --- Scroll ---
         if scroll_delta != egui::Vec2::ZERO {
-            if apply_gamepad_scroll_to_focused_target(ctx, scroll_delta) {
+            let scrolled = if active_screen == AppScreen::Console {
+                // Hard-bind right stick to the console log scroll area regardless of focus.
+                if let Some(console_id) = screens::console_log_scroll_id(ctx) {
+                    apply_gamepad_scroll_to_registered_id(ctx, console_id, scroll_delta)
+                } else {
+                    apply_gamepad_scroll_to_focused_target(ctx, scroll_delta)
+                }
+            } else {
+                apply_gamepad_scroll_to_focused_target(ctx, scroll_delta)
+            };
+            if scrolled {
                 ctx.request_repaint();
             }
         } else if skins_preview_orbit.abs() > 0.0 {
@@ -394,8 +407,10 @@ impl GamepadNavigator {
             Self::update_polled_axis_x(state, gamepad_id, left_x, &calibration, nav_actions);
             Self::update_polled_axis_y(state, gamepad_id, left_y, &calibration, nav_actions);
 
-            let centered_x = Self::normalized_x(state.stick_x, &calibration).abs() < calibration.deadzone_x;
-            let centered_y = Self::normalized_y(state.stick_y, &calibration).abs() < calibration.deadzone_y;
+            let centered_x =
+                Self::normalized_x(state.stick_x, &calibration).abs() < calibration.deadzone_x;
+            let centered_y =
+                Self::normalized_y(state.stick_y, &calibration).abs() < calibration.deadzone_y;
             if centered_x && centered_y && matches!(state.held_source, Some(HoldSource::Analog)) {
                 Self::clear_hold(state);
             }
@@ -490,11 +505,7 @@ impl GamepadNavigator {
     }
 
     fn detect_startup_gamepads(&mut self, calibrations: &BTreeMap<String, GamepadCalibration>) {
-        let connected_ids = self
-            .gilrs
-            .gamepads()
-            .map(|(id, _)| id)
-            .collect::<Vec<_>>();
+        let connected_ids = self.gilrs.gamepads().map(|(id, _)| id).collect::<Vec<_>>();
 
         if !self.startup_scan_complete {
             if connected_ids.is_empty() {
@@ -593,7 +604,9 @@ impl GamepadNavigator {
     }
 
     pub fn gamepad_identity(&self, id: GamepadId) -> Option<GamepadDeviceIdentity> {
-        self.gilrs.connected_gamepad(id).map(Self::identity_from_gamepad)
+        self.gilrs
+            .connected_gamepad(id)
+            .map(Self::identity_from_gamepad)
     }
 
     fn identity_from_gamepad(gamepad: Gamepad<'_>) -> GamepadDeviceIdentity {
@@ -613,7 +626,9 @@ impl GamepadNavigator {
         let key = format!(
             "{}:{}:{}:{}",
             name.to_ascii_lowercase(),
-            vendor_id.map(|value| format!("{value:04x}")).unwrap_or_default(),
+            vendor_id
+                .map(|value| format!("{value:04x}"))
+                .unwrap_or_default(),
             product_id
                 .map(|value| format!("{value:04x}"))
                 .unwrap_or_default(),
@@ -711,6 +726,32 @@ impl GamepadNavigator {
             screens::request_skins_motion_focus(ctx);
             ctx.request_repaint();
             return true;
+        }
+
+        if active_screen == AppScreen::Console
+            && dir == NavDir::Right
+            && Self::focused_widget_is_in_sidebar(ctx)
+        {
+            if let Some(focused_id) = ctx.memory(|memory| memory.focused()) {
+                ctx.memory_mut(|memory| memory.surrender_focus(focused_id));
+            }
+            screens::request_console_tab_focus(ctx);
+            ctx.request_repaint();
+            return true;
+        }
+
+        if active_screen == AppScreen::Skins {
+            let focused_id = ctx.memory(|memory| memory.focused());
+            if dir == NavDir::Right && focused_id == screens::skins_classic_model_button_id(ctx) {
+                screens::request_skins_model_focus(ctx, MinecraftSkinVariant::Slim);
+                ctx.request_repaint();
+                return true;
+            }
+            if dir == NavDir::Left && focused_id == screens::skins_slim_model_button_id(ctx) {
+                screens::request_skins_model_focus(ctx, MinecraftSkinVariant::Classic);
+                ctx.request_repaint();
+                return true;
+            }
         }
 
         false

@@ -49,12 +49,10 @@ pub fn render(
                     },
                 )
                 .inner;
-            let home_focus_requested = ui
-                .ctx()
-                .data_mut(|data| {
-                    data.get_temp::<bool>(egui::Id::new(HOME_FOCUS_REQUEST_ID))
-                        .unwrap_or(false)
-                });
+            let home_focus_requested = ui.ctx().data_mut(|data| {
+                data.get_temp::<bool>(egui::Id::new(HOME_FOCUS_REQUEST_ID))
+                    .unwrap_or(false)
+            });
             if screen == AppScreen::Home
                 && (ui.ctx().memory(|memory| memory.focused().is_none()) || home_focus_requested)
             {

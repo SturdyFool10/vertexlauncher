@@ -1395,7 +1395,8 @@ fn render_discover_tile(
     let now_focused = interaction.has_focus();
     let state_changed = now_hovered != was_hovered || now_focused != was_focused;
     if state_changed {
-        ui.ctx().data_mut(|d| d.insert_temp(id, (now_hovered, now_focused)));
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(id, (now_hovered, now_focused)));
         ui.ctx().request_repaint();
     }
 
@@ -1747,7 +1748,10 @@ fn build_snapshot_entries(
                         (None, right) => right,
                         (left, None) => left,
                     };
-                existing.updated_at = existing.updated_at.take().or_else(|| entry.updated_at.clone());
+                existing.updated_at = existing
+                    .updated_at
+                    .take()
+                    .or_else(|| entry.updated_at.clone());
                 existing.relevance_rank = existing.relevance_rank.min(entry.relevance_rank);
             }
             None => {
