@@ -1,22 +1,20 @@
 use std::{
+    collections::BTreeMap,
     collections::{HashMap, HashSet},
     fs,
     io,
     time::{Duration, Instant},
 };
 
+use config::GamepadCalibration;
 use egui::FocusDirection;
-use gilrs::{Axis, Button, EventType, GamepadId, Gilrs};
+use gilrs::{Axis, Button, EventType, Gamepad, GamepadId, Gilrs};
 use launcher_ui::notification;
 
 /// How long to wait after the first press before starting to repeat navigation.
 const INITIAL_REPEAT_DELAY: Duration = Duration::from_millis(350);
 /// How quickly to repeat while a direction is held.
 const REPEAT_INTERVAL: Duration = Duration::from_millis(110);
-/// Analog stick deflection required to trigger navigation (left stick).
-const STICK_THRESHOLD: f32 = 0.5;
-/// How far the stick must return toward center before re-triggering (left stick).
-const STICK_DEADZONE: f32 = 0.25;
 /// Points scrolled per frame at full right-stick deflection (~8 pts @ 60 fps ≈ 480 pts/s).
 const RIGHT_STICK_SCROLL_SPEED: f32 = 8.0;
 /// Minimum right-stick deflection before scrolling begins.
@@ -29,10 +27,38 @@ enum NavDir {
     Backward,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoldSource {
+    Dpad,
+    Analog,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GamepadDeviceIdentity {
+    pub key: String,
+    pub name: String,
+    pub vendor_id: Option<u16>,
+    pub product_id: Option<u16>,
+    pub uuid: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GamepadStickSample {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct GamepadUpdate {
+    pub calibration_requested: Option<GamepadDeviceIdentity>,
+}
+
 #[derive(Debug, Clone)]
 struct DeviceState {
     /// Currently held navigation direction (None = nothing held).
     held_dir: Option<NavDir>,
+    /// Which input source owns the current held direction.
+    held_source: Option<HoldSource>,
     /// When the held direction first fired.
     held_since: Option<Instant>,
     /// When the last repeat navigation fired.
@@ -59,6 +85,7 @@ impl Default for DeviceState {
     fn default() -> Self {
         Self {
             held_dir: None,
+            held_source: None,
             held_since: None,
             last_repeat: None,
             stick_x: 0.0,
@@ -80,6 +107,8 @@ pub struct GamepadNavigator {
     gilrs: Gilrs,
     device_states: HashMap<GamepadId, DeviceState>,
     known_gamepads: HashSet<GamepadId>,
+    prompted_uncalibrated: HashSet<String>,
+    pending_calibration_request: Option<GamepadDeviceIdentity>,
     startup_scan_complete: bool,
     linux_access_warning_emitted: bool,
     linux_probe_logged: bool,
@@ -93,6 +122,8 @@ impl GamepadNavigator {
                 gilrs,
                 device_states: HashMap::new(),
                 known_gamepads: HashSet::new(),
+                prompted_uncalibrated: HashSet::new(),
+                pending_calibration_request: None,
                 startup_scan_complete: false,
                 linux_access_warning_emitted: false,
                 linux_probe_logged: false,
@@ -111,8 +142,12 @@ impl GamepadNavigator {
     /// Process all pending gamepad events and inject navigation into egui.
     ///
     /// Should be called at the start of each `update` frame, before any widgets render.
-    pub fn update(&mut self, ctx: &egui::Context) {
-        self.detect_startup_gamepads();
+    pub fn update(
+        &mut self,
+        ctx: &egui::Context,
+        calibrations: &BTreeMap<String, GamepadCalibration>,
+    ) -> GamepadUpdate {
+        self.detect_startup_gamepads(calibrations);
         self.maybe_log_linux_input_probe();
         self.maybe_warn_about_linux_input_access();
 
@@ -129,7 +164,11 @@ impl GamepadNavigator {
             }
             match ev.event {
                 EventType::Connected => {
-                    let name = self.gamepad_name(ev.id);
+                    let identity = self.gamepad_identity(ev.id);
+                    let name = identity
+                        .as_ref()
+                        .map(|identity| identity.name.as_str())
+                        .unwrap_or("Controller");
                     if self.known_gamepads.insert(ev.id) {
                         tracing::info!(
                             target: "vertexlauncher/gamepad",
@@ -137,6 +176,9 @@ impl GamepadNavigator {
                             "Gamepad connected."
                         );
                         notification::info!("gamepad", "Gamepad connected: {name}");
+                    }
+                    if let Some(identity) = identity {
+                        self.maybe_queue_calibration_prompt(&identity, calibrations);
                     }
                 }
                 EventType::Disconnected => {
@@ -154,10 +196,10 @@ impl GamepadNavigator {
                 EventType::ButtonPressed(button, _) => match button {
                     // D-pad up/left = tab backward; down/right = tab forward.
                     Button::DPadUp | Button::DPadLeft => {
-                        nav_actions.push((ev.id, NavDir::Backward))
+                        nav_actions.push((ev.id, NavDir::Backward, HoldSource::Dpad))
                     }
                     Button::DPadDown | Button::DPadRight => {
-                        nav_actions.push((ev.id, NavDir::Forward))
+                        nav_actions.push((ev.id, NavDir::Forward, HoldSource::Dpad))
                     }
                     Button::South => activate = true,
                     Button::East => back = true,
@@ -175,20 +217,21 @@ impl GamepadNavigator {
                         Self::clear_hold(state);
                     }
                 }
-                EventType::AxisChanged(axis, value, _) => {
-                    self.handle_axis(ev.id, axis, value, &mut nav_actions);
-                }
+                EventType::AxisChanged(_, _, _) => {}
                 _ => {}
             }
         }
 
+        self.poll_current_axes(calibrations, &mut nav_actions);
+
         // --- Hold-to-navigate ---
         let now = Instant::now();
 
-        for (id, dir) in nav_actions {
+        for (id, dir, source) in nav_actions {
             Self::fire_nav(ctx, dir);
             if let Some(state) = self.device_states.get_mut(&id) {
                 state.held_dir = Some(dir);
+                state.held_source = Some(source);
                 state.held_since = Some(now);
                 state.last_repeat = None;
             }
@@ -235,98 +278,145 @@ impl GamepadNavigator {
                 i.smooth_scroll_delta.x += h_scroll_delta;
             });
         }
+
+        GamepadUpdate {
+            calibration_requested: self.pending_calibration_request.take(),
+        }
     }
 
-    /// Handle a left-stick or right-stick axis change.
-    fn handle_axis(
+    fn poll_current_axes(
         &mut self,
-        gamepad_id: GamepadId,
-        axis: Axis,
-        value: f32,
-        nav_actions: &mut Vec<(GamepadId, NavDir)>,
+        calibrations: &BTreeMap<String, GamepadCalibration>,
+        nav_actions: &mut Vec<(GamepadId, NavDir, HoldSource)>,
     ) {
-        let Some(state) = self.device_states.get_mut(&gamepad_id) else {
+        let snapshots = self
+            .gilrs
+            .gamepads()
+            .map(|(id, gamepad)| {
+                let identity = Self::identity_from_gamepad(gamepad);
+                (
+                    id,
+                    calibrations.get(identity.key.as_str()).cloned(),
+                    gamepad.value(Axis::LeftStickX),
+                    gamepad.value(Axis::LeftStickY),
+                    gamepad.value(Axis::RightStickX),
+                    gamepad.value(Axis::RightStickY),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for (gamepad_id, calibration, left_x, left_y, right_x, right_y) in snapshots {
+            let state = self.device_states.entry(gamepad_id).or_default();
+            state.right_stick_x = right_x;
+            state.right_stick_y = right_y;
+
+            let Some(calibration) = calibration else {
+                state.stick_x = left_x;
+                state.stick_y = left_y;
+                state.stick_x_seen = true;
+                state.stick_y_seen = true;
+                continue;
+            };
+
+            Self::update_polled_axis_x(state, gamepad_id, left_x, &calibration, nav_actions);
+            Self::update_polled_axis_y(state, gamepad_id, left_y, &calibration, nav_actions);
+
+            let centered_x = Self::normalized_x(state.stick_x, &calibration).abs() < calibration.deadzone_x;
+            let centered_y = Self::normalized_y(state.stick_y, &calibration).abs() < calibration.deadzone_y;
+            if centered_x && centered_y && matches!(state.held_source, Some(HoldSource::Analog)) {
+                Self::clear_hold(state);
+            }
+        }
+    }
+
+    fn update_polled_axis_x(
+        state: &mut DeviceState,
+        gamepad_id: GamepadId,
+        value: f32,
+        calibration: &GamepadCalibration,
+        nav_actions: &mut Vec<(GamepadId, NavDir, HoldSource)>,
+    ) {
+        if !state.stick_x_seen {
+            state.stick_x_seen = true;
+            state.stick_x = value;
+            state.stick_x_armed =
+                Self::normalized_x(value, calibration).abs() < calibration.deadzone_x;
             return;
-        };
-        match axis {
-            Axis::LeftStickX => {
-                if !state.stick_x_seen {
-                    state.stick_x_seen = true;
-                    state.stick_x = value;
-                    state.stick_x_armed = value.abs() < STICK_DEADZONE;
-                    return;
-                }
+        }
 
-                let was_right = state.stick_x > STICK_THRESHOLD;
-                let was_left = state.stick_x < -STICK_THRESHOLD;
-                state.stick_x = value;
-                let now_right = value > STICK_THRESHOLD;
-                let now_left = value < -STICK_THRESHOLD;
-                let released = was_right || was_left;
-                let center = value.abs() < STICK_DEADZONE;
+        let previous = Self::normalized_x(state.stick_x, calibration);
+        let was_right = previous > calibration.threshold_x;
+        let was_left = previous < -calibration.threshold_x;
+        state.stick_x = value;
+        let current = Self::normalized_x(value, calibration);
+        let now_right = current > calibration.threshold_x;
+        let now_left = current < -calibration.threshold_x;
+        let released = was_right || was_left;
+        let center = current.abs() < calibration.deadzone_x;
 
-                if center {
-                    state.stick_x_armed = true;
-                }
+        if center {
+            state.stick_x_armed = true;
+        }
 
-                if state.stick_x_armed && !was_right && now_right {
-                    nav_actions.push((gamepad_id, NavDir::Forward));
-                    state.stick_x_armed = false;
-                } else if state.stick_x_armed && !was_left && now_left {
-                    nav_actions.push((gamepad_id, NavDir::Backward));
-                    state.stick_x_armed = false;
-                } else if center && released {
-                    Self::clear_hold(state);
-                }
-            }
-            Axis::LeftStickY => {
-                if !state.stick_y_seen {
-                    state.stick_y_seen = true;
-                    state.stick_y = value;
-                    state.stick_y_armed = value.abs() < STICK_DEADZONE;
-                    return;
-                }
+        if state.stick_x_armed && !was_right && now_right {
+            nav_actions.push((gamepad_id, NavDir::Forward, HoldSource::Analog));
+            state.stick_x_armed = false;
+        } else if state.stick_x_armed && !was_left && now_left {
+            nav_actions.push((gamepad_id, NavDir::Backward, HoldSource::Analog));
+            state.stick_x_armed = false;
+        } else if center && released {
+            Self::clear_hold(state);
+        }
+    }
 
-                // gilrs Y: positive = up on most controllers → backward in tab order
-                let was_up = state.stick_y > STICK_THRESHOLD;
-                let was_down = state.stick_y < -STICK_THRESHOLD;
-                state.stick_y = value;
-                let now_up = value > STICK_THRESHOLD;
-                let now_down = value < -STICK_THRESHOLD;
-                let released = was_up || was_down;
-                let center = value.abs() < STICK_DEADZONE;
+    fn update_polled_axis_y(
+        state: &mut DeviceState,
+        gamepad_id: GamepadId,
+        value: f32,
+        calibration: &GamepadCalibration,
+        nav_actions: &mut Vec<(GamepadId, NavDir, HoldSource)>,
+    ) {
+        if !state.stick_y_seen {
+            state.stick_y_seen = true;
+            state.stick_y = value;
+            state.stick_y_armed =
+                Self::normalized_y(value, calibration).abs() < calibration.deadzone_y;
+            return;
+        }
 
-                if center {
-                    state.stick_y_armed = true;
-                }
+        let previous = Self::normalized_y(state.stick_y, calibration);
+        let was_up = previous > calibration.threshold_y;
+        let was_down = previous < -calibration.threshold_y;
+        state.stick_y = value;
+        let current = Self::normalized_y(value, calibration);
+        let now_up = current > calibration.threshold_y;
+        let now_down = current < -calibration.threshold_y;
+        let released = was_up || was_down;
+        let center = current.abs() < calibration.deadzone_y;
 
-                if state.stick_y_armed && !was_up && now_up {
-                    nav_actions.push((gamepad_id, NavDir::Backward));
-                    state.stick_y_armed = false;
-                } else if state.stick_y_armed && !was_down && now_down {
-                    nav_actions.push((gamepad_id, NavDir::Forward));
-                    state.stick_y_armed = false;
-                } else if center && released {
-                    Self::clear_hold(state);
-                }
-            }
-            Axis::RightStickY => {
-                state.right_stick_y = value;
-            }
-            Axis::RightStickX => {
-                state.right_stick_x = value;
-            }
-            _ => {}
+        if center {
+            state.stick_y_armed = true;
+        }
+
+        if state.stick_y_armed && !was_up && now_up {
+            nav_actions.push((gamepad_id, NavDir::Backward, HoldSource::Analog));
+            state.stick_y_armed = false;
+        } else if state.stick_y_armed && !was_down && now_down {
+            nav_actions.push((gamepad_id, NavDir::Forward, HoldSource::Analog));
+            state.stick_y_armed = false;
+        } else if center && released {
+            Self::clear_hold(state);
         }
     }
 
     fn clear_hold(state: &mut DeviceState) {
         state.held_dir = None;
+        state.held_source = None;
         state.held_since = None;
         state.last_repeat = None;
     }
 
-    fn detect_startup_gamepads(&mut self) {
+    fn detect_startup_gamepads(&mut self, calibrations: &BTreeMap<String, GamepadCalibration>) {
         let connected_ids = self
             .gilrs
             .gamepads()
@@ -342,13 +432,20 @@ impl GamepadNavigator {
             } else {
                 for id in &connected_ids {
                     if self.known_gamepads.insert(*id) {
-                        let name = self.gamepad_name(*id);
+                        let identity = self.gamepad_identity(*id);
+                        let name = identity
+                            .as_ref()
+                            .map(|identity| identity.name.as_str())
+                            .unwrap_or("Controller");
                         tracing::info!(
                             target: "vertexlauncher/gamepad",
                             gamepad_name = %name,
                             "Detected connected controller at startup."
                         );
                         notification::info!("gamepad", "Detected gamepad: {name}");
+                        if let Some(identity) = identity {
+                            self.maybe_queue_calibration_prompt(&identity, calibrations);
+                        }
                     }
                 }
             }
@@ -358,14 +455,103 @@ impl GamepadNavigator {
 
         for id in connected_ids {
             if self.known_gamepads.insert(id) {
-                let name = self.gamepad_name(id);
+                let identity = self.gamepad_identity(id);
+                let name = identity
+                    .as_ref()
+                    .map(|identity| identity.name.as_str())
+                    .unwrap_or("Controller");
                 tracing::info!(
                     target: "vertexlauncher/gamepad",
                     gamepad_name = %name,
                     "Detected connected controller after startup."
                 );
                 notification::info!("gamepad", "Detected gamepad: {name}");
+                if let Some(identity) = identity {
+                    self.maybe_queue_calibration_prompt(&identity, calibrations);
+                }
             }
+        }
+    }
+
+    fn maybe_queue_calibration_prompt(
+        &mut self,
+        identity: &GamepadDeviceIdentity,
+        calibrations: &BTreeMap<String, GamepadCalibration>,
+    ) {
+        if calibrations.contains_key(identity.key.as_str()) {
+            return;
+        }
+        if !self.prompted_uncalibrated.insert(identity.key.clone()) {
+            return;
+        }
+        self.pending_calibration_request = Some(identity.clone());
+        notification::info!(
+            "gamepad",
+            "Calibration needed for {}. Open the calibration modal to finish setup.",
+            identity.name
+        );
+    }
+
+    pub fn current_left_stick(&self, device_key: &str) -> Option<GamepadStickSample> {
+        self.gilrs.gamepads().find_map(|(_, gamepad)| {
+            let identity = Self::identity_from_gamepad(gamepad);
+            (identity.key == device_key).then(|| GamepadStickSample {
+                x: gamepad.value(Axis::LeftStickX),
+                y: gamepad.value(Axis::LeftStickY),
+            })
+        })
+    }
+
+    pub fn reset_navigation_state(&mut self, device_key: &str) {
+        let matching_ids = self
+            .gilrs
+            .gamepads()
+            .filter_map(|(id, gamepad)| {
+                let identity = Self::identity_from_gamepad(gamepad);
+                (identity.key == device_key).then_some(id)
+            })
+            .collect::<Vec<_>>();
+
+        for id in matching_ids {
+            if let Some(state) = self.device_states.get_mut(&id) {
+                *state = DeviceState::default();
+            }
+        }
+    }
+
+    pub fn gamepad_identity(&self, id: GamepadId) -> Option<GamepadDeviceIdentity> {
+        self.gilrs.connected_gamepad(id).map(Self::identity_from_gamepad)
+    }
+
+    fn identity_from_gamepad(gamepad: Gamepad<'_>) -> GamepadDeviceIdentity {
+        let name = gamepad.name().trim().to_owned();
+        let vendor_id = gamepad.vendor_id();
+        let product_id = gamepad.product_id();
+        let uuid = gamepad.uuid();
+        let uuid = if uuid.iter().all(|byte| *byte == 0) {
+            None
+        } else {
+            Some(
+                uuid.iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>(),
+            )
+        };
+        let key = format!(
+            "{}:{}:{}:{}",
+            name.to_ascii_lowercase(),
+            vendor_id.map(|value| format!("{value:04x}")).unwrap_or_default(),
+            product_id
+                .map(|value| format!("{value:04x}"))
+                .unwrap_or_default(),
+            uuid.clone().unwrap_or_default()
+        );
+        GamepadDeviceIdentity {
+            key,
+            name,
+            vendor_id,
+            product_id,
+            uuid,
         }
     }
 
@@ -399,11 +585,18 @@ impl GamepadNavigator {
     }
 
     fn gamepad_name(&self, id: GamepadId) -> String {
-        self.gilrs
-            .connected_gamepad(id)
-            .map(|gamepad| gamepad.name().trim().to_owned())
-            .filter(|name| !name.is_empty())
+        self.gamepad_identity(id)
+            .map(|identity| identity.name)
+            .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| format!("Controller {id:?}"))
+    }
+
+    fn normalized_x(value: f32, calibration: &GamepadCalibration) -> f32 {
+        (value - calibration.center_x) * calibration.x_forward_sign as f32
+    }
+
+    fn normalized_y(value: f32, calibration: &GamepadCalibration) -> f32 {
+        (value - calibration.center_y) * calibration.y_backward_sign as f32
     }
 
     /// Advance egui keyboard focus in the requested direction.

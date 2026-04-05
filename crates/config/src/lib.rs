@@ -3,6 +3,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
 };
+use std::collections::BTreeMap;
 use std::io::{Error as IOError, Write};
 use std::path::{Path, PathBuf};
 
@@ -41,6 +42,51 @@ const MAPLE_FONT_FAMILIES: &[&str] = &[
     "Maple Mono",
     "Maple Mono Normal",
 ];
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GamepadCalibration {
+    pub center_x: f32,
+    pub center_y: f32,
+    pub deadzone_x: f32,
+    pub deadzone_y: f32,
+    pub threshold_x: f32,
+    pub threshold_y: f32,
+    pub x_forward_sign: i8,
+    pub y_backward_sign: i8,
+}
+
+impl Default for GamepadCalibration {
+    fn default() -> Self {
+        Self {
+            center_x: 0.0,
+            center_y: 0.0,
+            deadzone_x: 0.25,
+            deadzone_y: 0.25,
+            threshold_x: 0.5,
+            threshold_y: 0.5,
+            x_forward_sign: 1,
+            y_backward_sign: 1,
+        }
+    }
+}
+
+impl GamepadCalibration {
+    pub fn normalize(&mut self) {
+        self.center_x = self.center_x.clamp(-1.0, 1.0);
+        self.center_y = self.center_y.clamp(-1.0, 1.0);
+        self.deadzone_x = self.deadzone_x.clamp(0.05, 0.95);
+        self.deadzone_y = self.deadzone_y.clamp(0.05, 0.95);
+        self.threshold_x = self
+            .threshold_x
+            .clamp((self.deadzone_x + 0.05).min(0.95), 0.98);
+        self.threshold_y = self
+            .threshold_y
+            .clamp((self.deadzone_y + 0.05).min(0.95), 0.98);
+        self.x_forward_sign = if self.x_forward_sign >= 0 { 1 } else { -1 };
+        self.y_backward_sign = if self.y_backward_sign >= 0 { 1 } else { -1 };
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -779,6 +825,7 @@ pub struct Config {
     java_17_jvm_path: Option<PathBuf>,
     java_21_jvm_path: Option<PathBuf>,
     java_25_jvm_path: Option<PathBuf>,
+    gamepad_calibrations: BTreeMap<String, GamepadCalibration>,
 }
 
 impl Config {
@@ -1139,6 +1186,28 @@ impl Config {
         }
     }
 
+    pub fn gamepad_calibration(&self, device_key: &str) -> Option<&GamepadCalibration> {
+        self.gamepad_calibrations.get(device_key)
+    }
+
+    pub fn gamepad_calibrations(&self) -> &BTreeMap<String, GamepadCalibration> {
+        &self.gamepad_calibrations
+    }
+
+    pub fn set_gamepad_calibration(
+        &mut self,
+        device_key: impl Into<String>,
+        calibration: GamepadCalibration,
+    ) {
+        let key = device_key.into().trim().to_owned();
+        if key.is_empty() {
+            return;
+        }
+        let mut calibration = calibration;
+        calibration.normalize();
+        self.gamepad_calibrations.insert(key, calibration);
+    }
+
     /// Normalizes all config values into launcher-supported ranges/defaults.
     pub fn normalize(&mut self) {
         if !WindowsBackdropType::ALL.contains(&self.windows_backdrop_type) {
@@ -1196,6 +1265,10 @@ impl Config {
         normalize_optional_path(&mut self.java_17_jvm_path);
         normalize_optional_path(&mut self.java_21_jvm_path);
         normalize_optional_path(&mut self.java_25_jvm_path);
+        self.gamepad_calibrations.retain(|key, _| !key.trim().is_empty());
+        for calibration in self.gamepad_calibrations.values_mut() {
+            calibration.normalize();
+        }
         if self.theme_id.trim().is_empty() {
             self.theme_id = "matrix_oled".to_owned();
         }
@@ -1247,6 +1320,7 @@ impl Config {
             java_21_jvm_path: _,
             java_25_jvm_path: _,
             curseforge_api_key: _,
+            gamepad_calibrations: _,
         } = self;
 
         visit(
@@ -1344,6 +1418,7 @@ impl Config {
             java_17_jvm_path: _,
             java_21_jvm_path: _,
             java_25_jvm_path: _,
+            gamepad_calibrations: _,
         } = self;
 
         visit(DropdownSettingId::UiFontFamily.spec(), ui_font_family);
@@ -1395,6 +1470,7 @@ impl Config {
             java_17_jvm_path: _,
             java_21_jvm_path: _,
             java_25_jvm_path: _,
+            gamepad_calibrations: _,
         } = self;
 
         visit(FloatSettingId::UiFontSize.spec(), ui_font_size);
@@ -1454,6 +1530,7 @@ impl Config {
             java_17_jvm_path: _,
             java_21_jvm_path: _,
             java_25_jvm_path: _,
+            gamepad_calibrations: _,
         } = self;
 
         visit(IntSettingId::UiFontWeight.spec(), ui_font_weight);
@@ -1514,6 +1591,7 @@ impl Config {
             java_17_jvm_path: _,
             java_21_jvm_path: _,
             java_25_jvm_path: _,
+            gamepad_calibrations: _,
         } = self;
 
         visit(
@@ -1585,6 +1663,7 @@ impl Default for Config {
             java_17_jvm_path: None,
             java_21_jvm_path: None,
             java_25_jvm_path: None,
+            gamepad_calibrations: BTreeMap::new(),
         }
     }
 }

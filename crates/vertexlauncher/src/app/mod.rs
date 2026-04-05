@@ -45,6 +45,7 @@ mod config_format_modal;
 mod create_instance_modal;
 mod discord_presence;
 mod gamepad;
+mod gamepad_calibration_modal;
 mod fonts;
 mod import_instance_modal;
 mod native_options;
@@ -145,6 +146,8 @@ struct VertexApp {
     create_instance_state: create_instance_modal::CreateInstanceState,
     show_import_instance_modal: bool,
     import_instance_state: import_instance_modal::ImportInstanceState,
+    show_gamepad_calibration_modal: bool,
+    gamepad_calibration_state: gamepad_calibration_modal::GamepadCalibrationState,
     in_flight_import_request: Option<import_instance_modal::ImportRequest>,
     curseforge_manual_download_preflight_request: Option<import_instance_modal::ImportRequest>,
     curseforge_manual_download_preflight_in_flight: bool,
@@ -302,6 +305,8 @@ impl VertexApp {
             create_instance_state: create_instance_modal::CreateInstanceState::default(),
             show_import_instance_modal: false,
             import_instance_state: import_instance_modal::ImportInstanceState::default(),
+            show_gamepad_calibration_modal: false,
+            gamepad_calibration_state: gamepad_calibration_modal::GamepadCalibrationState::default(),
             in_flight_import_request: None,
             curseforge_manual_download_preflight_request: None,
             curseforge_manual_download_preflight_in_flight: false,
@@ -345,8 +350,17 @@ impl VertexApp {
     }
 
     fn update_inner(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        if let Some(gamepad) = &mut self.gamepad {
-            gamepad.update(ctx);
+        let calibrations = self.config.gamepad_calibrations().clone();
+        let gamepad_update = if let Some(gamepad) = &mut self.gamepad {
+            gamepad.update(ctx, &calibrations)
+        } else {
+            gamepad::GamepadUpdate::default()
+        };
+        if let Some(device) = gamepad_update.calibration_requested
+            && !self.show_gamepad_calibration_modal
+        {
+            self.show_gamepad_calibration_modal = true;
+            self.gamepad_calibration_state.start(device);
         }
         self.apply_frame_limiter();
         self.text_ui.begin_frame(ctx);
@@ -800,6 +814,40 @@ impl VertexApp {
                 }
                 import_instance_modal::ModalAction::Import(request) => {
                     start_import_instance_task(self, request);
+                }
+            }
+        }
+        if self.show_gamepad_calibration_modal {
+            let live_sample = self
+                .gamepad
+                .as_ref()
+                .and_then(|gamepad| {
+                    self.gamepad_calibration_state
+                        .device_key()
+                        .and_then(|device_key| gamepad.current_left_stick(device_key))
+                });
+            match gamepad_calibration_modal::render(
+                ctx,
+                &mut self.text_ui,
+                &mut self.gamepad_calibration_state,
+                live_sample,
+            ) {
+                gamepad_calibration_modal::ModalAction::None => {}
+                gamepad_calibration_modal::ModalAction::Cancel => {
+                    self.show_gamepad_calibration_modal = false;
+                    self.gamepad_calibration_state.reset();
+                }
+                gamepad_calibration_modal::ModalAction::Save {
+                    device_key,
+                    calibration,
+                } => {
+                    self.config.set_gamepad_calibration(device_key.clone(), calibration);
+                    if let Some(gamepad) = self.gamepad.as_mut() {
+                        gamepad.reset_navigation_state(device_key.as_str());
+                    }
+                    self.show_gamepad_calibration_modal = false;
+                    self.gamepad_calibration_state.reset();
+                    notification::info!("gamepad", "Saved gamepad calibration.");
                 }
             }
         }
