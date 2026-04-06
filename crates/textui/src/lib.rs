@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::{BTreeSet, VecDeque},
     hash::{Hash, Hasher},
     mem,
@@ -272,9 +273,9 @@ pub fn apply_gamepad_scroll_if_focused(ui: &Ui, response: &Response) {
 }
 
 use cosmic_text::{
-    Action, Attrs, AttrsOwned, BorrowedWithFontSystem, Buffer, CacheKey, Color, Cursor, Edit,
-    Editor, Family, FontFeatures, FontSystem, LayoutRun, Metrics, Motion, Selection, Shaping,
-    Style as FontStyle, SwashContent, SwashImage, Weight, Wrap, fontdb,
+    Action, Affinity, Attrs, AttrsOwned, BorrowedWithFontSystem, Buffer, CacheKey, Color, Cursor,
+    Edit, Editor, Family, FontFeatures, FontSystem, LayoutGlyph, LayoutRun, Metrics, Motion,
+    Selection, Shaping, Style as FontStyle, SwashContent, SwashImage, Weight, Wrap, fontdb,
 };
 use egui::PointerButton;
 use egui::{
@@ -753,6 +754,239 @@ struct PreparedAtlasGlyph {
     approx_bytes: usize,
 }
 
+fn hash_text_fundamentals<H: Hasher>(fundamentals: &TextFundamentals, state: &mut H) {
+    fundamentals.kerning.hash(state);
+    fundamentals.stem_darkening.hash(state);
+    fundamentals.standard_ligatures.hash(state);
+    fundamentals.contextual_alternates.hash(state);
+    fundamentals.discretionary_ligatures.hash(state);
+    fundamentals.historical_ligatures.hash(state);
+    fundamentals.case_sensitive_forms.hash(state);
+    fundamentals.slashed_zero.hash(state);
+    fundamentals.tabular_numbers.hash(state);
+    fundamentals.letter_spacing_points.to_bits().hash(state);
+    fundamentals.word_spacing_points.to_bits().hash(state);
+}
+
+fn glyph_cluster_text<'a>(run_text: &'a str, glyph: &LayoutGlyph) -> &'a str {
+    run_text.get(glyph.start..glyph.end).unwrap_or_default()
+}
+
+fn spacing_after_glyph_points(
+    run_text: &str,
+    glyph: &LayoutGlyph,
+    glyph_index: usize,
+    glyph_count: usize,
+    fundamentals: &TextFundamentals,
+) -> f32 {
+    if glyph_index + 1 >= glyph_count {
+        return 0.0;
+    }
+    let mut spacing = fundamentals.letter_spacing_points.max(0.0);
+    let cluster = glyph_cluster_text(run_text, glyph);
+    if !cluster.is_empty() && cluster.chars().all(char::is_whitespace) {
+        spacing += fundamentals.word_spacing_points.max(0.0);
+    }
+    spacing
+}
+
+fn spacing_after_glyph_pixels(
+    run_text: &str,
+    glyph: &LayoutGlyph,
+    glyph_index: usize,
+    glyph_count: usize,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> f32 {
+    spacing_after_glyph_points(run_text, glyph, glyph_index, glyph_count, fundamentals) * scale
+}
+
+fn collect_glyph_spacing_prefixes_px(
+    run_text: &str,
+    glyphs: &[LayoutGlyph],
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Vec<f32> {
+    let mut prefixes = Vec::with_capacity(glyphs.len());
+    let mut extra_px = 0.0;
+    for (glyph_index, glyph) in glyphs.iter().enumerate() {
+        prefixes.push(extra_px);
+        extra_px += spacing_after_glyph_pixels(
+            run_text,
+            glyph,
+            glyph_index,
+            glyphs.len(),
+            fundamentals,
+            scale,
+        );
+    }
+    prefixes
+}
+
+fn adjusted_glyph_x_px(glyph: &LayoutGlyph, prefix_px: f32) -> f32 {
+    glyph.x + prefix_px
+}
+
+fn adjusted_glyph_right_px(glyph: &LayoutGlyph, prefix_px: f32) -> f32 {
+    adjusted_glyph_x_px(glyph, prefix_px) + glyph.w
+}
+
+fn run_cursor_from_glyph_right(run: &LayoutRun<'_>, glyph: &LayoutGlyph) -> Cursor {
+    if run.rtl {
+        Cursor::new_with_affinity(run.line_i, glyph.start, Affinity::After)
+    } else {
+        Cursor::new_with_affinity(run.line_i, glyph.end, Affinity::Before)
+    }
+}
+
+fn run_cursor_stops(
+    run: &LayoutRun<'_>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Vec<(Cursor, f32)> {
+    cursor_stops_for_glyphs(run.line_i, run.text, run.glyphs, fundamentals, scale)
+}
+
+fn cursor_stops_for_glyphs(
+    line_i: usize,
+    text: &str,
+    glyphs: &[LayoutGlyph],
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Vec<(Cursor, f32)> {
+    let mut stops = Vec::new();
+    if glyphs.is_empty() {
+        stops.push((Cursor::new(line_i, 0), 0.0));
+        return stops;
+    }
+
+    let prefixes = collect_glyph_spacing_prefixes_px(text, glyphs, fundamentals, scale);
+    for (glyph_index, glyph) in glyphs.iter().enumerate() {
+        let cluster = glyph_cluster_text(text, glyph);
+        let graphemes = cluster.grapheme_indices(true).collect::<Vec<_>>();
+        let total = graphemes.len().max(1);
+        let glyph_x = adjusted_glyph_x_px(glyph, prefixes[glyph_index]);
+
+        for step in 0..=total {
+            let cursor_index = graphemes
+                .get(step)
+                .map_or(glyph.end, |(offset, _)| glyph.start + *offset);
+            let offset = glyph.w * step as f32 / total as f32;
+            let x = if glyph.level.is_rtl() {
+                glyph_x + glyph.w - offset
+            } else {
+                glyph_x + offset
+            };
+            stops.push((Cursor::new(line_i, cursor_index), x));
+        }
+    }
+
+    stops.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.0.index.cmp(&b.0.index))
+    });
+    stops.dedup_by(|a, b| a.0 == b.0 && (a.1 - b.1).abs() <= 0.25);
+    stops
+}
+
+fn hit_buffer_with_fundamentals(
+    buffer: &Buffer,
+    x: f32,
+    y: f32,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Option<Cursor> {
+    let mut new_cursor_opt = None;
+
+    let mut runs = buffer.layout_runs().peekable();
+    let mut first_run = true;
+    while let Some(run) = runs.next() {
+        let line_top = run.line_top;
+        let line_height = run.line_height;
+
+        if first_run && y < line_top {
+            first_run = false;
+            new_cursor_opt = Some(Cursor::new(run.line_i, 0));
+        } else if y >= line_top && y < line_top + line_height {
+            let stops = run_cursor_stops(&run, fundamentals, scale);
+            if let Some((first_cursor, first_x)) = stops.first().copied() {
+                if x <= first_x {
+                    return Some(first_cursor);
+                }
+            }
+
+            for window in stops.windows(2) {
+                let (left_cursor, left_x) = window[0];
+                let (right_cursor, right_x) = window[1];
+                let mid_x = (left_x + right_x) * 0.5;
+                if x <= mid_x {
+                    return Some(left_cursor);
+                }
+                if x <= right_x {
+                    return Some(right_cursor);
+                }
+            }
+
+            if let Some((last_cursor, _)) = stops.last().copied() {
+                return Some(last_cursor);
+            }
+
+            return Some(Cursor::new(run.line_i, 0));
+        } else if runs.peek().is_none() && y > run.line_y {
+            if let Some(glyph) = run.glyphs.last() {
+                new_cursor_opt = Some(run_cursor_from_glyph_right(&run, glyph));
+            } else {
+                new_cursor_opt = Some(Cursor::new(run.line_i, 0));
+            }
+        }
+    }
+
+    new_cursor_opt
+}
+
+fn collect_prepared_glyphs_from_buffer(
+    buffer: &Buffer,
+    scale: f32,
+    default_color: Color32,
+    fundamentals: &TextFundamentals,
+) -> (Vec<PreparedGlyph>, f32) {
+    let mut glyphs = Vec::new();
+    let mut max_line_extra_points: f32 = 0.0;
+
+    for run in buffer.layout_runs() {
+        let baseline_y_px = run.line_y as i32;
+        let mut line_extra_points = 0.0;
+
+        for (glyph_index, glyph) in run.glyphs.iter().enumerate() {
+            let physical = glyph.physical((0.0, 0.0), 1.0);
+            glyphs.push(PreparedGlyph {
+                cache_key: GlyphRasterKey::new(
+                    physical.cache_key,
+                    scale,
+                    fundamentals.stem_darkening,
+                ),
+                offset_points: egui::vec2(
+                    physical.x as f32 / scale + line_extra_points,
+                    (baseline_y_px + physical.y) as f32 / scale,
+                ),
+                color: glyph.color_opt.map_or(default_color, cosmic_to_egui_color),
+            });
+            line_extra_points += spacing_after_glyph_points(
+                run.text,
+                glyph,
+                glyph_index,
+                run.glyphs.len(),
+                fundamentals,
+            );
+        }
+
+        max_line_extra_points = max_line_extra_points.max(line_extra_points);
+    }
+
+    (glyphs, max_line_extra_points)
+}
+
 #[derive(Clone, Debug)]
 enum AsyncRasterKind {
     Plain(String),
@@ -840,6 +1074,7 @@ struct InputState {
     last_text: String,
     attrs_fingerprint: u64,
     multiline: bool,
+    preferred_cursor_x_px: Option<f32>,
     scroll_metrics: EditorScrollMetrics,
     last_used_frame: u64,
     undo_stack: Vec<UndoEntry>,
@@ -1325,18 +1560,14 @@ impl TextUi {
     // to use the glyph image as a shader mask, stencil, or any other texture role.
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Returns (or freshly rasterizes) a cached texture for plain text.
-    ///
-    /// The texture is **not** painted — you control every aspect of rendering.
-    pub fn prepare_label_texture(
+    fn get_or_prepare_label_layout(
         &mut self,
-        ctx: &Context,
-        id_source: impl Hash,
+        cache_id: Id,
         text: &str,
         options: &LabelOptions,
         width_points_opt: Option<f32>,
-    ) -> TextTextureHandle {
-        let scale = ctx.pixels_per_point();
+        scale: f32,
+    ) -> Arc<PreparedTextLayout> {
         let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
 
         let mut hasher = new_fingerprint_hasher();
@@ -1349,28 +1580,7 @@ impl TextUi {
         options.weight.hash(&mut hasher);
         options.italic.hash(&mut hasher);
         options.color.hash(&mut hasher);
-        options.fundamentals.kerning.hash(&mut hasher);
-        options.fundamentals.stem_darkening.hash(&mut hasher);
-        options.fundamentals.standard_ligatures.hash(&mut hasher);
-        options.fundamentals.contextual_alternates.hash(&mut hasher);
-        options
-            .fundamentals
-            .discretionary_ligatures
-            .hash(&mut hasher);
-        options.fundamentals.historical_ligatures.hash(&mut hasher);
-        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
-        options.fundamentals.slashed_zero.hash(&mut hasher);
-        options.fundamentals.tabular_numbers.hash(&mut hasher);
-        options
-            .fundamentals
-            .letter_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
-        options
-            .fundamentals
-            .word_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
         scale.to_bits().hash(&mut hasher);
         binned_width
             .map(f32::to_bits)
@@ -1379,15 +1589,70 @@ impl TextUi {
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
 
-        let texture_id = egui::Id::new(id_source).with("textui_prepare_label");
-        let layout = self
-            .get_cached_prepared_layout(texture_id, fingerprint)
+        self.get_cached_prepared_layout(cache_id, fingerprint)
             .unwrap_or_else(|| {
                 let layout =
                     Arc::new(self.prepare_plain_text_layout(text, options, binned_width, scale));
-                self.cache_prepared_layout(texture_id, fingerprint, Arc::clone(&layout));
+                self.cache_prepared_layout(cache_id, fingerprint, Arc::clone(&layout));
                 layout
-            });
+            })
+    }
+
+    fn get_or_prepare_rich_layout(
+        &mut self,
+        cache_id: Id,
+        spans: &[RichTextSpan],
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        scale: f32,
+    ) -> Arc<PreparedTextLayout> {
+        let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
+
+        let mut hasher = new_fingerprint_hasher();
+        "prepare_rich".hash(&mut hasher);
+        for span in spans {
+            span.text.hash(&mut hasher);
+            span.style.color.hash(&mut hasher);
+            span.style.monospace.hash(&mut hasher);
+            span.style.italic.hash(&mut hasher);
+            span.style.weight.hash(&mut hasher);
+        }
+        options.font_size.to_bits().hash(&mut hasher);
+        options.line_height.to_bits().hash(&mut hasher);
+        options.wrap.hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
+        scale.to_bits().hash(&mut hasher);
+        binned_width
+            .map(f32::to_bits)
+            .unwrap_or(0)
+            .hash(&mut hasher);
+        self.hash_typography(&mut hasher);
+        let fingerprint = hasher.finish();
+
+        self.get_cached_prepared_layout(cache_id, fingerprint)
+            .unwrap_or_else(|| {
+                let layout =
+                    Arc::new(self.prepare_rich_text_layout(spans, options, binned_width, scale));
+                self.cache_prepared_layout(cache_id, fingerprint, Arc::clone(&layout));
+                layout
+            })
+    }
+
+    /// Returns (or freshly rasterizes) a cached texture for plain text.
+    ///
+    /// The texture is **not** painted — you control every aspect of rendering.
+    pub fn prepare_label_texture(
+        &mut self,
+        ctx: &Context,
+        id_source: impl Hash,
+        text: &str,
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+    ) -> TextTextureHandle {
+        let scale = ctx.pixels_per_point();
+        let texture_id = egui::Id::new(id_source).with("textui_prepare_label");
+        let layout =
+            self.get_or_prepare_label_layout(texture_id, text, options, width_points_opt, scale);
 
         self.build_text_texture_handle(ctx, layout, scale)
     }
@@ -1404,37 +1669,9 @@ impl TextUi {
         width_points_opt: Option<f32>,
     ) -> TextTextureHandle {
         let scale = ctx.pixels_per_point();
-        let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
-
-        let mut hasher = new_fingerprint_hasher();
-        "prepare_rich".hash(&mut hasher);
-        for span in spans {
-            span.text.hash(&mut hasher);
-            span.style.color.hash(&mut hasher);
-            span.style.monospace.hash(&mut hasher);
-            span.style.italic.hash(&mut hasher);
-            span.style.weight.hash(&mut hasher);
-        }
-        options.font_size.to_bits().hash(&mut hasher);
-        options.line_height.to_bits().hash(&mut hasher);
-        options.wrap.hash(&mut hasher);
-        scale.to_bits().hash(&mut hasher);
-        binned_width
-            .map(f32::to_bits)
-            .unwrap_or(0)
-            .hash(&mut hasher);
-        self.hash_typography(&mut hasher);
-        let fingerprint = hasher.finish();
-
         let texture_id = egui::Id::new(id_source).with("textui_prepare_rich");
-        let layout = self
-            .get_cached_prepared_layout(texture_id, fingerprint)
-            .unwrap_or_else(|| {
-                let layout =
-                    Arc::new(self.prepare_rich_text_layout(spans, options, binned_width, scale));
-                self.cache_prepared_layout(texture_id, fingerprint, Arc::clone(&layout));
-                layout
-            });
+        let layout =
+            self.get_or_prepare_rich_layout(texture_id, spans, options, width_points_opt, scale);
 
         self.build_text_texture_handle(ctx, layout, scale)
     }
@@ -1447,61 +1684,32 @@ impl TextUi {
         path: &TextPath,
         path_options: &TextPathOptions,
     ) -> Result<TextPathLayout, TextPathError> {
-        if text.is_empty() {
-            return Err(TextPathError::EmptyText);
-        }
-        let path_length = text_path_length(path);
-        if path.points.is_empty() {
-            return Err(TextPathError::EmptyPath);
-        }
-        if path_length <= f32::EPSILON {
-            return Err(TextPathError::PathTooShort);
-        }
-
         let layout = self.prepare_plain_text_layout(text, options, width_points_opt, 1.0);
-        if layout.glyphs.is_empty() {
-            return Err(TextPathError::EmptyText);
-        }
+        build_path_layout_from_prepared_layout(
+            &layout,
+            options.font_size,
+            options.line_height,
+            path,
+            path_options,
+        )
+    }
 
-        let baseline_y = layout.glyphs[0].offset_points.y;
-        let mut glyphs = Vec::with_capacity(layout.glyphs.len());
-        let mut bounds: Option<Rect> = None;
-        for (index, glyph) in layout.glyphs.iter().enumerate() {
-            let advance_points =
-                estimated_glyph_advance_points(&layout.glyphs, index, options.font_size);
-            let distance =
-                (path_options.start_offset_points + glyph.offset_points.x).clamp(0.0, path_length);
-            let sample = sample_text_path(path, distance).ok_or(TextPathError::PathTooShort)?;
-            let baseline_offset =
-                glyph.offset_points.y - baseline_y + path_options.normal_offset_points;
-            let anchor = sample.position + sample.normal * baseline_offset;
-            let rotation_radians = if path_options.rotate_glyphs {
-                sample.tangent.y.atan2(sample.tangent.x)
-            } else {
-                0.0
-            };
-            let glyph_rect = Rect::from_center_size(
-                anchor,
-                egui::vec2(advance_points.max(1.0), options.line_height.max(1.0)),
-            );
-            bounds = Some(bounds.map_or(glyph_rect, |current| current.union(glyph_rect)));
-            glyphs.push(TextPathGlyph {
-                anchor,
-                tangent: sample.tangent,
-                normal: sample.normal,
-                rotation_radians,
-                local_offset: egui::vec2(0.0, baseline_offset),
-                advance_points,
-                color: glyph.color,
-            });
-        }
-
-        Ok(TextPathLayout {
-            glyphs,
-            bounds: bounds.unwrap_or(Rect::NOTHING),
-            total_advance_points: layout.size_points.x,
-            path_length_points: path_length,
-        })
+    pub fn prepare_rich_text_path_layout(
+        &mut self,
+        spans: &[RichTextSpan],
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextPathLayout, TextPathError> {
+        let layout = self.prepare_rich_text_layout(spans, options, width_points_opt, 1.0);
+        build_path_layout_from_prepared_layout(
+            &layout,
+            options.font_size,
+            options.line_height,
+            path,
+            path_options,
+        )
     }
 
     pub fn export_label_as_shapes(
@@ -1511,24 +1719,164 @@ impl TextUi {
         width_points_opt: Option<f32>,
     ) -> VectorTextShape {
         let layout = self.prepare_plain_text_layout(text, options, width_points_opt, 1.0);
-        let mut glyphs = Vec::with_capacity(layout.glyphs.len());
-        let mut bounds: Option<Rect> = None;
-        for glyph in layout.glyphs.iter() {
-            let Some(shape) = export_vector_glyph_shape(
+        export_prepared_layout_as_shapes(
+            &layout,
+            &mut self.font_system,
+            &mut self.scale_context,
+            options.line_height,
+        )
+    }
+
+    pub fn export_rich_text_as_shapes(
+        &mut self,
+        spans: &[RichTextSpan],
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+    ) -> VectorTextShape {
+        let layout = self.prepare_rich_text_layout(spans, options, width_points_opt, 1.0);
+        export_prepared_layout_as_shapes(
+            &layout,
+            &mut self.font_system,
+            &mut self.scale_context,
+            options.line_height,
+        )
+    }
+
+    pub fn paint_label_on_path(
+        &mut self,
+        painter: &egui::Painter,
+        id_source: impl Hash,
+        text: &str,
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextPathLayout, TextPathError> {
+        let scale = painter.pixels_per_point();
+        let layout = self.get_or_prepare_label_layout(
+            Id::new(id_source).with("textui_path_label"),
+            text,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.paint_prepared_layout_on_path(
+            painter,
+            &layout,
+            options.font_size,
+            options.line_height,
+            path,
+            path_options,
+        )
+    }
+
+    pub fn paint_rich_text_on_path(
+        &mut self,
+        painter: &egui::Painter,
+        id_source: impl Hash,
+        spans: &[RichTextSpan],
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextPathLayout, TextPathError> {
+        let scale = painter.pixels_per_point();
+        let layout = self.get_or_prepare_rich_layout(
+            Id::new(id_source).with("textui_path_rich"),
+            spans,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.paint_prepared_layout_on_path(
+            painter,
+            &layout,
+            options.font_size,
+            options.line_height,
+            path,
+            path_options,
+        )
+    }
+
+    fn paint_prepared_layout_on_path(
+        &mut self,
+        painter: &egui::Painter,
+        layout: &PreparedTextLayout,
+        fallback_advance_points: f32,
+        line_height_points: f32,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextPathLayout, TextPathError> {
+        let path_layout = build_path_layout_from_prepared_layout(
+            layout,
+            fallback_advance_points,
+            line_height_points,
+            path,
+            path_options,
+        )?;
+        let scale = painter.pixels_per_point();
+        let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
+
+        for (glyph, path_glyph) in layout.glyphs.iter().zip(path_layout.glyphs.iter()) {
+            let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
+                painter.ctx(),
                 &mut self.font_system,
                 &mut self.scale_context,
-                glyph,
-                options.line_height,
+                glyph.cache_key,
+                self.current_frame,
             ) else {
                 continue;
             };
-            bounds = Some(bounds.map_or(shape.bounds, |current| current.union(shape.bounds)));
-            glyphs.push(shape);
+
+            let size_points = egui::vec2(
+                atlas_entry.size_px[0] as f32 / scale,
+                atlas_entry.size_px[1] as f32 / scale,
+            );
+            let origin_offset = egui::vec2(
+                atlas_entry.placement_left_px as f32 / scale,
+                -(atlas_entry.placement_top_px as f32) / scale,
+            );
+            let tint = if atlas_entry.is_color {
+                Color32::WHITE
+            } else {
+                glyph.color
+            };
+
+            if let Some((_, mesh)) = meshes
+                .iter_mut()
+                .find(|(texture_id, _)| *texture_id == atlas_entry.texture_id)
+            {
+                add_rotated_glyph_quad(
+                    mesh,
+                    path_glyph.anchor,
+                    origin_offset,
+                    size_points,
+                    atlas_entry.uv,
+                    tint,
+                    path_glyph.rotation_radians,
+                );
+            } else {
+                let mut mesh = egui::epaint::Mesh::with_texture(atlas_entry.texture_id);
+                add_rotated_glyph_quad(
+                    &mut mesh,
+                    path_glyph.anchor,
+                    origin_offset,
+                    size_points,
+                    atlas_entry.uv,
+                    tint,
+                    path_glyph.rotation_radians,
+                );
+                meshes.push((atlas_entry.texture_id, mesh));
+            }
         }
-        VectorTextShape {
-            glyphs,
-            bounds: bounds.unwrap_or(Rect::NOTHING),
+
+        for (_, mesh) in meshes {
+            if !mesh.is_empty() {
+                painter.add(egui::Shape::mesh(mesh));
+            }
         }
+
+        Ok(path_layout)
     }
 
     fn label_impl(
@@ -1560,28 +1908,7 @@ impl TextUi {
         options.weight.hash(&mut hasher);
         options.italic.hash(&mut hasher);
         options.color.hash(&mut hasher);
-        options.fundamentals.kerning.hash(&mut hasher);
-        options.fundamentals.stem_darkening.hash(&mut hasher);
-        options.fundamentals.standard_ligatures.hash(&mut hasher);
-        options.fundamentals.contextual_alternates.hash(&mut hasher);
-        options
-            .fundamentals
-            .discretionary_ligatures
-            .hash(&mut hasher);
-        options.fundamentals.historical_ligatures.hash(&mut hasher);
-        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
-        options.fundamentals.slashed_zero.hash(&mut hasher);
-        options.fundamentals.tabular_numbers.hash(&mut hasher);
-        options
-            .fundamentals
-            .letter_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
-        options
-            .fundamentals
-            .word_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
         scale.to_bits().hash(&mut hasher);
         width_points_opt
             .map(f32::to_bits)
@@ -2077,6 +2404,7 @@ impl TextUi {
             );
             state.last_text = text.clone();
             state.attrs_fingerprint = attrs_fingerprint;
+            state.preferred_cursor_x_px = None;
             if stick_to_bottom && !has_focus && !response.hovered() {
                 scroll_editor_to_buffer_end(&mut self.font_system, &mut state.editor);
             }
@@ -2133,6 +2461,8 @@ impl TextUi {
                 &mut state.editor,
                 content_rect,
                 scale,
+                &mut state.preferred_cursor_x_px,
+                &options.fundamentals,
                 has_focus,
                 pointer_over_scrollbar,
                 &mut state.scroll_metrics,
@@ -2189,6 +2519,7 @@ impl TextUi {
             &mut state.editor,
             content_rect,
             scale,
+            &options.fundamentals,
             &mut state.scroll_metrics,
         );
 
@@ -2281,6 +2612,7 @@ impl TextUi {
             );
             state.last_text.clone_from(text);
             state.attrs_fingerprint = attrs_fingerprint;
+            state.preferred_cursor_x_px = None;
         }
 
         state.scroll_metrics = self.configure_editor(
@@ -2341,6 +2673,7 @@ impl TextUi {
                         .set_selection(clamp_selection_to_editor(&state.editor, undo_sel));
                     state.last_text = undo_text;
                     state.last_undo_op = UndoOpKind::None;
+                    state.preferred_cursor_x_px = None;
                     changed = true;
                 }
             } else if redo_pressed {
@@ -2373,6 +2706,7 @@ impl TextUi {
                         .set_selection(clamp_selection_to_editor(&state.editor, redo_sel));
                     state.last_text = redo_text;
                     state.last_undo_op = UndoOpKind::None;
+                    state.preferred_cursor_x_px = None;
                     changed = true;
                 }
             } else {
@@ -2410,6 +2744,8 @@ impl TextUi {
                     multiline,
                     content_rect,
                     scale,
+                    &mut state.preferred_cursor_x_px,
+                    &options.fundamentals,
                     has_focus,
                     &mut state.scroll_metrics,
                 );
@@ -2465,6 +2801,7 @@ impl TextUi {
                 state.last_undo_op = UndoOpKind::None;
                 ui.ctx().copy_text(sel);
                 state.editor.delete_selection();
+                state.preferred_cursor_x_px = None;
                 changed = true;
             }
         }
@@ -2493,12 +2830,14 @@ impl TextUi {
                         state.redo_stack.clear();
                         state.last_undo_op = UndoOpKind::None;
                         state.editor.insert_string(&paste_text, None);
+                        state.preferred_cursor_x_px = None;
                         changed = true;
                     }
                 }
             }
         }
         if ctx_select_all {
+            state.preferred_cursor_x_px = None;
             changed |= select_all(&mut state.editor);
         }
 
@@ -2506,6 +2845,7 @@ impl TextUi {
         if latest_text != *text {
             *text = latest_text.clone();
             state.last_text = latest_text;
+            state.preferred_cursor_x_px = None;
             changed = true;
         }
 
@@ -2617,6 +2957,7 @@ impl TextUi {
             last_text: text.to_owned(),
             attrs_fingerprint: 0,
             multiline,
+            preferred_cursor_x_px: None,
             scroll_metrics: EditorScrollMetrics::default(),
             last_used_frame: 0,
             undo_stack: Vec::new(),
@@ -2658,7 +2999,8 @@ impl TextUi {
             borrowed.set_text(text, &attrs, Shaping::Advanced, None);
             borrowed.set_scroll(previous_scroll);
             borrowed.shape_until_scroll(true);
-            scroll_metrics = clamp_borrowed_buffer_scroll(&mut borrowed);
+            scroll_metrics =
+                clamp_borrowed_buffer_scroll(&mut borrowed, &options.fundamentals, scale);
         });
         editor.set_cursor(clamp_cursor_to_editor(editor, previous_cursor));
         editor.set_selection(clamp_selection_to_editor(editor, previous_selection));
@@ -2690,7 +3032,8 @@ impl TextUi {
                 Wrap::None
             });
             borrowed.shape_until_scroll(true);
-            scroll_metrics = clamp_borrowed_buffer_scroll(&mut borrowed);
+            scroll_metrics =
+                clamp_borrowed_buffer_scroll(&mut borrowed, &options.fundamentals, scale);
         });
         scroll_metrics
     }
@@ -2738,7 +3081,8 @@ impl TextUi {
             );
             borrowed.set_scroll(previous_scroll);
             borrowed.shape_until_scroll(true);
-            scroll_metrics = clamp_borrowed_buffer_scroll(&mut borrowed);
+            scroll_metrics =
+                clamp_borrowed_buffer_scroll(&mut borrowed, &options.fundamentals, scale);
         });
         editor.set_cursor(clamp_cursor_to_editor(editor, previous_cursor));
         editor.set_selection(clamp_selection_to_editor(editor, previous_selection));
@@ -2766,7 +3110,8 @@ impl TextUi {
             );
             borrowed.set_wrap(if wrap { Wrap::WordOrGlyph } else { Wrap::None });
             borrowed.shape_until_scroll(true);
-            scroll_metrics = clamp_borrowed_buffer_scroll(&mut borrowed);
+            scroll_metrics =
+                clamp_borrowed_buffer_scroll(&mut borrowed, &options.fundamentals, scale);
         });
         scroll_metrics
     }
@@ -2778,6 +3123,8 @@ impl TextUi {
         editor: &mut Editor<'static>,
         content_rect: Rect,
         scale: f32,
+        preferred_cursor_x_px: &mut Option<f32>,
+        fundamentals: &TextFundamentals,
         process_keyboard: bool,
         pointer_over_scrollbar: bool,
         scroll_metrics: &mut EditorScrollMetrics,
@@ -2799,40 +3146,74 @@ impl TextUi {
             let y = ((pointer_pos.y - content_rect.min.y) * scale).round() as i32;
 
             if response.triple_clicked() {
-                editor
-                    .borrow_with(&mut self.font_system)
-                    .action(Action::TripleClick { x, y });
-                changed = true;
+                changed |= triple_click_editor_to_pointer(
+                    editor,
+                    x,
+                    y,
+                    preferred_cursor_x_px,
+                    fundamentals,
+                    scale,
+                );
             } else if response.double_clicked() {
-                editor
-                    .borrow_with(&mut self.font_system)
-                    .action(Action::DoubleClick { x, y });
-                changed = true;
+                changed |= double_click_editor_to_pointer(
+                    editor,
+                    x,
+                    y,
+                    preferred_cursor_x_px,
+                    fundamentals,
+                    scale,
+                );
             } else if pointer_pressed_on_widget {
                 if modifiers.shift {
-                    changed |= extend_selection_to_pointer(editor, x, y);
+                    changed |= extend_selection_to_pointer(
+                        editor,
+                        x,
+                        y,
+                        preferred_cursor_x_px,
+                        fundamentals,
+                        scale,
+                    );
                 } else {
-                    editor
-                        .borrow_with(&mut self.font_system)
-                        .action(Action::Click { x, y });
-                    changed = true;
+                    changed |= click_editor_to_pointer(
+                        editor,
+                        x,
+                        y,
+                        preferred_cursor_x_px,
+                        fundamentals,
+                        scale,
+                    );
                 }
             } else if response.clicked() {
                 if modifiers.shift {
-                    changed |= extend_selection_to_pointer(editor, x, y);
+                    changed |= extend_selection_to_pointer(
+                        editor,
+                        x,
+                        y,
+                        preferred_cursor_x_px,
+                        fundamentals,
+                        scale,
+                    );
                 } else {
-                    editor
-                        .borrow_with(&mut self.font_system)
-                        .action(Action::Click { x, y });
-                    changed = true;
+                    changed |= click_editor_to_pointer(
+                        editor,
+                        x,
+                        y,
+                        preferred_cursor_x_px,
+                        fundamentals,
+                        scale,
+                    );
                 }
             }
 
             if response.dragged() {
-                editor
-                    .borrow_with(&mut self.font_system)
-                    .action(Action::Drag { x, y });
-                changed = true;
+                changed |= drag_editor_selection_to_pointer(
+                    editor,
+                    x,
+                    y,
+                    preferred_cursor_x_px,
+                    fundamentals,
+                    scale,
+                );
             }
         }
 
@@ -2886,6 +3267,9 @@ impl TextUi {
                             editor,
                             *key,
                             *modifiers,
+                            preferred_cursor_x_px,
+                            fundamentals,
+                            scale,
                         );
                     }
                     _ => {}
@@ -2897,7 +3281,7 @@ impl TextUi {
             editor
                 .borrow_with(&mut self.font_system)
                 .shape_as_needed(false);
-            *scroll_metrics = self.measure_editor_scroll_metrics(editor);
+            *scroll_metrics = self.measure_editor_scroll_metrics(editor, fundamentals, scale);
         }
 
         changed
@@ -2931,10 +3315,12 @@ impl TextUi {
     fn measure_editor_scroll_metrics(
         &mut self,
         editor: &mut Editor<'static>,
+        fundamentals: &TextFundamentals,
+        scale: f32,
     ) -> EditorScrollMetrics {
         editor.with_buffer_mut(|buffer| {
             let mut borrowed = buffer.borrow_with(&mut self.font_system);
-            measure_borrowed_buffer_scroll_metrics(&mut borrowed)
+            measure_borrowed_buffer_scroll_metrics(&mut borrowed, fundamentals, scale)
         })
     }
 
@@ -2945,6 +3331,7 @@ impl TextUi {
         editor: &mut Editor<'static>,
         content_rect: Rect,
         scale: f32,
+        fundamentals: &TextFundamentals,
         scroll_metrics: &mut EditorScrollMetrics,
     ) -> bool {
         let has_horizontal_scroll = scroll_metrics.max_horizontal_scroll_px > f32::EPSILON;
@@ -3005,7 +3392,7 @@ impl TextUi {
         if vertical_changed {
             self.adjust_editor_vertical_scroll(editor, vertical_delta_px);
         }
-        *scroll_metrics = self.measure_editor_scroll_metrics(editor);
+        *scroll_metrics = self.measure_editor_scroll_metrics(editor, fundamentals, scale);
         ui.ctx().request_repaint();
         true
     }
@@ -3059,16 +3446,22 @@ impl TextUi {
                 let line_top = run.line_top; // already scroll-adjusted by LayoutRunIter
                 let line_y = run.line_y;
                 let line_height = run.line_height;
+                let prefixes = collect_glyph_spacing_prefixes_px(
+                    run.text,
+                    run.glyphs,
+                    &options.fundamentals,
+                    scale,
+                );
 
                 // --- Selection highlights ---
                 if let Some((start, end)) = selection_bounds {
                     if line_i >= start.line && line_i <= end.line {
                         let mut range_opt: Option<(i32, i32)> = None;
 
-                        for glyph in run.glyphs {
+                        for (glyph_index, glyph) in run.glyphs.iter().enumerate() {
                             let cluster = &run.text[glyph.start..glyph.end];
                             let total = cluster.grapheme_indices(true).count().max(1);
-                            let mut c_x = glyph.x;
+                            let mut c_x = adjusted_glyph_x_px(glyph, prefixes[glyph_index]);
                             let c_w = glyph.w / total as f32;
 
                             for (i, c) in cluster.grapheme_indices(true) {
@@ -3126,7 +3519,9 @@ impl TextUi {
 
                 // --- Cursor ---
                 if has_focus {
-                    if let Some(cx) = editor_cursor_x_in_run(&editor.cursor(), &run) {
+                    if let Some(cx) =
+                        editor_cursor_x_in_run(&editor.cursor(), &run, &options.fundamentals, scale)
+                    {
                         let x_pts = (cx as f32 - horizontal_scroll_px) / scale + origin.x;
                         let y_pts = line_top / scale + origin.y;
                         let h_pts = line_height / scale;
@@ -3139,7 +3534,7 @@ impl TextUi {
                 }
 
                 // --- Glyph draw commands ---
-                for glyph in run.glyphs {
+                for (glyph_index, glyph) in run.glyphs.iter().enumerate() {
                     let physical = glyph.physical((0.0, 0.0), 1.0);
                     let color = if selection_visible {
                         if let Some((start, end)) = selection_bounds {
@@ -3171,7 +3566,7 @@ impl TextUi {
                             scale,
                             options.fundamentals.stem_darkening,
                         ),
-                        x_px: physical.x as f32 - horizontal_scroll_px,
+                        x_px: physical.x as f32 + prefixes[glyph_index] - horizontal_scroll_px,
                         y_px: line_y + physical.y as f32,
                         color,
                     });
@@ -3290,28 +3685,7 @@ impl TextUi {
         options.line_height.to_bits().hash(&mut hasher);
         scale.to_bits().hash(&mut hasher);
         wrap.hash(&mut hasher);
-        options.fundamentals.kerning.hash(&mut hasher);
-        options.fundamentals.stem_darkening.hash(&mut hasher);
-        options.fundamentals.standard_ligatures.hash(&mut hasher);
-        options.fundamentals.contextual_alternates.hash(&mut hasher);
-        options
-            .fundamentals
-            .discretionary_ligatures
-            .hash(&mut hasher);
-        options.fundamentals.historical_ligatures.hash(&mut hasher);
-        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
-        options.fundamentals.slashed_zero.hash(&mut hasher);
-        options.fundamentals.tabular_numbers.hash(&mut hasher);
-        options
-            .fundamentals
-            .letter_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
-        options
-            .fundamentals
-            .word_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
         self.ui_font_family.hash(&mut hasher);
         self.ui_font_size_scale.to_bits().hash(&mut hasher);
         self.ui_font_weight.hash(&mut hasher);
@@ -3335,6 +3709,8 @@ impl TextUi {
         multiline: bool,
         content_rect: Rect,
         scale: f32,
+        preferred_cursor_x_px: &mut Option<f32>,
+        fundamentals: &TextFundamentals,
         process_keyboard: bool,
         scroll_metrics: &mut EditorScrollMetrics,
     ) -> bool {
@@ -3348,31 +3724,54 @@ impl TextUi {
             let y = ((pointer_pos.y - content_rect.min.y) * scale).round() as i32;
 
             if response.triple_clicked() {
-                editor
-                    .borrow_with(&mut self.font_system)
-                    .action(Action::TripleClick { x, y });
-                changed = true;
+                changed |= triple_click_editor_to_pointer(
+                    editor,
+                    x,
+                    y,
+                    preferred_cursor_x_px,
+                    fundamentals,
+                    scale,
+                );
             } else if response.double_clicked() {
-                editor
-                    .borrow_with(&mut self.font_system)
-                    .action(Action::DoubleClick { x, y });
-                changed = true;
+                changed |= double_click_editor_to_pointer(
+                    editor,
+                    x,
+                    y,
+                    preferred_cursor_x_px,
+                    fundamentals,
+                    scale,
+                );
             } else if response.clicked() {
                 if modifiers.shift {
-                    changed |= extend_selection_to_pointer(editor, x, y);
+                    changed |= extend_selection_to_pointer(
+                        editor,
+                        x,
+                        y,
+                        preferred_cursor_x_px,
+                        fundamentals,
+                        scale,
+                    );
                 } else {
-                    editor
-                        .borrow_with(&mut self.font_system)
-                        .action(Action::Click { x, y });
-                    changed = true;
+                    changed |= click_editor_to_pointer(
+                        editor,
+                        x,
+                        y,
+                        preferred_cursor_x_px,
+                        fundamentals,
+                        scale,
+                    );
                 }
             }
 
             if response.dragged() {
-                editor
-                    .borrow_with(&mut self.font_system)
-                    .action(Action::Drag { x, y });
-                changed = true;
+                changed |= drag_editor_selection_to_pointer(
+                    editor,
+                    x,
+                    y,
+                    preferred_cursor_x_px,
+                    fundamentals,
+                    scale,
+                );
             }
         }
 
@@ -3385,6 +3784,7 @@ impl TextUi {
                             text = text.replace(['\n', '\r'], "");
                         }
                         if !text.is_empty() {
+                            *preferred_cursor_x_px = None;
                             editor.insert_string(&text, None);
                             changed = true;
                         }
@@ -3398,6 +3798,9 @@ impl TextUi {
                         if let Some(selection) = editor.copy_selection() {
                             ui.ctx().copy_text(selection);
                             changed |= editor.delete_selection();
+                            if changed {
+                                *preferred_cursor_x_px = None;
+                            }
                         }
                     }
                     egui::Event::Paste(pasted) => {
@@ -3406,6 +3809,7 @@ impl TextUi {
                             pasted = pasted.replace(['\n', '\r'], " ");
                         }
                         if !pasted.is_empty() {
+                            *preferred_cursor_x_px = None;
                             editor.insert_string(&pasted, None);
                             changed = true;
                         }
@@ -3425,6 +3829,7 @@ impl TextUi {
                                     paste_text.replace(['\n', '\r'], " ")
                                 };
                                 if !paste_text.is_empty() {
+                                    *preferred_cursor_x_px = None;
                                     editor.insert_string(&paste_text, None);
                                     changed = true;
                                 }
@@ -3443,6 +3848,9 @@ impl TextUi {
                             *key,
                             *modifiers,
                             multiline,
+                            preferred_cursor_x_px,
+                            fundamentals,
+                            scale,
                         );
                     }
                     _ => {}
@@ -3459,7 +3867,7 @@ impl TextUi {
                 0.0,
                 scroll_metrics.max_horizontal_scroll_px,
             );
-            *scroll_metrics = self.measure_editor_scroll_metrics(editor);
+            *scroll_metrics = self.measure_editor_scroll_metrics(editor, fundamentals, scale);
         }
 
         changed
@@ -3658,6 +4066,7 @@ impl TextUi {
             scale,
             options.color,
             options.fundamentals.stem_darkening,
+            &options.fundamentals,
         )
     }
 
@@ -3669,27 +4078,23 @@ impl TextUi {
         scale: f32,
         default_color: Color32,
         stem_darkening: bool,
+        fundamentals: &TextFundamentals,
     ) -> PreparedTextLayout {
-        let mut glyphs = Vec::new();
-        for run in buffer.layout_runs() {
-            let baseline_y_px = run.line_y as i32;
-            for glyph in run.glyphs {
-                let physical = glyph.physical((0.0, 0.0), 1.0);
-                glyphs.push(PreparedGlyph {
-                    cache_key: GlyphRasterKey::new(physical.cache_key, scale, stem_darkening),
-                    offset_points: egui::vec2(
-                        physical.x as f32 / scale,
-                        (baseline_y_px + physical.y) as f32 / scale,
-                    ),
-                    color: glyph.color_opt.map_or(default_color, cosmic_to_egui_color),
-                });
-            }
-        }
-
+        let mut effective_fundamentals = fundamentals.clone();
+        effective_fundamentals.stem_darkening = stem_darkening;
+        let (glyphs, extra_width_points) = collect_prepared_glyphs_from_buffer(
+            buffer,
+            scale,
+            default_color,
+            &effective_fundamentals,
+        );
         let approx_bytes = glyphs.len().saturating_mul(mem::size_of::<PreparedGlyph>());
         PreparedTextLayout {
             glyphs: Arc::from(glyphs),
-            size_points: egui::vec2(width_px as f32 / scale, height_px as f32 / scale),
+            size_points: egui::vec2(
+                width_px as f32 / scale + extra_width_points,
+                height_px as f32 / scale,
+            ),
             approx_bytes,
         }
     }
@@ -4006,28 +4411,7 @@ impl TextUi {
         options.line_height.to_bits().hash(&mut hasher);
         options.text_color.hash(&mut hasher);
         options.monospace.hash(&mut hasher);
-        options.fundamentals.kerning.hash(&mut hasher);
-        options.fundamentals.stem_darkening.hash(&mut hasher);
-        options.fundamentals.standard_ligatures.hash(&mut hasher);
-        options.fundamentals.contextual_alternates.hash(&mut hasher);
-        options
-            .fundamentals
-            .discretionary_ligatures
-            .hash(&mut hasher);
-        options.fundamentals.historical_ligatures.hash(&mut hasher);
-        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
-        options.fundamentals.slashed_zero.hash(&mut hasher);
-        options.fundamentals.tabular_numbers.hash(&mut hasher);
-        options
-            .fundamentals
-            .letter_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
-        options
-            .fundamentals
-            .word_spacing_points
-            .to_bits()
-            .hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
         scale.to_bits().hash(&mut hasher);
         self.ui_font_family.hash(&mut hasher);
         self.ui_font_size_scale.to_bits().hash(&mut hasher);
@@ -4183,32 +4567,20 @@ fn async_prepare_text_layout(
     }
     let width_px = measured_width_px.max(1);
     let height_px = measured_height_px.max(1);
-    let mut glyphs = Vec::new();
-    for run in buffer.layout_runs() {
-        let baseline_y_px = run.line_y as i32;
-        for glyph in run.glyphs {
-            let physical = glyph.physical((0.0, 0.0), 1.0);
-            glyphs.push(PreparedGlyph {
-                cache_key: GlyphRasterKey::new(
-                    physical.cache_key,
-                    req.scale,
-                    req.options.fundamentals.stem_darkening,
-                ),
-                offset_points: egui::vec2(
-                    physical.x as f32 / req.scale,
-                    (baseline_y_px + physical.y) as f32 / req.scale,
-                ),
-                color: glyph
-                    .color_opt
-                    .map_or(req.options.color, cosmic_to_egui_color),
-            });
-        }
-    }
+    let (glyphs, extra_width_points) = collect_prepared_glyphs_from_buffer(
+        &buffer,
+        req.scale,
+        req.options.color,
+        &req.options.fundamentals,
+    );
 
     PreparedTextLayout {
         approx_bytes: glyphs.len().saturating_mul(mem::size_of::<PreparedGlyph>()),
         glyphs: Arc::from(glyphs),
-        size_points: egui::vec2(width_px as f32 / req.scale, height_px as f32 / req.scale),
+        size_points: egui::vec2(
+            width_px as f32 / req.scale + extra_width_points,
+            height_px as f32 / req.scale,
+        ),
     }
 }
 
@@ -4969,6 +5341,124 @@ fn paint_text_texture_glyphs(
     }
 }
 
+fn build_path_layout_from_prepared_layout(
+    layout: &PreparedTextLayout,
+    fallback_advance_points: f32,
+    line_height_points: f32,
+    path: &TextPath,
+    path_options: &TextPathOptions,
+) -> Result<TextPathLayout, TextPathError> {
+    if path.points.is_empty() {
+        return Err(TextPathError::EmptyPath);
+    }
+    if layout.glyphs.is_empty() {
+        return Err(TextPathError::EmptyText);
+    }
+    let path_length = text_path_length(path);
+    if path_length <= f32::EPSILON {
+        return Err(TextPathError::PathTooShort);
+    }
+
+    let baseline_y = layout.glyphs[0].offset_points.y;
+    let mut glyphs = Vec::with_capacity(layout.glyphs.len());
+    let mut bounds: Option<Rect> = None;
+    for (index, glyph) in layout.glyphs.iter().enumerate() {
+        let advance_points =
+            estimated_glyph_advance_points(&layout.glyphs, index, fallback_advance_points);
+        let distance =
+            (path_options.start_offset_points + glyph.offset_points.x).clamp(0.0, path_length);
+        let sample = sample_text_path(path, distance).ok_or(TextPathError::PathTooShort)?;
+        let baseline_offset =
+            glyph.offset_points.y - baseline_y + path_options.normal_offset_points;
+        let anchor = sample.position + sample.normal * baseline_offset;
+        let rotation_radians = if path_options.rotate_glyphs {
+            sample.tangent.y.atan2(sample.tangent.x)
+        } else {
+            0.0
+        };
+        let glyph_rect = Rect::from_center_size(
+            anchor,
+            egui::vec2(advance_points.max(1.0), line_height_points.max(1.0)),
+        );
+        bounds = Some(bounds.map_or(glyph_rect, |current| current.union(glyph_rect)));
+        glyphs.push(TextPathGlyph {
+            anchor,
+            tangent: sample.tangent,
+            normal: sample.normal,
+            rotation_radians,
+            local_offset: egui::vec2(0.0, baseline_offset),
+            advance_points,
+            color: glyph.color,
+        });
+    }
+
+    Ok(TextPathLayout {
+        glyphs,
+        bounds: bounds.unwrap_or(Rect::NOTHING),
+        total_advance_points: layout.size_points.x,
+        path_length_points: path_length,
+    })
+}
+
+fn export_prepared_layout_as_shapes(
+    layout: &PreparedTextLayout,
+    font_system: &mut FontSystem,
+    scale_context: &mut ScaleContext,
+    fallback_line_height: f32,
+) -> VectorTextShape {
+    let mut glyphs = Vec::with_capacity(layout.glyphs.len());
+    let mut bounds: Option<Rect> = None;
+    for glyph in layout.glyphs.iter() {
+        let Some(shape) =
+            export_vector_glyph_shape(font_system, scale_context, glyph, fallback_line_height)
+        else {
+            continue;
+        };
+        bounds = Some(bounds.map_or(shape.bounds, |current| current.union(shape.bounds)));
+        glyphs.push(shape);
+    }
+    VectorTextShape {
+        glyphs,
+        bounds: bounds.unwrap_or(Rect::NOTHING),
+    }
+}
+
+fn add_rotated_glyph_quad(
+    mesh: &mut egui::epaint::Mesh,
+    anchor: Pos2,
+    top_left_offset: Vec2,
+    size_points: Vec2,
+    uv: Rect,
+    tint: Color32,
+    rotation_radians: f32,
+) {
+    let rotation = egui::emath::Rot2::from_angle(rotation_radians);
+    let positions = [
+        top_left_offset,
+        top_left_offset + egui::vec2(size_points.x, 0.0),
+        top_left_offset + size_points,
+        top_left_offset + egui::vec2(0.0, size_points.y),
+    ]
+    .map(|offset| anchor + rotation * offset);
+    let uvs = [
+        uv.min,
+        Pos2::new(uv.max.x, uv.min.y),
+        uv.max,
+        Pos2::new(uv.min.x, uv.max.y),
+    ];
+
+    let index = mesh.vertices.len() as u32;
+    for (pos, uv) in positions.into_iter().zip(uvs) {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos,
+            uv,
+            color: tint,
+        });
+    }
+    mesh.add_triangle(index, index + 1, index + 2);
+    mesh.add_triangle(index, index + 2, index + 3);
+}
+
 #[derive(Clone, Copy)]
 struct TextPathSample {
     position: Pos2,
@@ -5279,9 +5769,320 @@ fn selection_anchor(selection: Selection) -> Option<Cursor> {
     }
 }
 
-fn extend_selection_to_pointer(editor: &mut Editor<'static>, x: i32, y: i32) -> bool {
+fn cursor_x_for_layout_cursor(
+    buffer: &mut Buffer,
+    font_system: &mut FontSystem,
+    cursor: Cursor,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Option<f32> {
+    let layout_cursor = buffer.layout_cursor(font_system, cursor)?;
+    let line_text = buffer.lines.get(layout_cursor.line)?.text().to_owned();
+    let layout = buffer.line_layout(font_system, layout_cursor.line)?;
+    let layout_line = layout.get(layout_cursor.layout).or_else(|| layout.last())?;
+    let stops = cursor_stops_for_glyphs(
+        layout_cursor.line,
+        &line_text,
+        &layout_line.glyphs,
+        fundamentals,
+        scale,
+    );
+    stops
+        .into_iter()
+        .find(|(stop_cursor, _)| {
+            stop_cursor.line == cursor.line && stop_cursor.index == cursor.index
+        })
+        .map(|(_, x)| x)
+        .or_else(|| layout_line.glyphs.is_empty().then_some(0.0))
+}
+
+fn cursor_for_layout_line_x(
+    buffer: &mut Buffer,
+    font_system: &mut FontSystem,
+    line_i: usize,
+    layout_i: usize,
+    desired_x: f32,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Option<Cursor> {
+    let line_text = buffer.lines.get(line_i)?.text().to_owned();
+    let layout = buffer.line_layout(font_system, line_i)?;
+    let layout_line = layout.get(layout_i).or_else(|| layout.last())?;
+    let stops =
+        cursor_stops_for_glyphs(line_i, &line_text, &layout_line.glyphs, fundamentals, scale);
+
+    if let Some((first_cursor, first_x)) = stops.first().copied()
+        && desired_x <= first_x
+    {
+        return Some(first_cursor);
+    }
+
+    for window in stops.windows(2) {
+        let (left_cursor, left_x) = window[0];
+        let (right_cursor, right_x) = window[1];
+        let mid_x = (left_x + right_x) * 0.5;
+        if desired_x <= mid_x {
+            return Some(left_cursor);
+        }
+        if desired_x <= right_x {
+            return Some(right_cursor);
+        }
+    }
+
+    stops
+        .last()
+        .map(|(cursor, _)| *cursor)
+        .or_else(|| Some(Cursor::new_with_affinity(line_i, 0, Affinity::After)))
+}
+
+fn adjacent_visual_layout_position(
+    buffer: &mut Buffer,
+    font_system: &mut FontSystem,
+    cursor: Cursor,
+    direction: i32,
+) -> Option<(usize, usize)> {
+    let mut layout_cursor = buffer.layout_cursor(font_system, cursor)?;
+    match direction.cmp(&0) {
+        Ordering::Less => {
+            if layout_cursor.layout > 0 {
+                layout_cursor.layout -= 1;
+            } else if layout_cursor.line > 0 {
+                layout_cursor.line -= 1;
+                let layout_count = buffer.line_layout(font_system, layout_cursor.line)?.len();
+                layout_cursor.layout = layout_count.saturating_sub(1);
+            } else {
+                return None;
+            }
+        }
+        Ordering::Greater => {
+            let layout_count = buffer.line_layout(font_system, layout_cursor.line)?.len();
+            if layout_cursor.layout + 1 < layout_count {
+                layout_cursor.layout += 1;
+            } else if layout_cursor.line + 1 < buffer.lines.len() {
+                layout_cursor.line += 1;
+                layout_cursor.layout = 0;
+            } else {
+                return None;
+            }
+        }
+        Ordering::Equal => return Some((layout_cursor.line, layout_cursor.layout)),
+    }
+    Some((layout_cursor.line, layout_cursor.layout))
+}
+
+fn move_cursor_one_visual_line(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    direction: i32,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> bool {
+    let current_cursor = editor.cursor();
+    let desired_x = preferred_cursor_x_px.unwrap_or_else(|| {
+        editor
+            .with_buffer_mut(|buffer| {
+                cursor_x_for_layout_cursor(buffer, font_system, current_cursor, fundamentals, scale)
+            })
+            .unwrap_or(0.0)
+    });
+    *preferred_cursor_x_px = Some(desired_x);
+
+    let Some((target_line, target_layout)) = editor.with_buffer_mut(|buffer| {
+        adjacent_visual_layout_position(buffer, font_system, current_cursor, direction)
+    }) else {
+        return false;
+    };
+
+    let Some(new_cursor) = editor.with_buffer_mut(|buffer| {
+        cursor_for_layout_line_x(
+            buffer,
+            font_system,
+            target_line,
+            target_layout,
+            desired_x,
+            fundamentals,
+            scale,
+        )
+    }) else {
+        return false;
+    };
+
+    if new_cursor != current_cursor {
+        editor.set_cursor(new_cursor);
+        true
+    } else {
+        false
+    }
+}
+
+fn handle_spacing_aware_vertical_motion(
+    font_system: &mut FontSystem,
+    editor: &mut Editor<'static>,
+    motion: Motion,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> bool {
+    match motion {
+        Motion::Up => move_cursor_one_visual_line(
+            font_system,
+            editor,
+            -1,
+            preferred_cursor_x_px,
+            fundamentals,
+            scale,
+        ),
+        Motion::Down => move_cursor_one_visual_line(
+            font_system,
+            editor,
+            1,
+            preferred_cursor_x_px,
+            fundamentals,
+            scale,
+        ),
+        Motion::PageUp | Motion::PageDown | Motion::Vertical(_) => {
+            let step_count = editor.with_buffer(|buffer| match motion {
+                Motion::PageUp => buffer
+                    .size()
+                    .1
+                    .map(|height| -(height as i32 / buffer.metrics().line_height as i32))
+                    .unwrap_or(0),
+                Motion::PageDown => buffer
+                    .size()
+                    .1
+                    .map(|height| height as i32 / buffer.metrics().line_height as i32)
+                    .unwrap_or(0),
+                Motion::Vertical(px) => px / buffer.metrics().line_height as i32,
+                _ => 0,
+            });
+            let direction = step_count.signum();
+            let mut moved = false;
+            for _ in 0..step_count.unsigned_abs() {
+                if !move_cursor_one_visual_line(
+                    font_system,
+                    editor,
+                    direction,
+                    preferred_cursor_x_px,
+                    fundamentals,
+                    scale,
+                ) {
+                    break;
+                }
+                moved = true;
+            }
+            moved
+        }
+        _ => false,
+    }
+}
+
+fn motion_uses_preferred_cursor_x(motion: Motion) -> bool {
+    matches!(
+        motion,
+        Motion::Up | Motion::Down | Motion::PageUp | Motion::PageDown | Motion::Vertical(_)
+    )
+}
+
+fn editor_hit_test(
+    editor: &Editor<'static>,
+    x: i32,
+    y: i32,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Option<Cursor> {
+    editor.with_buffer(|buffer| {
+        hit_buffer_with_fundamentals(buffer, x as f32, y as f32, fundamentals, scale)
+    })
+}
+
+fn click_editor_to_pointer(
+    editor: &mut Editor<'static>,
+    x: i32,
+    y: i32,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> bool {
+    *preferred_cursor_x_px = None;
+    let old_cursor = editor.cursor();
+    let old_selection = editor.selection();
+    editor.set_selection(Selection::None);
+    if let Some(new_cursor) = editor_hit_test(editor, x, y, fundamentals, scale) {
+        editor.set_cursor(new_cursor);
+    }
+    editor.cursor() != old_cursor || editor.selection() != old_selection
+}
+
+fn double_click_editor_to_pointer(
+    editor: &mut Editor<'static>,
+    x: i32,
+    y: i32,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> bool {
+    *preferred_cursor_x_px = None;
+    let old_cursor = editor.cursor();
+    let old_selection = editor.selection();
+    editor.set_selection(Selection::None);
+    if let Some(new_cursor) = editor_hit_test(editor, x, y, fundamentals, scale) {
+        editor.set_cursor(new_cursor);
+        editor.set_selection(Selection::Word(editor.cursor()));
+    }
+    editor.cursor() != old_cursor || editor.selection() != old_selection
+}
+
+fn triple_click_editor_to_pointer(
+    editor: &mut Editor<'static>,
+    x: i32,
+    y: i32,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> bool {
+    *preferred_cursor_x_px = None;
+    let old_cursor = editor.cursor();
+    let old_selection = editor.selection();
+    editor.set_selection(Selection::None);
+    if let Some(new_cursor) = editor_hit_test(editor, x, y, fundamentals, scale) {
+        editor.set_cursor(new_cursor);
+        editor.set_selection(Selection::Line(editor.cursor()));
+    }
+    editor.cursor() != old_cursor || editor.selection() != old_selection
+}
+
+fn drag_editor_selection_to_pointer(
+    editor: &mut Editor<'static>,
+    x: i32,
+    y: i32,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> bool {
+    *preferred_cursor_x_px = None;
+    let old_cursor = editor.cursor();
+    let old_selection = editor.selection();
+    if editor.selection() == Selection::None {
+        editor.set_selection(Selection::Normal(editor.cursor()));
+    }
+    if let Some(new_cursor) = editor_hit_test(editor, x, y, fundamentals, scale) {
+        editor.set_cursor(new_cursor);
+    }
+    editor.cursor() != old_cursor || editor.selection() != old_selection
+}
+
+fn extend_selection_to_pointer(
+    editor: &mut Editor<'static>,
+    x: i32,
+    y: i32,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> bool {
+    *preferred_cursor_x_px = None;
     let anchor = selection_anchor(editor.selection()).unwrap_or_else(|| editor.cursor());
-    let Some(new_cursor) = editor.with_buffer(|buffer| buffer.hit(x as f32, y as f32)) else {
+    let Some(new_cursor) = editor_hit_test(editor, x, y, fundamentals, scale) else {
         return false;
     };
 
@@ -5381,18 +6182,32 @@ fn handle_editor_key_event(
     key: Key,
     modifiers: egui::Modifiers,
     multiline: bool,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
 ) -> bool {
     if modifiers.command && key == Key::A {
+        *preferred_cursor_x_px = None;
         return select_all(editor);
     }
 
     if handle_editor_delete_shortcut(font_system, editor, key, modifiers) {
+        *preferred_cursor_x_px = None;
         return true;
     }
 
     if cfg!(target_os = "macos") && modifiers.ctrl && !modifiers.shift {
         if let Some(motion) = mac_control_motion(key) {
-            return handle_editor_motion_key(font_system, editor, key, modifiers, motion);
+            return handle_editor_motion_key(
+                font_system,
+                editor,
+                key,
+                modifiers,
+                motion,
+                preferred_cursor_x_px,
+                fundamentals,
+                scale,
+            );
         }
     }
 
@@ -5401,10 +6216,18 @@ fn handle_editor_key_event(
     };
 
     match action {
-        Action::Motion(motion) => {
-            handle_editor_motion_key(font_system, editor, key, modifiers, motion)
-        }
+        Action::Motion(motion) => handle_editor_motion_key(
+            font_system,
+            editor,
+            key,
+            modifiers,
+            motion,
+            preferred_cursor_x_px,
+            fundamentals,
+            scale,
+        ),
         _ => {
+            *preferred_cursor_x_px = None;
             editor.borrow_with(font_system).action(action);
             true
         }
@@ -5416,19 +6239,33 @@ fn handle_read_only_editor_key_event(
     editor: &mut Editor<'static>,
     key: Key,
     modifiers: egui::Modifiers,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
 ) -> bool {
     if modifiers.command && key == Key::A {
+        *preferred_cursor_x_px = None;
         return select_all(editor);
     }
 
     if cfg!(target_os = "macos") && modifiers.ctrl && !modifiers.shift {
         if let Some(motion) = mac_control_motion(key) {
-            return handle_editor_motion_key(font_system, editor, key, modifiers, motion);
+            return handle_editor_motion_key(
+                font_system,
+                editor,
+                key,
+                modifiers,
+                motion,
+                preferred_cursor_x_px,
+                fundamentals,
+                scale,
+            );
         }
     }
 
     let Some(action) = key_to_action(key, modifiers, true) else {
         if key == Key::Escape && editor.selection() != Selection::None {
+            *preferred_cursor_x_px = None;
             editor.set_selection(Selection::None);
             return true;
         }
@@ -5436,11 +6273,19 @@ fn handle_read_only_editor_key_event(
     };
 
     match action {
-        Action::Motion(motion) => {
-            handle_editor_motion_key(font_system, editor, key, modifiers, motion)
-        }
+        Action::Motion(motion) => handle_editor_motion_key(
+            font_system,
+            editor,
+            key,
+            modifiers,
+            motion,
+            preferred_cursor_x_px,
+            fundamentals,
+            scale,
+        ),
         Action::Escape => {
             if editor.selection() != Selection::None {
+                *preferred_cursor_x_px = None;
                 editor.set_selection(Selection::None);
                 true
             } else {
@@ -5464,11 +6309,25 @@ fn handle_editor_motion_key(
     key: Key,
     modifiers: egui::Modifiers,
     motion: Motion,
+    preferred_cursor_x_px: &mut Option<f32>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
 ) -> bool {
     if modifiers.shift {
         if editor.selection() == Selection::None {
             editor.set_selection(Selection::Normal(editor.cursor()));
         }
+        if motion_uses_preferred_cursor_x(motion) {
+            return handle_spacing_aware_vertical_motion(
+                font_system,
+                editor,
+                motion,
+                preferred_cursor_x_px,
+                fundamentals,
+                scale,
+            );
+        }
+        *preferred_cursor_x_px = None;
         editor
             .borrow_with(font_system)
             .action(Action::Motion(motion));
@@ -5477,11 +6336,13 @@ fn handle_editor_motion_key(
 
     if let Some((start, end)) = editor.selection_bounds() {
         if modifiers.is_none() && key == Key::ArrowLeft {
+            *preferred_cursor_x_px = None;
             editor.set_selection(Selection::None);
             editor.set_cursor(start);
             return true;
         }
         if modifiers.is_none() && key == Key::ArrowRight {
+            *preferred_cursor_x_px = None;
             editor.set_selection(Selection::None);
             editor.set_cursor(end);
             return true;
@@ -5489,10 +6350,22 @@ fn handle_editor_motion_key(
         editor.set_selection(Selection::None);
     }
 
-    editor
-        .borrow_with(font_system)
-        .action(Action::Motion(motion));
-    true
+    if motion_uses_preferred_cursor_x(motion) {
+        handle_spacing_aware_vertical_motion(
+            font_system,
+            editor,
+            motion,
+            preferred_cursor_x_px,
+            fundamentals,
+            scale,
+        )
+    } else {
+        *preferred_cursor_x_px = None;
+        editor
+            .borrow_with(font_system)
+            .action(Action::Motion(motion));
+        true
+    }
 }
 
 fn handle_editor_delete_shortcut(
@@ -5780,6 +6653,8 @@ fn measure_buffer_pixels(buffer: &Buffer) -> (usize, usize) {
 
 fn measure_borrowed_buffer_scroll_metrics(
     buffer: &mut BorrowedWithFontSystem<'_, Buffer>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
 ) -> EditorScrollMetrics {
     let metrics = buffer.metrics();
     let scroll = buffer.scroll();
@@ -5794,14 +6669,21 @@ fn measure_borrowed_buffer_scroll_metrics(
             current_vertical_scroll_px = line_top + scroll.vertical.max(0.0);
         }
 
+        let line_text = buffer.lines[line_i].text().to_owned();
         let Some(layout_lines) = buffer.line_layout(line_i) else {
             continue;
         };
         for layout_line in layout_lines {
             let line_height = layout_line.line_height_opt.unwrap_or(metrics.line_height);
             max_bottom = max_bottom.max(line_top + line_height);
-            for glyph in &layout_line.glyphs {
-                max_right = max_right.max(glyph.x + glyph.w);
+            let prefixes = collect_glyph_spacing_prefixes_px(
+                &line_text,
+                &layout_line.glyphs,
+                fundamentals,
+                scale,
+            );
+            for (glyph_index, glyph) in layout_line.glyphs.iter().enumerate() {
+                max_right = max_right.max(adjusted_glyph_right_px(glyph, prefixes[glyph_index]));
             }
             line_top += line_height;
         }
@@ -5832,8 +6714,10 @@ fn measure_borrowed_buffer_scroll_metrics(
 
 fn clamp_borrowed_buffer_scroll(
     buffer: &mut BorrowedWithFontSystem<'_, Buffer>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
 ) -> EditorScrollMetrics {
-    let mut scroll_metrics = measure_borrowed_buffer_scroll_metrics(buffer);
+    let mut scroll_metrics = measure_borrowed_buffer_scroll_metrics(buffer, fundamentals, scale);
     let mut scroll = buffer.scroll();
     let clamped_horizontal = scroll
         .horizontal
@@ -5977,23 +6861,33 @@ fn editor_cursor_glyph_opt(cursor: &Cursor, run: &LayoutRun<'_>) -> Option<(usiz
 
 /// Pixel x-coordinate of the cursor within a layout run (in buffer-space, before scroll).
 /// Returns None if the cursor is not on this run.
-fn editor_cursor_x_in_run(cursor: &Cursor, run: &LayoutRun<'_>) -> Option<i32> {
+fn editor_cursor_x_in_run(
+    cursor: &Cursor,
+    run: &LayoutRun<'_>,
+    fundamentals: &TextFundamentals,
+    scale: f32,
+) -> Option<i32> {
     let (cursor_glyph, cursor_glyph_offset) = editor_cursor_glyph_opt(cursor, run)?;
+    let prefixes = collect_glyph_spacing_prefixes_px(run.text, run.glyphs, fundamentals, scale);
     let x = run.glyphs.get(cursor_glyph).map_or_else(
         || {
             run.glyphs.last().map_or(0, |g| {
+                let prefix_px = prefixes.last().copied().unwrap_or(0.0);
+                let glyph_x = adjusted_glyph_x_px(g, prefix_px);
                 if g.level.is_rtl() {
-                    g.x as i32
+                    glyph_x as i32
                 } else {
-                    (g.x + g.w) as i32
+                    (glyph_x + g.w) as i32
                 }
             })
         },
         |g| {
+            let prefix_px = prefixes.get(cursor_glyph).copied().unwrap_or(0.0);
+            let glyph_x = adjusted_glyph_x_px(g, prefix_px);
             if g.level.is_rtl() {
-                (g.x + g.w - cursor_glyph_offset) as i32
+                (glyph_x + g.w - cursor_glyph_offset) as i32
             } else {
-                (g.x + cursor_glyph_offset) as i32
+                (glyph_x + cursor_glyph_offset) as i32
             }
         },
     );

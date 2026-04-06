@@ -1,4 +1,5 @@
 use egui::{Color32, Pos2, Rect, Vec2};
+use std::fmt::Write as _;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum TextKerning {
@@ -118,4 +119,76 @@ pub struct VectorGlyphShape {
 pub struct VectorTextShape {
     pub glyphs: Vec<VectorGlyphShape>,
     pub bounds: Rect,
+}
+
+impl VectorGlyphShape {
+    pub fn to_svg_path_data(&self) -> String {
+        let mut path = String::new();
+        for command in &self.commands {
+            match command {
+                VectorPathCommand::MoveTo(point) => {
+                    let _ = write!(path, "M{} {} ", point.x, point.y);
+                }
+                VectorPathCommand::LineTo(point) => {
+                    let _ = write!(path, "L{} {} ", point.x, point.y);
+                }
+                VectorPathCommand::QuadTo(control, point) => {
+                    let _ = write!(
+                        path,
+                        "Q{} {} {} {} ",
+                        control.x, control.y, point.x, point.y
+                    );
+                }
+                VectorPathCommand::CurveTo(control_a, control_b, point) => {
+                    let _ = write!(
+                        path,
+                        "C{} {} {} {} {} {} ",
+                        control_a.x, control_a.y, control_b.x, control_b.y, point.x, point.y
+                    );
+                }
+                VectorPathCommand::Close => path.push_str("Z "),
+            }
+        }
+        path.trim_end().to_owned()
+    }
+}
+
+impl VectorTextShape {
+    pub fn to_svg_document(&self) -> String {
+        let bounds = if self.bounds.width() > 0.0 && self.bounds.height() > 0.0 {
+            self.bounds
+        } else {
+            Rect::from_min_size(Pos2::ZERO, Vec2::splat(1.0))
+        };
+        let mut svg = String::new();
+        let _ = write!(
+            svg,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}">"#,
+            bounds.min.x,
+            bounds.min.y,
+            bounds.width().max(1.0),
+            bounds.height().max(1.0)
+        );
+        for glyph in &self.glyphs {
+            let _ = write!(
+                svg,
+                r#"<path d="{}" fill="{}"/>"#,
+                glyph.to_svg_path_data(),
+                svg_color(glyph.color)
+            );
+        }
+        svg.push_str("</svg>");
+        svg
+    }
+}
+
+fn svg_color(color: Color32) -> String {
+    let alpha = color.a() as f32 / 255.0;
+    format!(
+        "rgba({}, {}, {}, {:.3})",
+        color.r(),
+        color.g(),
+        color.b(),
+        alpha
+    )
 }
