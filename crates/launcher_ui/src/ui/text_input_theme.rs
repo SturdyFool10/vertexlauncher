@@ -1,5 +1,5 @@
 use egui::{Color32, CornerRadius, Ui};
-use textui::InputOptions;
+use textui_egui::prelude::*;
 
 pub fn themed_text_input_options(ui: &Ui, monospace: bool) -> InputOptions {
     let visuals = ui.visuals();

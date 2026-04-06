@@ -24,6 +24,7 @@ modprovider.workspace = true
 modrinth.workspace = true
 curseforge.workspace = true
 textui.workspace = true
+textui_egui.workspace = true
 launcher_runtime.workspace = true
 shared_lru.workspace = true
 tokio.workspace = true

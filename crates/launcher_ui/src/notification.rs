@@ -5,7 +5,8 @@ use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
 use egui::{self, Color32, CornerRadius, Frame, Layout, Margin, Stroke};
-use textui::{LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 
 use crate::{assets, privacy};
 

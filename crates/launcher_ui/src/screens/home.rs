@@ -14,9 +14,9 @@ use egui::{Color32, Layout, TextureOptions, Ui};
 use flate2::read::GzDecoder;
 use instances::{InstanceStore, instance_root_path, set_server_favorite, set_world_favorite};
 use launcher_runtime as tokio_runtime;
-use textui::{
-    LabelOptions, TextUi,
-    truncate_single_line_text_with_ellipsis_preserving_whitespace as truncate_for_width,
+use textui::TextUi;
+use textui_egui::{
+    prelude::*, truncate_single_line_text_with_ellipsis_preserving_whitespace as truncate_for_width,
 };
 use ui_foundation::{
     DialogPreset, UiMetrics, danger_button, dialog_options, fill_tab_row, secondary_button,

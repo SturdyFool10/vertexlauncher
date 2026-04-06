@@ -1,7 +1,8 @@
 use std::hash::Hash;
 
 use egui::{Color32, CornerRadius, Margin, Ui, pos2, vec2};
-use textui::{ButtonOptions, RichTextSpan, RichTextStyle, TextUi};
+use textui::TextUi;
+use textui_egui::{make_gamepad_scrollable, prelude::*};
 
 use crate::{
     assets, console,
@@ -179,7 +180,7 @@ struct VisibleLogRowHit {
     line_len_chars: usize,
 }
 
-fn virtual_log_line_options(ui: &Ui, level: Option<LogLevel>) -> textui::LabelOptions {
+fn virtual_log_line_options(ui: &Ui, level: Option<LogLevel>) -> LabelOptions {
     let mut options = style::body(ui);
     options.wrap = false;
     options.color = color_for_level(ui, level);
@@ -267,7 +268,7 @@ fn selection_fill_color(ui: &Ui) -> egui::Color32 {
     ui.visuals().selection.bg_fill.linear_multiply(0.55)
 }
 
-fn galley_font_id(options: &textui::LabelOptions) -> egui::FontId {
+fn galley_font_id(options: &LabelOptions) -> egui::FontId {
     if options.monospace {
         egui::FontId::monospace(options.font_size)
     } else {
@@ -484,7 +485,7 @@ fn render_virtualized_log_lines(
                 let spans = [RichTextSpan {
                     text: line.clone(),
                     style: RichTextStyle {
-                        color: options.color,
+                        color: options.color.into(),
                         monospace: options.monospace,
                         italic: options.italic,
                         weight: options.weight,
@@ -528,7 +529,7 @@ fn render_virtualized_log_lines(
                 });
 
                 paint_log_selection_for_line(ui, rect, &galley, line, line_index, &selection_state);
-                texture.paint(ui, text_rect);
+                texture.paint(text_ui, ui, text_rect);
             }
 
             let mut current_hovered_line: Option<usize> = None;
@@ -724,7 +725,7 @@ fn render_virtualized_log_lines(
 
             ui.add_space(bottom_space);
         });
-    textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
+    make_gamepad_scrollable(ui.ctx(), &scroll_output);
     ui.ctx().data_mut(|d| {
         d.insert_temp(egui::Id::new(CONSOLE_LOG_SCROLL_ID_KEY), scroll_output.id);
     });

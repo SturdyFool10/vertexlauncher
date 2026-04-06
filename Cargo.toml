@@ -20,6 +20,7 @@ members = [
     "crates/runtime_bootstrap",
     "crates/shared_lru",
     "crates/textui",
+    "crates/textui_egui",
     "crates/vertex_constants",
     "crates/vtmpack",
 ]
@@ -77,6 +78,7 @@ fontloader = { path = "crates/fontloader" }
 runtime_bootstrap = { path = "crates/runtime_bootstrap" }
 shared_lru = { path = "crates/shared_lru" }
 textui = { path = "crates/textui" }
+textui_egui = { path = "crates/textui_egui" }
 vtmpack = { path = "crates/vtmpack" }
 vertex_constants = { path = "crates/vertex_constants" }
 

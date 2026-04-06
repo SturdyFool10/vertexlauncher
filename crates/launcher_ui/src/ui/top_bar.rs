@@ -8,7 +8,8 @@ use egui::{
 };
 use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 use shared_lru::ThreadSafeLru;
-use textui::{ButtonOptions, LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 use ui_foundation::{is_compact_width, popup_width};
 
 use crate::{

@@ -20,3 +20,4 @@ shared_lru.workspace = true
 etagere.workspace = true
 rustc-hash.workspace = true
 wgpu.workspace = true
+bytemuck = { version = "*", features = ["derive"] }

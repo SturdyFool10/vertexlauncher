@@ -12,7 +12,7 @@ use gilrs::{Axis, Button, EventType, Gamepad, GamepadId, Gilrs};
 use launcher_ui::notification;
 use launcher_ui::screens::{self, AppScreen};
 use launcher_ui::ui::{components::settings_widgets, sidebar};
-use textui::{
+use textui_egui::{
     apply_gamepad_scroll_to_focused_target, apply_gamepad_scroll_to_registered_id,
     set_gamepad_scroll_delta,
 };

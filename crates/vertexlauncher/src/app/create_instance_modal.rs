@@ -13,7 +13,8 @@ use launcher_ui::{
     assets,
     ui::components::{icon_button, settings_widgets},
 };
-use textui::{LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 use ui_foundation::{DialogPreset, dialog_options, show_dialog};
 use url::Url;
 

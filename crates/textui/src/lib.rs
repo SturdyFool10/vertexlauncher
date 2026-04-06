@@ -3,267 +3,20 @@ use std::{
     collections::{BTreeSet, VecDeque},
     hash::{Hash, Hasher},
     mem,
-    sync::{Arc, mpsc},
+    sync::{Arc, Mutex, mpsc},
 };
 
 const GAMEPAD_SCROLL_DELTA_ID: &str = "textui_gamepad_scroll_delta";
-const GAMEPAD_SCROLL_TARGETS_ID: &str = "textui_gamepad_scroll_targets";
-const GAMEPAD_SCROLL_FRAME_ID: &str = "textui_gamepad_scroll_frame";
+const TEXT_WGPU_INSTANCED_SHADER: &str = include_str!("shaders/text_instanced.wgsl");
 
-#[derive(Clone, Copy)]
-struct GamepadScrollTarget {
-    id: Id,
-    /// Visible rect of the scroll area (inner_rect).
-    rect: Rect,
-    /// Full content size. Used to compute the max scroll offset and to
-    /// determine which axes are actually scrollable.
-    content_size: Vec2,
-}
-
-impl GamepadScrollTarget {
-    fn max_offset(&self) -> Vec2 {
-        Vec2::new(
-            (self.content_size.x - self.rect.width()).max(0.0),
-            (self.content_size.y - self.rect.height()).max(0.0),
-        )
-    }
-
-    fn can_scroll_h(&self) -> bool {
-        self.max_offset().x > 0.5
-    }
-    fn can_scroll_v(&self) -> bool {
-        self.max_offset().y > 0.5
-    }
-}
-
-pub fn set_gamepad_scroll_delta(ctx: &egui::Context, delta: egui::Vec2) {
-    ctx.data_mut(|data| data.insert_temp(egui::Id::new(GAMEPAD_SCROLL_DELTA_ID), delta));
-}
-
-pub fn gamepad_scroll_delta(ctx: &egui::Context) -> egui::Vec2 {
+fn gamepad_scroll_delta(ctx: &egui::Context) -> egui::Vec2 {
     ctx.data_mut(|data| {
         data.get_temp::<egui::Vec2>(egui::Id::new(GAMEPAD_SCROLL_DELTA_ID))
             .unwrap_or(egui::Vec2::ZERO)
     })
 }
 
-/// Called inside the gamepad_scroll wrappers to clear the target list at the
-/// start of each new render frame so stale scroll areas never linger.
-fn ensure_gamepad_scroll_targets_fresh(ctx: &egui::Context) {
-    let current = ctx.cumulative_frame_nr();
-    let frame_key = egui::Id::new(GAMEPAD_SCROLL_FRAME_ID);
-    let last = ctx.data(|d| d.get_temp::<u64>(frame_key).unwrap_or(u64::MAX));
-    if current != last {
-        ctx.data_mut(|d| {
-            d.remove::<Vec<GamepadScrollTarget>>(egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID));
-            d.insert_temp(frame_key, current);
-        });
-    }
-}
-
-fn register_gamepad_scroll_target(ctx: &egui::Context, id: Id, rect: Rect, content_size: Vec2) {
-    ctx.data_mut(|data| {
-        let key = egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID);
-        let mut targets = data
-            .get_temp::<Vec<GamepadScrollTarget>>(key)
-            .unwrap_or_default();
-        targets.retain(|target| target.id != id);
-        targets.push(GamepadScrollTarget {
-            id,
-            rect,
-            content_size,
-        });
-        data.insert_temp(key, targets);
-    });
-}
-
-/// Mark a [`egui::ScrollArea`] output as a gamepad-scrollable container.
-///
-/// Call this immediately after [`egui::ScrollArea::show`] or
-/// [`egui::ScrollArea::show_rows`]. Horizontal and vertical capability are
-/// derived automatically from `content_size` vs `inner_rect`, so no axis
-/// flags need to be specified.
-///
-/// ```ignore
-/// let output = egui::ScrollArea::vertical().show(ui, |ui| { ... });
-/// textui::make_gamepad_scrollable(ui.ctx(), &output);
-/// ```
-pub fn make_gamepad_scrollable<R>(
-    ctx: &egui::Context,
-    output: &egui::scroll_area::ScrollAreaOutput<R>,
-) {
-    ensure_gamepad_scroll_targets_fresh(ctx);
-    register_gamepad_scroll_target(ctx, output.id, output.inner_rect, output.content_size);
-}
-
-/// Convenience wrapper that calls [`egui::ScrollArea::show`] and immediately
-/// marks the result as gamepad-scrollable.
-///
-/// ```ignore
-/// textui::gamepad_scroll(egui::ScrollArea::vertical(), ui, |ui| { ... });
-/// ```
-pub fn gamepad_scroll<R>(
-    scroll_area: egui::ScrollArea,
-    ui: &mut egui::Ui,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> egui::scroll_area::ScrollAreaOutput<R> {
-    let output = scroll_area.show(ui, add_contents);
-    make_gamepad_scrollable(ui.ctx(), &output);
-    output
-}
-
-pub fn apply_gamepad_scroll_to_focused_target(ctx: &egui::Context, delta: Vec2) -> bool {
-    if delta == Vec2::ZERO {
-        return false;
-    }
-
-    let Some(focused_id) = ctx.memory(|memory| memory.focused()) else {
-        return false;
-    };
-
-    // Read the focused widget's screen rect if it was rendered this frame.
-    // It may be absent when the widget scrolled out of the visible range
-    // (e.g. with virtual/show_rows scrolling) or is otherwise off-screen.
-    let focused_screen_rect = ctx.read_response(focused_id).map(|r| r.rect);
-
-    let targets = ctx.data_mut(|data| {
-        data.get_temp::<Vec<GamepadScrollTarget>>(egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID))
-            .unwrap_or_default()
-    });
-
-    // Build candidate list: prefer targets that positionally contain the
-    // focused widget; fall back to all targets when the widget is off-screen.
-    let sort_by_area = |a: &GamepadScrollTarget, b: &GamepadScrollTarget| {
-        let a_area = a.rect.width() * a.rect.height();
-        let b_area = b.rect.width() * b.rect.height();
-        a_area
-            .partial_cmp(&b_area)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    };
-
-    let mut candidates: Vec<GamepadScrollTarget> = if let Some(fr) = focused_screen_rect {
-        let fp = fr.center();
-        let positional: Vec<_> = targets
-            .iter()
-            .copied()
-            .filter(|t| t.rect.contains(fp) || t.rect.intersects(fr))
-            .collect();
-        // If the focused widget is rendered but outside every registered rect
-        // (scrolled past the viewport edge in a non-virtual list), fall back
-        // to all targets so scrolling doesn't silently stop.
-        if positional.is_empty() {
-            targets
-        } else {
-            positional
-        }
-    } else {
-        // Widget is not rendered this frame (off-screen in a virtual list).
-        // Use all registered targets; area-sort will pick the innermost one.
-        targets
-    };
-    candidates.sort_by(sort_by_area);
-
-    // If the focused widget is itself a registered scroll container, promote it
-    // to the front so it is checked before any containing parents.
-    if let Some(pos) = candidates.iter().position(|t| t.id == focused_id) {
-        let direct = candidates.remove(pos);
-        candidates.insert(0, direct);
-    }
-
-    // Walk from the focused element outward. For each axis, consume it only
-    // when a container can actually scroll in that direction AND movement
-    // occurs (i.e. we're not already at the boundary). This lets the delta
-    // propagate outward when the inner container is fully scrolled.
-    let mut need_x = delta.x != 0.0;
-    let mut need_y = delta.y != 0.0;
-    let mut applied = false;
-
-    for target in &candidates {
-        if !need_x && !need_y {
-            break;
-        }
-
-        let max_offset = target.max_offset();
-        let can_x = need_x && target.can_scroll_h();
-        let can_y = need_y && target.can_scroll_v();
-
-        if !can_x && !can_y {
-            continue;
-        }
-
-        let mut state = egui::scroll_area::State::load(ctx, target.id).unwrap_or_default();
-        let mut changed = false;
-
-        if can_x {
-            let new_x = (state.offset.x - delta.x).clamp(0.0, max_offset.x);
-            if new_x != state.offset.x {
-                state.offset.x = new_x;
-                need_x = false;
-                applied = true;
-                changed = true;
-            }
-        }
-        if can_y {
-            let new_y = (state.offset.y - delta.y).clamp(0.0, max_offset.y);
-            if new_y != state.offset.y {
-                state.offset.y = new_y;
-                need_y = false;
-                applied = true;
-                changed = true;
-            }
-        }
-
-        if changed {
-            state.store(ctx, target.id);
-        }
-    }
-
-    applied
-}
-
-/// Apply scroll delta directly to a specific registered scroll area, bypassing focus lookup.
-///
-/// Returns `true` if the scroll state was changed. Useful for hard-binding input to a
-/// specific scroll area (e.g. the console log) regardless of which widget has focus.
-pub fn apply_gamepad_scroll_to_registered_id(
-    ctx: &egui::Context,
-    scroll_id: egui::Id,
-    delta: Vec2,
-) -> bool {
-    if delta == Vec2::ZERO {
-        return false;
-    }
-    let targets = ctx.data(|d| {
-        d.get_temp::<Vec<GamepadScrollTarget>>(egui::Id::new(GAMEPAD_SCROLL_TARGETS_ID))
-            .unwrap_or_default()
-    });
-    let Some(target) = targets.iter().find(|t| t.id == scroll_id).copied() else {
-        return false;
-    };
-    let max_offset = target.max_offset();
-    let mut state = egui::scroll_area::State::load(ctx, scroll_id).unwrap_or_default();
-    let mut changed = false;
-    if delta.x != 0.0 && target.can_scroll_h() {
-        let new_x = (state.offset.x - delta.x).clamp(0.0, max_offset.x);
-        if new_x != state.offset.x {
-            state.offset.x = new_x;
-            changed = true;
-        }
-    }
-    if delta.y != 0.0 && target.can_scroll_v() {
-        let new_y = (state.offset.y - delta.y).clamp(0.0, max_offset.y);
-        if new_y != state.offset.y {
-            state.offset.y = new_y;
-            changed = true;
-        }
-    }
-    if changed {
-        state.store(ctx, scroll_id);
-    }
-    changed
-}
-
-pub fn apply_gamepad_scroll_if_focused(ui: &Ui, response: &Response) {
+fn apply_gamepad_scroll_if_focused(ui: &Ui, response: &Response) {
     if response.has_focus() {
         let delta = gamepad_scroll_delta(ui.ctx());
         if delta != egui::Vec2::ZERO {
@@ -272,6 +25,7 @@ pub fn apply_gamepad_scroll_if_focused(ui: &Ui, response: &Response) {
     }
 }
 
+use bytemuck::{Pod, Zeroable};
 use cosmic_text::{
     Action, Affinity, Attrs, AttrsOwned, BorrowedWithFontSystem, Buffer, CacheKey, Color, Cursor,
     Edit, Editor, Family, FontFeatures, FontSystem, LayoutGlyph, LayoutRun, Metrics, Motion,
@@ -302,6 +56,7 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use tracing::warn;
 use unicode_segmentation::UnicodeSegmentation;
+use wgpu::util::DeviceExt as _;
 
 mod advanced_text;
 mod button_options;
@@ -313,8 +68,13 @@ mod text_helpers;
 mod tooltip_options;
 
 pub use advanced_text::{
-    TextFundamentals, TextKerning, TextPath, TextPathError, TextPathGlyph, TextPathLayout,
-    TextPathOptions, VectorGlyphShape, VectorPathCommand, VectorTextShape,
+    RichTextSpan, RichTextStyle, TextAtlasPageData, TextAtlasPageSnapshot, TextAtlasQuad,
+    TextAtlasSampling, TextColor, TextFeatureSetting, TextFrameInfo, TextFrameOutput,
+    TextFundamentals, TextGpuPowerPreference, TextGpuQuad, TextGpuScene, TextGraphicsApi,
+    TextGraphicsConfig, TextHintingMode, TextKerning, TextOpticalSizingMode, TextPath,
+    TextPathError, TextPathGlyph, TextPathLayout, TextPathOptions, TextPoint,
+    TextRasterizationConfig, TextRect, TextRenderScene, TextRendererBackend, TextStemDarkeningMode,
+    TextVariationSetting, TextVector, VectorGlyphShape, VectorPathCommand, VectorTextShape,
 };
 pub use button_options::ButtonOptions;
 pub use code_block_options::CodeBlockOptions;
@@ -369,6 +129,42 @@ fn snap_rect_to_pixel_grid(rect: Rect, pixels_per_point: f32) -> Rect {
     )
 }
 
+#[inline]
+fn texture_options_for_sampling(sampling: TextAtlasSampling) -> TextureOptions {
+    match sampling {
+        TextAtlasSampling::Linear => TextureOptions::LINEAR,
+        TextAtlasSampling::Nearest => TextureOptions::NEAREST,
+    }
+}
+
+#[inline]
+fn wgpu_filter_mode_for_sampling(sampling: TextAtlasSampling) -> wgpu::FilterMode {
+    match sampling {
+        TextAtlasSampling::Linear => wgpu::FilterMode::Linear,
+        TextAtlasSampling::Nearest => wgpu::FilterMode::Nearest,
+    }
+}
+
+pub fn wgpu_backends_for_text_graphics_api(api: TextGraphicsApi) -> wgpu::Backends {
+    match api {
+        TextGraphicsApi::Auto => wgpu::Backends::PRIMARY,
+        TextGraphicsApi::Vulkan => wgpu::Backends::VULKAN,
+        TextGraphicsApi::Metal => wgpu::Backends::METAL,
+        TextGraphicsApi::Dx12 => wgpu::Backends::DX12,
+        TextGraphicsApi::Gl => wgpu::Backends::GL,
+    }
+}
+
+pub fn wgpu_power_preference_for_text_gpu_preference(
+    preference: TextGpuPowerPreference,
+) -> wgpu::PowerPreference {
+    match preference {
+        TextGpuPowerPreference::Auto => wgpu::PowerPreference::default(),
+        TextGpuPowerPreference::LowPower => wgpu::PowerPreference::LowPower,
+        TextGpuPowerPreference::HighPerformance => wgpu::PowerPreference::HighPerformance,
+    }
+}
+
 fn color_image_byte_size(image: &ColorImage) -> usize {
     color_image_byte_size_from_size(image.size)
 }
@@ -384,18 +180,24 @@ fn new_fingerprint_hasher() -> FxHasher {
     FxHasher::default()
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct GlyphRasterKey {
     cache_key: CacheKey,
     display_scale_bits: u32,
     raster_flags: u8,
+    variation_settings: Arc<[TextVariationSetting]>,
 }
 
 impl GlyphRasterKey {
     const STEM_DARKENING: u8 = 1 << 0;
 
     #[inline]
-    fn new(cache_key: CacheKey, display_scale: f32, stem_darkening: bool) -> Self {
+    fn new(
+        cache_key: CacheKey,
+        display_scale: f32,
+        stem_darkening: bool,
+        variation_settings: Arc<[TextVariationSetting]>,
+    ) -> Self {
         Self {
             cache_key,
             display_scale_bits: display_scale.to_bits(),
@@ -404,16 +206,17 @@ impl GlyphRasterKey {
             } else {
                 0
             },
+            variation_settings,
         }
     }
 
     #[inline]
-    fn display_scale(self) -> f32 {
+    fn display_scale(&self) -> f32 {
         f32::from_bits(self.display_scale_bits)
     }
 
     #[inline]
-    fn stem_darkening(self) -> bool {
+    fn stem_darkening(&self) -> bool {
         self.raster_flags & Self::STEM_DARKENING != 0
     }
 }
@@ -438,10 +241,32 @@ fn should_hint(display_scale: f32) -> bool {
 }
 
 #[inline]
-fn stem_darkening_strength(ppem: f32) -> f32 {
-    let min_ppem = 10.0;
-    let max_ppem = 50.0;
-    let max_strength = 0.4;
+fn resolved_hinting_enabled(display_scale: f32, rasterization: TextRasterizationConfig) -> bool {
+    match rasterization.hinting {
+        TextHintingMode::Enabled => true,
+        TextHintingMode::Disabled => false,
+        TextHintingMode::Auto => should_hint(display_scale),
+    }
+}
+
+#[inline]
+fn resolved_stem_darkening_strength(
+    ppem: f32,
+    style_enabled: bool,
+    rasterization: TextRasterizationConfig,
+) -> f32 {
+    let enabled = match rasterization.stem_darkening {
+        TextStemDarkeningMode::Enabled => true,
+        TextStemDarkeningMode::Disabled => false,
+        TextStemDarkeningMode::Auto => style_enabled,
+    };
+    if !enabled {
+        return 0.0;
+    }
+
+    let min_ppem = rasterization.stem_darkening_min_ppem.max(0.0);
+    let max_ppem = rasterization.stem_darkening_max_ppem.max(min_ppem);
+    let max_strength = rasterization.stem_darkening_max_strength.max(0.0);
     if ppem >= max_ppem {
         0.0
     } else if ppem <= min_ppem {
@@ -528,97 +353,6 @@ fn configure_text_font_defaults(font_system: &mut FontSystem) {
     }
 }
 
-/// A prepared text handle with helpers for all paint scenarios.
-///
-/// Obtain via [`TextUi::prepare_label_texture`] or
-/// [`TextUi::prepare_rich_text_texture`].  You can:
-///
-/// - Call `handle.paint(ui, rect)` for standard rendering.
-/// - Call `handle.paint_tinted(ui, rect, tint)` for alpha-fade or colourisation.
-/// - Call `handle.paint_uv(ui, rect, uv, tint)` for UV crop/flip/repeat.
-///
-/// `handle.texture_id` points at the first atlas page used by the text, not a
-/// full standalone text bitmap.
-#[derive(Clone)]
-pub struct TextTextureHandle {
-    /// The first atlas page touched by this prepared text.
-    pub texture_id: TextureId,
-    glyphs: Arc<[TextTextureGlyph]>,
-    /// Logical (points) size of the rendered text content.
-    pub size_points: Vec2,
-}
-
-impl TextTextureHandle {
-    /// Paint the texture in `rect` with no tint (white = pass-through).
-    pub fn paint(&self, ui: &Ui, rect: Rect) {
-        let painter = ui.painter().with_clip_rect(ui.clip_rect());
-        paint_text_texture_glyphs(
-            &painter,
-            rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            self.size_points,
-            &self.glyphs,
-            Color32::WHITE,
-        );
-    }
-
-    /// Paint with a tint multiplier.  `Color32::WHITE` = unmodified.
-    pub fn paint_tinted(&self, ui: &Ui, rect: Rect, tint: Color32) {
-        let painter = ui.painter().with_clip_rect(ui.clip_rect());
-        paint_text_texture_glyphs(
-            &painter,
-            rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            self.size_points,
-            &self.glyphs,
-            tint,
-        );
-    }
-
-    /// Paint a UV sub-region with a tint.  Full UV = `Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0,1.0))`.
-    pub fn paint_uv(&self, ui: &Ui, rect: Rect, uv: Rect, tint: Color32) {
-        let painter = ui.painter().with_clip_rect(ui.clip_rect());
-        paint_text_texture_glyphs(&painter, rect, uv, self.size_points, &self.glyphs, tint);
-    }
-
-    /// Paint on a specific egui `Painter` (e.g. a layer painter for overlays).
-    pub fn paint_on(&self, painter: &egui::Painter, rect: Rect, tint: Color32) {
-        paint_text_texture_glyphs(
-            painter,
-            rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            self.size_points,
-            &self.glyphs,
-            tint,
-        );
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct RichTextStyle {
-    pub color: Color32,
-    pub monospace: bool,
-    pub italic: bool,
-    pub weight: u16,
-}
-
-impl Default for RichTextStyle {
-    fn default() -> Self {
-        Self {
-            color: Color32::WHITE,
-            monospace: false,
-            italic: false,
-            weight: 400,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct RichTextSpan {
-    pub text: String,
-    pub style: RichTextStyle,
-}
-
 type SpanStyle = RichTextStyle;
 type RichSpan = RichTextSpan;
 
@@ -629,20 +363,11 @@ struct PreparedTextLayout {
     approx_bytes: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct PreparedGlyph {
     cache_key: GlyphRasterKey,
     offset_points: Vec2,
     color: Color32,
-}
-
-#[derive(Clone)]
-struct TextTextureGlyph {
-    texture_id: TextureId,
-    offset_points: Vec2,
-    size_points: Vec2,
-    uv: Rect,
-    tint: Color32,
 }
 
 struct PreparedTextCacheEntry {
@@ -655,6 +380,9 @@ struct GlyphAtlas {
     entries: ThreadSafeLru<GlyphRasterKey, GlyphAtlasEntry>,
     pages: Vec<GlyphAtlasPage>,
     page_side_px: usize,
+    padding_px: usize,
+    sampling: TextAtlasSampling,
+    rasterization: TextRasterizationConfig,
     wgpu_render_state: Option<EguiWgpuRenderState>,
     pending: FxHashSet<GlyphRasterKey>,
     ready: VecDeque<GlyphAtlasWorkerResponse>,
@@ -737,7 +465,7 @@ struct GlyphAtlasEntry {
 
 #[derive(Clone)]
 struct ResolvedGlyphAtlasEntry {
-    texture_id: TextureId,
+    page_index: usize,
     uv: Rect,
     size_px: [usize; 2],
     placement_left_px: i32,
@@ -754,6 +482,106 @@ struct PreparedAtlasGlyph {
     approx_bytes: usize,
 }
 
+#[derive(Clone, Debug)]
+struct PaintTextQuad {
+    page_index: usize,
+    positions: [Pos2; 4],
+    uvs: [Pos2; 4],
+    tint: Color32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct TextWgpuScreenUniform {
+    screen_size_points: [f32; 2],
+    _padding: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct TextWgpuInstance {
+    pos0: [f32; 2],
+    pos1: [f32; 2],
+    pos2: [f32; 2],
+    pos3: [f32; 2],
+    uv0: [f32; 2],
+    uv1: [f32; 2],
+    uv2: [f32; 2],
+    uv3: [f32; 2],
+    color: [f32; 4],
+}
+
+impl TextWgpuInstance {
+    fn from_quad(quad: &PaintTextQuad) -> Self {
+        Self {
+            pos0: [quad.positions[0].x, quad.positions[0].y],
+            pos1: [quad.positions[1].x, quad.positions[1].y],
+            pos2: [quad.positions[2].x, quad.positions[2].y],
+            pos3: [quad.positions[3].x, quad.positions[3].y],
+            uv0: [quad.uvs[0].x, quad.uvs[0].y],
+            uv1: [quad.uvs[1].x, quad.uvs[1].y],
+            uv2: [quad.uvs[2].x, quad.uvs[2].y],
+            uv3: [quad.uvs[3].x, quad.uvs[3].y],
+            color: quad.tint.to_normalized_gamma_f32(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct TextWgpuSceneBatchSource {
+    texture: wgpu::Texture,
+    instances: Arc<[TextWgpuInstance]>,
+}
+
+struct TextWgpuPreparedBatch {
+    bind_group: wgpu::BindGroup,
+    instance_buffer: wgpu::Buffer,
+    instance_count: u32,
+}
+
+#[derive(Default)]
+struct TextWgpuPreparedScene {
+    batches: Vec<TextWgpuPreparedBatch>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ResolvedTextRendererBackend {
+    EguiMesh,
+    WgpuInstanced,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ResolvedTextGraphicsConfig {
+    renderer_backend: ResolvedTextRendererBackend,
+    atlas_sampling: TextAtlasSampling,
+    atlas_page_target_px: usize,
+    atlas_padding_px: usize,
+    rasterization: TextRasterizationConfig,
+}
+
+#[derive(Clone)]
+struct TextWgpuSceneCallback {
+    target_format: wgpu::TextureFormat,
+    atlas_sampling: TextAtlasSampling,
+    batches: Arc<[TextWgpuSceneBatchSource]>,
+    prepared: Arc<Mutex<TextWgpuPreparedScene>>,
+}
+
+struct TextWgpuPipelineResources {
+    target_format: wgpu::TextureFormat,
+    atlas_sampling: TextAtlasSampling,
+    pipeline: wgpu::RenderPipeline,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+}
+
+struct CpuSceneAtlasPage {
+    allocator: AtlasAllocator,
+    image: ColorImage,
+}
+
 fn hash_text_fundamentals<H: Hasher>(fundamentals: &TextFundamentals, state: &mut H) {
     fundamentals.kerning.hash(state);
     fundamentals.stem_darkening.hash(state);
@@ -766,6 +594,18 @@ fn hash_text_fundamentals<H: Hasher>(fundamentals: &TextFundamentals, state: &mu
     fundamentals.tabular_numbers.hash(state);
     fundamentals.letter_spacing_points.to_bits().hash(state);
     fundamentals.word_spacing_points.to_bits().hash(state);
+    fundamentals.feature_settings.len().hash(state);
+    for feature in &fundamentals.feature_settings {
+        feature.hash(state);
+    }
+    fundamentals.variation_settings.len().hash(state);
+    for variation in &fundamentals.variation_settings {
+        variation.hash(state);
+    }
+}
+
+fn shared_variation_settings(fundamentals: &TextFundamentals) -> Arc<[TextVariationSetting]> {
+    Arc::from(fundamentals.variation_settings.clone().into_boxed_slice())
 }
 
 fn glyph_cluster_text<'a>(run_text: &'a str, glyph: &LayoutGlyph) -> &'a str {
@@ -953,6 +793,7 @@ fn collect_prepared_glyphs_from_buffer(
 ) -> (Vec<PreparedGlyph>, f32) {
     let mut glyphs = Vec::new();
     let mut max_line_extra_points: f32 = 0.0;
+    let variation_settings = shared_variation_settings(fundamentals);
 
     for run in buffer.layout_runs() {
         let baseline_y_px = run.line_y as i32;
@@ -965,6 +806,7 @@ fn collect_prepared_glyphs_from_buffer(
                     physical.cache_key,
                     scale,
                     fundamentals.stem_darkening,
+                    Arc::clone(&variation_settings),
                 ),
                 offset_points: egui::vec2(
                     physical.x as f32 / scale + line_extra_points,
@@ -1040,6 +882,8 @@ enum GlyphAtlasWorkerMessage {
     Rasterize {
         generation: u64,
         cache_key: GlyphRasterKey,
+        rasterization: TextRasterizationConfig,
+        padding_px: usize,
     },
 }
 
@@ -1116,7 +960,7 @@ enum MarkdownBlock {
     },
 }
 
-/// High-level text rendering helper built on cosmic-text + egui textures.
+/// High-level text rendering engine built on cosmic-text + Swash.
 pub struct TextUi {
     font_system: FontSystem,
     scale_context: ScaleContext,
@@ -1124,7 +968,6 @@ pub struct TextUi {
     code_theme: Theme,
     prepared_texts: ThreadSafeLru<Id, PreparedTextCacheEntry>,
     glyph_atlas: GlyphAtlas,
-    empty_text_texture: Option<TextureHandle>,
     input_states: FxHashMap<Id, InputState>,
     ui_font_family: Option<String>,
     ui_font_size_scale: f32,
@@ -1134,6 +977,7 @@ pub struct TextUi {
     open_type_feature_tags: Vec<[u8; 4]>,
     open_type_features: Option<FontFeatures>,
     async_raster: AsyncRasterState,
+    graphics_config: TextGraphicsConfig,
     current_frame: u64,
     max_texture_side_px: usize,
     frame_events: Vec<egui::Event>,
@@ -1151,6 +995,11 @@ impl Default for TextUi {
 impl TextUi {
     /// Creates a new text renderer and background async raster worker.
     pub fn new() -> Self {
+        Self::new_with_graphics_config(TextGraphicsConfig::default())
+    }
+
+    /// Creates a new text renderer with an explicit graphics configuration.
+    pub fn new_with_graphics_config(mut graphics_config: TextGraphicsConfig) -> Self {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
         let code_theme = theme_set
@@ -1175,6 +1024,11 @@ impl TextUi {
         let glyph_atlas = GlyphAtlas::new();
         let mut font_system = FontSystem::new();
         configure_text_font_defaults(&mut font_system);
+        if cfg!(target_os = "linux") {
+            if graphics_config.renderer_backend == TextRendererBackend::Auto {
+                graphics_config.renderer_backend = TextRendererBackend::EguiMesh;
+            }
+        }
 
         Self {
             font_system,
@@ -1183,7 +1037,6 @@ impl TextUi {
             code_theme,
             prepared_texts: ThreadSafeLru::new(PREPARED_TEXT_CACHE_MAX_BYTES),
             glyph_atlas,
-            empty_text_texture: None,
             input_states: FxHashMap::default(),
             ui_font_family: None,
             ui_font_size_scale: 1.0,
@@ -1198,6 +1051,7 @@ impl TextUi {
                 pending: FxHashSet::default(),
                 cache: ThreadSafeLru::new(ASYNC_RASTER_CACHE_MAX_BYTES),
             },
+            graphics_config,
             current_frame: 0,
             max_texture_side_px: usize::MAX,
             frame_events: Vec::new(),
@@ -1205,15 +1059,24 @@ impl TextUi {
         }
     }
 
-    /// Performs per-frame maintenance and processes async raster results.
-    pub fn begin_frame(&mut self, ctx: &Context, render_state: Option<&EguiWgpuRenderState>) {
-        self.current_frame = ctx.cumulative_frame_nr();
+    /// Advances the engine-side frame state without requiring an [`egui::Context`].
+    ///
+    /// Consumers that use the context-free scene/export APIs can drive frame maintenance
+    /// through this method and inject any relevant input/render state separately.
+    pub fn begin_frame_info(&mut self, frame_info: TextFrameInfo) {
+        self.current_frame = frame_info.frame_number;
         let current_frame = self.current_frame;
-        let max_texture_side_px = ctx.input(|i| i.max_texture_side).max(1);
-        self.frame_events = ctx.input(|i| i.events.clone());
-        self.glyph_atlas.set_render_state(render_state);
+        let max_texture_side_px = frame_info.max_texture_side_px.max(1);
+        let graphics_config = self.resolved_graphics_config(max_texture_side_px);
+        self.frame_events.clear();
         self.glyph_atlas
-            .set_page_side(max_texture_side_px.min(GLYPH_ATLAS_PAGE_TARGET_PX).max(256));
+            .set_page_side(graphics_config.atlas_page_target_px);
+        self.glyph_atlas
+            .set_sampling(graphics_config.atlas_sampling);
+        self.glyph_atlas
+            .set_padding(graphics_config.atlas_padding_px);
+        self.glyph_atlas
+            .set_rasterization(graphics_config.rasterization);
         if self.max_texture_side_px != max_texture_side_px {
             self.max_texture_side_px = max_texture_side_px;
             self.invalidate_text_caches(false);
@@ -1234,9 +1097,87 @@ impl TextUi {
         self.enforce_prepared_text_cache_budget();
         self.enforce_async_raster_cache_budget();
         self.poll_async_raster_results();
-        self.glyph_atlas.poll_ready(ctx, current_frame);
-        if !self.glyph_atlas.pending.is_empty() {
+    }
+
+    /// Replaces the per-frame input event buffer used by interactive widgets.
+    pub fn set_frame_events(&mut self, frame_events: Vec<egui::Event>) {
+        self.frame_events = frame_events;
+    }
+
+    /// Clears any per-frame input events previously set by [`Self::set_frame_events`].
+    pub fn clear_frame_events(&mut self) {
+        self.frame_events.clear();
+    }
+
+    /// Updates the optional native WGPU render state used by the atlas renderer.
+    ///
+    /// When using native atlas pages, set this before [`Self::begin_frame_info`] so any
+    /// frame-start invalidation can release old textures through the current renderer.
+    pub fn set_egui_wgpu_render_state(&mut self, render_state: Option<&EguiWgpuRenderState>) {
+        self.glyph_atlas.set_render_state(render_state);
+    }
+
+    /// Flushes pending atlas work that still needs an [`egui::Context`] for texture uploads.
+    pub fn flush_egui_frame(&mut self, ctx: &Context) -> TextFrameOutput {
+        self.glyph_atlas.poll_ready(ctx, self.current_frame);
+        let needs_repaint = !self.glyph_atlas.pending.is_empty();
+        if needs_repaint {
             ctx.request_repaint();
+        }
+        TextFrameOutput { needs_repaint }
+    }
+
+    pub fn set_graphics_config(&mut self, graphics_config: TextGraphicsConfig) {
+        if self.graphics_config != graphics_config {
+            self.graphics_config = graphics_config;
+            self.invalidate_text_caches(false);
+        }
+    }
+
+    pub fn graphics_config(&self) -> TextGraphicsConfig {
+        self.graphics_config
+    }
+
+    pub fn set_gpu_instancing_enabled(&mut self, enabled: bool) {
+        let mut graphics_config = self.graphics_config;
+        graphics_config.renderer_backend = if enabled {
+            TextRendererBackend::WgpuInstanced
+        } else {
+            TextRendererBackend::EguiMesh
+        };
+        self.set_graphics_config(graphics_config);
+    }
+
+    pub fn gpu_instancing_enabled(&self) -> bool {
+        !matches!(
+            self.resolved_graphics_config(self.max_texture_side_px.max(1))
+                .renderer_backend,
+            ResolvedTextRendererBackend::EguiMesh
+        )
+    }
+
+    fn resolved_graphics_config(&self, max_texture_side_px: usize) -> ResolvedTextGraphicsConfig {
+        let renderer_backend = match self.graphics_config.renderer_backend {
+            TextRendererBackend::Auto => {
+                if cfg!(target_os = "linux") {
+                    ResolvedTextRendererBackend::EguiMesh
+                } else {
+                    ResolvedTextRendererBackend::WgpuInstanced
+                }
+            }
+            TextRendererBackend::EguiMesh => ResolvedTextRendererBackend::EguiMesh,
+            TextRendererBackend::WgpuInstanced => ResolvedTextRendererBackend::WgpuInstanced,
+        };
+        ResolvedTextGraphicsConfig {
+            renderer_backend,
+            atlas_sampling: self.graphics_config.atlas_sampling,
+            atlas_page_target_px: self
+                .graphics_config
+                .atlas_page_target_px
+                .max(256)
+                .min(max_texture_side_px.max(1)),
+            atlas_padding_px: self.graphics_config.atlas_padding_px,
+            rasterization: self.graphics_config.rasterization,
         }
     }
 
@@ -1322,8 +1263,9 @@ impl TextUi {
         );
 
         if let Some(layout) = layout {
-            let texture = self.build_text_texture_handle(ui.ctx(), layout, scale);
-            let desired_size = texture.size_points + options.padding * 2.0;
+            let scene = self.build_text_scene_from_layout(ui.ctx(), &layout, scale);
+            let scene_size = egui_vec_from_text(scene.size_points);
+            let desired_size = scene_size + options.padding * 2.0;
             let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
 
             let bg_shape = egui::Shape::rect_filled(
@@ -1341,8 +1283,9 @@ impl TextUi {
                 );
             }
 
-            let image_rect = Rect::from_min_size(rect.min + options.padding, texture.size_points);
-            texture.paint(ui, image_rect);
+            let image_rect = Rect::from_min_size(rect.min + options.padding, scene_size);
+            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            self.paint_scene_in_rect(&painter, image_rect, &scene);
             return response;
         }
 
@@ -1524,7 +1467,7 @@ impl TextUi {
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         let attrs_owned = self.build_text_attrs_owned(
             &SpanStyle {
-                color: options.color,
+                color: options.color.into(),
                 monospace: options.monospace,
                 italic: options.italic,
                 weight: options.weight,
@@ -1549,16 +1492,6 @@ impl TextUi {
         let (width_px, height_px) = measure_buffer_pixels(&buffer);
         egui::vec2(width_px as f32 / scale, height_px as f32 / scale)
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Raw-texture API  — zero restrictions on how you consume the result
-    //
-    // Returns a `TextTextureHandle` containing the first atlas page texture id
-    // and logical size. Call `.paint()` for the standard path,
-    // `.paint_tinted()` for alpha-fade/colourisation, `.paint_uv()` for
-    // UV-crop/flip, or pass `.texture_id` directly into a wgpu PaintCallback
-    // to use the glyph image as a shader mask, stencil, or any other texture role.
-    // ─────────────────────────────────────────────────────────────────────────
 
     fn get_or_prepare_label_layout(
         &mut self,
@@ -1638,42 +1571,78 @@ impl TextUi {
             })
     }
 
-    /// Returns (or freshly rasterizes) a cached texture for plain text.
-    ///
-    /// The texture is **not** painted — you control every aspect of rendering.
-    pub fn prepare_label_texture(
+    pub fn prepare_label_scene(
         &mut self,
         ctx: &Context,
         id_source: impl Hash,
         text: &str,
         options: &LabelOptions,
         width_points_opt: Option<f32>,
-    ) -> TextTextureHandle {
+    ) -> TextRenderScene {
         let scale = ctx.pixels_per_point();
-        let texture_id = egui::Id::new(id_source).with("textui_prepare_label");
-        let layout =
-            self.get_or_prepare_label_layout(texture_id, text, options, width_points_opt, scale);
-
-        self.build_text_texture_handle(ctx, layout, scale)
+        let layout = self.get_or_prepare_label_layout(
+            Id::new(id_source).with("textui_prepare_label_scene"),
+            text,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_scene_from_layout(ctx, &layout, scale)
     }
 
-    /// Returns (or freshly rasterizes) a cached texture for rich (multi-style) text.
-    ///
-    /// Same zero-restriction guarantees as [`prepare_label_texture`].
-    pub fn prepare_rich_text_texture(
+    pub fn prepare_rich_text_scene(
         &mut self,
         ctx: &Context,
         id_source: impl Hash,
         spans: &[RichTextSpan],
         options: &LabelOptions,
         width_points_opt: Option<f32>,
-    ) -> TextTextureHandle {
+    ) -> TextRenderScene {
         let scale = ctx.pixels_per_point();
-        let texture_id = egui::Id::new(id_source).with("textui_prepare_rich");
-        let layout =
-            self.get_or_prepare_rich_layout(texture_id, spans, options, width_points_opt, scale);
+        let layout = self.get_or_prepare_rich_layout(
+            Id::new(id_source).with("textui_prepare_rich_scene"),
+            spans,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_scene_from_layout(ctx, &layout, scale)
+    }
 
-        self.build_text_texture_handle(ctx, layout, scale)
+    pub fn prepare_label_gpu_scene_at_scale(
+        &mut self,
+        id_source: impl Hash,
+        text: &str,
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        scale: f32,
+    ) -> TextGpuScene {
+        let layout = self.get_or_prepare_label_layout(
+            Id::new(id_source).with("textui_prepare_label_gpu_scene"),
+            text,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_gpu_scene_from_layout(&layout, scale)
+    }
+
+    pub fn prepare_rich_text_gpu_scene_at_scale(
+        &mut self,
+        id_source: impl Hash,
+        spans: &[RichTextSpan],
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        scale: f32,
+    ) -> TextGpuScene {
+        let layout = self.get_or_prepare_rich_layout(
+            Id::new(id_source).with("textui_prepare_rich_gpu_scene"),
+            spans,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_gpu_scene_from_layout(&layout, scale)
     }
 
     pub fn prepare_label_path_layout(
@@ -1724,6 +1693,7 @@ impl TextUi {
             &mut self.font_system,
             &mut self.scale_context,
             options.line_height,
+            self.graphics_config.rasterization,
         )
     }
 
@@ -1739,6 +1709,7 @@ impl TextUi {
             &mut self.font_system,
             &mut self.scale_context,
             options.line_height,
+            self.graphics_config.rasterization,
         )
     }
 
@@ -1815,14 +1786,14 @@ impl TextUi {
             path_options,
         )?;
         let scale = painter.pixels_per_point();
-        let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
+        let mut quads = Vec::with_capacity(layout.glyphs.len());
 
         for (glyph, path_glyph) in layout.glyphs.iter().zip(path_layout.glyphs.iter()) {
             let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
                 painter.ctx(),
                 &mut self.font_system,
                 &mut self.scale_context,
-                glyph.cache_key,
+                glyph.cache_key.clone(),
                 self.current_frame,
             ) else {
                 continue;
@@ -1842,41 +1813,192 @@ impl TextUi {
                 glyph.color
             };
 
-            if let Some((_, mesh)) = meshes
-                .iter_mut()
-                .find(|(texture_id, _)| *texture_id == atlas_entry.texture_id)
-            {
-                add_rotated_glyph_quad(
-                    mesh,
-                    path_glyph.anchor,
+            quads.push(PaintTextQuad {
+                page_index: atlas_entry.page_index,
+                positions: rotated_quad_positions(
+                    egui_point_from_text(path_glyph.anchor),
                     origin_offset,
                     size_points,
-                    atlas_entry.uv,
-                    tint,
                     path_glyph.rotation_radians,
-                );
-            } else {
-                let mut mesh = egui::epaint::Mesh::with_texture(atlas_entry.texture_id);
-                add_rotated_glyph_quad(
-                    &mut mesh,
-                    path_glyph.anchor,
-                    origin_offset,
-                    size_points,
-                    atlas_entry.uv,
-                    tint,
-                    path_glyph.rotation_radians,
-                );
-                meshes.push((atlas_entry.texture_id, mesh));
-            }
+                ),
+                uvs: uv_quad_points(atlas_entry.uv),
+                tint,
+            });
         }
 
-        for (_, mesh) in meshes {
-            if !mesh.is_empty() {
-                painter.add(egui::Shape::mesh(mesh));
-            }
-        }
+        self.paint_text_quads(painter, egui_rect_from_text(path_layout.bounds), &quads);
 
         Ok(path_layout)
+    }
+
+    pub fn prepare_label_path_scene(
+        &mut self,
+        ctx: &Context,
+        id_source: impl Hash,
+        text: &str,
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextRenderScene, TextPathError> {
+        let scale = ctx.pixels_per_point();
+        let layout = self.get_or_prepare_label_layout(
+            Id::new(id_source).with("textui_prepare_path_label_scene"),
+            text,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_scene_on_path(
+            ctx,
+            &layout,
+            options.font_size,
+            options.line_height,
+            scale,
+            path,
+            path_options,
+        )
+    }
+
+    pub fn prepare_label_path_gpu_scene_at_scale(
+        &mut self,
+        id_source: impl Hash,
+        text: &str,
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        scale: f32,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextGpuScene, TextPathError> {
+        let layout = self.get_or_prepare_label_layout(
+            Id::new(id_source).with("textui_prepare_path_label_gpu_scene"),
+            text,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_gpu_scene_on_path(
+            &layout,
+            options.font_size,
+            options.line_height,
+            scale,
+            path,
+            path_options,
+        )
+    }
+
+    pub fn prepare_rich_text_path_gpu_scene_at_scale(
+        &mut self,
+        id_source: impl Hash,
+        spans: &[RichTextSpan],
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        scale: f32,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextGpuScene, TextPathError> {
+        let layout = self.get_or_prepare_rich_layout(
+            Id::new(id_source).with("textui_prepare_path_rich_gpu_scene"),
+            spans,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_gpu_scene_on_path(
+            &layout,
+            options.font_size,
+            options.line_height,
+            scale,
+            path,
+            path_options,
+        )
+    }
+
+    pub fn prepare_rich_text_path_scene(
+        &mut self,
+        ctx: &Context,
+        id_source: impl Hash,
+        spans: &[RichTextSpan],
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextRenderScene, TextPathError> {
+        let scale = ctx.pixels_per_point();
+        let layout = self.get_or_prepare_rich_layout(
+            Id::new(id_source).with("textui_prepare_path_rich_scene"),
+            spans,
+            options,
+            width_points_opt,
+            scale,
+        );
+        self.build_text_scene_on_path(
+            ctx,
+            &layout,
+            options.font_size,
+            options.line_height,
+            scale,
+            path,
+            path_options,
+        )
+    }
+
+    pub fn atlas_page_snapshot(&self, page_index: usize) -> Option<TextAtlasPageSnapshot> {
+        self.glyph_atlas.page_snapshot(page_index)
+    }
+
+    pub fn atlas_page_data(&self, page_index: usize) -> Option<TextAtlasPageData> {
+        self.glyph_atlas.page_data(page_index)
+    }
+
+    pub fn atlas_page_snapshots_for_scene(
+        &self,
+        scene: &TextRenderScene,
+    ) -> Vec<TextAtlasPageSnapshot> {
+        scene
+            .atlas_page_indices()
+            .into_iter()
+            .filter_map(|page_index| self.atlas_page_snapshot(page_index))
+            .collect()
+    }
+
+    pub fn atlas_page_data_for_scene(&self, scene: &TextRenderScene) -> Vec<TextAtlasPageData> {
+        scene
+            .atlas_page_indices()
+            .into_iter()
+            .filter_map(|page_index| self.atlas_page_data(page_index))
+            .collect()
+    }
+
+    pub fn gpu_scene_for_scene(&self, scene: &TextRenderScene) -> TextGpuScene {
+        scene.to_gpu_scene(self.atlas_page_data_for_scene(scene))
+    }
+
+    pub fn paint_scene_in_rect(
+        &mut self,
+        painter: &egui::Painter,
+        rect: Rect,
+        scene: &TextRenderScene,
+    ) {
+        self.paint_scene_in_rect_tinted(painter, rect, scene, Color32::WHITE);
+    }
+
+    pub fn paint_scene_in_rect_tinted(
+        &mut self,
+        painter: &egui::Painter,
+        rect: Rect,
+        scene: &TextRenderScene,
+        tint: Color32,
+    ) {
+        let rect = snap_rect_to_pixel_grid(rect, painter.pixels_per_point());
+        let quads = map_scene_quads_to_rect(
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            egui_vec_from_text(scene.size_points),
+            &scene.quads,
+            tint,
+        );
+        self.paint_text_quads(painter, rect, &quads);
     }
 
     fn label_impl(
@@ -1916,8 +2038,8 @@ impl TextUi {
             .hash(&mut hasher);
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
-        let texture_id = ui.make_persistent_id(id_source).with("textui_label");
-        let texture = if async_mode {
+        let cache_id = ui.make_persistent_id(id_source).with("textui_label");
+        let scene = if async_mode {
             match self.get_or_queue_async_plain_layout(
                 fingerprint,
                 text.to_owned(),
@@ -1925,7 +2047,7 @@ impl TextUi {
                 width_points_opt,
                 scale,
             ) {
-                Some(layout) => self.build_text_texture_handle(ui.ctx(), layout, scale),
+                Some(layout) => self.build_text_scene_from_layout(ui.ctx(), &layout, scale),
                 None => {
                     let fallback_height = (options.line_height + options.padding.y * 2.0).max(20.0);
                     let fallback_width =
@@ -1942,9 +2064,12 @@ impl TextUi {
                 }
             }
         } else {
-            self.prepare_label_texture(ui.ctx(), texture_id, text, options, width_points_opt)
+            let layout =
+                self.get_or_prepare_label_layout(cache_id, text, options, width_points_opt, scale);
+            self.build_text_scene_from_layout(ui.ctx(), &layout, scale)
         };
-        if texture.size_points == Vec2::ZERO {
+        let scene_size = egui_vec_from_text(scene.size_points);
+        if scene_size == Vec2::ZERO {
             let fallback_height = (options.line_height + options.padding.y * 2.0).max(20.0);
             let fallback_width = width_points_opt.unwrap_or_else(|| ui.available_width().max(1.0));
             let (rect, response) =
@@ -1955,10 +2080,11 @@ impl TextUi {
             return response;
         }
 
-        let desired_size = texture.size_points + options.padding * 2.0;
+        let desired_size = scene_size + options.padding * 2.0;
         let (rect, response) = ui.allocate_exact_size(desired_size, sense);
-        let image_rect = Rect::from_min_size(rect.min + options.padding, texture.size_points);
-        texture.paint(ui, image_rect);
+        let image_rect = Rect::from_min_size(rect.min + options.padding, scene_size);
+        let painter = ui.painter().with_clip_rect(ui.clip_rect());
+        self.paint_scene_in_rect(&painter, image_rect, &scene);
 
         response
     }
@@ -2000,9 +2126,12 @@ impl TextUi {
         label_style.color = options.text_color;
         label_style.wrap = false;
 
-        let text_tex_id = ui.make_persistent_id(id_source).with("button_text");
-        let texture = self.prepare_label_texture(ui.ctx(), text_tex_id, text, &label_style, None);
-        let text_size = texture.size_points;
+        let scale = ui.ctx().pixels_per_point();
+        let text_cache_id = ui.make_persistent_id(id_source).with("button_text");
+        let text_layout =
+            self.get_or_prepare_label_layout(text_cache_id, text, &label_style, None, scale);
+        let text_scene = self.build_text_scene_from_layout(ui.ctx(), &text_layout, scale);
+        let text_size = egui_vec_from_text(text_scene.size_points);
 
         let desired_size = egui::vec2(
             (text_size.x + options.padding.x * 2.0).max(options.min_size.x),
@@ -2050,7 +2179,8 @@ impl TextUi {
         }
 
         let text_rect = Rect::from_center_size(rect.center(), text_size);
-        texture.paint(ui, text_rect);
+        let painter = ui.painter().with_clip_rect(ui.clip_rect());
+        self.paint_scene_in_rect(&painter, text_rect, &text_scene);
         apply_gamepad_scroll_if_focused(ui, &response);
 
         response
@@ -2094,14 +2224,14 @@ impl TextUi {
             hasher.finish()
         };
 
-        let texture = self.prepare_label_texture(
+        let scene = self.prepare_label_scene(
             ui.ctx(),
             tooltip_tex_id,
             text,
             &options.text,
             width_points_opt,
         );
-        let raster_size = texture.size_points;
+        let raster_size = egui_vec_from_text(scene.size_points);
 
         let size = raster_size + options.padding * 2.0;
         let mut rect = Rect::from_min_size(pointer + options.offset, size);
@@ -2139,7 +2269,7 @@ impl TextUi {
             Rect::from_min_size(rect.min + options.padding, raster_size),
             scale,
         );
-        texture.paint_on(&painter, text_rect, Color32::WHITE);
+        self.paint_scene_in_rect(&painter, text_rect, &scene);
     }
 
     /// Renders a syntax-highlighted code block synchronously.
@@ -2176,13 +2306,13 @@ impl TextUi {
             .hash(&mut hasher);
         self.hash_typography(&mut hasher);
         let _fingerprint = hasher.finish();
-        let texture_id = ui.make_persistent_id(id_source).with("textui_code");
+        let scene_id = ui.make_persistent_id(id_source).with("textui_code");
 
         let spans =
             self.highlight_code_spans(code, options.language.as_deref(), options.text_color);
-        let texture = self.prepare_rich_text_texture(
+        let scene = self.prepare_rich_text_scene(
             ui.ctx(),
-            texture_id,
+            scene_id,
             &spans,
             &LabelOptions {
                 font_size: options.font_size,
@@ -2198,7 +2328,8 @@ impl TextUi {
             width_points_opt,
         );
 
-        let desired_size = texture.size_points + options.padding * 2.0;
+        let scene_size = egui_vec_from_text(scene.size_points);
+        let desired_size = scene_size + options.padding * 2.0;
         let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
 
         let bg_shape = egui::Shape::rect_filled(
@@ -2216,8 +2347,9 @@ impl TextUi {
             );
         }
 
-        let image_rect = Rect::from_min_size(rect.min + options.padding, texture.size_points);
-        texture.paint(ui, image_rect);
+        let image_rect = Rect::from_min_size(rect.min + options.padding, scene_size);
+        let painter = ui.painter().with_clip_rect(ui.clip_rect());
+        self.paint_scene_in_rect(&painter, image_rect, &scene);
 
         response
     }
@@ -2915,23 +3047,25 @@ impl TextUi {
                 fundamentals: options.fundamentals.clone(),
                 ..LabelOptions::default()
             };
-            let placeholder = self.prepare_label_texture(
+            let placeholder_scene = self.prepare_label_scene(
                 ui.ctx(),
                 id.with("placeholder"),
                 placeholder_text,
                 &placeholder_style,
                 multiline.then_some(content_rect.width()),
             );
+            let placeholder_size = egui_vec_from_text(placeholder_scene.size_points);
             let y_offset = if multiline {
                 0.0
             } else {
-                ((content_rect.height() - placeholder.size_points.y) * 0.5).max(0.0)
+                ((content_rect.height() - placeholder_size.y) * 0.5).max(0.0)
             };
             let placeholder_rect = Rect::from_min_size(
                 Pos2::new(content_rect.min.x, content_rect.min.y + y_offset),
-                placeholder.size_points.min(content_rect.size()),
+                placeholder_size.min(content_rect.size()),
             );
-            placeholder.paint(ui, placeholder_rect);
+            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            self.paint_scene_in_rect(&painter, placeholder_rect, &placeholder_scene);
         }
 
         apply_gamepad_scroll_if_focused(ui, &response);
@@ -3437,6 +3571,7 @@ impl TextUi {
         let mut sel_rects: Vec<Rect> = Vec::new();
         let mut cursor_rect: Option<Rect> = None;
         let mut glyph_cmds: Vec<GlyphCmd> = Vec::new();
+        let variation_settings = shared_variation_settings(&options.fundamentals);
 
         editor.with_buffer(|buffer| {
             let buf_width = buffer.size().0.unwrap_or(0.0);
@@ -3565,6 +3700,7 @@ impl TextUi {
                             physical.cache_key,
                             scale,
                             options.fundamentals.stem_darkening,
+                            Arc::clone(&variation_settings),
                         ),
                         x_px: physical.x as f32 + prefixes[glyph_index] - horizontal_scroll_px,
                         y_px: line_y + physical.y as f32,
@@ -3583,8 +3719,8 @@ impl TextUi {
             ));
         }
 
-        // --- Resolve glyphs through the atlas and build GPU meshes ---
-        let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
+        // --- Resolve glyphs through the atlas and build text quads ---
+        let mut quads = Vec::with_capacity(glyph_cmds.len());
         for cmd in glyph_cmds {
             let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
                 painter.ctx(),
@@ -3613,23 +3749,15 @@ impl TextUi {
                 cmd.color
             };
 
-            if let Some((_, mesh)) = meshes
-                .iter_mut()
-                .find(|(texture_id, _)| *texture_id == atlas_entry.texture_id)
-            {
-                mesh.add_rect_with_uv(glyph_rect, atlas_entry.uv, tint);
-            } else {
-                let mut mesh = egui::epaint::Mesh::with_texture(atlas_entry.texture_id);
-                mesh.add_rect_with_uv(glyph_rect, atlas_entry.uv, tint);
-                meshes.push((atlas_entry.texture_id, mesh));
-            }
+            quads.push(PaintTextQuad {
+                page_index: atlas_entry.page_index,
+                positions: quad_positions_from_min_size(glyph_rect.min, glyph_rect.size()),
+                uvs: uv_quad_points(atlas_entry.uv),
+                tint,
+            });
         }
 
-        for (_, mesh) in meshes {
-            if !mesh.is_empty() {
-                painter.add(egui::Shape::mesh(mesh));
-            }
-        }
+        self.paint_text_quads(&painter, content_rect, &quads);
 
         // --- Cursor on top of glyphs ---
         if let Some(cursor_rect) = cursor_rect {
@@ -3648,7 +3776,7 @@ impl TextUi {
         scale: f32,
     ) -> AttrsOwned {
         let mut attrs = Attrs::new()
-            .color(to_cosmic_color(style.color))
+            .color(to_cosmic_text_color(style.color))
             .weight(Weight(self.effective_weight(style.weight)))
             .metrics(Metrics::new(
                 (self.effective_font_size(options.font_size) * scale).max(1.0),
@@ -3892,7 +4020,7 @@ impl TextUi {
             return vec![RichSpan {
                 text: code.to_owned(),
                 style: SpanStyle {
-                    color: fallback_color,
+                    color: fallback_color.into(),
                     monospace: true,
                     italic: false,
                     weight: 400,
@@ -3919,7 +4047,8 @@ impl TextUi {
                                     style.foreground.g,
                                     style.foreground.b,
                                     style.foreground.a,
-                                ),
+                                )
+                                .into(),
                                 monospace: true,
                                 italic: style.font_style.contains(SyntectFontStyle::ITALIC),
                                 weight: if style.font_style.contains(SyntectFontStyle::BOLD) {
@@ -3935,7 +4064,7 @@ impl TextUi {
                     spans.push(RichSpan {
                         text: line.to_owned(),
                         style: SpanStyle {
-                            color: fallback_color,
+                            color: fallback_color.into(),
                             monospace: true,
                             italic: false,
                             weight: 400,
@@ -3990,7 +4119,7 @@ impl TextUi {
         let spans = vec![RichSpan {
             text: text.to_owned(),
             style: SpanStyle {
-                color: options.color,
+                color: options.color.into(),
                 monospace: options.monospace,
                 italic: options.italic,
                 weight: options.weight,
@@ -4014,7 +4143,7 @@ impl TextUi {
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         let default_attrs_owned = self.build_text_attrs_owned(
             &SpanStyle {
-                color: options.color,
+                color: options.color.into(),
                 monospace: options.monospace,
                 italic: options.italic,
                 weight: options.weight,
@@ -4099,54 +4228,428 @@ impl TextUi {
         }
     }
 
-    fn build_text_texture_handle(
+    fn build_text_scene_from_layout(
         &mut self,
         ctx: &Context,
-        layout: Arc<PreparedTextLayout>,
+        layout: &PreparedTextLayout,
         scale: f32,
-    ) -> TextTextureHandle {
-        let mut glyphs = Vec::with_capacity(layout.glyphs.len());
-        for glyph in layout.glyphs.iter().copied() {
-            let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
+    ) -> TextRenderScene {
+        let mut quads = Vec::with_capacity(layout.glyphs.len());
+        let mut bounds: Option<Rect> = None;
+
+        for glyph in layout.glyphs.iter() {
+            let Some(atlas_entry) = self.glyph_atlas.resolve_sync(
                 ctx,
                 &mut self.font_system,
                 &mut self.scale_context,
-                glyph.cache_key,
+                glyph.cache_key.clone(),
                 self.current_frame,
             ) else {
                 continue;
             };
 
-            glyphs.push(TextTextureGlyph {
-                texture_id: atlas_entry.texture_id,
-                offset_points: glyph.offset_points
-                    + egui::vec2(
-                        atlas_entry.placement_left_px as f32 / scale,
-                        -(atlas_entry.placement_top_px as f32) / scale,
-                    ),
-                size_points: egui::vec2(
-                    atlas_entry.size_px[0] as f32 / scale,
-                    atlas_entry.size_px[1] as f32 / scale,
-                ),
-                uv: atlas_entry.uv,
+            let min = Pos2::new(
+                glyph.offset_points.x + atlas_entry.placement_left_px as f32 / scale,
+                glyph.offset_points.y - atlas_entry.placement_top_px as f32 / scale,
+            );
+            let size_points = egui::vec2(
+                atlas_entry.size_px[0] as f32 / scale,
+                atlas_entry.size_px[1] as f32 / scale,
+            );
+            let positions = quad_positions_from_min_size(min, size_points);
+            let quad_bounds = rect_from_points(positions);
+            bounds = Some(bounds.map_or(quad_bounds, |current| current.union(quad_bounds)));
+            quads.push(TextAtlasQuad {
+                atlas_page_index: atlas_entry.page_index,
+                positions: positions.map(Into::into),
+                uvs: uv_quad_points(atlas_entry.uv).map(Into::into),
                 tint: if atlas_entry.is_color {
-                    Color32::WHITE
+                    Color32::WHITE.into()
                 } else {
-                    glyph.color
+                    glyph.color.into()
                 },
+                is_color: atlas_entry.is_color,
             });
         }
 
-        let texture = glyphs
-            .first()
-            .map(|glyph| glyph.texture_id)
-            .unwrap_or_else(|| self.empty_text_texture(ctx).id());
-
-        TextTextureHandle {
-            texture_id: texture,
-            glyphs: Arc::from(glyphs),
-            size_points: layout.size_points,
+        TextRenderScene {
+            quads,
+            bounds: bounds.unwrap_or(Rect::NOTHING).into(),
+            size_points: layout.size_points.into(),
         }
+    }
+
+    fn build_text_gpu_scene_from_layout(
+        &mut self,
+        layout: &PreparedTextLayout,
+        scale: f32,
+    ) -> TextGpuScene {
+        let target_page_side_px =
+            default_gpu_scene_page_side(self.resolved_graphics_config(self.max_texture_side_px));
+        let graphics_config = self.resolved_graphics_config(self.max_texture_side_px);
+        let mut pages = Vec::<CpuSceneAtlasPage>::new();
+        let mut quads = Vec::with_capacity(layout.glyphs.len());
+        let mut bounds: Option<Rect> = None;
+
+        for glyph in layout.glyphs.iter() {
+            let Some(atlas_glyph) = rasterize_atlas_glyph(
+                &mut self.font_system,
+                &mut self.scale_context,
+                &glyph.cache_key,
+                graphics_config.rasterization,
+                graphics_config.atlas_padding_px,
+            ) else {
+                continue;
+            };
+
+            let allocation_size = size2(
+                atlas_glyph.upload_image.size[0] as i32,
+                atlas_glyph.upload_image.size[1] as i32,
+            );
+            let Some((page_index, allocation)) =
+                allocate_cpu_scene_page_slot(&mut pages, target_page_side_px, allocation_size)
+            else {
+                continue;
+            };
+
+            let pos = [
+                allocation.rectangle.min.x.max(0) as usize,
+                allocation.rectangle.min.y.max(0) as usize,
+            ];
+            blit_color_image(
+                &mut pages[page_index].image,
+                &atlas_glyph.upload_image,
+                pos[0],
+                pos[1],
+            );
+
+            let page_size = pages[page_index].image.size;
+            let uv = Rect::from_min_max(
+                Pos2::new(
+                    (pos[0] + graphics_config.atlas_padding_px) as f32 / page_size[0] as f32,
+                    (pos[1] + graphics_config.atlas_padding_px) as f32 / page_size[1] as f32,
+                ),
+                Pos2::new(
+                    (pos[0] + graphics_config.atlas_padding_px + atlas_glyph.size_px[0]) as f32
+                        / page_size[0] as f32,
+                    (pos[1] + graphics_config.atlas_padding_px + atlas_glyph.size_px[1]) as f32
+                        / page_size[1] as f32,
+                ),
+            );
+
+            let min = Pos2::new(
+                glyph.offset_points.x + atlas_glyph.placement_left_px as f32 / scale,
+                glyph.offset_points.y - atlas_glyph.placement_top_px as f32 / scale,
+            );
+            let size_points = egui::vec2(
+                atlas_glyph.size_px[0] as f32 / scale,
+                atlas_glyph.size_px[1] as f32 / scale,
+            );
+            let positions = quad_positions_from_min_size(min, size_points);
+            let quad_bounds = rect_from_points(positions);
+            bounds = Some(bounds.map_or(quad_bounds, |current| current.union(quad_bounds)));
+            quads.push(TextGpuQuad {
+                atlas_page_index: page_index,
+                positions: positions.map(|point| [point.x, point.y]),
+                uvs: uv_quad_points(uv).map(|point| [point.x, point.y]),
+                tint_rgba: [
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.r()
+                    } else {
+                        glyph.color.r()
+                    },
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.g()
+                    } else {
+                        glyph.color.g()
+                    },
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.b()
+                    } else {
+                        glyph.color.b()
+                    },
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.a()
+                    } else {
+                        glyph.color.a()
+                    },
+                ],
+            });
+        }
+
+        let bounds = bounds.unwrap_or(Rect::NOTHING);
+        TextGpuScene {
+            atlas_pages: pages
+                .iter()
+                .enumerate()
+                .map(|(page_index, page)| color_image_to_page_data(page_index, &page.image))
+                .collect(),
+            quads,
+            bounds_min: [bounds.min.x, bounds.min.y],
+            bounds_max: [bounds.max.x, bounds.max.y],
+            size_points: [layout.size_points.x, layout.size_points.y],
+        }
+    }
+
+    fn build_text_scene_on_path(
+        &mut self,
+        ctx: &Context,
+        layout: &PreparedTextLayout,
+        fallback_advance_points: f32,
+        line_height_points: f32,
+        scale: f32,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextRenderScene, TextPathError> {
+        let path_layout = build_path_layout_from_prepared_layout(
+            layout,
+            fallback_advance_points,
+            line_height_points,
+            path,
+            path_options,
+        )?;
+
+        let mut quads = Vec::with_capacity(layout.glyphs.len());
+        let mut bounds: Option<Rect> = None;
+
+        for (glyph, path_glyph) in layout.glyphs.iter().zip(path_layout.glyphs.iter()) {
+            let Some(atlas_entry) = self.glyph_atlas.resolve_sync(
+                ctx,
+                &mut self.font_system,
+                &mut self.scale_context,
+                glyph.cache_key.clone(),
+                self.current_frame,
+            ) else {
+                continue;
+            };
+
+            let size_points = egui::vec2(
+                atlas_entry.size_px[0] as f32 / scale,
+                atlas_entry.size_px[1] as f32 / scale,
+            );
+            let origin_offset = egui::vec2(
+                atlas_entry.placement_left_px as f32 / scale,
+                -(atlas_entry.placement_top_px as f32) / scale,
+            );
+            let positions = rotated_quad_positions(
+                egui_point_from_text(path_glyph.anchor),
+                origin_offset,
+                size_points,
+                path_glyph.rotation_radians,
+            );
+            let quad_bounds = rect_from_points(positions);
+            bounds = Some(bounds.map_or(quad_bounds, |current| current.union(quad_bounds)));
+            quads.push(TextAtlasQuad {
+                atlas_page_index: atlas_entry.page_index,
+                positions: positions.map(Into::into),
+                uvs: uv_quad_points(atlas_entry.uv).map(Into::into),
+                tint: if atlas_entry.is_color {
+                    Color32::WHITE.into()
+                } else {
+                    glyph.color.into()
+                },
+                is_color: atlas_entry.is_color,
+            });
+        }
+
+        Ok(TextRenderScene {
+            quads,
+            bounds: bounds
+                .unwrap_or(egui_rect_from_text(path_layout.bounds))
+                .into(),
+            size_points: layout.size_points.into(),
+        })
+    }
+
+    fn build_text_gpu_scene_on_path(
+        &mut self,
+        layout: &PreparedTextLayout,
+        fallback_advance_points: f32,
+        line_height_points: f32,
+        scale: f32,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextGpuScene, TextPathError> {
+        let path_layout = build_path_layout_from_prepared_layout(
+            layout,
+            fallback_advance_points,
+            line_height_points,
+            path,
+            path_options,
+        )?;
+        let target_page_side_px =
+            default_gpu_scene_page_side(self.resolved_graphics_config(self.max_texture_side_px));
+        let graphics_config = self.resolved_graphics_config(self.max_texture_side_px);
+        let mut pages = Vec::<CpuSceneAtlasPage>::new();
+        let mut quads = Vec::with_capacity(layout.glyphs.len());
+        let mut bounds: Option<Rect> = None;
+
+        for (glyph, path_glyph) in layout.glyphs.iter().zip(path_layout.glyphs.iter()) {
+            let Some(atlas_glyph) = rasterize_atlas_glyph(
+                &mut self.font_system,
+                &mut self.scale_context,
+                &glyph.cache_key,
+                graphics_config.rasterization,
+                graphics_config.atlas_padding_px,
+            ) else {
+                continue;
+            };
+
+            let allocation_size = size2(
+                atlas_glyph.upload_image.size[0] as i32,
+                atlas_glyph.upload_image.size[1] as i32,
+            );
+            let Some((page_index, allocation)) =
+                allocate_cpu_scene_page_slot(&mut pages, target_page_side_px, allocation_size)
+            else {
+                continue;
+            };
+
+            let pos = [
+                allocation.rectangle.min.x.max(0) as usize,
+                allocation.rectangle.min.y.max(0) as usize,
+            ];
+            blit_color_image(
+                &mut pages[page_index].image,
+                &atlas_glyph.upload_image,
+                pos[0],
+                pos[1],
+            );
+
+            let page_size = pages[page_index].image.size;
+            let uv = Rect::from_min_max(
+                Pos2::new(
+                    (pos[0] + graphics_config.atlas_padding_px) as f32 / page_size[0] as f32,
+                    (pos[1] + graphics_config.atlas_padding_px) as f32 / page_size[1] as f32,
+                ),
+                Pos2::new(
+                    (pos[0] + graphics_config.atlas_padding_px + atlas_glyph.size_px[0]) as f32
+                        / page_size[0] as f32,
+                    (pos[1] + graphics_config.atlas_padding_px + atlas_glyph.size_px[1]) as f32
+                        / page_size[1] as f32,
+                ),
+            );
+
+            let size_points = egui::vec2(
+                atlas_glyph.size_px[0] as f32 / scale,
+                atlas_glyph.size_px[1] as f32 / scale,
+            );
+            let origin_offset = egui::vec2(
+                atlas_glyph.placement_left_px as f32 / scale,
+                -(atlas_glyph.placement_top_px as f32) / scale,
+            );
+            let positions = rotated_quad_positions(
+                egui_point_from_text(path_glyph.anchor),
+                origin_offset,
+                size_points,
+                path_glyph.rotation_radians,
+            );
+            let quad_bounds = rect_from_points(positions);
+            bounds = Some(bounds.map_or(quad_bounds, |current| current.union(quad_bounds)));
+            quads.push(TextGpuQuad {
+                atlas_page_index: page_index,
+                positions: positions.map(|point| [point.x, point.y]),
+                uvs: uv_quad_points(uv).map(|point| [point.x, point.y]),
+                tint_rgba: [
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.r()
+                    } else {
+                        glyph.color.r()
+                    },
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.g()
+                    } else {
+                        glyph.color.g()
+                    },
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.b()
+                    } else {
+                        glyph.color.b()
+                    },
+                    if atlas_glyph.is_color {
+                        Color32::WHITE.a()
+                    } else {
+                        glyph.color.a()
+                    },
+                ],
+            });
+        }
+
+        let bounds = bounds.unwrap_or(egui_rect_from_text(path_layout.bounds));
+        Ok(TextGpuScene {
+            atlas_pages: pages
+                .iter()
+                .enumerate()
+                .map(|(page_index, page)| color_image_to_page_data(page_index, &page.image))
+                .collect(),
+            quads,
+            bounds_min: [bounds.min.x, bounds.min.y],
+            bounds_max: [bounds.max.x, bounds.max.y],
+            size_points: [layout.size_points.x, layout.size_points.y],
+        })
+    }
+
+    fn build_text_wgpu_scene_callback(
+        &self,
+        quads: &[PaintTextQuad],
+    ) -> Option<TextWgpuSceneCallback> {
+        let graphics_config = self.resolved_graphics_config(self.max_texture_side_px.max(1));
+        if graphics_config.renderer_backend != ResolvedTextRendererBackend::WgpuInstanced {
+            return None;
+        }
+        let target_format = self.glyph_atlas.wgpu_render_state.as_ref()?.target_format;
+        let mut grouped = FxHashMap::<usize, Vec<TextWgpuInstance>>::default();
+        for quad in quads {
+            grouped
+                .entry(quad.page_index)
+                .or_default()
+                .push(TextWgpuInstance::from_quad(quad));
+        }
+
+        let mut page_indices = grouped.keys().copied().collect::<Vec<_>>();
+        page_indices.sort_unstable();
+        let mut batches = Vec::with_capacity(page_indices.len());
+        for page_index in page_indices {
+            let texture = self.glyph_atlas.native_texture_for_page(page_index)?;
+            let instances = grouped.remove(&page_index).unwrap_or_default();
+            if instances.is_empty() {
+                continue;
+            }
+            batches.push(TextWgpuSceneBatchSource {
+                texture,
+                instances: Arc::from(instances.into_boxed_slice()),
+            });
+        }
+
+        if batches.is_empty() {
+            return None;
+        }
+
+        Some(TextWgpuSceneCallback {
+            target_format,
+            atlas_sampling: graphics_config.atlas_sampling,
+            batches: Arc::from(batches.into_boxed_slice()),
+            prepared: Arc::new(Mutex::new(TextWgpuPreparedScene::default())),
+        })
+    }
+
+    fn paint_text_quads(&mut self, painter: &egui::Painter, bounds: Rect, quads: &[PaintTextQuad]) {
+        if quads.is_empty() {
+            return;
+        }
+
+        if let Some(callback) = self.build_text_wgpu_scene_callback(quads) {
+            let callback_rect = bounds.intersect(painter.clip_rect());
+            if callback_rect.is_positive() {
+                painter.add(egui_wgpu::Callback::new_paint_callback(
+                    callback_rect,
+                    callback,
+                ));
+                return;
+            }
+        }
+
+        paint_text_quads_fallback(&self.glyph_atlas, painter, quads);
     }
 
     fn typography_snapshot(&self) -> TypographySnapshot {
@@ -4201,7 +4704,6 @@ impl TextUi {
         let _ = self.async_raster.cache.write(|state| state.clear());
         self.async_raster.pending.clear();
         self.glyph_atlas.clear();
-        self.empty_text_texture = None;
         self.markdown_cache.clear();
         if clear_input_states {
             self.input_states.clear();
@@ -4327,16 +4829,6 @@ impl TextUi {
         None
     }
 
-    fn empty_text_texture(&mut self, ctx: &Context) -> &TextureHandle {
-        self.empty_text_texture.get_or_insert_with(|| {
-            ctx.load_texture(
-                "textui_empty_texture",
-                ColorImage::new([1, 1], vec![Color32::TRANSPARENT]),
-                TextureOptions::LINEAR,
-            )
-        })
-    }
-
     fn effective_font_size(&self, size_points: f32) -> f32 {
         (size_points * self.ui_font_size_scale).max(1.0)
     }
@@ -4358,7 +4850,7 @@ impl TextUi {
         fundamentals: &TextFundamentals,
     ) -> AttrsOwned {
         let mut attrs = Attrs::new()
-            .color(to_cosmic_color(style.color))
+            .color(to_cosmic_text_color(style.color))
             .weight(Weight(self.effective_weight(style.weight)))
             .metrics(Metrics::new(
                 self.effective_font_size(font_size_points),
@@ -4476,6 +4968,9 @@ fn compose_font_features(
     settings.insert(*b"case", u16::from(fundamentals.case_sensitive_forms));
     settings.insert(*b"zero", u16::from(fundamentals.slashed_zero));
     settings.insert(*b"tnum", u16::from(fundamentals.tabular_numbers));
+    for feature in &fundamentals.feature_settings {
+        settings.insert(feature.tag, feature.value);
+    }
     build_font_features_from_settings(settings)
 }
 
@@ -4526,7 +5021,7 @@ fn async_prepare_text_layout(
                 let attrs_owned = async_build_text_attrs_owned(
                     req,
                     &SpanStyle {
-                        color: req.options.color,
+                        color: req.options.color.into(),
                         monospace: req.options.monospace,
                         italic: req.options.italic,
                         weight: req.options.weight,
@@ -4539,7 +5034,7 @@ fn async_prepare_text_layout(
                 let default_attrs_owned = async_build_text_attrs_owned(
                     req,
                     &SpanStyle {
-                        color: req.options.color,
+                        color: req.options.color.into(),
                         monospace: req.options.monospace,
                         italic: req.options.italic,
                         weight: req.options.weight,
@@ -4588,7 +5083,7 @@ fn async_build_text_attrs_owned(req: &AsyncRasterRequest, style: &SpanStyle) -> 
     let effective_weight =
         (i32::from(style.weight) + (req.typography.ui_font_weight - 400)).clamp(100, 900) as u16;
     let mut attrs = Attrs::new()
-        .color(to_cosmic_color(style.color))
+        .color(to_cosmic_text_color(style.color))
         .weight(Weight(effective_weight))
         .metrics(Metrics::new(
             (req.options.font_size * req.typography.ui_font_size_scale).max(1.0),
@@ -4627,6 +5122,9 @@ impl GlyphAtlas {
             entries: ThreadSafeLru::new(GLYPH_ATLAS_MAX_BYTES),
             pages: Vec::new(),
             page_side_px: GLYPH_ATLAS_PAGE_TARGET_PX,
+            padding_px: GLYPH_ATLAS_PADDING_PX.max(0) as usize,
+            sampling: TextAtlasSampling::Linear,
+            rasterization: TextRasterizationConfig::default(),
             wgpu_render_state: None,
             pending: FxHashSet::default(),
             ready: VecDeque::new(),
@@ -4642,6 +5140,18 @@ impl GlyphAtlas {
 
     fn set_page_side(&mut self, page_side_px: usize) {
         self.page_side_px = page_side_px.max(1);
+    }
+
+    fn set_sampling(&mut self, sampling: TextAtlasSampling) {
+        self.sampling = sampling;
+    }
+
+    fn set_padding(&mut self, padding_px: usize) {
+        self.padding_px = padding_px;
+    }
+
+    fn set_rasterization(&mut self, rasterization: TextRasterizationConfig) {
+        self.rasterization = rasterization;
     }
 
     fn register_font(&self, bytes: Vec<u8>) {
@@ -4752,7 +5262,9 @@ impl GlyphAtlas {
             let queued = self.tx.as_ref().is_some_and(|tx| {
                 tx.send(GlyphAtlasWorkerMessage::Rasterize {
                     generation: self.generation,
-                    cache_key,
+                    cache_key: cache_key.clone(),
+                    rasterization: self.rasterization,
+                    padding_px: self.padding_px,
                 })
                 .is_ok()
             });
@@ -4763,7 +5275,39 @@ impl GlyphAtlas {
             }
         }
 
-        let glyph = rasterize_atlas_glyph(font_system, scale_context, cache_key)?;
+        let glyph = rasterize_atlas_glyph(
+            font_system,
+            scale_context,
+            &cache_key,
+            self.rasterization,
+            self.padding_px,
+        )?;
+        self.insert_prepared_glyph(ctx, cache_key, glyph, current_frame, true)
+    }
+
+    fn resolve_sync(
+        &mut self,
+        ctx: &Context,
+        font_system: &mut FontSystem,
+        scale_context: &mut ScaleContext,
+        cache_key: GlyphRasterKey,
+        current_frame: u64,
+    ) -> Option<ResolvedGlyphAtlasEntry> {
+        if let Some(entry) = self.entries.write(|state| {
+            let entry = state.touch(&cache_key)?;
+            entry.value.last_used_frame = current_frame;
+            Some(entry.value.clone())
+        }) {
+            return Some(self.resolve_entry(&entry));
+        }
+
+        let glyph = rasterize_atlas_glyph(
+            font_system,
+            scale_context,
+            &cache_key,
+            self.rasterization,
+            self.padding_px,
+        )?;
         self.insert_prepared_glyph(ctx, cache_key, glyph, current_frame, true)
     }
 
@@ -4803,8 +5347,8 @@ impl GlyphAtlas {
             page_index,
             allocation_id: allocation.id,
             atlas_min_px: [
-                (allocation.rectangle.min.x + GLYPH_ATLAS_PADDING_PX) as usize,
-                (allocation.rectangle.min.y + GLYPH_ATLAS_PADDING_PX) as usize,
+                (allocation.rectangle.min.x + self.padding_px as i32) as usize,
+                (allocation.rectangle.min.y + self.padding_px as i32) as usize,
             ],
             size_px: glyph.size_px,
             placement_left_px: glyph.placement_left_px,
@@ -4880,14 +5424,14 @@ impl GlyphAtlas {
             let id = render_state.renderer.write().register_native_texture(
                 &render_state.device,
                 &view,
-                wgpu::FilterMode::Linear,
+                wgpu_filter_mode_for_sampling(self.sampling),
             );
             GlyphAtlasTexture::Wgpu(NativeGlyphAtlasTexture { id, texture })
         } else {
             GlyphAtlasTexture::Egui(ctx.load_texture(
                 format!("textui_glyph_atlas_{}", self.pages.len()),
                 ColorImage::filled([side, side], Color32::TRANSPARENT),
-                TextureOptions::LINEAR,
+                texture_options_for_sampling(self.sampling),
             ))
         }
     }
@@ -4913,7 +5457,6 @@ impl GlyphAtlas {
     }
 
     fn resolve_entry(&self, entry: &GlyphAtlasEntry) -> ResolvedGlyphAtlasEntry {
-        let texture_id = self.pages[entry.page_index].texture.id();
         let side = self.page_side_px as f32;
         let uv = Rect::from_min_max(
             Pos2::new(
@@ -4927,12 +5470,43 @@ impl GlyphAtlas {
         );
 
         ResolvedGlyphAtlasEntry {
-            texture_id,
+            page_index: entry.page_index,
             uv,
             size_px: entry.size_px,
             placement_left_px: entry.placement_left_px,
             placement_top_px: entry.placement_top_px,
             is_color: entry.is_color,
+        }
+    }
+
+    fn page_snapshot(&self, page_index: usize) -> Option<TextAtlasPageSnapshot> {
+        let page = self.pages.get(page_index)?;
+        Some(TextAtlasPageSnapshot {
+            page_index,
+            size_px: page.backing.size,
+            rgba8: page
+                .backing
+                .pixels
+                .iter()
+                .flat_map(|pixel| pixel.to_array())
+                .collect(),
+        })
+    }
+
+    fn page_data(&self, page_index: usize) -> Option<TextAtlasPageData> {
+        self.page_snapshot(page_index)
+            .map(|snapshot| snapshot.to_rgba8())
+    }
+
+    fn texture_id_for_page(&self, page_index: usize) -> Option<TextureId> {
+        self.pages.get(page_index).map(|page| page.texture.id())
+    }
+
+    fn native_texture_for_page(&self, page_index: usize) -> Option<wgpu::Texture> {
+        let page = self.pages.get(page_index)?;
+        match &page.texture {
+            GlyphAtlasTexture::Wgpu(texture) => Some(texture.texture.clone()),
+            GlyphAtlasTexture::Egui(_) => None,
         }
     }
 
@@ -4973,7 +5547,7 @@ impl GlyphAtlas {
                 texture.set_partial(
                     dirty_rect.min,
                     egui::ImageData::Color(image.into()),
-                    TextureOptions::LINEAR,
+                    texture_options_for_sampling(self.sampling),
                 );
             }
             GlyphAtlasTexture::Wgpu(texture) => {
@@ -5006,8 +5580,16 @@ fn glyph_atlas_worker_loop(
             GlyphAtlasWorkerMessage::Rasterize {
                 generation,
                 cache_key,
+                rasterization,
+                padding_px,
             } => {
-                let glyph = rasterize_atlas_glyph(&mut font_system, &mut scale_context, cache_key);
+                let glyph = rasterize_atlas_glyph(
+                    &mut font_system,
+                    &mut scale_context,
+                    &cache_key,
+                    rasterization,
+                    padding_px,
+                );
                 let _ = tx.send(GlyphAtlasWorkerResponse {
                     generation,
                     cache_key,
@@ -5021,9 +5603,11 @@ fn glyph_atlas_worker_loop(
 fn rasterize_atlas_glyph(
     font_system: &mut FontSystem,
     scale_context: &mut ScaleContext,
-    cache_key: GlyphRasterKey,
+    cache_key: &GlyphRasterKey,
+    rasterization: TextRasterizationConfig,
+    padding_px: usize,
 ) -> Option<PreparedAtlasGlyph> {
-    let image = render_swash_image(font_system, scale_context, cache_key)?;
+    let image = render_swash_image(font_system, scale_context, cache_key, rasterization)?;
     let glyph_width = image.placement.width as usize;
     let glyph_height = image.placement.height as usize;
     if glyph_width == 0 || glyph_height == 0 {
@@ -5031,7 +5615,7 @@ fn rasterize_atlas_glyph(
     }
 
     let glyph_image = swash_image_to_color_image(&image)?;
-    let upload_image = build_atlas_upload_image(&glyph_image);
+    let upload_image = build_atlas_upload_image(&glyph_image, padding_px);
     Some(PreparedAtlasGlyph {
         approx_bytes: color_image_byte_size(&upload_image),
         upload_image,
@@ -5045,7 +5629,8 @@ fn rasterize_atlas_glyph(
 fn render_swash_image(
     font_system: &mut FontSystem,
     scale_context: &mut ScaleContext,
-    raster_key: GlyphRasterKey,
+    raster_key: &GlyphRasterKey,
+    rasterization: TextRasterizationConfig,
 ) -> Option<SwashImage> {
     let cache_key = raster_key.cache_key;
     let display_scale = raster_key.display_scale().max(1.0);
@@ -5055,32 +5640,49 @@ fn render_swash_image(
     let font = font_system.get_font(cache_key.font_id, cache_key.font_weight)?;
     let swash_font = font.as_swash();
 
-    let mut settings = Vec::new();
+    let mut settings_by_tag = std::collections::BTreeMap::<[u8; 4], f32>::new();
     if let Some(variation) = swash_font
         .variations()
         .find_by_tag(SwashTag::from_be_bytes(*b"wght"))
     {
-        settings.push(SwashSetting {
-            tag: SwashTag::from_be_bytes(*b"wght"),
-            value: f32::from(cache_key.font_weight.0)
-                .clamp(variation.min_value(), variation.max_value()),
-        });
+        settings_by_tag.insert(
+            *b"wght",
+            f32::from(cache_key.font_weight.0).clamp(variation.min_value(), variation.max_value()),
+        );
     }
     if let Some(variation) = swash_font
         .variations()
         .find_by_tag(SwashTag::from_be_bytes(*b"opsz"))
     {
-        settings.push(SwashSetting {
-            tag: SwashTag::from_be_bytes(*b"opsz"),
-            value: opsz_for_font_size(logical_font_size)
-                .clamp(variation.min_value(), variation.max_value()),
-        });
+        if rasterization.optical_sizing != TextOpticalSizingMode::Disabled {
+            settings_by_tag.insert(
+                *b"opsz",
+                opsz_for_font_size(logical_font_size)
+                    .clamp(variation.min_value(), variation.max_value()),
+            );
+        }
     }
+    for variation in raster_key.variation_settings.iter().copied() {
+        let tag = SwashTag::from_be_bytes(variation.tag);
+        if let Some(axis) = swash_font.variations().find_by_tag(tag) {
+            settings_by_tag.insert(
+                variation.tag,
+                variation.value().clamp(axis.min_value(), axis.max_value()),
+            );
+        }
+    }
+    let settings = settings_by_tag
+        .into_iter()
+        .map(|(tag, value)| SwashSetting {
+            tag: SwashTag::from_be_bytes(tag),
+            value,
+        })
+        .collect::<Vec<_>>();
 
     let mut scaler = scale_context
         .builder(swash_font)
         .size(ppem)
-        .hint(should_hint(display_scale));
+        .hint(resolved_hinting_enabled(display_scale, rasterization));
     if !settings.is_empty() {
         scaler = scaler.variations(settings.into_iter());
     }
@@ -5106,11 +5708,11 @@ fn render_swash_image(
     render
         .format(SwashFormat::Alpha)
         .offset(offset)
-        .embolden(if raster_key.stem_darkening() {
-            stem_darkening_strength(ppem)
-        } else {
-            0.0
-        })
+        .embolden(resolved_stem_darkening_strength(
+            ppem,
+            raster_key.stem_darkening(),
+            rasterization,
+        ))
         .transform(
             if cache_key
                 .flags
@@ -5131,7 +5733,8 @@ fn render_swash_image(
 fn render_swash_outline_commands(
     font_system: &mut FontSystem,
     scale_context: &mut ScaleContext,
-    raster_key: GlyphRasterKey,
+    raster_key: &GlyphRasterKey,
+    rasterization: TextRasterizationConfig,
 ) -> Option<Box<[swash::zeno::Command]>> {
     use swash::zeno::PathData as _;
 
@@ -5143,32 +5746,49 @@ fn render_swash_outline_commands(
     let font = font_system.get_font(cache_key.font_id, cache_key.font_weight)?;
     let swash_font = font.as_swash();
 
-    let mut settings = Vec::new();
+    let mut settings_by_tag = std::collections::BTreeMap::<[u8; 4], f32>::new();
     if let Some(variation) = swash_font
         .variations()
         .find_by_tag(SwashTag::from_be_bytes(*b"wght"))
     {
-        settings.push(SwashSetting {
-            tag: SwashTag::from_be_bytes(*b"wght"),
-            value: f32::from(cache_key.font_weight.0)
-                .clamp(variation.min_value(), variation.max_value()),
-        });
+        settings_by_tag.insert(
+            *b"wght",
+            f32::from(cache_key.font_weight.0).clamp(variation.min_value(), variation.max_value()),
+        );
     }
     if let Some(variation) = swash_font
         .variations()
         .find_by_tag(SwashTag::from_be_bytes(*b"opsz"))
     {
-        settings.push(SwashSetting {
-            tag: SwashTag::from_be_bytes(*b"opsz"),
-            value: opsz_for_font_size(logical_font_size)
-                .clamp(variation.min_value(), variation.max_value()),
-        });
+        if rasterization.optical_sizing != TextOpticalSizingMode::Disabled {
+            settings_by_tag.insert(
+                *b"opsz",
+                opsz_for_font_size(logical_font_size)
+                    .clamp(variation.min_value(), variation.max_value()),
+            );
+        }
     }
+    for variation in raster_key.variation_settings.iter().copied() {
+        let tag = SwashTag::from_be_bytes(variation.tag);
+        if let Some(axis) = swash_font.variations().find_by_tag(tag) {
+            settings_by_tag.insert(
+                variation.tag,
+                variation.value().clamp(axis.min_value(), axis.max_value()),
+            );
+        }
+    }
+    let settings = settings_by_tag
+        .into_iter()
+        .map(|(tag, value)| SwashSetting {
+            tag: SwashTag::from_be_bytes(tag),
+            value,
+        })
+        .collect::<Vec<_>>();
 
     let mut scaler = scale_context
         .builder(swash_font)
         .size(ppem)
-        .hint(should_hint(display_scale));
+        .hint(resolved_hinting_enabled(display_scale, rasterization));
     if !settings.is_empty() {
         scaler = scaler.variations(settings.into_iter());
     }
@@ -5211,8 +5831,7 @@ fn swash_image_to_color_image(image: &cosmic_text::SwashImage) -> Option<ColorIm
     Some(ColorImage::new([width, height], pixels))
 }
 
-fn build_atlas_upload_image(glyph: &ColorImage) -> ColorImage {
-    let padding = GLYPH_ATLAS_PADDING_PX.max(0) as usize;
+fn build_atlas_upload_image(glyph: &ColorImage, padding: usize) -> ColorImage {
     let mut upload = ColorImage::filled(
         [
             glyph.size[0].saturating_add(padding * 2),
@@ -5296,41 +5915,295 @@ fn write_color_image_to_wgpu_texture(
     );
 }
 
-fn paint_text_texture_glyphs(
-    painter: &egui::Painter,
-    rect: Rect,
-    uv: Rect,
-    natural_size: Vec2,
-    glyphs: &[TextTextureGlyph],
-    tint: Color32,
-) {
-    let rect = snap_rect_to_pixel_grid(rect, painter.pixels_per_point());
-    let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
-
-    for glyph in glyphs {
-        let glyph_rect = Rect::from_min_size(
-            Pos2::new(glyph.offset_points.x, glyph.offset_points.y),
-            glyph.size_points,
-        );
-        let Some((target_rect, glyph_uv)) =
-            map_glyph_rect(rect, uv, natural_size, glyph_rect, glyph.uv)
-        else {
-            continue;
+impl TextWgpuPipelineResources {
+    fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        atlas_sampling: TextAtlasSampling,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("textui_instanced_shader"),
+            source: wgpu::ShaderSource::Wgsl(TEXT_WGPU_INSTANCED_SHADER.into()),
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("textui_instanced_uniform_bgl"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("textui_instanced_texture_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("textui_instanced_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu_filter_mode_for_sampling(atlas_sampling),
+            min_filter: wgpu_filter_mode_for_sampling(atlas_sampling),
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let uniform = TextWgpuScreenUniform {
+            screen_size_points: [1.0, 1.0],
+            _padding: [0.0, 0.0],
         };
-        if target_rect.width() <= 0.0 || target_rect.height() <= 0.0 {
-            continue;
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("textui_instanced_uniform_buffer"),
+            contents: bytemuck::bytes_of(&uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("textui_instanced_uniform_bg"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("textui_instanced_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let premultiplied_alpha = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("textui_instanced_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: mem::size_of::<TextWgpuInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2,
+                        1 => Float32x2,
+                        2 => Float32x2,
+                        3 => Float32x2,
+                        4 => Float32x2,
+                        5 => Float32x2,
+                        6 => Float32x2,
+                        7 => Float32x2,
+                        8 => Float32x4
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(premultiplied_alpha),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+        Self {
+            target_format,
+            atlas_sampling,
+            pipeline,
+            texture_bind_group_layout,
+            sampler,
+            uniform_buffer,
+            uniform_bind_group,
+        }
+    }
+
+    fn update_uniform(&self, queue: &wgpu::Queue, screen_size_points: [f32; 2]) {
+        let uniform = TextWgpuScreenUniform {
+            screen_size_points,
+            _padding: [0.0, 0.0],
+        };
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
+    }
+}
+
+impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let resources = callback_resources
+            .entry::<TextWgpuPipelineResources>()
+            .or_insert_with(|| {
+                TextWgpuPipelineResources::new(device, self.target_format, self.atlas_sampling)
+            });
+        if resources.target_format != self.target_format
+            || resources.atlas_sampling != self.atlas_sampling
+        {
+            *resources =
+                TextWgpuPipelineResources::new(device, self.target_format, self.atlas_sampling);
+        }
+        resources.update_uniform(
+            queue,
+            [
+                screen_descriptor.size_in_pixels[0] as f32 / screen_descriptor.pixels_per_point,
+                screen_descriptor.size_in_pixels[1] as f32 / screen_descriptor.pixels_per_point,
+            ],
+        );
+
+        let mut prepared_batches = Vec::with_capacity(self.batches.len());
+        for batch in self.batches.iter() {
+            if batch.instances.is_empty() {
+                continue;
+            }
+            let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("textui_instanced_instance_buffer"),
+                contents: bytemuck::cast_slice(batch.instances.as_ref()),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let view = batch
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("textui_instanced_texture_bg"),
+                layout: &resources.texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&resources.sampler),
+                    },
+                ],
+            });
+            prepared_batches.push(TextWgpuPreparedBatch {
+                bind_group,
+                instance_buffer,
+                instance_count: batch.instances.len() as u32,
+            });
         }
 
-        let final_tint = multiply_color32(glyph.tint, tint);
+        if let Ok(mut prepared) = self.prepared.lock() {
+            prepared.batches = prepared_batches;
+        }
+
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        let Some(resources) = callback_resources.get::<TextWgpuPipelineResources>() else {
+            return;
+        };
+        let Ok(prepared) = self.prepared.lock() else {
+            return;
+        };
+        if prepared.batches.is_empty() {
+            return;
+        }
+
+        render_pass.set_viewport(
+            0.0,
+            0.0,
+            info.screen_size_px[0] as f32,
+            info.screen_size_px[1] as f32,
+            0.0,
+            1.0,
+        );
+        render_pass.set_pipeline(&resources.pipeline);
+        render_pass.set_bind_group(0, &resources.uniform_bind_group, &[]);
+        for batch in &prepared.batches {
+            render_pass.set_bind_group(1, &batch.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, batch.instance_buffer.slice(..));
+            render_pass.draw(0..6, 0..batch.instance_count);
+        }
+    }
+}
+
+fn add_text_quad(
+    mesh: &mut egui::epaint::Mesh,
+    positions: [Pos2; 4],
+    uvs: [Pos2; 4],
+    tint: Color32,
+) {
+    let base = mesh.vertices.len() as u32;
+    for index in 0..4 {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: positions[index],
+            uv: uvs[index],
+            color: tint,
+        });
+    }
+    mesh.indices
+        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+fn paint_text_quads_fallback(
+    glyph_atlas: &GlyphAtlas,
+    painter: &egui::Painter,
+    quads: &[PaintTextQuad],
+) {
+    let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
+    for quad in quads {
+        let Some(texture_id) = glyph_atlas.texture_id_for_page(quad.page_index) else {
+            continue;
+        };
         if let Some((_, mesh)) = meshes
             .iter_mut()
-            .find(|(texture_id, _)| *texture_id == glyph.texture_id)
+            .find(|(existing_id, _)| *existing_id == texture_id)
         {
-            mesh.add_rect_with_uv(target_rect, glyph_uv, final_tint);
+            add_text_quad(mesh, quad.positions, quad.uvs, quad.tint);
         } else {
-            let mut mesh = egui::epaint::Mesh::with_texture(glyph.texture_id);
-            mesh.add_rect_with_uv(target_rect, glyph_uv, final_tint);
-            meshes.push((glyph.texture_id, mesh));
+            let mut mesh = egui::epaint::Mesh::with_texture(texture_id);
+            add_text_quad(&mut mesh, quad.positions, quad.uvs, quad.tint);
+            meshes.push((texture_id, mesh));
         }
     }
 
@@ -5339,6 +6212,128 @@ fn paint_text_texture_glyphs(
             painter.add(egui::Shape::mesh(mesh));
         }
     }
+}
+
+fn map_scene_quads_to_rect(
+    rect: Rect,
+    uv: Rect,
+    natural_size: Vec2,
+    quads: &[TextAtlasQuad],
+    tint: Color32,
+) -> Vec<PaintTextQuad> {
+    if natural_size.x.abs() <= f32::EPSILON || natural_size.y.abs() <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let scale_x = rect.width() / natural_size.x;
+    let scale_y = rect.height() / natural_size.y;
+    let uv_width = uv.width();
+    let uv_height = uv.height();
+
+    quads
+        .iter()
+        .map(|quad| PaintTextQuad {
+            page_index: quad.atlas_page_index,
+            positions: quad.positions.map(|point| {
+                Pos2::new(
+                    rect.min.x + point.x * scale_x,
+                    rect.min.y + point.y * scale_y,
+                )
+            }),
+            uvs: quad.uvs.map(|point| {
+                Pos2::new(
+                    uv.min.x + point.x * uv_width,
+                    uv.min.y + point.y * uv_height,
+                )
+            }),
+            tint: multiply_color32(quad.tint.into(), tint),
+        })
+        .collect()
+}
+
+fn default_gpu_scene_page_side(graphics_config: ResolvedTextGraphicsConfig) -> usize {
+    graphics_config.atlas_page_target_px.max(256)
+}
+
+fn allocate_cpu_scene_page_slot(
+    pages: &mut Vec<CpuSceneAtlasPage>,
+    target_page_side_px: usize,
+    allocation_size: etagere::Size,
+) -> Option<(usize, Allocation)> {
+    for (page_index, page) in pages.iter_mut().enumerate() {
+        if let Some(allocation) = page.allocator.allocate(allocation_size) {
+            return Some((page_index, allocation));
+        }
+    }
+
+    let side = target_page_side_px
+        .max(allocation_size.width.max(1) as usize)
+        .max(allocation_size.height.max(1) as usize);
+    let mut allocator = AtlasAllocator::new(size2(side as i32, side as i32));
+    let allocation = allocator.allocate(allocation_size)?;
+    pages.push(CpuSceneAtlasPage {
+        allocator,
+        image: ColorImage::filled([side, side], Color32::TRANSPARENT),
+    });
+    Some((pages.len() - 1, allocation))
+}
+
+fn color_image_to_page_data(page_index: usize, image: &ColorImage) -> TextAtlasPageData {
+    let mut rgba8 = Vec::with_capacity(image.pixels.len().saturating_mul(4));
+    for pixel in &image.pixels {
+        rgba8.extend_from_slice(&pixel.to_array());
+    }
+    TextAtlasPageData {
+        page_index,
+        size_px: image.size,
+        rgba8,
+    }
+}
+
+fn quad_positions_from_min_size(min: Pos2, size: Vec2) -> [Pos2; 4] {
+    [
+        min,
+        Pos2::new(min.x + size.x, min.y),
+        Pos2::new(min.x + size.x, min.y + size.y),
+        Pos2::new(min.x, min.y + size.y),
+    ]
+}
+
+fn rotated_quad_positions(
+    anchor: Pos2,
+    top_left_offset: Vec2,
+    size_points: Vec2,
+    rotation_radians: f32,
+) -> [Pos2; 4] {
+    let rotation = egui::emath::Rot2::from_angle(rotation_radians);
+    [
+        top_left_offset,
+        top_left_offset + egui::vec2(size_points.x, 0.0),
+        top_left_offset + size_points,
+        top_left_offset + egui::vec2(0.0, size_points.y),
+    ]
+    .map(|offset| anchor + rotation * offset)
+}
+
+fn uv_quad_points(uv: Rect) -> [Pos2; 4] {
+    [
+        uv.min,
+        Pos2::new(uv.max.x, uv.min.y),
+        uv.max,
+        Pos2::new(uv.min.x, uv.max.y),
+    ]
+}
+
+fn rect_from_points(points: [Pos2; 4]) -> Rect {
+    let mut min = points[0];
+    let mut max = points[0];
+    for point in &points[1..] {
+        min.x = min.x.min(point.x);
+        min.y = min.y.min(point.y);
+        max.x = max.x.max(point.x);
+        max.y = max.y.max(point.y);
+    }
+    Rect::from_min_max(min, max)
 }
 
 fn build_path_layout_from_prepared_layout(
@@ -5382,19 +6377,19 @@ fn build_path_layout_from_prepared_layout(
         );
         bounds = Some(bounds.map_or(glyph_rect, |current| current.union(glyph_rect)));
         glyphs.push(TextPathGlyph {
-            anchor,
-            tangent: sample.tangent,
-            normal: sample.normal,
+            anchor: anchor.into(),
+            tangent: sample.tangent.into(),
+            normal: sample.normal.into(),
             rotation_radians,
-            local_offset: egui::vec2(0.0, baseline_offset),
+            local_offset: egui::vec2(0.0, baseline_offset).into(),
             advance_points,
-            color: glyph.color,
+            color: glyph.color.into(),
         });
     }
 
     Ok(TextPathLayout {
         glyphs,
-        bounds: bounds.unwrap_or(Rect::NOTHING),
+        bounds: bounds.unwrap_or(Rect::NOTHING).into(),
         total_advance_points: layout.size_points.x,
         path_length_points: path_length,
     })
@@ -5405,58 +6400,29 @@ fn export_prepared_layout_as_shapes(
     font_system: &mut FontSystem,
     scale_context: &mut ScaleContext,
     fallback_line_height: f32,
+    rasterization: TextRasterizationConfig,
 ) -> VectorTextShape {
     let mut glyphs = Vec::with_capacity(layout.glyphs.len());
     let mut bounds: Option<Rect> = None;
     for glyph in layout.glyphs.iter() {
-        let Some(shape) =
-            export_vector_glyph_shape(font_system, scale_context, glyph, fallback_line_height)
-        else {
+        let Some(shape) = export_vector_glyph_shape(
+            font_system,
+            scale_context,
+            glyph,
+            fallback_line_height,
+            rasterization,
+        ) else {
             continue;
         };
-        bounds = Some(bounds.map_or(shape.bounds, |current| current.union(shape.bounds)));
+        bounds = Some(bounds.map_or(shape.bounds.into(), |current| {
+            current.union(shape.bounds.into())
+        }));
         glyphs.push(shape);
     }
     VectorTextShape {
         glyphs,
-        bounds: bounds.unwrap_or(Rect::NOTHING),
+        bounds: bounds.unwrap_or(Rect::NOTHING).into(),
     }
-}
-
-fn add_rotated_glyph_quad(
-    mesh: &mut egui::epaint::Mesh,
-    anchor: Pos2,
-    top_left_offset: Vec2,
-    size_points: Vec2,
-    uv: Rect,
-    tint: Color32,
-    rotation_radians: f32,
-) {
-    let rotation = egui::emath::Rot2::from_angle(rotation_radians);
-    let positions = [
-        top_left_offset,
-        top_left_offset + egui::vec2(size_points.x, 0.0),
-        top_left_offset + size_points,
-        top_left_offset + egui::vec2(0.0, size_points.y),
-    ]
-    .map(|offset| anchor + rotation * offset);
-    let uvs = [
-        uv.min,
-        Pos2::new(uv.max.x, uv.min.y),
-        uv.max,
-        Pos2::new(uv.min.x, uv.max.y),
-    ];
-
-    let index = mesh.vertices.len() as u32;
-    for (pos, uv) in positions.into_iter().zip(uvs) {
-        mesh.vertices.push(egui::epaint::Vertex {
-            pos,
-            uv,
-            color: tint,
-        });
-    }
-    mesh.add_triangle(index, index + 1, index + 2);
-    mesh.add_triangle(index, index + 2, index + 3);
 }
 
 #[derive(Clone, Copy)]
@@ -5473,9 +6439,17 @@ fn text_path_length(path: &TextPath) -> f32 {
 }
 
 fn iter_text_path_segments(path: &TextPath) -> impl Iterator<Item = (Pos2, Pos2)> + '_ {
-    let open_segments = path.points.windows(2).map(|points| (points[0], points[1]));
+    let open_segments = path.points.windows(2).map(|points| {
+        (
+            egui_point_from_text(points[0]),
+            egui_point_from_text(points[1]),
+        )
+    });
     let closing_segment = if path.closed && path.points.len() > 2 {
-        Some((*path.points.last().unwrap_or(&Pos2::ZERO), path.points[0]))
+        Some((
+            egui_point_from_text(*path.points.last().unwrap_or(&TextPoint::ZERO)),
+            egui_point_from_text(path.points[0]),
+        ))
     } else {
         None
     };
@@ -5506,6 +6480,8 @@ fn sample_text_path(path: &TextPath, distance_points: f32) -> Option<TextPathSam
         [.., a, b] => (a, b),
         _ => return None,
     };
+    let last_but_one = egui_point_from_text(last_but_one);
+    let last = egui_point_from_text(last);
     let delta = last - last_but_one;
     let segment_length = delta.length();
     if segment_length <= f32::EPSILON {
@@ -5536,8 +6512,10 @@ fn export_vector_glyph_shape(
     scale_context: &mut ScaleContext,
     glyph: &PreparedGlyph,
     fallback_line_height: f32,
+    rasterization: TextRasterizationConfig,
 ) -> Option<VectorGlyphShape> {
-    let commands = render_swash_outline_commands(font_system, scale_context, glyph.cache_key)?;
+    let commands =
+        render_swash_outline_commands(font_system, scale_context, &glyph.cache_key, rasterization)?;
     let mut vector_commands = Vec::with_capacity(commands.len());
     let mut bounds: Option<Rect> = None;
     for command in commands.iter() {
@@ -5546,16 +6524,18 @@ fn export_vector_glyph_shape(
         vector_commands.push(mapped);
     }
     Some(VectorGlyphShape {
-        bounds: bounds.unwrap_or_else(|| {
-            Rect::from_min_size(
-                Pos2::new(
-                    glyph.offset_points.x,
-                    glyph.offset_points.y - fallback_line_height,
-                ),
-                egui::vec2(1.0, fallback_line_height.max(1.0)),
-            )
-        }),
-        color: glyph.color,
+        bounds: bounds
+            .unwrap_or_else(|| {
+                Rect::from_min_size(
+                    Pos2::new(
+                        glyph.offset_points.x,
+                        glyph.offset_points.y - fallback_line_height,
+                    ),
+                    egui::vec2(1.0, fallback_line_height.max(1.0)),
+                )
+            })
+            .into(),
+        color: glyph.color.into(),
         commands: vector_commands,
     })
 }
@@ -5567,14 +6547,16 @@ fn map_outline_command_to_points(
     let map_point =
         |point: swash::zeno::Point| Pos2::new(glyph_origin.x + point.x, glyph_origin.y - point.y);
     match command {
-        swash::zeno::Command::MoveTo(point) => VectorPathCommand::MoveTo(map_point(point)),
-        swash::zeno::Command::LineTo(point) => VectorPathCommand::LineTo(map_point(point)),
+        swash::zeno::Command::MoveTo(point) => VectorPathCommand::MoveTo(map_point(point).into()),
+        swash::zeno::Command::LineTo(point) => VectorPathCommand::LineTo(map_point(point).into()),
         swash::zeno::Command::QuadTo(control, point) => {
-            VectorPathCommand::QuadTo(map_point(control), map_point(point))
+            VectorPathCommand::QuadTo(map_point(control).into(), map_point(point).into())
         }
-        swash::zeno::Command::CurveTo(control_a, control_b, point) => {
-            VectorPathCommand::CurveTo(map_point(control_a), map_point(control_b), map_point(point))
-        }
+        swash::zeno::Command::CurveTo(control_a, control_b, point) => VectorPathCommand::CurveTo(
+            map_point(control_a).into(),
+            map_point(control_b).into(),
+            map_point(point).into(),
+        ),
         swash::zeno::Command::Close => VectorPathCommand::Close,
     }
 }
@@ -5586,133 +6568,18 @@ fn update_vector_shape_bounds(bounds: &mut Option<Rect>, command: &VectorPathCom
     };
     match command {
         VectorPathCommand::MoveTo(point) | VectorPathCommand::LineTo(point) => {
-            include_point(*point)
+            include_point((*point).into())
         }
         VectorPathCommand::QuadTo(control, point) => {
-            include_point(*control);
-            include_point(*point);
+            include_point((*control).into());
+            include_point((*point).into());
         }
         VectorPathCommand::CurveTo(control_a, control_b, point) => {
-            include_point(*control_a);
-            include_point(*control_b);
-            include_point(*point);
+            include_point((*control_a).into());
+            include_point((*control_b).into());
+            include_point((*point).into());
         }
         VectorPathCommand::Close => {}
-    }
-}
-
-fn map_glyph_rect(
-    target_rect: Rect,
-    target_uv: Rect,
-    natural_size: Vec2,
-    glyph_rect: Rect,
-    glyph_uv: Rect,
-) -> Option<(Rect, Rect)> {
-    if natural_size.x <= f32::EPSILON || natural_size.y <= f32::EPSILON {
-        return None;
-    }
-    if (target_uv.max.x - target_uv.min.x).abs() <= f32::EPSILON
-        || (target_uv.max.y - target_uv.min.y).abs() <= f32::EPSILON
-    {
-        return None;
-    }
-
-    let glyph_u0 = glyph_rect.min.x / natural_size.x;
-    let glyph_u1 = glyph_rect.max.x / natural_size.x;
-    let glyph_v0 = glyph_rect.min.y / natural_size.y;
-    let glyph_v1 = glyph_rect.max.y / natural_size.y;
-
-    let overlap_u0 = glyph_u0.max(target_uv.min.x.min(target_uv.max.x));
-    let overlap_u1 = glyph_u1.min(target_uv.min.x.max(target_uv.max.x));
-    let overlap_v0 = glyph_v0.max(target_uv.min.y.min(target_uv.max.y));
-    let overlap_v1 = glyph_v1.min(target_uv.min.y.max(target_uv.max.y));
-    if overlap_u0 >= overlap_u1 || overlap_v0 >= overlap_v1 {
-        return None;
-    }
-
-    let target_x0 = remap(
-        overlap_u0,
-        target_uv.min.x,
-        target_uv.max.x,
-        target_rect.min.x,
-        target_rect.max.x,
-    );
-    let target_x1 = remap(
-        overlap_u1,
-        target_uv.min.x,
-        target_uv.max.x,
-        target_rect.min.x,
-        target_rect.max.x,
-    );
-    let target_y0 = remap(
-        overlap_v0,
-        target_uv.min.y,
-        target_uv.max.y,
-        target_rect.min.y,
-        target_rect.max.y,
-    );
-    let target_y1 = remap(
-        overlap_v1,
-        target_uv.min.y,
-        target_uv.max.y,
-        target_rect.min.y,
-        target_rect.max.y,
-    );
-
-    let glyph_uv_x0 = remap(
-        overlap_u0,
-        glyph_u0,
-        glyph_u1,
-        glyph_uv.min.x,
-        glyph_uv.max.x,
-    );
-    let glyph_uv_x1 = remap(
-        overlap_u1,
-        glyph_u0,
-        glyph_u1,
-        glyph_uv.min.x,
-        glyph_uv.max.x,
-    );
-    let glyph_uv_y0 = remap(
-        overlap_v0,
-        glyph_v0,
-        glyph_v1,
-        glyph_uv.min.y,
-        glyph_uv.max.y,
-    );
-    let glyph_uv_y1 = remap(
-        overlap_v1,
-        glyph_v0,
-        glyph_v1,
-        glyph_uv.min.y,
-        glyph_uv.max.y,
-    );
-
-    let (dest_min_x, dest_max_x, uv_min_x, uv_max_x) = if target_x0 <= target_x1 {
-        (target_x0, target_x1, glyph_uv_x0, glyph_uv_x1)
-    } else {
-        (target_x1, target_x0, glyph_uv_x1, glyph_uv_x0)
-    };
-    let (dest_min_y, dest_max_y, uv_min_y, uv_max_y) = if target_y0 <= target_y1 {
-        (target_y0, target_y1, glyph_uv_y0, glyph_uv_y1)
-    } else {
-        (target_y1, target_y0, glyph_uv_y1, glyph_uv_y0)
-    };
-
-    Some((
-        Rect::from_min_max(
-            Pos2::new(dest_min_x, dest_min_y),
-            Pos2::new(dest_max_x, dest_max_y),
-        ),
-        Rect::from_min_max(Pos2::new(uv_min_x, uv_min_y), Pos2::new(uv_max_x, uv_max_y)),
-    ))
-}
-
-fn remap(value: f32, src_min: f32, src_max: f32, dest_min: f32, dest_max: f32) -> f32 {
-    if (src_max - src_min).abs() <= f32::EPSILON {
-        dest_min
-    } else {
-        dest_min + ((value - src_min) / (src_max - src_min)) * (dest_max - dest_min)
     }
 }
 
@@ -6826,8 +7693,24 @@ fn to_cosmic_color(color: Color32) -> Color {
     Color::rgba(color.r(), color.g(), color.b(), color.a())
 }
 
+fn to_cosmic_text_color(color: TextColor) -> Color {
+    to_cosmic_color(color.into())
+}
+
 fn cosmic_to_egui_color(color: Color) -> Color32 {
     Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), color.a())
+}
+
+fn egui_vec_from_text(vector: TextVector) -> Vec2 {
+    vector.into()
+}
+
+fn egui_rect_from_text(rect: TextRect) -> Rect {
+    rect.into()
+}
+
+fn egui_point_from_text(point: TextPoint) -> Pos2 {
+    point.into()
 }
 
 /// Find the glyph index and x-offset within that glyph for a cursor on the given layout run.

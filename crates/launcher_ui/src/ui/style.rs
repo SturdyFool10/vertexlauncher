@@ -1,5 +1,5 @@
 use egui::{Color32, Ui, Vec2};
-use textui::{ButtonOptions, LabelOptions};
+use textui_egui::prelude::*;
 
 pub const SPACE_XS: f32 = 4.0;
 pub const SPACE_SM: f32 = 6.0;

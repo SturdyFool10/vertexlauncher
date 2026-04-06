@@ -15,6 +15,7 @@ egui_extras.workspace = true
 fontloader.workspace = true
 config.workspace = true
 textui.workspace = true
+textui_egui.workspace = true
 ui_foundation.workspace = true
 auth.workspace = true
 content_resolver.workspace = true

@@ -18,7 +18,8 @@ use instances::{
     InstanceRecord, InstanceStore, delete_instance_root_path, instance_root_path,
     record_instance_launch_usage, remove_instance_record,
 };
-use textui::{LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 use ui_foundation::{
     DialogPreset, UiMetrics, danger_button, dialog_options, secondary_button, show_dialog,
 };

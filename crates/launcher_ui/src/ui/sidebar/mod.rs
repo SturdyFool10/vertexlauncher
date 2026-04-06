@@ -1,6 +1,7 @@
 use egui::{Context, ScrollArea, SidePanel, Ui};
 use std::path::PathBuf;
-use textui::{ButtonOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 
 use crate::assets;
 use crate::screens::AppScreen;

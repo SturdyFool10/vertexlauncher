@@ -2,7 +2,7 @@ use config::{
     Config, ConfigFormat, JavaRuntimeVersion, LoadConfigResult, create_default_config, load_config,
     save_config,
 };
-use eframe::{self, egui};
+use eframe::{self, egui, egui_wgpu::wgpu};
 use egui::CentralPanel;
 use installation::{
     DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, display_user_path,
@@ -30,6 +30,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use textui::TextUi;
+use textui_egui as textui_adapter;
+use textui_egui::prelude::*;
 use ui_foundation::{DialogPreset, dialog_options, secondary_button, show_dialog};
 
 use self::auth_state::{AuthState, REPAINT_INTERVAL};
@@ -176,6 +178,7 @@ struct VertexApp {
     discover_install_results_rx:
         Option<Arc<Mutex<mpsc::Receiver<import_instance_modal::ImportTaskResult>>>>,
     auth: AuthState,
+    startup_graphics: platform::StartupGraphicsConfig,
     text_ui: TextUi,
     config_save_in_flight: bool,
     pending_config_save: Option<Config>,
@@ -263,9 +266,13 @@ impl VertexApp {
             config.set_theme_id(theme_catalog.default_theme_id().to_owned());
         }
         let theme = theme_catalog.resolve(config.theme_id()).clone();
+        let startup_graphics =
+            platform::startup_graphics_config(effective_window_blur_enabled(&config));
 
-        let mut text_ui = TextUi::new();
-        text_ui.begin_frame(&cc.egui_ctx, cc.wgpu_render_state.as_ref());
+        let mut text_ui =
+            TextUi::new_with_graphics_config(build_text_graphics_config(&config, startup_graphics));
+        let _ =
+            textui_adapter::begin_frame(&mut text_ui, &cc.egui_ctx, cc.wgpu_render_state.as_ref());
         FontController::register_included_fonts(&mut text_ui);
 
         let instance_store = match load_store() {
@@ -322,6 +329,7 @@ impl VertexApp {
             discover_install_results_tx: None,
             discover_install_results_rx: None,
             auth: AuthState::load(streamer_mode_enabled),
+            startup_graphics,
             text_ui,
             config_save_in_flight: false,
             pending_config_save: None,
@@ -398,7 +406,11 @@ impl VertexApp {
             self.gamepad_calibration_state.start(device);
         }
         self.apply_frame_limiter();
-        self.text_ui.begin_frame(ctx, frame.wgpu_render_state());
+        self.text_ui.set_graphics_config(build_text_graphics_config(
+            &self.config,
+            self.startup_graphics,
+        ));
+        let _ = textui_adapter::begin_frame(&mut self.text_ui, ctx, frame.wgpu_render_state());
         launcher_ui::ui::components::image_textures::begin_frame(ctx);
         poll_config_save_results(self);
         poll_instance_store_save_results(self);
@@ -1214,6 +1226,47 @@ fn sleep_precise(duration: Duration) {
         std::hint::spin_loop();
         std::thread::yield_now();
     }
+}
+
+fn build_text_graphics_config(
+    config: &Config,
+    startup_graphics: platform::StartupGraphicsConfig,
+) -> textui::TextGraphicsConfig {
+    textui::TextGraphicsConfig {
+        renderer_backend: match startup_graphics.renderer {
+            eframe::Renderer::Wgpu => textui::TextRendererBackend::Auto,
+            _ => textui::TextRendererBackend::EguiMesh,
+        },
+        graphics_api: preferred_text_graphics_api(startup_graphics.backends),
+        gpu_power_preference: if config.low_power_gpu_preferred() {
+            textui::TextGpuPowerPreference::LowPower
+        } else {
+            textui::TextGpuPowerPreference::HighPerformance
+        },
+        ..textui::TextGraphicsConfig::default()
+    }
+}
+
+fn preferred_text_graphics_api(backends: wgpu::Backends) -> textui::TextGraphicsApi {
+    if cfg!(target_os = "macos") && backends.contains(wgpu::Backends::METAL) {
+        return textui::TextGraphicsApi::Metal;
+    }
+    if cfg!(target_os = "windows") && backends.contains(wgpu::Backends::DX12) {
+        return textui::TextGraphicsApi::Dx12;
+    }
+    if backends.contains(wgpu::Backends::VULKAN) {
+        return textui::TextGraphicsApi::Vulkan;
+    }
+    if backends.contains(wgpu::Backends::METAL) {
+        return textui::TextGraphicsApi::Metal;
+    }
+    if backends.contains(wgpu::Backends::DX12) {
+        return textui::TextGraphicsApi::Dx12;
+    }
+    if backends.contains(wgpu::Backends::GL) {
+        return textui::TextGraphicsApi::Gl;
+    }
+    textui::TextGraphicsApi::Auto
 }
 
 fn effective_window_blur_enabled(config: &Config) -> bool {
@@ -2090,20 +2143,20 @@ fn render_curseforge_manual_download_modal(
         dialog_options("curseforge_manual_download_modal", DialogPreset::Form),
         |ui| {
             let modal_max_height = ui.max_rect().height();
-            let body_style = textui::LabelOptions {
+            let body_style = LabelOptions {
                 color: ui.visuals().text_color(),
                 wrap: true,
-                ..textui::LabelOptions::default()
+                ..LabelOptions::default()
             };
-            let subtle_style = textui::LabelOptions {
+            let subtle_style = LabelOptions {
                 color: ui.visuals().weak_text_color(),
                 wrap: true,
-                ..textui::LabelOptions::default()
+                ..LabelOptions::default()
             };
-            let error_style = textui::LabelOptions {
+            let error_style = LabelOptions {
                 color: ui.visuals().error_fg_color,
                 wrap: true,
-                ..textui::LabelOptions::default()
+                ..LabelOptions::default()
             };
             let _ = text_ui.label(
                 ui,

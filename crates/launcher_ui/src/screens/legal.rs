@@ -1,5 +1,6 @@
 use egui::{self, Frame, ScrollArea, Stroke, Ui};
-use textui::{CodeBlockOptions, LabelOptions, TextFundamentals, TextKerning, TextUi};
+use textui::{TextFundamentals, TextKerning, TextUi};
+use textui_egui::prelude::*;
 
 use crate::{
     assets,
@@ -199,6 +200,8 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                                             tabular_numbers: false,
                                             letter_spacing_points: 0.0,
                                             word_spacing_points: 0.0,
+                                            feature_settings: Vec::new(),
+                                            variation_settings: Vec::new(),
                                         },
                                         ..CodeBlockOptions::default()
                                     };

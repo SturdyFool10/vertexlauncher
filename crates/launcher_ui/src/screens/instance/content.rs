@@ -2,6 +2,7 @@ use super::content_lookup_result::ContentLookupResultEntry;
 use super::*;
 use content_resolver::detect_installed_content_kind;
 use std::collections::{BTreeMap, HashSet};
+use textui_egui::truncate_single_line_text_with_ellipsis;
 use ui_foundation::tab_button;
 
 const CONTENT_HASH_CACHE_FLUSH_DEBOUNCE: Duration = Duration::from_millis(750);
@@ -1087,13 +1088,8 @@ fn cached_truncated_description(
         return cache_entry.truncated_description.clone();
     }
 
-    let truncated_description = textui::truncate_single_line_text_with_ellipsis(
-        text_ui,
-        ui,
-        description,
-        max_width,
-        label_options,
-    );
+    let truncated_description =
+        truncate_single_line_text_with_ellipsis(text_ui, ui, description, max_width, label_options);
     state.installed_content_entry_ui_cache.insert(
         lookup_key.to_owned(),
         InstalledContentEntryUiCache {

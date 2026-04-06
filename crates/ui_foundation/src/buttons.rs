@@ -1,5 +1,5 @@
 use egui::{Color32, Ui, Vec2};
-use textui::ButtonOptions;
+use textui_egui::prelude::*;
 
 pub fn primary_button(ui: &Ui, min_size: Vec2) -> ButtonOptions {
     ButtonOptions {

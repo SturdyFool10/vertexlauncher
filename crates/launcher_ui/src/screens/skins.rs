@@ -14,6 +14,7 @@ use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Text
 use image::{RgbaImage, imageops::FilterType};
 use launcher_runtime as tokio_runtime;
 use textui::TextUi;
+use textui_egui::{gamepad_scroll, prelude::*};
 
 use super::LaunchAuthContext;
 use crate::{
@@ -165,7 +166,7 @@ pub fn render(
         ui.ctx().request_repaint_after(Duration::from_millis(50));
     }
 
-    textui::gamepad_scroll(
+    gamepad_scroll(
         egui::ScrollArea::vertical().auto_shrink([false, false]),
         ui,
         |ui| render_contents(ui, text_ui, &mut state, streamer_mode),
@@ -635,12 +636,12 @@ fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinMana
     let content_rect = rect.shrink2(egui::vec2(18.0, 18.0));
     let title_style = style::section_heading(ui);
     let muted = style::muted(ui);
-    let button_label_style = textui::LabelOptions {
+    let button_label_style = LabelOptions {
         font_size: choose_style.font_size,
         line_height: choose_style.line_height,
         color: choose_style.text_color,
         wrap: false,
-        ..textui::LabelOptions::default()
+        ..LabelOptions::default()
     };
     let title_size = text_ui.measure_text_size(ui, "Drag Skin Image here", &title_style);
     let or_size = text_ui.measure_text_size(ui, "or", &muted);

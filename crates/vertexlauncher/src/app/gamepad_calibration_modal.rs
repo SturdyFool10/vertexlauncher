@@ -1,6 +1,7 @@
 use config::GamepadCalibration;
 use eframe::egui;
-use textui::{LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 use ui_foundation::{DialogPreset, dialog_options, primary_button, secondary_button, show_dialog};
 
 use crate::app::gamepad::{GamepadDeviceIdentity, GamepadStickSample};

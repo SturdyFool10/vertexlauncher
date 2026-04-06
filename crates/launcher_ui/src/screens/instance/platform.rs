@@ -1,7 +1,8 @@
 use config::Config;
 use egui::Ui;
 use instances::InstanceRecord;
-use textui::{LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 
 #[cfg(target_os = "linux")]
 use crate::ui::components::settings_widgets;

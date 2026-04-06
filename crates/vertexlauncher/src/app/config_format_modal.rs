@@ -1,6 +1,7 @@
 use config::ConfigFormat;
 use eframe::egui;
-use textui::{ButtonOptions, LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 use ui_foundation::{DialogPreset, dialog_options, primary_button, secondary_button, show_dialog};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

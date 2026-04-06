@@ -30,7 +30,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock, mpsc},
     time::{Duration, Instant},
 };
-use textui::{ButtonOptions, InputOptions, LabelOptions, TextUi, TooltipOptions};
+use textui::TextUi;
+use textui_egui::prelude::*;
 use ui_foundation::{
     DialogPreset, danger_button, dialog_options, is_compact_width, primary_button,
     secondary_button, selectable_row_button, show_dialog, tab_button, themed_text_input,

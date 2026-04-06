@@ -1,9 +1,10 @@
 use std::hash::Hash;
 
 use egui::{self, Align, Layout, Response, Sense, Ui};
-use textui::{
-    ButtonOptions, InputOptions, LabelOptions, TextUi, TooltipOptions,
-    apply_gamepad_scroll_to_registered_id, truncate_single_line_text_with_ellipsis,
+use textui::TextUi;
+use textui_egui::{
+    apply_gamepad_scroll_if_focused, apply_gamepad_scroll_to_registered_id, gamepad_scroll_delta,
+    make_gamepad_scrollable, prelude::*,
 };
 
 use crate::{
@@ -264,7 +265,7 @@ pub fn toggle_row(
             })
             .inner;
         maybe_request_default_focus(ui.ctx(), &switch_response);
-        textui::apply_gamepad_scroll_if_focused(ui, &switch_response);
+        apply_gamepad_scroll_if_focused(ui, &switch_response);
 
         if activate_target == Some(toggle_id)
             || activate_target.is_some_and(|id| id == label_response.id)
@@ -995,7 +996,7 @@ pub fn u128_slider_with_input_row(
                             slider_changed = true;
                         }
                     }
-                    textui::apply_gamepad_scroll_if_focused(ui, &slider_response);
+                    apply_gamepad_scroll_if_focused(ui, &slider_response);
 
                     let progress = if slider_max > slider_min {
                         (slider_value - slider_min) as f32 / (slider_max - slider_min) as f32
@@ -1187,7 +1188,7 @@ pub fn float_slider_row(
                             slider_response.mark_changed();
                         }
                     }
-                    textui::apply_gamepad_scroll_if_focused(ui, &slider_response);
+                    apply_gamepad_scroll_if_focused(ui, &slider_response);
 
                     let progress = if max > min {
                         (*value - min) / (max - min)
@@ -1460,8 +1461,8 @@ fn dropdown(
                         }
                     }
                 });
-            textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
-            let gamepad_scroll_delta = textui::gamepad_scroll_delta(ui.ctx());
+            make_gamepad_scrollable(ui.ctx(), &scroll_output);
+            let gamepad_scroll_delta = gamepad_scroll_delta(ui.ctx());
             if gamepad_scroll_delta != egui::Vec2::ZERO
                 && apply_gamepad_scroll_to_registered_id(
                     ui.ctx(),
@@ -1710,8 +1711,8 @@ fn searchable_dropdown(
                             }
                         }
                     });
-                textui::make_gamepad_scrollable(ui.ctx(), &scroll_output);
-                let gamepad_scroll_delta = textui::gamepad_scroll_delta(ui.ctx());
+                make_gamepad_scrollable(ui.ctx(), &scroll_output);
+                let gamepad_scroll_delta = gamepad_scroll_delta(ui.ctx());
                 if gamepad_scroll_delta != egui::Vec2::ZERO
                     && apply_gamepad_scroll_to_registered_id(
                         ui.ctx(),

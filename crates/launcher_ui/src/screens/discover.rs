@@ -9,10 +9,8 @@ use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
 use installation::{MinecraftVersionEntry, fetch_version_catalog};
 use modrinth::Client as ModrinthClient;
-use textui::{
-    InputOptions, LabelOptions, TextUi, apply_gamepad_scroll_to_registered_id,
-    make_gamepad_scrollable,
-};
+use textui::TextUi;
+use textui_egui::{apply_gamepad_scroll_to_registered_id, make_gamepad_scrollable, prelude::*};
 use ui_foundation::{UiMetrics, responsive_columns, themed_text_input};
 
 use crate::{

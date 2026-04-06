@@ -1,7 +1,8 @@
 use std::hash::Hash;
 
 use egui::{Color32, CornerRadius, Response, Ui, Vec2};
-use textui::{InputOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 
 pub fn themed_text_input(
     text_ui: &mut TextUi,

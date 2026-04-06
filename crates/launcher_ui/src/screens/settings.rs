@@ -9,7 +9,8 @@ use installation::purge_cache as purge_installation_cache;
 use launcher_runtime as tokio_runtime;
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::Duration;
-use textui::{ButtonOptions, TextUi};
+use textui::TextUi;
+use textui_egui::{gamepad_scroll, prelude::*};
 
 use super::{SettingsInfo, platform};
 use crate::ui::{components::settings_widgets, style, theme::Theme};
@@ -33,7 +34,7 @@ pub fn render(
     available_themes: &[Theme],
     settings_info: &SettingsInfo,
 ) {
-    textui::gamepad_scroll(
+    gamepad_scroll(
         egui::ScrollArea::vertical()
             .id_salt("settings_page_scroll")
             .auto_shrink([false, false]),
@@ -251,8 +252,8 @@ fn render_info_row(
     ui: &mut Ui,
     label: &str,
     value: &str,
-    key_style: &textui::LabelOptions,
-    value_style: &textui::LabelOptions,
+    key_style: &LabelOptions,
+    value_style: &LabelOptions,
 ) {
     let _ = text_ui.label(ui, ("settings_info_label", label), label, key_style);
     let _ = text_ui.label(ui, ("settings_info_value", label), value, value_style);

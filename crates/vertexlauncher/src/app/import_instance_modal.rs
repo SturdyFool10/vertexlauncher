@@ -23,7 +23,8 @@ use managed_content::{
 use modrinth::Client as ModrinthClient;
 use serde::Deserialize;
 use serde_json::Value;
-use textui::{LabelOptions, TextUi};
+use textui::TextUi;
+use textui_egui::prelude::*;
 use ui_foundation::{DialogPreset, dialog_options, primary_button, secondary_button, show_dialog};
 use vtmpack::{VtmpackDownloadableEntry, VtmpackManifest, read_vtmpack_manifest};
 
