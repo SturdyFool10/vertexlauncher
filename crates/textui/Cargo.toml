@@ -5,8 +5,10 @@ edition = "2024"
 
 [dependencies]
 egui.workspace = true # works with 0.33.x
+egui-wgpu.workspace = true
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 cosmic-text.workspace = true
+swash.workspace = true
 glyphon = "*"
 pulldown-cmark = "*"
 syntect = "*"
@@ -17,3 +19,4 @@ launcher_runtime.workspace = true
 shared_lru.workspace = true
 etagere.workspace = true
 rustc-hash.workspace = true
+wgpu.workspace = true

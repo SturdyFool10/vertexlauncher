@@ -1,3 +1,4 @@
+use crate::TextFundamentals;
 use egui::{Color32, Vec2};
 
 /// Styling options for plain/rich labels.
@@ -11,6 +12,7 @@ pub struct LabelOptions {
     pub weight: u16,
     pub italic: bool,
     pub padding: Vec2,
+    pub fundamentals: TextFundamentals,
 }
 
 impl Default for LabelOptions {
@@ -24,6 +26,7 @@ impl Default for LabelOptions {
             weight: 400,
             italic: false,
             padding: egui::vec2(0.0, 0.0),
+            fundamentals: TextFundamentals::default(),
         }
     }
 }

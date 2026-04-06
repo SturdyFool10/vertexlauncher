@@ -274,13 +274,14 @@ pub fn apply_gamepad_scroll_if_focused(ui: &Ui, response: &Response) {
 use cosmic_text::{
     Action, Attrs, AttrsOwned, BorrowedWithFontSystem, Buffer, CacheKey, Color, Cursor, Edit,
     Editor, Family, FontFeatures, FontSystem, LayoutRun, Metrics, Motion, Selection, Shaping,
-    Style as FontStyle, SwashCache, SwashContent, Weight, Wrap,
+    Style as FontStyle, SwashContent, SwashImage, Weight, Wrap, fontdb,
 };
 use egui::PointerButton;
 use egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense,
-    TextureHandle, TextureOptions, Ui, Vec2,
+    TextureHandle, TextureId, TextureOptions, Ui, Vec2,
 };
+use egui_wgpu::RenderState as EguiWgpuRenderState;
 use etagere::{AllocId, Allocation, AtlasAllocator, size2};
 use launcher_runtime as tokio_runtime;
 use pulldown_cmark::{
@@ -289,6 +290,11 @@ use pulldown_cmark::{
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use shared_lru::ThreadSafeLru;
 use skrifa::raw::{FontRef as SkrifaFontRef, TableProvider as _};
+use swash::scale::{Render, ScaleContext, Source, StrikeWith};
+use swash::zeno::{
+    Angle as SwashAngle, Format as SwashFormat, Transform as SwashTransform, Vector as SwashVector,
+};
+use swash::{Setting as SwashSetting, Tag as SwashTag};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle as SyntectFontStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
@@ -296,6 +302,7 @@ use syntect::util::LinesWithEndings;
 use tracing::warn;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod advanced_text;
 mod button_options;
 mod code_block_options;
 mod input_options;
@@ -304,6 +311,10 @@ mod markdown_options;
 mod text_helpers;
 mod tooltip_options;
 
+pub use advanced_text::{
+    TextFundamentals, TextKerning, TextPath, TextPathError, TextPathGlyph, TextPathLayout,
+    TextPathOptions, VectorGlyphShape, VectorPathCommand, VectorTextShape,
+};
 pub use button_options::ButtonOptions;
 pub use code_block_options::CodeBlockOptions;
 pub use input_options::InputOptions;
@@ -372,6 +383,150 @@ fn new_fingerprint_hasher() -> FxHasher {
     FxHasher::default()
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct GlyphRasterKey {
+    cache_key: CacheKey,
+    display_scale_bits: u32,
+    raster_flags: u8,
+}
+
+impl GlyphRasterKey {
+    const STEM_DARKENING: u8 = 1 << 0;
+
+    #[inline]
+    fn new(cache_key: CacheKey, display_scale: f32, stem_darkening: bool) -> Self {
+        Self {
+            cache_key,
+            display_scale_bits: display_scale.to_bits(),
+            raster_flags: if stem_darkening {
+                Self::STEM_DARKENING
+            } else {
+                0
+            },
+        }
+    }
+
+    #[inline]
+    fn display_scale(self) -> f32 {
+        f32::from_bits(self.display_scale_bits)
+    }
+
+    #[inline]
+    fn stem_darkening(self) -> bool {
+        self.raster_flags & Self::STEM_DARKENING != 0
+    }
+}
+
+#[inline]
+fn should_hint(display_scale: f32) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = display_scale;
+        false
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        display_scale < 1.5
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        display_scale < 1.5
+    }
+}
+
+#[inline]
+fn stem_darkening_strength(ppem: f32) -> f32 {
+    let min_ppem = 10.0;
+    let max_ppem = 50.0;
+    let max_strength = 0.4;
+    if ppem >= max_ppem {
+        0.0
+    } else if ppem <= min_ppem {
+        max_strength
+    } else {
+        max_strength * (1.0 - (ppem - min_ppem) / (max_ppem - min_ppem))
+    }
+}
+
+#[inline]
+fn opsz_for_font_size(font_size_pt: f32) -> f32 {
+    font_size_pt.clamp(8.0, 144.0)
+}
+
+fn font_family_available(db: &fontdb::Database, family: &str) -> bool {
+    db.faces().any(|face| {
+        face.families
+            .iter()
+            .any(|family_name| family_name.0.eq_ignore_ascii_case(family))
+    })
+}
+
+fn choose_available_family<'a>(db: &fontdb::Database, families: &'a [&'a str]) -> Option<&'a str> {
+    families
+        .iter()
+        .copied()
+        .find(|family| font_family_available(db, family))
+}
+
+fn configure_text_font_defaults(font_system: &mut FontSystem) {
+    let db = font_system.db_mut();
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(family) =
+            choose_available_family(db, &["SF Pro Text", ".SF NS", "Helvetica Neue"])
+        {
+            db.set_sans_serif_family(family);
+        }
+        if let Some(family) = choose_available_family(db, &["SF Mono", "Menlo", "Monaco"]) {
+            db.set_monospace_family(family);
+        }
+        if let Some(family) = choose_available_family(db, &["Times New Roman", "Times"]) {
+            db.set_serif_family(family);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(family) =
+            choose_available_family(db, &["Segoe UI Variable", "Segoe UI", "Arial"])
+        {
+            db.set_sans_serif_family(family);
+        }
+        if let Some(family) =
+            choose_available_family(db, &["Cascadia Mono", "Consolas", "Courier New"])
+        {
+            db.set_monospace_family(family);
+        }
+        if let Some(family) = choose_available_family(db, &["Times New Roman", "Georgia"]) {
+            db.set_serif_family(family);
+        }
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        if let Some(family) = choose_available_family(
+            db,
+            &["Inter", "Noto Sans", "Cantarell", "Ubuntu", "DejaVu Sans"],
+        ) {
+            db.set_sans_serif_family(family);
+        }
+        if let Some(family) = choose_available_family(
+            db,
+            &["Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono"],
+        ) {
+            db.set_monospace_family(family);
+        }
+        if let Some(family) =
+            choose_available_family(db, &["Noto Serif", "DejaVu Serif", "Liberation Serif"])
+        {
+            db.set_serif_family(family);
+        }
+    }
+}
+
 /// A prepared text handle with helpers for all paint scenarios.
 ///
 /// Obtain via [`TextUi::prepare_label_texture`] or
@@ -381,12 +536,12 @@ fn new_fingerprint_hasher() -> FxHasher {
 /// - Call `handle.paint_tinted(ui, rect, tint)` for alpha-fade or colourisation.
 /// - Call `handle.paint_uv(ui, rect, uv, tint)` for UV crop/flip/repeat.
 ///
-/// `handle.texture` is kept for backwards compatibility and points at the
-/// first atlas page used by the text, not a full standalone text bitmap.
+/// `handle.texture_id` points at the first atlas page used by the text, not a
+/// full standalone text bitmap.
 #[derive(Clone)]
 pub struct TextTextureHandle {
     /// The first atlas page touched by this prepared text.
-    pub texture: TextureHandle,
+    pub texture_id: TextureId,
     glyphs: Arc<[TextTextureGlyph]>,
     /// Logical (points) size of the rendered text content.
     pub size_points: Vec2,
@@ -475,14 +630,14 @@ struct PreparedTextLayout {
 
 #[derive(Clone, Copy, Debug)]
 struct PreparedGlyph {
-    cache_key: CacheKey,
+    cache_key: GlyphRasterKey,
     offset_points: Vec2,
     color: Color32,
 }
 
 #[derive(Clone)]
 struct TextTextureGlyph {
-    texture: TextureHandle,
+    texture_id: TextureId,
     offset_points: Vec2,
     size_points: Vec2,
     uv: Rect,
@@ -496,10 +651,11 @@ struct PreparedTextCacheEntry {
 }
 
 struct GlyphAtlas {
-    entries: ThreadSafeLru<CacheKey, GlyphAtlasEntry>,
+    entries: ThreadSafeLru<GlyphRasterKey, GlyphAtlasEntry>,
     pages: Vec<GlyphAtlasPage>,
     page_side_px: usize,
-    pending: FxHashSet<CacheKey>,
+    wgpu_render_state: Option<EguiWgpuRenderState>,
+    pending: FxHashSet<GlyphRasterKey>,
     ready: VecDeque<GlyphAtlasWorkerResponse>,
     generation: u64,
     tx: Option<mpsc::Sender<GlyphAtlasWorkerMessage>>,
@@ -508,8 +664,61 @@ struct GlyphAtlas {
 
 struct GlyphAtlasPage {
     allocator: AtlasAllocator,
-    texture: TextureHandle,
+    texture: GlyphAtlasTexture,
+    backing: ColorImage,
+    dirty_rect: Option<DirtyAtlasRect>,
     live_glyphs: usize,
+}
+
+enum GlyphAtlasTexture {
+    Egui(TextureHandle),
+    Wgpu(NativeGlyphAtlasTexture),
+}
+
+struct NativeGlyphAtlasTexture {
+    id: TextureId,
+    texture: wgpu::Texture,
+}
+
+impl GlyphAtlasTexture {
+    fn id(&self) -> TextureId {
+        match self {
+            Self::Egui(texture) => texture.id(),
+            Self::Wgpu(texture) => texture.id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DirtyAtlasRect {
+    min: [usize; 2],
+    max: [usize; 2],
+}
+
+impl DirtyAtlasRect {
+    fn new(pos: [usize; 2], size: [usize; 2]) -> Self {
+        Self {
+            min: pos,
+            max: [
+                pos[0].saturating_add(size[0]),
+                pos[1].saturating_add(size[1]),
+            ],
+        }
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            min: [self.min[0].min(other.min[0]), self.min[1].min(other.min[1])],
+            max: [self.max[0].max(other.max[0]), self.max[1].max(other.max[1])],
+        }
+    }
+
+    fn size(self) -> [usize; 2] {
+        [
+            self.max[0].saturating_sub(self.min[0]),
+            self.max[1].saturating_sub(self.min[1]),
+        ]
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -527,7 +736,7 @@ struct GlyphAtlasEntry {
 
 #[derive(Clone)]
 struct ResolvedGlyphAtlasEntry {
-    texture: TextureHandle,
+    texture_id: TextureId,
     uv: Rect,
     size_px: [usize; 2],
     placement_left_px: i32,
@@ -571,8 +780,7 @@ struct TypographySnapshot {
     ui_font_family: Option<String>,
     ui_font_size_scale: f32,
     ui_font_weight: i32,
-    open_type_features_enabled: bool,
-    open_type_features_to_enable: String,
+    open_type_feature_tags: Vec<[u8; 4]>,
 }
 
 struct AsyncRasterState {
@@ -597,13 +805,13 @@ enum GlyphAtlasWorkerMessage {
     RegisterFont(Vec<u8>),
     Rasterize {
         generation: u64,
-        cache_key: CacheKey,
+        cache_key: GlyphRasterKey,
     },
 }
 
 struct GlyphAtlasWorkerResponse {
     generation: u64,
-    cache_key: CacheKey,
+    cache_key: GlyphRasterKey,
     glyph: Option<PreparedAtlasGlyph>,
 }
 
@@ -676,7 +884,7 @@ enum MarkdownBlock {
 /// High-level text rendering helper built on cosmic-text + egui textures.
 pub struct TextUi {
     font_system: FontSystem,
-    swash_cache: SwashCache,
+    scale_context: ScaleContext,
     syntax_set: SyntaxSet,
     code_theme: Theme,
     prepared_texts: ThreadSafeLru<Id, PreparedTextCacheEntry>,
@@ -688,6 +896,7 @@ pub struct TextUi {
     ui_font_weight: i32,
     open_type_features_enabled: bool,
     open_type_features_to_enable: String,
+    open_type_feature_tags: Vec<[u8; 4]>,
     open_type_features: Option<FontFeatures>,
     async_raster: AsyncRasterState,
     current_frame: u64,
@@ -729,10 +938,12 @@ impl TextUi {
         });
         let (worker_tx, result_rx) = (Some(worker_tx), Some(result_rx));
         let glyph_atlas = GlyphAtlas::new();
+        let mut font_system = FontSystem::new();
+        configure_text_font_defaults(&mut font_system);
 
         Self {
-            font_system: FontSystem::new(),
-            swash_cache: SwashCache::new(),
+            font_system,
+            scale_context: ScaleContext::new(),
             syntax_set,
             code_theme,
             prepared_texts: ThreadSafeLru::new(PREPARED_TEXT_CACHE_MAX_BYTES),
@@ -744,6 +955,7 @@ impl TextUi {
             ui_font_weight: 400,
             open_type_features_enabled: false,
             open_type_features_to_enable: String::new(),
+            open_type_feature_tags: Vec::new(),
             open_type_features: None,
             async_raster: AsyncRasterState {
                 tx: worker_tx,
@@ -759,11 +971,12 @@ impl TextUi {
     }
 
     /// Performs per-frame maintenance and processes async raster results.
-    pub fn begin_frame(&mut self, ctx: &Context) {
+    pub fn begin_frame(&mut self, ctx: &Context, render_state: Option<&EguiWgpuRenderState>) {
         self.current_frame = ctx.cumulative_frame_nr();
         let current_frame = self.current_frame;
         let max_texture_side_px = ctx.input(|i| i.max_texture_side).max(1);
         self.frame_events = ctx.input(|i| i.events.clone());
+        self.glyph_atlas.set_render_state(render_state);
         self.glyph_atlas
             .set_page_side(max_texture_side_px.min(GLYPH_ATLAS_PAGE_TARGET_PX).max(256));
         if self.max_texture_side_px != max_texture_side_px {
@@ -785,8 +998,6 @@ impl TextUi {
         self.glyph_atlas.trim_stale(current_frame);
         self.enforce_prepared_text_cache_budget();
         self.enforce_async_raster_cache_budget();
-        self.swash_cache.image_cache.clear();
-        self.swash_cache.outline_command_cache.clear();
         self.poll_async_raster_results();
         self.glyph_atlas.poll_ready(ctx, current_frame);
         if !self.glyph_atlas.pending.is_empty() {
@@ -846,6 +1057,7 @@ impl TextUi {
             weight: 400,
             italic: false,
             padding: egui::Vec2::ZERO,
+            fundamentals: options.fundamentals.clone(),
         };
 
         let mut hasher = new_fingerprint_hasher();
@@ -964,6 +1176,7 @@ impl TextUi {
 
         if self.open_type_features_enabled == enabled
             && self.open_type_features_to_enable == normalized_csv
+            && self.open_type_feature_tags == active_tags
             && self.open_type_features == active_features
         {
             return;
@@ -971,6 +1184,7 @@ impl TextUi {
 
         self.open_type_features_enabled = enabled;
         self.open_type_features_to_enable = normalized_csv;
+        self.open_type_feature_tags = active_tags;
         self.open_type_features = active_features;
         self.invalidate_text_caches(false);
     }
@@ -1082,6 +1296,7 @@ impl TextUi {
             },
             options.font_size,
             options.line_height,
+            &options.fundamentals,
         );
 
         {
@@ -1103,11 +1318,11 @@ impl TextUi {
     // ─────────────────────────────────────────────────────────────────────────
     // Raw-texture API  — zero restrictions on how you consume the result
     //
-    // Returns a `TextTextureHandle` containing the egui `TextureHandle` and
-    // logical size.  Call `.paint()` for the standard path, `.paint_tinted()`
-    // for alpha-fade/colourisation, `.paint_uv()` for UV-crop/flip, or pass
-    // `.texture.id()` directly into a wgpu PaintCallback to use the glyph
-    // image as a shader mask, stencil, or any other texture role.
+    // Returns a `TextTextureHandle` containing the first atlas page texture id
+    // and logical size. Call `.paint()` for the standard path,
+    // `.paint_tinted()` for alpha-fade/colourisation, `.paint_uv()` for
+    // UV-crop/flip, or pass `.texture_id` directly into a wgpu PaintCallback
+    // to use the glyph image as a shader mask, stencil, or any other texture role.
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Returns (or freshly rasterizes) a cached texture for plain text.
@@ -1134,6 +1349,28 @@ impl TextUi {
         options.weight.hash(&mut hasher);
         options.italic.hash(&mut hasher);
         options.color.hash(&mut hasher);
+        options.fundamentals.kerning.hash(&mut hasher);
+        options.fundamentals.stem_darkening.hash(&mut hasher);
+        options.fundamentals.standard_ligatures.hash(&mut hasher);
+        options.fundamentals.contextual_alternates.hash(&mut hasher);
+        options
+            .fundamentals
+            .discretionary_ligatures
+            .hash(&mut hasher);
+        options.fundamentals.historical_ligatures.hash(&mut hasher);
+        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
+        options.fundamentals.slashed_zero.hash(&mut hasher);
+        options.fundamentals.tabular_numbers.hash(&mut hasher);
+        options
+            .fundamentals
+            .letter_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
+        options
+            .fundamentals
+            .word_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
         scale.to_bits().hash(&mut hasher);
         binned_width
             .map(f32::to_bits)
@@ -1202,6 +1439,98 @@ impl TextUi {
         self.build_text_texture_handle(ctx, layout, scale)
     }
 
+    pub fn prepare_label_path_layout(
+        &mut self,
+        text: &str,
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+        path: &TextPath,
+        path_options: &TextPathOptions,
+    ) -> Result<TextPathLayout, TextPathError> {
+        if text.is_empty() {
+            return Err(TextPathError::EmptyText);
+        }
+        let path_length = text_path_length(path);
+        if path.points.is_empty() {
+            return Err(TextPathError::EmptyPath);
+        }
+        if path_length <= f32::EPSILON {
+            return Err(TextPathError::PathTooShort);
+        }
+
+        let layout = self.prepare_plain_text_layout(text, options, width_points_opt, 1.0);
+        if layout.glyphs.is_empty() {
+            return Err(TextPathError::EmptyText);
+        }
+
+        let baseline_y = layout.glyphs[0].offset_points.y;
+        let mut glyphs = Vec::with_capacity(layout.glyphs.len());
+        let mut bounds: Option<Rect> = None;
+        for (index, glyph) in layout.glyphs.iter().enumerate() {
+            let advance_points =
+                estimated_glyph_advance_points(&layout.glyphs, index, options.font_size);
+            let distance =
+                (path_options.start_offset_points + glyph.offset_points.x).clamp(0.0, path_length);
+            let sample = sample_text_path(path, distance).ok_or(TextPathError::PathTooShort)?;
+            let baseline_offset =
+                glyph.offset_points.y - baseline_y + path_options.normal_offset_points;
+            let anchor = sample.position + sample.normal * baseline_offset;
+            let rotation_radians = if path_options.rotate_glyphs {
+                sample.tangent.y.atan2(sample.tangent.x)
+            } else {
+                0.0
+            };
+            let glyph_rect = Rect::from_center_size(
+                anchor,
+                egui::vec2(advance_points.max(1.0), options.line_height.max(1.0)),
+            );
+            bounds = Some(bounds.map_or(glyph_rect, |current| current.union(glyph_rect)));
+            glyphs.push(TextPathGlyph {
+                anchor,
+                tangent: sample.tangent,
+                normal: sample.normal,
+                rotation_radians,
+                local_offset: egui::vec2(0.0, baseline_offset),
+                advance_points,
+                color: glyph.color,
+            });
+        }
+
+        Ok(TextPathLayout {
+            glyphs,
+            bounds: bounds.unwrap_or(Rect::NOTHING),
+            total_advance_points: layout.size_points.x,
+            path_length_points: path_length,
+        })
+    }
+
+    pub fn export_label_as_shapes(
+        &mut self,
+        text: &str,
+        options: &LabelOptions,
+        width_points_opt: Option<f32>,
+    ) -> VectorTextShape {
+        let layout = self.prepare_plain_text_layout(text, options, width_points_opt, 1.0);
+        let mut glyphs = Vec::with_capacity(layout.glyphs.len());
+        let mut bounds: Option<Rect> = None;
+        for glyph in layout.glyphs.iter() {
+            let Some(shape) = export_vector_glyph_shape(
+                &mut self.font_system,
+                &mut self.scale_context,
+                glyph,
+                options.line_height,
+            ) else {
+                continue;
+            };
+            bounds = Some(bounds.map_or(shape.bounds, |current| current.union(shape.bounds)));
+            glyphs.push(shape);
+        }
+        VectorTextShape {
+            glyphs,
+            bounds: bounds.unwrap_or(Rect::NOTHING),
+        }
+    }
+
     fn label_impl(
         &mut self,
         ui: &mut Ui,
@@ -1231,6 +1560,28 @@ impl TextUi {
         options.weight.hash(&mut hasher);
         options.italic.hash(&mut hasher);
         options.color.hash(&mut hasher);
+        options.fundamentals.kerning.hash(&mut hasher);
+        options.fundamentals.stem_darkening.hash(&mut hasher);
+        options.fundamentals.standard_ligatures.hash(&mut hasher);
+        options.fundamentals.contextual_alternates.hash(&mut hasher);
+        options
+            .fundamentals
+            .discretionary_ligatures
+            .hash(&mut hasher);
+        options.fundamentals.historical_ligatures.hash(&mut hasher);
+        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
+        options.fundamentals.slashed_zero.hash(&mut hasher);
+        options.fundamentals.tabular_numbers.hash(&mut hasher);
+        options
+            .fundamentals
+            .letter_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
+        options
+            .fundamentals
+            .word_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
         scale.to_bits().hash(&mut hasher);
         width_points_opt
             .map(f32::to_bits)
@@ -1515,6 +1866,7 @@ impl TextUi {
                 weight: 400,
                 italic: false,
                 padding: egui::Vec2::ZERO,
+                fundamentals: options.fundamentals.clone(),
             },
             width_points_opt,
         );
@@ -1610,6 +1962,7 @@ impl TextUi {
                             weight: 700,
                             italic: false,
                             padding: egui::Vec2::ZERO,
+                            fundamentals: options.body.fundamentals.clone(),
                         };
                         let _ = self.label(ui, ("md_h", index), text.as_str(), &heading_style);
                     }
@@ -2219,6 +2572,7 @@ impl TextUi {
                     .unwrap_or_else(|| options.text_color.gamma_multiply(0.5)),
                 wrap: multiline,
                 monospace: options.monospace,
+                fundamentals: options.fundamentals.clone(),
                 ..LabelOptions::default()
             };
             let placeholder = self.prepare_label_texture(
@@ -2684,7 +3038,7 @@ impl TextUi {
         let painter = painter.with_clip_rect(content_rect);
 
         struct GlyphCmd {
-            cache_key: CacheKey,
+            cache_key: GlyphRasterKey,
             /// Buffer-space x in device pixels (horizontal scroll already subtracted).
             x_px: f32,
             /// Buffer-space y in device pixels (`line_y + physical.y`; vertical scroll
@@ -2786,7 +3140,7 @@ impl TextUi {
 
                 // --- Glyph draw commands ---
                 for glyph in run.glyphs {
-                    let physical = glyph.physical((0.0, 0.0), scale);
+                    let physical = glyph.physical((0.0, 0.0), 1.0);
                     let color = if selection_visible {
                         if let Some((start, end)) = selection_bounds {
                             if line_i >= start.line
@@ -2812,7 +3166,11 @@ impl TextUi {
                     };
 
                     glyph_cmds.push(GlyphCmd {
-                        cache_key: physical.cache_key,
+                        cache_key: GlyphRasterKey::new(
+                            physical.cache_key,
+                            scale,
+                            options.fundamentals.stem_darkening,
+                        ),
                         x_px: physical.x as f32 - horizontal_scroll_px,
                         y_px: line_y + physical.y as f32,
                         color,
@@ -2831,12 +3189,12 @@ impl TextUi {
         }
 
         // --- Resolve glyphs through the atlas and build GPU meshes ---
-        let mut meshes: Vec<(TextureHandle, egui::epaint::Mesh)> = Vec::new();
+        let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
         for cmd in glyph_cmds {
             let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
                 painter.ctx(),
                 &mut self.font_system,
-                &mut self.swash_cache,
+                &mut self.scale_context,
                 cmd.cache_key,
                 self.current_frame,
             ) else {
@@ -2862,13 +3220,13 @@ impl TextUi {
 
             if let Some((_, mesh)) = meshes
                 .iter_mut()
-                .find(|(t, _)| t.id() == atlas_entry.texture.id())
+                .find(|(texture_id, _)| *texture_id == atlas_entry.texture_id)
             {
                 mesh.add_rect_with_uv(glyph_rect, atlas_entry.uv, tint);
             } else {
-                let mut mesh = egui::epaint::Mesh::with_texture(atlas_entry.texture.id());
+                let mut mesh = egui::epaint::Mesh::with_texture(atlas_entry.texture_id);
                 mesh.add_rect_with_uv(glyph_rect, atlas_entry.uv, tint);
-                meshes.push((atlas_entry.texture, mesh));
+                meshes.push((atlas_entry.texture_id, mesh));
             }
         }
 
@@ -2910,8 +3268,10 @@ impl TextUi {
         if style.italic {
             attrs = attrs.style(FontStyle::Italic);
         }
-        if let Some(features) = &self.open_type_features {
-            attrs = attrs.font_features(features.clone());
+        if let Some(features) =
+            compose_font_features(&self.open_type_feature_tags, &options.fundamentals)
+        {
+            attrs = attrs.font_features(features);
         }
 
         AttrsOwned::new(&attrs)
@@ -2930,6 +3290,28 @@ impl TextUi {
         options.line_height.to_bits().hash(&mut hasher);
         scale.to_bits().hash(&mut hasher);
         wrap.hash(&mut hasher);
+        options.fundamentals.kerning.hash(&mut hasher);
+        options.fundamentals.stem_darkening.hash(&mut hasher);
+        options.fundamentals.standard_ligatures.hash(&mut hasher);
+        options.fundamentals.contextual_alternates.hash(&mut hasher);
+        options
+            .fundamentals
+            .discretionary_ligatures
+            .hash(&mut hasher);
+        options.fundamentals.historical_ligatures.hash(&mut hasher);
+        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
+        options.fundamentals.slashed_zero.hash(&mut hasher);
+        options.fundamentals.tabular_numbers.hash(&mut hasher);
+        options
+            .fundamentals
+            .letter_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
+        options
+            .fundamentals
+            .word_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
         self.ui_font_family.hash(&mut hasher);
         self.ui_font_size_scale.to_bits().hash(&mut hasher);
         self.ui_font_weight.hash(&mut hasher);
@@ -3231,11 +3613,17 @@ impl TextUi {
             },
             options.font_size,
             options.line_height,
+            &options.fundamentals,
         );
         let span_attrs_owned = spans
             .iter()
             .map(|span| {
-                self.build_text_attrs_owned(&span.style, options.font_size, options.line_height)
+                self.build_text_attrs_owned(
+                    &span.style,
+                    options.font_size,
+                    options.line_height,
+                    &options.fundamentals,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -3269,6 +3657,7 @@ impl TextUi {
             measured_height_px.max(1),
             scale,
             options.color,
+            options.fundamentals.stem_darkening,
         )
     }
 
@@ -3279,14 +3668,15 @@ impl TextUi {
         height_px: usize,
         scale: f32,
         default_color: Color32,
+        stem_darkening: bool,
     ) -> PreparedTextLayout {
         let mut glyphs = Vec::new();
         for run in buffer.layout_runs() {
             let baseline_y_px = run.line_y as i32;
             for glyph in run.glyphs {
-                let physical = glyph.physical((0.0, 0.0), scale);
+                let physical = glyph.physical((0.0, 0.0), 1.0);
                 glyphs.push(PreparedGlyph {
-                    cache_key: physical.cache_key,
+                    cache_key: GlyphRasterKey::new(physical.cache_key, scale, stem_darkening),
                     offset_points: egui::vec2(
                         physical.x as f32 / scale,
                         (baseline_y_px + physical.y) as f32 / scale,
@@ -3315,7 +3705,7 @@ impl TextUi {
             let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
                 ctx,
                 &mut self.font_system,
-                &mut self.swash_cache,
+                &mut self.scale_context,
                 glyph.cache_key,
                 self.current_frame,
             ) else {
@@ -3323,7 +3713,7 @@ impl TextUi {
             };
 
             glyphs.push(TextTextureGlyph {
-                texture: atlas_entry.texture,
+                texture_id: atlas_entry.texture_id,
                 offset_points: glyph.offset_points
                     + egui::vec2(
                         atlas_entry.placement_left_px as f32 / scale,
@@ -3344,11 +3734,11 @@ impl TextUi {
 
         let texture = glyphs
             .first()
-            .map(|glyph| glyph.texture.clone())
-            .unwrap_or_else(|| self.empty_text_texture(ctx).clone());
+            .map(|glyph| glyph.texture_id)
+            .unwrap_or_else(|| self.empty_text_texture(ctx).id());
 
         TextTextureHandle {
-            texture,
+            texture_id: texture,
             glyphs: Arc::from(glyphs),
             size_points: layout.size_points,
         }
@@ -3359,8 +3749,7 @@ impl TextUi {
             ui_font_family: self.ui_font_family.clone(),
             ui_font_size_scale: self.ui_font_size_scale,
             ui_font_weight: self.ui_font_weight,
-            open_type_features_enabled: self.open_type_features_enabled,
-            open_type_features_to_enable: self.open_type_features_to_enable.clone(),
+            open_type_feature_tags: self.open_type_feature_tags.clone(),
         }
     }
 
@@ -3408,8 +3797,6 @@ impl TextUi {
         self.async_raster.pending.clear();
         self.glyph_atlas.clear();
         self.empty_text_texture = None;
-        self.swash_cache.image_cache.clear();
-        self.swash_cache.outline_command_cache.clear();
         self.markdown_cache.clear();
         if clear_input_states {
             self.input_states.clear();
@@ -3563,6 +3950,7 @@ impl TextUi {
         style: &SpanStyle,
         font_size_points: f32,
         line_height_points: f32,
+        fundamentals: &TextFundamentals,
     ) -> AttrsOwned {
         let mut attrs = Attrs::new()
             .color(to_cosmic_color(style.color))
@@ -3581,8 +3969,8 @@ impl TextUi {
         if style.italic {
             attrs = attrs.style(FontStyle::Italic);
         }
-        if let Some(features) = &self.open_type_features {
-            attrs = attrs.font_features(features.clone());
+        if let Some(features) = compose_font_features(&self.open_type_feature_tags, fundamentals) {
+            attrs = attrs.font_features(features);
         }
 
         AttrsOwned::new(&attrs)
@@ -3602,8 +3990,10 @@ impl TextUi {
         } else if let Some(family) = self.ui_font_family.as_deref() {
             attrs = attrs.family(Family::Name(family));
         }
-        if let Some(features) = &self.open_type_features {
-            attrs = attrs.font_features(features.clone());
+        if let Some(features) =
+            compose_font_features(&self.open_type_feature_tags, &options.fundamentals)
+        {
+            attrs = attrs.font_features(features);
         }
 
         AttrsOwned::new(&attrs)
@@ -3616,6 +4006,28 @@ impl TextUi {
         options.line_height.to_bits().hash(&mut hasher);
         options.text_color.hash(&mut hasher);
         options.monospace.hash(&mut hasher);
+        options.fundamentals.kerning.hash(&mut hasher);
+        options.fundamentals.stem_darkening.hash(&mut hasher);
+        options.fundamentals.standard_ligatures.hash(&mut hasher);
+        options.fundamentals.contextual_alternates.hash(&mut hasher);
+        options
+            .fundamentals
+            .discretionary_ligatures
+            .hash(&mut hasher);
+        options.fundamentals.historical_ligatures.hash(&mut hasher);
+        options.fundamentals.case_sensitive_forms.hash(&mut hasher);
+        options.fundamentals.slashed_zero.hash(&mut hasher);
+        options.fundamentals.tabular_numbers.hash(&mut hasher);
+        options
+            .fundamentals
+            .letter_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
+        options
+            .fundamentals
+            .word_spacing_points
+            .to_bits()
+            .hash(&mut hasher);
         scale.to_bits().hash(&mut hasher);
         self.ui_font_family.hash(&mut hasher);
         self.ui_font_size_scale.to_bits().hash(&mut hasher);
@@ -3644,11 +4056,51 @@ fn parse_feature_tag_list(feature_tags_csv: &str) -> Vec<[u8; 4]> {
     tags.into_iter().collect()
 }
 
+fn build_font_features_from_settings(
+    settings: impl IntoIterator<Item = ([u8; 4], u16)>,
+) -> Option<FontFeatures> {
+    let mut features = FontFeatures::new();
+    let mut any = false;
+    for (tag, value) in settings {
+        features.set(cosmic_text::FeatureTag::new(&tag), value.into());
+        any = true;
+    }
+    any.then_some(features)
+}
+
+fn compose_font_features(
+    global_feature_tags: &[[u8; 4]],
+    fundamentals: &TextFundamentals,
+) -> Option<FontFeatures> {
+    let mut settings = std::collections::BTreeMap::<[u8; 4], u16>::new();
+    for tag in global_feature_tags {
+        settings.insert(*tag, 1);
+    }
+    match fundamentals.kerning {
+        TextKerning::Auto => {}
+        TextKerning::Normal => {
+            settings.insert(*b"kern", 1);
+        }
+        TextKerning::None => {
+            settings.insert(*b"kern", 0);
+        }
+    }
+    settings.insert(*b"liga", u16::from(fundamentals.standard_ligatures));
+    settings.insert(*b"calt", u16::from(fundamentals.contextual_alternates));
+    settings.insert(*b"dlig", u16::from(fundamentals.discretionary_ligatures));
+    settings.insert(*b"hlig", u16::from(fundamentals.historical_ligatures));
+    settings.insert(*b"case", u16::from(fundamentals.case_sensitive_forms));
+    settings.insert(*b"zero", u16::from(fundamentals.slashed_zero));
+    settings.insert(*b"tnum", u16::from(fundamentals.tabular_numbers));
+    build_font_features_from_settings(settings)
+}
+
 fn async_raster_worker_loop(
     rx: mpsc::Receiver<AsyncRasterWorkerMessage>,
     tx: mpsc::Sender<AsyncRasterResponse>,
 ) {
     let mut font_system = FontSystem::new();
+    configure_text_font_defaults(&mut font_system);
 
     while let Ok(msg) = rx.recv() {
         match msg {
@@ -3676,17 +4128,6 @@ fn async_prepare_text_layout(
     );
     let mut buffer = Buffer::new(font_system, metrics);
     let width_px_opt = req.width_points_opt.map(|w| (w * req.scale).max(1.0));
-    let feature_tags = if req.typography.open_type_features_enabled {
-        parse_feature_tag_list(&req.typography.open_type_features_to_enable)
-    } else {
-        Vec::new()
-    };
-    let features = if feature_tags.is_empty() {
-        None
-    } else {
-        Some(build_font_features(&feature_tags))
-    };
-
     {
         let mut borrowed = buffer.borrow_with(font_system);
         borrowed.set_wrap(if req.options.wrap {
@@ -3706,7 +4147,6 @@ fn async_prepare_text_layout(
                         italic: req.options.italic,
                         weight: req.options.weight,
                     },
-                    features.clone(),
                 );
                 let attrs = attrs_owned.as_attrs();
                 borrowed.set_text(text, &attrs, Shaping::Advanced, None);
@@ -3720,11 +4160,10 @@ fn async_prepare_text_layout(
                         italic: req.options.italic,
                         weight: req.options.weight,
                     },
-                    features.clone(),
                 );
                 let span_attrs_owned = spans
                     .iter()
-                    .map(|span| async_build_text_attrs_owned(req, &span.style, features.clone()))
+                    .map(|span| async_build_text_attrs_owned(req, &span.style))
                     .collect::<Vec<_>>();
                 let rich_text = spans
                     .iter()
@@ -3748,9 +4187,13 @@ fn async_prepare_text_layout(
     for run in buffer.layout_runs() {
         let baseline_y_px = run.line_y as i32;
         for glyph in run.glyphs {
-            let physical = glyph.physical((0.0, 0.0), req.scale);
+            let physical = glyph.physical((0.0, 0.0), 1.0);
             glyphs.push(PreparedGlyph {
-                cache_key: physical.cache_key,
+                cache_key: GlyphRasterKey::new(
+                    physical.cache_key,
+                    req.scale,
+                    req.options.fundamentals.stem_darkening,
+                ),
                 offset_points: egui::vec2(
                     physical.x as f32 / req.scale,
                     (baseline_y_px + physical.y) as f32 / req.scale,
@@ -3769,11 +4212,7 @@ fn async_prepare_text_layout(
     }
 }
 
-fn async_build_text_attrs_owned(
-    req: &AsyncRasterRequest,
-    style: &SpanStyle,
-    features: Option<FontFeatures>,
-) -> AttrsOwned {
+fn async_build_text_attrs_owned(req: &AsyncRasterRequest, style: &SpanStyle) -> AttrsOwned {
     let effective_weight =
         (i32::from(style.weight) + (req.typography.ui_font_weight - 400)).clamp(100, 900) as u16;
     let mut attrs = Attrs::new()
@@ -3792,18 +4231,18 @@ fn async_build_text_attrs_owned(
     if style.italic {
         attrs = attrs.style(FontStyle::Italic);
     }
-    if let Some(features) = features {
+    if let Some(features) = compose_font_features(
+        &req.typography.open_type_feature_tags,
+        &req.options.fundamentals,
+    ) {
         attrs = attrs.font_features(features);
     }
     AttrsOwned::new(&attrs)
 }
 
 fn build_font_features(tags: &[[u8; 4]]) -> FontFeatures {
-    let mut features = FontFeatures::new();
-    for tag in tags {
-        features.set(cosmic_text::FeatureTag::new(tag), 1);
-    }
-    features
+    build_font_features_from_settings(tags.iter().copied().map(|tag| (tag, 1)))
+        .unwrap_or_else(FontFeatures::new)
 }
 
 impl GlyphAtlas {
@@ -3816,12 +4255,17 @@ impl GlyphAtlas {
             entries: ThreadSafeLru::new(GLYPH_ATLAS_MAX_BYTES),
             pages: Vec::new(),
             page_side_px: GLYPH_ATLAS_PAGE_TARGET_PX,
+            wgpu_render_state: None,
             pending: FxHashSet::default(),
             ready: VecDeque::new(),
             generation: 0,
             tx: Some(tx),
             rx: Some(result_rx),
         }
+    }
+
+    fn set_render_state(&mut self, render_state: Option<&EguiWgpuRenderState>) {
+        self.wgpu_render_state = render_state.cloned();
     }
 
     fn set_page_side(&mut self, page_side_px: usize) {
@@ -3839,7 +4283,7 @@ impl GlyphAtlas {
         self.pending.clear();
         self.ready.clear();
         let _ = self.entries.write(|state| state.clear());
-        self.pages.clear();
+        self.free_all_pages();
     }
 
     fn poll_ready(&mut self, ctx: &Context, current_frame: u64) {
@@ -3879,9 +4323,11 @@ impl GlyphAtlas {
             if let Some(glyph) = response.glyph {
                 uploaded_glyphs = uploaded_glyphs.saturating_add(1);
                 uploaded_bytes = uploaded_bytes.saturating_add(glyph.approx_bytes);
-                self.insert_prepared_glyph(ctx, response.cache_key, glyph, current_frame);
+                self.insert_prepared_glyph(ctx, response.cache_key, glyph, current_frame, false);
             }
         }
+
+        self.flush_dirty_pages();
 
         if worker_disconnected {
             self.tx = None;
@@ -3901,12 +4347,25 @@ impl GlyphAtlas {
         }
     }
 
+    fn free_all_pages(&mut self) {
+        if let Some(render_state) = self.wgpu_render_state.as_ref() {
+            let mut renderer = render_state.renderer.write();
+            for page in self.pages.drain(..) {
+                if let GlyphAtlasTexture::Wgpu(texture) = page.texture {
+                    renderer.free_texture(&texture.id);
+                }
+            }
+        } else {
+            self.pages.clear();
+        }
+    }
+
     fn resolve_or_queue(
         &mut self,
         ctx: &Context,
         font_system: &mut FontSystem,
-        swash_cache: &mut SwashCache,
-        cache_key: CacheKey,
+        scale_context: &mut ScaleContext,
+        cache_key: GlyphRasterKey,
         current_frame: u64,
     ) -> Option<ResolvedGlyphAtlasEntry> {
         if let Some(entry) = self.entries.write(|state| {
@@ -3932,16 +4391,17 @@ impl GlyphAtlas {
             }
         }
 
-        let glyph = rasterize_atlas_glyph(font_system, swash_cache, cache_key)?;
-        self.insert_prepared_glyph(ctx, cache_key, glyph, current_frame)
+        let glyph = rasterize_atlas_glyph(font_system, scale_context, cache_key)?;
+        self.insert_prepared_glyph(ctx, cache_key, glyph, current_frame, true)
     }
 
     fn insert_prepared_glyph(
         &mut self,
         ctx: &Context,
-        cache_key: CacheKey,
+        cache_key: GlyphRasterKey,
         glyph: PreparedAtlasGlyph,
         current_frame: u64,
+        flush_immediately: bool,
     ) -> Option<ResolvedGlyphAtlasEntry> {
         let allocation_size = size2(
             glyph.upload_image.size[0] as i32,
@@ -3986,6 +4446,9 @@ impl GlyphAtlas {
         self.entries.write(|state| {
             state.insert_without_eviction(cache_key, entry, approx_bytes);
         });
+        if flush_immediately {
+            self.flush_page_upload(page_index);
+        }
         Some(resolved)
     }
 
@@ -4012,17 +4475,49 @@ impl GlyphAtlas {
         }
 
         // No reusable page; allocate a fresh GPU texture.
-        let texture = ctx.load_texture(
-            format!("textui_glyph_atlas_{}", self.pages.len()),
-            ColorImage::filled([side, side], Color32::TRANSPARENT),
-            TextureOptions::LINEAR,
-        );
+        let texture = self.allocate_page_texture(ctx, side);
         self.pages.push(GlyphAtlasPage {
             allocator: AtlasAllocator::new(size2(side_i, side_i)),
             texture,
+            backing: ColorImage::filled([side, side], Color32::TRANSPARENT),
+            dirty_rect: None,
             live_glyphs: 0,
         });
         true
+    }
+
+    fn allocate_page_texture(&mut self, ctx: &Context, side: usize) -> GlyphAtlasTexture {
+        if let Some(render_state) = self.wgpu_render_state.as_ref() {
+            let texture = render_state
+                .device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("textui_glyph_atlas"),
+                    size: wgpu::Extent3d {
+                        width: side as u32,
+                        height: side as u32,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+                });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let id = render_state.renderer.write().register_native_texture(
+                &render_state.device,
+                &view,
+                wgpu::FilterMode::Linear,
+            );
+            GlyphAtlasTexture::Wgpu(NativeGlyphAtlasTexture { id, texture })
+        } else {
+            GlyphAtlasTexture::Egui(ctx.load_texture(
+                format!("textui_glyph_atlas_{}", self.pages.len()),
+                ColorImage::filled([side, side], Color32::TRANSPARENT),
+                TextureOptions::LINEAR,
+            ))
+        }
     }
 
     fn evict_one_lru(&mut self) -> bool {
@@ -4046,7 +4541,7 @@ impl GlyphAtlas {
     }
 
     fn resolve_entry(&self, entry: &GlyphAtlasEntry) -> ResolvedGlyphAtlasEntry {
-        let texture = self.pages[entry.page_index].texture.clone();
+        let texture_id = self.pages[entry.page_index].texture.id();
         let side = self.page_side_px as f32;
         let uv = Rect::from_min_max(
             Pos2::new(
@@ -4060,7 +4555,7 @@ impl GlyphAtlas {
         );
 
         ResolvedGlyphAtlasEntry {
-            texture,
+            texture_id,
             uv,
             size_px: entry.size_px,
             placement_left_px: entry.placement_left_px,
@@ -4074,15 +4569,52 @@ impl GlyphAtlas {
             return;
         };
 
-        page.texture.set_partial(
-            [
-                allocation.rectangle.min.x.max(0) as usize,
-                allocation.rectangle.min.y.max(0) as usize,
-            ],
-            egui::ImageData::Color(glyph.clone().into()),
-            TextureOptions::LINEAR,
+        let pos = [
+            allocation.rectangle.min.x.max(0) as usize,
+            allocation.rectangle.min.y.max(0) as usize,
+        ];
+        blit_color_image(&mut page.backing, glyph, pos[0], pos[1]);
+        let dirty = DirtyAtlasRect::new(pos, glyph.size);
+        page.dirty_rect = Some(
+            page.dirty_rect
+                .map_or(dirty, |existing| existing.union(dirty)),
         );
         page.live_glyphs = page.live_glyphs.saturating_add(1);
+    }
+
+    fn flush_dirty_pages(&mut self) {
+        for page_index in 0..self.pages.len() {
+            self.flush_page_upload(page_index);
+        }
+    }
+
+    fn flush_page_upload(&mut self, page_index: usize) {
+        let Some(page) = self.pages.get_mut(page_index) else {
+            return;
+        };
+        let Some(dirty_rect) = page.dirty_rect.take() else {
+            return;
+        };
+        let image = color_image_sub_image(&page.backing, dirty_rect);
+        match &mut page.texture {
+            GlyphAtlasTexture::Egui(texture) => {
+                texture.set_partial(
+                    dirty_rect.min,
+                    egui::ImageData::Color(image.into()),
+                    TextureOptions::LINEAR,
+                );
+            }
+            GlyphAtlasTexture::Wgpu(texture) => {
+                if let Some(render_state) = self.wgpu_render_state.as_ref() {
+                    write_color_image_to_wgpu_texture(
+                        &render_state.queue,
+                        &texture.texture,
+                        dirty_rect.min,
+                        &image,
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -4091,7 +4623,8 @@ fn glyph_atlas_worker_loop(
     tx: mpsc::Sender<GlyphAtlasWorkerResponse>,
 ) {
     let mut font_system = FontSystem::new();
-    let mut swash_cache = SwashCache::new();
+    configure_text_font_defaults(&mut font_system);
+    let mut scale_context = ScaleContext::new();
 
     while let Ok(message) = rx.recv() {
         match message {
@@ -4102,7 +4635,7 @@ fn glyph_atlas_worker_loop(
                 generation,
                 cache_key,
             } => {
-                let glyph = rasterize_atlas_glyph(&mut font_system, &mut swash_cache, cache_key);
+                let glyph = rasterize_atlas_glyph(&mut font_system, &mut scale_context, cache_key);
                 let _ = tx.send(GlyphAtlasWorkerResponse {
                     generation,
                     cache_key,
@@ -4115,10 +4648,10 @@ fn glyph_atlas_worker_loop(
 
 fn rasterize_atlas_glyph(
     font_system: &mut FontSystem,
-    swash_cache: &mut SwashCache,
-    cache_key: CacheKey,
+    scale_context: &mut ScaleContext,
+    cache_key: GlyphRasterKey,
 ) -> Option<PreparedAtlasGlyph> {
-    let image = swash_cache.get_image_uncached(font_system, cache_key)?;
+    let image = render_swash_image(font_system, scale_context, cache_key)?;
     let glyph_width = image.placement.width as usize;
     let glyph_height = image.placement.height as usize;
     if glyph_width == 0 || glyph_height == 0 {
@@ -4135,6 +4668,152 @@ fn rasterize_atlas_glyph(
         placement_top_px: image.placement.top,
         is_color: matches!(image.content, SwashContent::Color),
     })
+}
+
+fn render_swash_image(
+    font_system: &mut FontSystem,
+    scale_context: &mut ScaleContext,
+    raster_key: GlyphRasterKey,
+) -> Option<SwashImage> {
+    let cache_key = raster_key.cache_key;
+    let display_scale = raster_key.display_scale().max(1.0);
+    let ppem = f32::from_bits(cache_key.font_size_bits);
+    let logical_font_size = (ppem / display_scale).max(1.0);
+
+    let font = font_system.get_font(cache_key.font_id, cache_key.font_weight)?;
+    let swash_font = font.as_swash();
+
+    let mut settings = Vec::new();
+    if let Some(variation) = swash_font
+        .variations()
+        .find_by_tag(SwashTag::from_be_bytes(*b"wght"))
+    {
+        settings.push(SwashSetting {
+            tag: SwashTag::from_be_bytes(*b"wght"),
+            value: f32::from(cache_key.font_weight.0)
+                .clamp(variation.min_value(), variation.max_value()),
+        });
+    }
+    if let Some(variation) = swash_font
+        .variations()
+        .find_by_tag(SwashTag::from_be_bytes(*b"opsz"))
+    {
+        settings.push(SwashSetting {
+            tag: SwashTag::from_be_bytes(*b"opsz"),
+            value: opsz_for_font_size(logical_font_size)
+                .clamp(variation.min_value(), variation.max_value()),
+        });
+    }
+
+    let mut scaler = scale_context
+        .builder(swash_font)
+        .size(ppem)
+        .hint(should_hint(display_scale));
+    if !settings.is_empty() {
+        scaler = scaler.variations(settings.into_iter());
+    }
+    let mut scaler = scaler.build();
+
+    let offset = if cache_key
+        .flags
+        .contains(cosmic_text::CacheKeyFlags::PIXEL_FONT)
+    {
+        SwashVector::new(
+            cache_key.x_bin.as_float().round() + 1.0,
+            cache_key.y_bin.as_float().round(),
+        )
+    } else {
+        SwashVector::new(cache_key.x_bin.as_float(), cache_key.y_bin.as_float())
+    };
+
+    let mut render = Render::new(&[
+        Source::ColorOutline(0),
+        Source::ColorBitmap(StrikeWith::BestFit),
+        Source::Outline,
+    ]);
+    render
+        .format(SwashFormat::Alpha)
+        .offset(offset)
+        .embolden(if raster_key.stem_darkening() {
+            stem_darkening_strength(ppem)
+        } else {
+            0.0
+        })
+        .transform(
+            if cache_key
+                .flags
+                .contains(cosmic_text::CacheKeyFlags::FAKE_ITALIC)
+            {
+                Some(SwashTransform::skew(
+                    SwashAngle::from_degrees(14.0),
+                    SwashAngle::from_degrees(0.0),
+                ))
+            } else {
+                None
+            },
+        );
+
+    render.render(&mut scaler, cache_key.glyph_id)
+}
+
+fn render_swash_outline_commands(
+    font_system: &mut FontSystem,
+    scale_context: &mut ScaleContext,
+    raster_key: GlyphRasterKey,
+) -> Option<Box<[swash::zeno::Command]>> {
+    use swash::zeno::PathData as _;
+
+    let cache_key = raster_key.cache_key;
+    let display_scale = raster_key.display_scale().max(1.0);
+    let ppem = f32::from_bits(cache_key.font_size_bits);
+    let logical_font_size = (ppem / display_scale).max(1.0);
+
+    let font = font_system.get_font(cache_key.font_id, cache_key.font_weight)?;
+    let swash_font = font.as_swash();
+
+    let mut settings = Vec::new();
+    if let Some(variation) = swash_font
+        .variations()
+        .find_by_tag(SwashTag::from_be_bytes(*b"wght"))
+    {
+        settings.push(SwashSetting {
+            tag: SwashTag::from_be_bytes(*b"wght"),
+            value: f32::from(cache_key.font_weight.0)
+                .clamp(variation.min_value(), variation.max_value()),
+        });
+    }
+    if let Some(variation) = swash_font
+        .variations()
+        .find_by_tag(SwashTag::from_be_bytes(*b"opsz"))
+    {
+        settings.push(SwashSetting {
+            tag: SwashTag::from_be_bytes(*b"opsz"),
+            value: opsz_for_font_size(logical_font_size)
+                .clamp(variation.min_value(), variation.max_value()),
+        });
+    }
+
+    let mut scaler = scale_context
+        .builder(swash_font)
+        .size(ppem)
+        .hint(should_hint(display_scale));
+    if !settings.is_empty() {
+        scaler = scaler.variations(settings.into_iter());
+    }
+    let mut scaler = scaler.build();
+    let mut outline = scaler
+        .scale_outline(cache_key.glyph_id)
+        .or_else(|| scaler.scale_color_outline(cache_key.glyph_id))?;
+    if cache_key
+        .flags
+        .contains(cosmic_text::CacheKeyFlags::FAKE_ITALIC)
+    {
+        outline.transform(&SwashTransform::skew(
+            SwashAngle::from_degrees(14.0),
+            SwashAngle::from_degrees(0.0),
+        ));
+    }
+    Some(outline.path().commands().collect())
 }
 
 fn swash_image_to_color_image(image: &cosmic_text::SwashImage) -> Option<ColorImage> {
@@ -4192,6 +4871,59 @@ fn blit_color_image(dest: &mut ColorImage, src: &ColorImage, dest_x: usize, dest
     }
 }
 
+fn color_image_sub_image(src: &ColorImage, rect: DirtyAtlasRect) -> ColorImage {
+    let size = rect.size();
+    let mut image = ColorImage::filled(size, Color32::TRANSPARENT);
+    let src_width = src.size[0];
+    let dst_width = size[0];
+    for y in 0..size[1] {
+        let src_y = rect.min[1] + y;
+        let src_row = src_y * src_width;
+        let dst_row = y * dst_width;
+        for x in 0..size[0] {
+            let src_x = rect.min[0] + x;
+            image.pixels[dst_row + x] = src.pixels[src_row + src_x];
+        }
+    }
+    image
+}
+
+fn write_color_image_to_wgpu_texture(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    pos: [usize; 2],
+    image: &ColorImage,
+) {
+    let size = wgpu::Extent3d {
+        width: image.size[0] as u32,
+        height: image.size[1] as u32,
+        depth_or_array_layers: 1,
+    };
+    let mut bytes = Vec::with_capacity(image.pixels.len().saturating_mul(4));
+    for pixel in &image.pixels {
+        bytes.extend_from_slice(&pixel.to_array());
+    }
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d {
+                x: pos[0] as u32,
+                y: pos[1] as u32,
+                z: 0,
+            },
+            aspect: wgpu::TextureAspect::All,
+        },
+        &bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * image.size[0] as u32),
+            rows_per_image: Some(image.size[1] as u32),
+        },
+        size,
+    );
+}
+
 fn paint_text_texture_glyphs(
     painter: &egui::Painter,
     rect: Rect,
@@ -4201,7 +4933,7 @@ fn paint_text_texture_glyphs(
     tint: Color32,
 ) {
     let rect = snap_rect_to_pixel_grid(rect, painter.pixels_per_point());
-    let mut meshes: Vec<(TextureHandle, egui::epaint::Mesh)> = Vec::new();
+    let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
 
     for glyph in glyphs {
         let glyph_rect = Rect::from_min_size(
@@ -4220,13 +4952,13 @@ fn paint_text_texture_glyphs(
         let final_tint = multiply_color32(glyph.tint, tint);
         if let Some((_, mesh)) = meshes
             .iter_mut()
-            .find(|(texture, _)| texture.id() == glyph.texture.id())
+            .find(|(texture_id, _)| *texture_id == glyph.texture_id)
         {
             mesh.add_rect_with_uv(target_rect, glyph_uv, final_tint);
         } else {
-            let mut mesh = egui::epaint::Mesh::with_texture(glyph.texture.id());
+            let mut mesh = egui::epaint::Mesh::with_texture(glyph.texture_id);
             mesh.add_rect_with_uv(target_rect, glyph_uv, final_tint);
-            meshes.push((glyph.texture.clone(), mesh));
+            meshes.push((glyph.texture_id, mesh));
         }
     }
 
@@ -4234,6 +4966,148 @@ fn paint_text_texture_glyphs(
         if !mesh.is_empty() {
             painter.add(egui::Shape::mesh(mesh));
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TextPathSample {
+    position: Pos2,
+    tangent: Vec2,
+    normal: Vec2,
+}
+
+fn text_path_length(path: &TextPath) -> f32 {
+    iter_text_path_segments(path)
+        .map(|(from, to)| (to - from).length())
+        .sum()
+}
+
+fn iter_text_path_segments(path: &TextPath) -> impl Iterator<Item = (Pos2, Pos2)> + '_ {
+    let open_segments = path.points.windows(2).map(|points| (points[0], points[1]));
+    let closing_segment = if path.closed && path.points.len() > 2 {
+        Some((*path.points.last().unwrap_or(&Pos2::ZERO), path.points[0]))
+    } else {
+        None
+    };
+    open_segments.chain(closing_segment)
+}
+
+fn sample_text_path(path: &TextPath, distance_points: f32) -> Option<TextPathSample> {
+    let mut remaining = distance_points.max(0.0);
+    for (from, to) in iter_text_path_segments(path) {
+        let delta = to - from;
+        let segment_length = delta.length();
+        if segment_length <= f32::EPSILON {
+            continue;
+        }
+        let tangent = delta / segment_length;
+        let normal = egui::vec2(-tangent.y, tangent.x);
+        if remaining <= segment_length {
+            let position = from + tangent * remaining;
+            return Some(TextPathSample {
+                position,
+                tangent,
+                normal,
+            });
+        }
+        remaining -= segment_length;
+    }
+    let (&last_but_one, &last) = match path.points.as_slice() {
+        [.., a, b] => (a, b),
+        _ => return None,
+    };
+    let delta = last - last_but_one;
+    let segment_length = delta.length();
+    if segment_length <= f32::EPSILON {
+        return None;
+    }
+    let tangent = delta / segment_length;
+    Some(TextPathSample {
+        position: last,
+        tangent,
+        normal: egui::vec2(-tangent.y, tangent.x),
+    })
+}
+
+fn estimated_glyph_advance_points(
+    glyphs: &[PreparedGlyph],
+    index: usize,
+    fallback_font_size: f32,
+) -> f32 {
+    if let Some(next) = glyphs.get(index + 1) {
+        (next.offset_points.x - glyphs[index].offset_points.x).max(0.0)
+    } else {
+        fallback_font_size.max(1.0) * 0.5
+    }
+}
+
+fn export_vector_glyph_shape(
+    font_system: &mut FontSystem,
+    scale_context: &mut ScaleContext,
+    glyph: &PreparedGlyph,
+    fallback_line_height: f32,
+) -> Option<VectorGlyphShape> {
+    let commands = render_swash_outline_commands(font_system, scale_context, glyph.cache_key)?;
+    let mut vector_commands = Vec::with_capacity(commands.len());
+    let mut bounds: Option<Rect> = None;
+    for command in commands.iter() {
+        let mapped = map_outline_command_to_points(*command, glyph.offset_points);
+        update_vector_shape_bounds(&mut bounds, &mapped);
+        vector_commands.push(mapped);
+    }
+    Some(VectorGlyphShape {
+        bounds: bounds.unwrap_or_else(|| {
+            Rect::from_min_size(
+                Pos2::new(
+                    glyph.offset_points.x,
+                    glyph.offset_points.y - fallback_line_height,
+                ),
+                egui::vec2(1.0, fallback_line_height.max(1.0)),
+            )
+        }),
+        color: glyph.color,
+        commands: vector_commands,
+    })
+}
+
+fn map_outline_command_to_points(
+    command: swash::zeno::Command,
+    glyph_origin: Vec2,
+) -> VectorPathCommand {
+    let map_point =
+        |point: swash::zeno::Point| Pos2::new(glyph_origin.x + point.x, glyph_origin.y - point.y);
+    match command {
+        swash::zeno::Command::MoveTo(point) => VectorPathCommand::MoveTo(map_point(point)),
+        swash::zeno::Command::LineTo(point) => VectorPathCommand::LineTo(map_point(point)),
+        swash::zeno::Command::QuadTo(control, point) => {
+            VectorPathCommand::QuadTo(map_point(control), map_point(point))
+        }
+        swash::zeno::Command::CurveTo(control_a, control_b, point) => {
+            VectorPathCommand::CurveTo(map_point(control_a), map_point(control_b), map_point(point))
+        }
+        swash::zeno::Command::Close => VectorPathCommand::Close,
+    }
+}
+
+fn update_vector_shape_bounds(bounds: &mut Option<Rect>, command: &VectorPathCommand) {
+    let mut include_point = |point: Pos2| {
+        let rect = Rect::from_min_max(point, point);
+        *bounds = Some(bounds.map_or(rect, |current| current.union(rect)));
+    };
+    match command {
+        VectorPathCommand::MoveTo(point) | VectorPathCommand::LineTo(point) => {
+            include_point(*point)
+        }
+        VectorPathCommand::QuadTo(control, point) => {
+            include_point(*control);
+            include_point(*point);
+        }
+        VectorPathCommand::CurveTo(control_a, control_b, point) => {
+            include_point(*control_a);
+            include_point(*control_b);
+            include_point(*point);
+        }
+        VectorPathCommand::Close => {}
     }
 }
 

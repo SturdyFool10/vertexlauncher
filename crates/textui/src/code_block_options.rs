@@ -1,3 +1,4 @@
+use crate::TextFundamentals;
 use egui::{Color32, Stroke, Vec2};
 
 /// Styling options for syntax-highlighted code blocks.
@@ -12,6 +13,7 @@ pub struct CodeBlockOptions {
     pub language: Option<String>,
     pub padding: Vec2,
     pub corner_radius: u8,
+    pub fundamentals: TextFundamentals,
 }
 
 impl Default for CodeBlockOptions {
@@ -26,6 +28,7 @@ impl Default for CodeBlockOptions {
             language: None,
             padding: egui::vec2(10.0, 10.0),
             corner_radius: 8,
+            fundamentals: TextFundamentals::default(),
         }
     }
 }

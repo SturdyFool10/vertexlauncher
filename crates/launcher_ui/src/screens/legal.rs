@@ -1,5 +1,5 @@
 use egui::{self, Frame, ScrollArea, Stroke, Ui};
-use textui::{CodeBlockOptions, LabelOptions, TextUi};
+use textui::{CodeBlockOptions, LabelOptions, TextFundamentals, TextKerning, TextUi};
 
 use crate::{
     assets,
@@ -187,6 +187,19 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                                         stroke: ui.visuals().widgets.noninteractive.bg_stroke,
                                         language: Some("text".to_owned()),
                                         wrap: true,
+                                        fundamentals: TextFundamentals {
+                                            kerning: TextKerning::Normal,
+                                            stem_darkening: false,
+                                            standard_ligatures: false,
+                                            contextual_alternates: false,
+                                            discretionary_ligatures: false,
+                                            historical_ligatures: false,
+                                            case_sensitive_forms: false,
+                                            slashed_zero: false,
+                                            tabular_numbers: false,
+                                            letter_spacing_points: 0.0,
+                                            word_spacing_points: 0.0,
+                                        },
                                         ..CodeBlockOptions::default()
                                     };
                                     if openness >= 0.98 {

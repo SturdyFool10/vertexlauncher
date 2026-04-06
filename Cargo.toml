@@ -30,6 +30,7 @@ default-members = [
 [workspace.dependencies]
 eframe = { version = "0.33.3", features = ["wgpu", "serde"] }
 egui = { version = "0.33.3", features = ["serde"] }
+egui-wgpu = "0.33.3"
 egui_extras = { version = "0.33.3", features = ["http", "image", "gif", "svg", "chrono", "datepicker", "syntect", "serde"] }
 serde = { version = "1.0.228", features = ["derive", "serde_derive"] }
 wgpu = "27.0.1"
@@ -41,6 +42,7 @@ humantime = "2.3.0"
 directories = "6.0.0"
 image = "0.24.9"
 cosmic-text = "0.18"
+swash = "0.2.6"
 glyphon = "0.10.0"
 etagere = "0.2.15"
 pulldown-cmark = "0.13.3"

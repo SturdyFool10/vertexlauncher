@@ -265,7 +265,7 @@ impl VertexApp {
         let theme = theme_catalog.resolve(config.theme_id()).clone();
 
         let mut text_ui = TextUi::new();
-        text_ui.begin_frame(&cc.egui_ctx);
+        text_ui.begin_frame(&cc.egui_ctx, cc.wgpu_render_state.as_ref());
         FontController::register_included_fonts(&mut text_ui);
 
         let instance_store = match load_store() {
@@ -398,7 +398,7 @@ impl VertexApp {
             self.gamepad_calibration_state.start(device);
         }
         self.apply_frame_limiter();
-        self.text_ui.begin_frame(ctx);
+        self.text_ui.begin_frame(ctx, frame.wgpu_render_state());
         launcher_ui::ui::components::image_textures::begin_frame(ctx);
         poll_config_save_results(self);
         poll_instance_store_save_results(self);

@@ -1,3 +1,4 @@
+use crate::TextFundamentals;
 use egui::{Color32, Stroke, Vec2};
 
 /// Styling/behavior options for single/multi-line text inputs.
@@ -23,6 +24,7 @@ pub struct InputOptions {
     pub desired_rows: usize,
     pub placeholder_text: Option<String>,
     pub placeholder_color: Option<Color32>,
+    pub fundamentals: TextFundamentals,
 }
 
 impl Default for InputOptions {
@@ -48,6 +50,7 @@ impl Default for InputOptions {
             desired_rows: 5,
             placeholder_text: None,
             placeholder_color: None,
+            fundamentals: TextFundamentals::default(),
         }
     }
 }
