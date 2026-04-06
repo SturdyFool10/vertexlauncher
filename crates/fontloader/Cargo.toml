@@ -8,4 +8,3 @@ egui.workspace = true
 fontdb.workspace = true
 thiserror.workspace = true
 eframe.workspace = true
-

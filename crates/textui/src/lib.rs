@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, VecDeque},
     hash::{Hash, Hasher},
     mem,
     sync::{Arc, mpsc},
@@ -286,6 +286,7 @@ use launcher_runtime as tokio_runtime;
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options as MdOptions, Parser, Tag, TagEnd,
 };
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use shared_lru::ThreadSafeLru;
 use skrifa::raw::{FontRef as SkrifaFontRef, TableProvider as _};
 use syntect::easy::HighlightLines;
@@ -364,6 +365,11 @@ fn color_image_byte_size_from_size(size: [usize; 2]) -> usize {
     size[0]
         .saturating_mul(size[1])
         .saturating_mul(mem::size_of::<Color32>())
+}
+
+#[inline]
+fn new_fingerprint_hasher() -> FxHasher {
+    FxHasher::default()
 }
 
 /// A prepared text handle with helpers for all paint scenarios.
@@ -493,7 +499,7 @@ struct GlyphAtlas {
     entries: ThreadSafeLru<CacheKey, GlyphAtlasEntry>,
     pages: Vec<GlyphAtlasPage>,
     page_side_px: usize,
-    pending: HashSet<CacheKey>,
+    pending: FxHashSet<CacheKey>,
     ready: VecDeque<GlyphAtlasWorkerResponse>,
     generation: u64,
     tx: Option<mpsc::Sender<GlyphAtlasWorkerMessage>>,
@@ -572,7 +578,7 @@ struct TypographySnapshot {
 struct AsyncRasterState {
     tx: Option<mpsc::Sender<AsyncRasterWorkerMessage>>,
     rx: Option<mpsc::Receiver<AsyncRasterResponse>>,
-    pending: HashSet<u64>,
+    pending: FxHashSet<u64>,
     cache: ThreadSafeLru<u64, AsyncRasterCacheEntry>,
 }
 
@@ -676,7 +682,7 @@ pub struct TextUi {
     prepared_texts: ThreadSafeLru<Id, PreparedTextCacheEntry>,
     glyph_atlas: GlyphAtlas,
     empty_text_texture: Option<TextureHandle>,
-    input_states: HashMap<Id, InputState>,
+    input_states: FxHashMap<Id, InputState>,
     ui_font_family: Option<String>,
     ui_font_size_scale: f32,
     ui_font_weight: i32,
@@ -689,7 +695,7 @@ pub struct TextUi {
     frame_events: Vec<egui::Event>,
     /// Cache for parsed markdown blocks: Id → (fingerprint, last_used_frame, blocks).
     /// Prevents re-parsing unchanged markdown every frame.
-    markdown_cache: HashMap<Id, (u64, u64, Arc<[MarkdownBlock]>)>,
+    markdown_cache: FxHashMap<Id, (u64, u64, Arc<[MarkdownBlock]>)>,
 }
 
 impl Default for TextUi {
@@ -732,7 +738,7 @@ impl TextUi {
             prepared_texts: ThreadSafeLru::new(PREPARED_TEXT_CACHE_MAX_BYTES),
             glyph_atlas,
             empty_text_texture: None,
-            input_states: HashMap::new(),
+            input_states: FxHashMap::default(),
             ui_font_family: None,
             ui_font_size_scale: 1.0,
             ui_font_weight: 400,
@@ -742,13 +748,13 @@ impl TextUi {
             async_raster: AsyncRasterState {
                 tx: worker_tx,
                 rx: result_rx,
-                pending: HashSet::new(),
+                pending: FxHashSet::default(),
                 cache: ThreadSafeLru::new(ASYNC_RASTER_CACHE_MAX_BYTES),
             },
             current_frame: 0,
             max_texture_side_px: usize::MAX,
             frame_events: Vec::new(),
-            markdown_cache: HashMap::new(),
+            markdown_cache: FxHashMap::default(),
         }
     }
 
@@ -842,7 +848,7 @@ impl TextUi {
             padding: egui::Vec2::ZERO,
         };
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = new_fingerprint_hasher();
         "code_async".hash(&mut hasher);
         code.hash(&mut hasher);
         options.font_size.to_bits().hash(&mut hasher);
@@ -1118,7 +1124,7 @@ impl TextUi {
         let scale = ctx.pixels_per_point();
         let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = new_fingerprint_hasher();
         "prepare_label".hash(&mut hasher);
         text.hash(&mut hasher);
         options.font_size.to_bits().hash(&mut hasher);
@@ -1163,7 +1169,7 @@ impl TextUi {
         let scale = ctx.pixels_per_point();
         let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = new_fingerprint_hasher();
         "prepare_rich".hash(&mut hasher);
         for span in spans {
             span.text.hash(&mut hasher);
@@ -1215,7 +1221,7 @@ impl TextUi {
             None
         };
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = new_fingerprint_hasher();
         "label".hash(&mut hasher);
         text.hash(&mut hasher);
         options.font_size.to_bits().hash(&mut hasher);
@@ -1395,7 +1401,7 @@ impl TextUi {
         // ── Cache the tooltip texture; rasterize only when content changes ───
         let tooltip_tex_id = ui.make_persistent_id(&id_source).with("tooltip_text");
         let _tooltip_fingerprint = {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            let mut hasher = new_fingerprint_hasher();
             "textui_tooltip".hash(&mut hasher);
             text.hash(&mut hasher);
             options.text.font_size.to_bits().hash(&mut hasher);
@@ -1476,7 +1482,7 @@ impl TextUi {
             None
         };
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = new_fingerprint_hasher();
         "code".hash(&mut hasher);
         code.hash(&mut hasher);
         options.font_size.to_bits().hash(&mut hasher);
@@ -1551,7 +1557,7 @@ impl TextUi {
         // frame when nothing changed.
         let cache_id = ui.make_persistent_id(&id_source).with("md_cache");
         let md_fingerprint = {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            let mut hasher = new_fingerprint_hasher();
             "markdown_blocks".hash(&mut hasher);
             markdown.hash(&mut hasher);
             options.heading_scale.to_bits().hash(&mut hasher);
@@ -2780,7 +2786,7 @@ impl TextUi {
 
                 // --- Glyph draw commands ---
                 for glyph in run.glyphs {
-                    let physical = glyph.physical((0.0, 0.0), 1.0);
+                    let physical = glyph.physical((0.0, 0.0), scale);
                     let color = if selection_visible {
                         if let Some((start, end)) = selection_bounds {
                             if line_i >= start.line
@@ -2918,7 +2924,7 @@ impl TextUi {
         scale: f32,
         wrap: bool,
     ) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = new_fingerprint_hasher();
         "rich_viewer_attrs".hash(&mut hasher);
         options.font_size.to_bits().hash(&mut hasher);
         options.line_height.to_bits().hash(&mut hasher);
@@ -3278,7 +3284,7 @@ impl TextUi {
         for run in buffer.layout_runs() {
             let baseline_y_px = run.line_y as i32;
             for glyph in run.glyphs {
-                let physical = glyph.physical((0.0, 0.0), 1.0);
+                let physical = glyph.physical((0.0, 0.0), scale);
                 glyphs.push(PreparedGlyph {
                     cache_key: physical.cache_key,
                     offset_points: egui::vec2(
@@ -3604,7 +3610,7 @@ impl TextUi {
     }
 
     fn input_attrs_fingerprint(&self, options: &InputOptions, scale: f32) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = new_fingerprint_hasher();
         "input_attrs".hash(&mut hasher);
         options.font_size.to_bits().hash(&mut hasher);
         options.line_height.to_bits().hash(&mut hasher);
@@ -3742,7 +3748,7 @@ fn async_prepare_text_layout(
     for run in buffer.layout_runs() {
         let baseline_y_px = run.line_y as i32;
         for glyph in run.glyphs {
-            let physical = glyph.physical((0.0, 0.0), 1.0);
+            let physical = glyph.physical((0.0, 0.0), req.scale);
             glyphs.push(PreparedGlyph {
                 cache_key: physical.cache_key,
                 offset_points: egui::vec2(
@@ -3810,7 +3816,7 @@ impl GlyphAtlas {
             entries: ThreadSafeLru::new(GLYPH_ATLAS_MAX_BYTES),
             pages: Vec::new(),
             page_side_px: GLYPH_ATLAS_PAGE_TARGET_PX,
-            pending: HashSet::new(),
+            pending: FxHashSet::default(),
             ready: VecDeque::new(),
             generation: 0,
             tx: Some(tx),

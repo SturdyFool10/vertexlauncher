@@ -128,6 +128,20 @@ impl FontCatalog {
     /// Scan common system font directories (Windows/macOS/Linux).
     pub fn load_system(&mut self) {
         self.db.load_system_fonts();
+
+        #[cfg(target_os = "linux")]
+        {
+            for host_dir in [
+                "/run/host/fonts",
+                "/run/host/local-fonts",
+                "/run/host/user-fonts",
+            ] {
+                let path = std::path::Path::new(host_dir);
+                if path.exists() {
+                    self.db.load_fonts_dir(path);
+                }
+            }
+        }
     }
 
     /// Load fonts from a directory (recursively).

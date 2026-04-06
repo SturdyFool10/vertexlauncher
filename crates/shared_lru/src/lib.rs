@@ -1,5 +1,5 @@
+use rustc_hash::FxHashMap;
 use std::{
-    collections::HashMap,
     hash::Hash,
     sync::{Arc, Mutex},
 };
@@ -13,7 +13,7 @@ pub struct LruEntry<V> {
 
 #[derive(Debug)]
 pub struct LruState<K, V> {
-    entries: HashMap<K, LruEntry<V>>,
+    entries: FxHashMap<K, LruEntry<V>>,
     max_bytes: usize,
     total_bytes: usize,
     tick: u64,
@@ -25,7 +25,7 @@ where
 {
     pub fn new(max_bytes: usize) -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: FxHashMap::default(),
             max_bytes,
             total_bytes: 0,
             tick: 0,
@@ -136,6 +136,7 @@ where
         if self.total_bytes <= self.max_bytes {
             return Vec::new();
         }
+        let target_bytes = self.max_bytes.saturating_mul(3) / 4;
 
         // Collect eligible keys sorted oldest-first in one pass.
         let mut eviction_order: Vec<(K, u64)> = self
@@ -149,7 +150,7 @@ where
 
         let mut evicted = Vec::new();
         for (key, _) in eviction_order {
-            if self.total_bytes <= self.max_bytes {
+            if self.total_bytes <= target_bytes {
                 break;
             }
             if let Some(entry) = self.entries.remove(&key) {

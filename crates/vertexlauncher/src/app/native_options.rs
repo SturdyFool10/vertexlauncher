@@ -173,9 +173,21 @@ fn build_adapter_diagnostic(
     let mut out = String::new();
 
     writeln!(out).ok();
-    writeln!(out, "╔══════════════════════════════════════════════════════╗").ok();
-    writeln!(out, "║  Vertex Launcher — GPU initialisation failed         ║").ok();
-    writeln!(out, "╚══════════════════════════════════════════════════════╝").ok();
+    writeln!(
+        out,
+        "╔══════════════════════════════════════════════════════╗"
+    )
+    .ok();
+    writeln!(
+        out,
+        "║  Vertex Launcher — GPU initialisation failed         ║"
+    )
+    .ok();
+    writeln!(
+        out,
+        "╚══════════════════════════════════════════════════════╝"
+    )
+    .ok();
     writeln!(out).ok();
     writeln!(
         out,
@@ -185,7 +197,11 @@ fn build_adapter_diagnostic(
     writeln!(out).ok();
 
     if adapters.is_empty() {
-        writeln!(out, "No GPU adapters were enumerated for the active backends.").ok();
+        writeln!(
+            out,
+            "No GPU adapters were enumerated for the active backends."
+        )
+        .ok();
         writeln!(out).ok();
         writeln!(out, "Likely causes:").ok();
         writeln!(
@@ -252,7 +268,12 @@ fn build_adapter_diagnostic(
             .ok();
 
             if !is_software && !surface_ok {
-                writeln!(out, "    Why      : {}", surface_incompatibility_reason(&info)).ok();
+                writeln!(
+                    out,
+                    "    Why      : {}",
+                    surface_incompatibility_reason(&info)
+                )
+                .ok();
             } else if is_software {
                 writeln!(
                     out,
@@ -296,9 +317,7 @@ fn surface_incompatibility_reason(info: &wgpu::AdapterInfo) -> &'static str {
              Ensure Mesa or the NVIDIA driver is up to date, or try running \
              under an Xwayland session (DISPLAY set, WAYLAND_DISPLAY unset)."
         }
-        wgpu::Backend::Gl => {
-            "OpenGL adapter — the launcher does not use the OpenGL backend."
-        }
+        wgpu::Backend::Gl => "OpenGL adapter — the launcher does not use the OpenGL backend.",
         wgpu::Backend::Metal => {
             "Metal adapter found on a non-macOS platform — this should not happen."
         }
@@ -353,8 +372,7 @@ fn transparent_backend_options(transparent_viewport: bool) -> wgpu::BackendOptio
     {
         let mut options = wgpu::BackendOptions::default();
         if transparent_viewport {
-            options.dx12.presentation_system =
-                wgpu::wgt::Dx12SwapchainKind::DxgiFromVisual;
+            options.dx12.presentation_system = wgpu::wgt::Dx12SwapchainKind::DxgiFromVisual;
         }
         return options;
     }
