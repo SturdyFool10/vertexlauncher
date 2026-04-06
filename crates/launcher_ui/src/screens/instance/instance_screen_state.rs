@@ -45,7 +45,7 @@ pub(super) struct InstalledContentEntryUiCache {
     pub(super) truncated_description: String,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(super) enum InstanceScreenTab {
     #[default]
     Content,

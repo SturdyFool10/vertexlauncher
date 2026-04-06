@@ -23,13 +23,24 @@ mod skins;
 pub use console::console_log_scroll_id;
 pub use console::request_console_tab_focus;
 pub use content_browser::ContentBrowserState;
+pub use content_browser::loader_dropdown_id as content_browser_loader_dropdown_id;
+pub use content_browser::scope_dropdown_id as content_browser_scope_dropdown_id;
+pub use content_browser::sort_dropdown_id as content_browser_sort_dropdown_id;
+pub use content_browser::version_dropdown_id as content_browser_version_dropdown_id;
 pub use discover::{DiscoverInstallRequest, DiscoverInstallSource, DiscoverState};
 pub use home::HomePresenceSection;
 pub use home::purge_inactive_state as purge_inactive_home_state;
 pub use home::purge_screenshot_state as purge_home_screenshot_state;
+pub use home::set_gamepad_screenshot_viewer_input as set_home_screenshot_viewer_gamepad_input;
 pub use instance::InstancePresenceSection;
+pub use instance::instance_content_resource_packs_tab_id;
+pub use instance::instance_content_shader_packs_tab_id;
+pub use instance::instance_top_content_tab_id;
+pub use instance::instance_top_logs_tab_id;
+pub use instance::instance_top_screenshots_tab_id;
 pub use instance::purge_inactive_state as purge_inactive_instance_state;
 pub use instance::purge_screenshot_state as purge_instance_screenshot_state;
+pub use instance::set_gamepad_screenshot_viewer_input as set_instance_screenshot_viewer_gamepad_input;
 pub use library::{
     purge_inactive_state as purge_inactive_library_state, render_global_overlays,
     request_delete_instance,

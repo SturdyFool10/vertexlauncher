@@ -161,6 +161,8 @@ finish-args:
 
   - --filesystem=home
 
+  - --filesystem=/run/media
+
   - --filesystem=xdg-config/vertexlauncher
 
   - --filesystem=xdg-data/vertexlauncher

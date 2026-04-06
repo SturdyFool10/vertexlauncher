@@ -9,14 +9,20 @@ use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
 use installation::{MinecraftVersionEntry, fetch_version_catalog};
 use modrinth::Client as ModrinthClient;
-use textui::{InputOptions, LabelOptions, TextUi, make_gamepad_scrollable};
+use textui::{
+    InputOptions, LabelOptions, TextUi, apply_gamepad_scroll_to_registered_id,
+    make_gamepad_scrollable,
+};
 use ui_foundation::{UiMetrics, responsive_columns, themed_text_input};
 
 use crate::{
     app::tokio_runtime,
     assets,
     screens::AppScreen,
-    ui::{components::remote_tiled_image, style},
+    ui::{
+        components::{remote_tiled_image, settings_widgets},
+        style,
+    },
 };
 
 const DISCOVER_PROVIDER_LIMIT: u32 = 36;
@@ -502,6 +508,7 @@ fn render_discover_browse_content(
         wrap: true,
         ..LabelOptions::default()
     };
+    let mut filter_controls_have_focus = false;
 
     egui::Frame::new()
         .fill(ui.visuals().faint_bg_color)
@@ -546,85 +553,98 @@ fn render_discover_browse_content(
 
             let (filter_columns, dropdown_width) =
                 responsive_columns(ui.available_width(), 180.0, DISCOVER_CARD_GAP, 4);
-            let selected_game_version = selected_game_version_label(
-                state.game_version_filter.as_str(),
-                &state.available_game_versions,
-            );
+            filter_controls_have_focus = search_response.has_focus();
             let mut render_filter_row = |ui: &mut Ui, row: usize| {
                 ui.spacing_mut().item_spacing.x = DISCOVER_CARD_GAP;
                 let provider_index = row * filter_columns;
                 if provider_index == 0 {
-                    sized_combo_box(
+                    let provider_options =
+                        DiscoverProviderFilter::ALL.map(DiscoverProviderFilter::label);
+                    let mut provider_index = DiscoverProviderFilter::ALL
+                        .iter()
+                        .position(|provider| *provider == state.provider_filter)
+                        .unwrap_or(0);
+                    let response = sized_dropdown_picker(
                         ui,
+                        text_ui,
                         "discover_provider_filter",
                         dropdown_width,
-                        state.provider_filter.label(),
-                        |ui| {
-                            for provider in DiscoverProviderFilter::ALL {
-                                ui.selectable_value(
-                                    &mut state.provider_filter,
-                                    provider,
-                                    provider.label(),
-                                );
-                            }
-                        },
+                        &mut provider_index,
+                        &provider_options,
                     );
+                    state.provider_filter = DiscoverProviderFilter::ALL[provider_index];
+                    filter_controls_have_focus |= response.has_focus();
                 }
                 if provider_index <= 1 && 1 < (row + 1) * filter_columns {
-                    sized_combo_box(
+                    let loader_options = DiscoverLoaderFilter::ALL.map(DiscoverLoaderFilter::label);
+                    let mut loader_index = DiscoverLoaderFilter::ALL
+                        .iter()
+                        .position(|loader| *loader == state.loader_filter)
+                        .unwrap_or(0);
+                    let response = sized_dropdown_picker(
                         ui,
+                        text_ui,
                         "discover_loader_filter",
                         dropdown_width,
-                        state.loader_filter.label(),
-                        |ui| {
-                            for loader in DiscoverLoaderFilter::ALL {
-                                ui.selectable_value(
-                                    &mut state.loader_filter,
-                                    loader,
-                                    loader.label(),
-                                );
-                            }
-                        },
+                        &mut loader_index,
+                        &loader_options,
                     );
+                    state.loader_filter = DiscoverLoaderFilter::ALL[loader_index];
+                    filter_controls_have_focus |= response.has_focus();
                 }
                 if provider_index <= 2 && 2 < (row + 1) * filter_columns {
-                    sized_combo_box(
+                    let sort_options = DiscoverSortMode::ALL.map(DiscoverSortMode::label);
+                    let mut sort_index = DiscoverSortMode::ALL
+                        .iter()
+                        .position(|sort_mode| *sort_mode == state.sort_mode)
+                        .unwrap_or(0);
+                    let response = sized_dropdown_picker(
                         ui,
+                        text_ui,
                         "discover_sort_mode",
                         dropdown_width,
-                        state.sort_mode.label(),
-                        |ui| {
-                            for sort_mode in DiscoverSortMode::ALL {
-                                ui.selectable_value(
-                                    &mut state.sort_mode,
-                                    sort_mode,
-                                    sort_mode.label(),
-                                );
-                            }
-                        },
+                        &mut sort_index,
+                        &sort_options,
                     );
+                    state.sort_mode = DiscoverSortMode::ALL[sort_index];
+                    filter_controls_have_focus |= response.has_focus();
                 }
                 if provider_index <= 3 && 3 < (row + 1) * filter_columns {
-                    sized_combo_box(
+                    let mut game_version_options =
+                        Vec::<String>::with_capacity(state.available_game_versions.len() + 1);
+                    game_version_options.push("Any version".to_owned());
+                    for version in &state.available_game_versions {
+                        game_version_options.push(version.display_label());
+                    }
+                    let game_version_option_refs = game_version_options
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>();
+                    let mut game_version_index = 0_usize;
+                    if !state.game_version_filter.trim().is_empty()
+                        && let Some(found_index) = state
+                            .available_game_versions
+                            .iter()
+                            .position(|version| version.id == state.game_version_filter)
+                    {
+                        game_version_index = found_index + 1;
+                    }
+                    let response = sized_dropdown_picker(
                         ui,
+                        text_ui,
                         "discover_game_version",
                         dropdown_width,
-                        selected_game_version.as_str(),
-                        |ui| {
-                            ui.selectable_value(
-                                &mut state.game_version_filter,
-                                String::new(),
-                                "Any version",
-                            );
-                            for version in &state.available_game_versions {
-                                ui.selectable_value(
-                                    &mut state.game_version_filter,
-                                    version.id.clone(),
-                                    version.display_label(),
-                                );
-                            }
-                        },
+                        &mut game_version_index,
+                        &game_version_option_refs,
                     );
+                    state.game_version_filter = if game_version_index == 0 {
+                        String::new()
+                    } else {
+                        state.available_game_versions[game_version_index - 1]
+                            .id
+                            .clone()
+                    };
+                    filter_controls_have_focus |= response.has_focus();
                 }
             };
             let filter_rows = 4_usize.div_ceil(filter_columns);
@@ -701,6 +721,15 @@ fn render_discover_browse_content(
                 && viewport.bottom() >= content_bottom - 320.0;
         });
     make_gamepad_scrollable(ui.ctx(), &scroll_output);
+    if filter_controls_have_focus
+        && apply_gamepad_scroll_to_registered_id(
+            ui.ctx(),
+            scroll_output.id,
+            egui::vec2(0.0, 100_000.0),
+        )
+    {
+        ui.ctx().request_repaint();
+    }
 
     if should_load_more {
         request_search(state, false, SearchMode::Append);
@@ -1952,6 +1981,24 @@ fn themed_svg_bytes(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {
         .into_bytes()
 }
 
+fn sized_dropdown_picker(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    id: impl std::hash::Hash,
+    width: f32,
+    selected_index: &mut usize,
+    options: &[&str],
+) -> egui::Response {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, style::CONTROL_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            settings_widgets::dropdown_picker(text_ui, ui, id, selected_index, options, Some(width))
+        },
+    )
+    .inner
+}
+
 fn sized_combo_box(
     ui: &mut Ui,
     id: impl std::hash::Hash,
@@ -1969,22 +2016,6 @@ fn sized_combo_box(
                 .show_ui(ui, add_contents);
         },
     );
-}
-
-fn selected_game_version_label(
-    selected_filter: &str,
-    available_game_versions: &[MinecraftVersionEntry],
-) -> String {
-    let selected = selected_filter.trim();
-    if selected.is_empty() {
-        return "Any version".to_owned();
-    }
-
-    available_game_versions
-        .iter()
-        .find(|version| version.id == selected)
-        .map(MinecraftVersionEntry::display_label)
-        .unwrap_or_else(|| selected.to_owned())
 }
 
 fn request_version_catalog(state: &mut DiscoverState) {

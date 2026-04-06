@@ -483,6 +483,13 @@ pub fn purge_screenshot_state(ctx: &egui::Context) {
     });
 }
 
+pub fn set_gamepad_screenshot_viewer_input(ctx: &egui::Context, pan: egui::Vec2, zoom: f32) {
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new("home_screenshot_viewer_gamepad_pan"), pan);
+        data.insert_temp(egui::Id::new("home_screenshot_viewer_gamepad_zoom"), zoom);
+    });
+}
+
 fn home_activity_results() -> &'static Mutex<HomeActivityResultChannel> {
     HOME_ACTIVITY_RESULTS.get_or_init(|| {
         let (result_tx, result_rx) = mpsc::channel::<HomeActivityScanResult>();
@@ -1376,6 +1383,15 @@ fn render_screenshot_viewer_modal(
         .screenshot_images
         .request(image_key.clone(), screenshot.path.clone());
     let image_bytes = state.screenshot_images.bytes(image_key.as_str());
+    let gamepad_pan = ctx
+        .data(|data| {
+            data.get_temp::<egui::Vec2>(egui::Id::new("home_screenshot_viewer_gamepad_pan"))
+        })
+        .unwrap_or(egui::Vec2::ZERO);
+    let gamepad_zoom = ctx
+        .data(|data| data.get_temp::<f32>(egui::Id::new("home_screenshot_viewer_gamepad_zoom")))
+        .unwrap_or(0.0);
+    let frame_dt = ctx.input(|input| input.stable_dt).clamp(1.0 / 240.0, 0.05);
 
     let now_ms = current_time_millis();
     let mut close_requested = false;
@@ -1553,6 +1569,23 @@ fn render_screenshot_viewer_modal(
                 let delta = ui.ctx().input(|input| input.pointer.delta());
                 viewer_state.pan_uv.x -= delta.x / image_rect.width().max(1.0) * visible_fraction;
                 viewer_state.pan_uv.y -= delta.y / image_rect.height().max(1.0) * visible_fraction;
+                clamp_viewer_pan(viewer_state);
+                ui.ctx().request_repaint();
+            }
+            if gamepad_zoom.abs() > 0.05 {
+                let zoom_scale = (1.0 + gamepad_zoom * 1.8 * frame_dt).clamp(0.7, 1.3);
+                viewer_state.zoom = (viewer_state.zoom * zoom_scale)
+                    .clamp(SCREENSHOT_VIEWER_MIN_ZOOM, SCREENSHOT_VIEWER_MAX_ZOOM);
+                clamp_viewer_pan(viewer_state);
+                ui.ctx().request_repaint();
+            }
+            if viewer_state.zoom > SCREENSHOT_VIEWER_MIN_ZOOM
+                && (gamepad_pan.x.abs() > 0.05 || gamepad_pan.y.abs() > 0.05)
+            {
+                let visible_fraction = 1.0 / viewer_state.zoom.max(SCREENSHOT_VIEWER_MIN_ZOOM);
+                let pan_speed = 1.35 * frame_dt * visible_fraction;
+                viewer_state.pan_uv.x += gamepad_pan.x * pan_speed;
+                viewer_state.pan_uv.y += gamepad_pan.y * pan_speed;
                 clamp_viewer_pan(viewer_state);
                 ui.ctx().request_repaint();
             }

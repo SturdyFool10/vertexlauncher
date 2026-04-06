@@ -2,7 +2,7 @@ use super::content_lookup_result::ContentLookupResultEntry;
 use super::*;
 use content_resolver::detect_installed_content_kind;
 use std::collections::{BTreeMap, HashSet};
-use ui_foundation::fill_tab_row;
+use ui_foundation::tab_button;
 
 const CONTENT_HASH_CACHE_FLUSH_DEBOUNCE: Duration = Duration::from_millis(750);
 const CONTENT_LOOKUP_REPAINT_INTERVAL: Duration = Duration::from_millis(100);
@@ -13,6 +13,14 @@ const INSTALLED_CONTENT_BADGE_FONT_SIZE: f32 = 13.0;
 const INSTALLED_CONTENT_BADGE_LINE_HEIGHT: f32 = 16.0;
 const INSTALLED_CONTENT_BADGE_PADDING_X: f32 = 6.0;
 const INSTALLED_CONTENT_BADGE_PADDING_Y: f32 = 3.0;
+const INSTANCE_CONTENT_TAB_ID_KEY: &str = "instance_content_tab_id";
+
+pub(super) fn installed_content_tab_id(
+    ctx: &egui::Context,
+    kind: InstalledContentKind,
+) -> Option<egui::Id> {
+    ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new((INSTANCE_CONTENT_TAB_ID_KEY, kind))))
+}
 
 #[derive(Clone, Debug)]
 pub(super) struct ContentApplyResult {
@@ -98,15 +106,7 @@ pub(super) fn render_installed_content_section(
 
     ui.add_space(10.0);
     let previous_tab = state.selected_content_tab;
-    fill_tab_row(
-        text_ui,
-        ui,
-        ("instance_content_tab", instance_id),
-        &mut state.selected_content_tab,
-        &InstalledContentKind::ALL.map(|tab| (tab, tab.label())),
-        30.0,
-        6.0,
-    );
+    render_installed_content_tab_row(ui, text_ui, instance_id, &mut state.selected_content_tab);
     if state.selected_content_tab != previous_tab {
         state.installed_content_page = 1;
     }
@@ -424,6 +424,43 @@ pub(super) fn render_installed_content_section(
         ui.ctx().request_repaint_after(repaint_after);
     }
     flush_content_hash_cache(state, instance_root);
+}
+
+fn render_installed_content_tab_row(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    instance_id: &str,
+    active_tab: &mut InstalledContentKind,
+) {
+    let tabs = InstalledContentKind::ALL.map(|tab| (tab, tab.label()));
+    let spacing = 6.0;
+    let height = 30.0;
+    let width =
+        ((ui.available_width() - spacing * (tabs.len() as f32 - 1.0)) / tabs.len() as f32).max(0.0);
+    ui.push_id(("instance_content_tab", instance_id), |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = spacing;
+            for &(tab, label) in &tabs {
+                let selected = *active_tab == tab;
+                let response = text_ui.selectable_button(
+                    ui,
+                    ("fill_tab_row", label),
+                    label,
+                    selected,
+                    &tab_button(ui, selected, egui::vec2(width, height)),
+                );
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new((INSTANCE_CONTENT_TAB_ID_KEY, tab)),
+                        response.id,
+                    )
+                });
+                if response.clicked() {
+                    *active_tab = tab;
+                }
+            }
+        });
+    });
 }
 
 fn installed_content_files_for_tab(

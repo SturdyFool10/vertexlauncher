@@ -14,7 +14,7 @@ use ui_foundation::{is_compact_width, popup_width};
 use crate::{
     assets, privacy,
     ui::{
-        components::{icon_button, image_textures},
+        components::{icon_button, image_textures, settings_widgets},
         style,
     },
 };
@@ -201,7 +201,8 @@ pub fn render(
                         ))
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            if !popup_was_open {
+                            if !popup_was_open && settings_widgets::gamepad_input_history(ui.ctx())
+                            {
                                 ui.ctx().data_mut(|data| {
                                     data.insert_temp(
                                         egui::Id::new((

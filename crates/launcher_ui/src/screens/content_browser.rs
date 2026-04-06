@@ -1,4 +1,5 @@
 use config::Config;
+use content_resolver::detect_installed_content_kind;
 use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
 use installation::{
@@ -22,13 +23,16 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use textui::{InputOptions, LabelOptions, TextUi, normalize_inline_whitespace};
-use ui_foundation::{UiMetrics, responsive_columns, themed_text_input};
+use ui_foundation::{UiMetrics, themed_text_input};
 
 use crate::app::tokio_runtime;
 use crate::assets;
 use crate::install_activity;
 use crate::notification;
-use crate::ui::{components::remote_tiled_image, style};
+use crate::ui::{
+    components::{remote_tiled_image, settings_widgets},
+    style,
+};
 
 use super::AppScreen;
 
@@ -51,6 +55,10 @@ const VERTEX_PREFETCH_DIR_NAME: &str = "vertex_prefetch";
 const VERSION_CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(75);
 const DETAIL_VERSIONS_FETCH_TIMEOUT: Duration = Duration::from_secs(45);
 const CONTENT_BROWSER_SEARCH_CACHE_MAX_ENTRIES: usize = 12;
+const CONTENT_BROWSER_VERSION_DROPDOWN_ID_KEY: &str = "content_browser_version_dropdown_id";
+const CONTENT_BROWSER_SCOPE_DROPDOWN_ID_KEY: &str = "content_browser_scope_dropdown_id";
+const CONTENT_BROWSER_SORT_DROPDOWN_ID_KEY: &str = "content_browser_sort_dropdown_id";
+const CONTENT_BROWSER_LOADER_DROPDOWN_ID_KEY: &str = "content_browser_loader_dropdown_id";
 
 #[derive(Clone, Copy, Debug)]
 struct ContentBrowserUiMetrics {
@@ -102,6 +110,26 @@ pub(crate) fn request_open_detail_for_content(entry: UnifiedContentEntry) {
     if let Ok(mut pending) = store.lock() {
         *pending = Some(entry);
     }
+}
+
+pub fn version_dropdown_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| {
+        data.get_temp::<egui::Id>(egui::Id::new(CONTENT_BROWSER_VERSION_DROPDOWN_ID_KEY))
+    })
+}
+
+pub fn scope_dropdown_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CONTENT_BROWSER_SCOPE_DROPDOWN_ID_KEY)))
+}
+
+pub fn sort_dropdown_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CONTENT_BROWSER_SORT_DROPDOWN_ID_KEY)))
+}
+
+pub fn loader_dropdown_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| {
+        data.get_temp::<egui::Id>(egui::Id::new(CONTENT_BROWSER_LOADER_DROPDOWN_ID_KEY))
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -813,7 +841,6 @@ fn render_controls(
         .inner_margin(egui::Margin::same(style::SPACE_XL as i8));
     frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_MD);
-        let button_style = style::neutral_button(ui);
         let response = themed_text_input(
             text_ui,
             ui,
@@ -821,7 +848,9 @@ fn render_controls(
             &mut state.query_input,
             InputOptions {
                 desired_width: Some(ui.available_width().max(160.0)),
-                placeholder_text: Some("Search project names, summaries, and tags".to_owned()),
+                placeholder_text: Some(
+                    "Search project names, summaries, and tags. Press Enter to search".to_owned(),
+                ),
                 ..InputOptions::default()
             },
         );
@@ -840,53 +869,6 @@ fn render_controls(
             }
         }
 
-        ui.add_space(style::SPACE_MD);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_MD, style::SPACE_MD);
-            egui::ComboBox::from_id_salt(("content_browser_loader", instance_id))
-                .selected_text(format!("Loader: {}", state.loader.label()))
-                .show_ui(ui, |ui| {
-                    for loader in BrowserLoader::ALL {
-                        ui.selectable_value(&mut state.loader, loader, loader.label());
-                    }
-                });
-
-            if ui
-                .add_enabled_ui(!state.search_in_flight, |ui| {
-                    text_ui.button(
-                        ui,
-                        ("content_browser_search_button", instance_id),
-                        "Search",
-                        &button_style,
-                    )
-                })
-                .inner
-                .clicked()
-            {
-                request_search_for_current_filters(state, true);
-            }
-
-            if ui
-                .add_enabled_ui(!state.identify_in_flight, |ui| {
-                    text_ui.button(
-                        ui,
-                        ("content_browser_identify_file_button", instance_id),
-                        "Identify .jar",
-                        &button_style,
-                    )
-                })
-                .inner
-                .clicked()
-            {
-                if let Some(selected_path) = rfd::FileDialog::new()
-                    .set_title("Identify Mod File")
-                    .add_filter("Minecraft Mod", &["jar"])
-                    .pick_file()
-                {
-                    request_identify_file(state, selected_path);
-                }
-            }
-        });
         if !state.search_tags.is_empty() {
             ui.add_space(style::SPACE_SM);
             if render_search_tag_chips(ui, &mut state.search_tags) {
@@ -894,84 +876,173 @@ fn render_controls(
             }
         }
         ui.add_space(style::SPACE_MD);
-        let gap = ui.spacing().item_spacing.x;
-        let (columns, column_width) = responsive_columns(ui.available_width(), 180.0, gap, 3);
-        let selected_version = selected_minecraft_version_label(
-            state.minecraft_version_filter.as_str(),
-            &state.available_game_versions,
-        );
-        ui.vertical(|ui| {
-            for row in 0..3_usize.div_ceil(columns) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    let start = row * columns;
-                    let end = (start + columns).min(3);
-                    for index in start..end {
-                        match index {
-                            0 => {
-                                egui::ComboBox::from_id_salt((
-                                    "content_browser_minecraft_version",
-                                    instance_id,
-                                ))
-                                .width(column_width)
-                                .selected_text(format!("Version: {}", selected_version))
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut state.minecraft_version_filter,
-                                        String::new(),
-                                        "Any version",
-                                    );
-                                    for version in &state.available_game_versions {
-                                        ui.selectable_value(
-                                            &mut state.minecraft_version_filter,
-                                            version.id.clone(),
-                                            version.display_label(),
-                                        );
-                                    }
-                                });
-                            }
-                            1 => {
-                                egui::ComboBox::from_id_salt((
-                                    "content_browser_scope",
-                                    instance_id,
-                                ))
-                                .width(column_width)
-                                .selected_text(format!("Type: {}", state.content_scope.label()))
-                                .show_ui(ui, |ui| {
-                                    for scope in ContentScope::ALL {
-                                        ui.selectable_value(
-                                            &mut state.content_scope,
-                                            scope,
-                                            scope.label(),
-                                        );
-                                    }
-                                });
-                            }
-                            _ => {
-                                egui::ComboBox::from_id_salt((
-                                    "content_browser_mod_sort",
-                                    instance_id,
-                                ))
-                                .width(column_width)
-                                .selected_text(format!("Sort: {}", state.mod_sort_mode.label()))
-                                .show_ui(ui, |ui| {
-                                    for mode in ModSortMode::ALL {
-                                        ui.selectable_value(
-                                            &mut state.mod_sort_mode,
-                                            mode,
-                                            mode.label(),
-                                        );
-                                    }
-                                });
-                            }
-                        }
+        let gap = style::SPACE_MD;
+        let column_width = ((ui.available_width() - gap * 3.0) / 4.0).max(1.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_width, style::CONTROL_HEIGHT),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    let mut version_options =
+                        Vec::<String>::with_capacity(state.available_game_versions.len() + 1);
+                    version_options.push("Any version".to_owned());
+                    for version in &state.available_game_versions {
+                        version_options.push(version.display_label());
                     }
-                });
-                if row + 1 < 3_usize.div_ceil(columns) {
-                    ui.add_space(style::SPACE_SM);
-                }
-            }
+                    let version_option_refs = version_options
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>();
+                    let mut selected_version_index = 0_usize;
+                    if !state.minecraft_version_filter.trim().is_empty()
+                        && let Some(found_index) = state
+                            .available_game_versions
+                            .iter()
+                            .position(|version| version.id == state.minecraft_version_filter)
+                    {
+                        selected_version_index = found_index + 1;
+                    }
+                    let response = settings_widgets::dropdown_picker(
+                        text_ui,
+                        ui,
+                        ("content_browser_minecraft_version", instance_id),
+                        &mut selected_version_index,
+                        &version_option_refs,
+                        Some(column_width),
+                    );
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new(CONTENT_BROWSER_VERSION_DROPDOWN_ID_KEY),
+                            response.id,
+                        )
+                    });
+                    if response.changed() {
+                        state.minecraft_version_filter = if selected_version_index == 0 {
+                            String::new()
+                        } else {
+                            state.available_game_versions[selected_version_index - 1]
+                                .id
+                                .clone()
+                        };
+                        request_search_for_current_filters(state, true);
+                    }
+                },
+            );
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_width, style::CONTROL_HEIGHT),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    let scope_options = ContentScope::ALL.map(ContentScope::label);
+                    let mut scope_index = ContentScope::ALL
+                        .iter()
+                        .position(|scope| *scope == state.content_scope)
+                        .unwrap_or(0);
+                    let response = settings_widgets::dropdown_picker(
+                        text_ui,
+                        ui,
+                        ("content_browser_scope", instance_id),
+                        &mut scope_index,
+                        &scope_options,
+                        Some(column_width),
+                    );
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new(CONTENT_BROWSER_SCOPE_DROPDOWN_ID_KEY),
+                            response.id,
+                        )
+                    });
+                    if response.changed() {
+                        state.content_scope = ContentScope::ALL[scope_index];
+                        request_search_for_current_filters(state, true);
+                    }
+                },
+            );
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_width, style::CONTROL_HEIGHT),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    let sort_options = ModSortMode::ALL.map(ModSortMode::label);
+                    let mut sort_index = ModSortMode::ALL
+                        .iter()
+                        .position(|mode| *mode == state.mod_sort_mode)
+                        .unwrap_or(0);
+                    let response = settings_widgets::dropdown_picker(
+                        text_ui,
+                        ui,
+                        ("content_browser_mod_sort", instance_id),
+                        &mut sort_index,
+                        &sort_options,
+                        Some(column_width),
+                    );
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new(CONTENT_BROWSER_SORT_DROPDOWN_ID_KEY),
+                            response.id,
+                        )
+                    });
+                    if response.changed() {
+                        state.mod_sort_mode = ModSortMode::ALL[sort_index];
+                        request_search_for_current_filters(state, true);
+                    }
+                },
+            );
+
+            ui.allocate_ui_with_layout(
+                egui::vec2(column_width, style::CONTROL_HEIGHT),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    let loader_options = BrowserLoader::ALL.map(BrowserLoader::label);
+                    let mut loader_index = BrowserLoader::ALL
+                        .iter()
+                        .position(|loader| *loader == state.loader)
+                        .unwrap_or(0);
+                    let response = settings_widgets::dropdown_picker(
+                        text_ui,
+                        ui,
+                        ("content_browser_loader", instance_id),
+                        &mut loader_index,
+                        &loader_options,
+                        Some(column_width),
+                    );
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new(CONTENT_BROWSER_LOADER_DROPDOWN_ID_KEY),
+                            response.id,
+                        )
+                    });
+                    if response.changed() {
+                        state.loader = BrowserLoader::ALL[loader_index];
+                        request_search_for_current_filters(state, true);
+                    }
+                },
+            );
         });
+
+        ui.add_space(style::SPACE_MD);
+        let identify_response = ui.add_enabled_ui(!state.identify_in_flight, |ui| {
+            settings_widgets::full_width_button(
+                text_ui,
+                ui,
+                ("content_browser_identify_file_button", instance_id),
+                "Identify Content File",
+                ui.available_width(),
+                false,
+            )
+        });
+        if identify_response.inner.clicked()
+            && let Some(selected_path) = rfd::FileDialog::new()
+                .set_title("Identify Content File")
+                .add_filter("Minecraft Content", &["jar", "zip"])
+                .add_filter("Mods", &["jar"])
+                .add_filter("Packs", &["zip"])
+                .pick_file()
+        {
+            request_identify_file(state, selected_path);
+        }
 
         let queue_status = if state.download_in_flight {
             format!("Downloads: active, {} queued", state.download_queue.len())
@@ -1822,47 +1893,66 @@ fn render_detail_versions_tab(
         .corner_radius(egui::CornerRadius::same(10))
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                egui::ComboBox::from_id_salt((
-                    "detail_loader_filter",
-                    instance_id,
-                    &entry.dedupe_key,
-                ))
-                .selected_text(format!("Loader: {}", state.detail_loader_filter.label()))
-                .show_ui(ui, |ui| {
-                    for loader in BrowserLoader::ALL {
-                        ui.selectable_value(
-                            &mut state.detail_loader_filter,
-                            loader,
-                            loader.label(),
-                        );
-                    }
-                });
-                egui::ComboBox::from_id_salt((
+            let loader_options = BrowserLoader::ALL.map(BrowserLoader::label);
+            let mut detail_loader_index = BrowserLoader::ALL
+                .iter()
+                .position(|loader| *loader == state.detail_loader_filter)
+                .unwrap_or(0);
+            let detail_loader_response = settings_widgets::full_width_dropdown_row(
+                text_ui,
+                ui,
+                ("detail_loader_filter", instance_id, &entry.dedupe_key),
+                "Loader",
+                None,
+                &mut detail_loader_index,
+                &loader_options,
+            );
+            if detail_loader_response.changed() {
+                state.detail_loader_filter = BrowserLoader::ALL[detail_loader_index];
+            }
+
+            ui.add_space(style::SPACE_SM);
+            let mut version_options =
+                Vec::<String>::with_capacity(state.available_game_versions.len() + 1);
+            version_options.push("Any version".to_owned());
+            for version in &state.available_game_versions {
+                version_options.push(version.display_label());
+            }
+            let version_option_refs = version_options
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            let mut selected_version_index = 0_usize;
+            if !state.detail_minecraft_version_filter.trim().is_empty()
+                && let Some(found_index) = state
+                    .available_game_versions
+                    .iter()
+                    .position(|version| version.id == state.detail_minecraft_version_filter)
+            {
+                selected_version_index = found_index + 1;
+            }
+            let detail_version_response = settings_widgets::full_width_dropdown_row(
+                text_ui,
+                ui,
+                (
                     "detail_minecraft_version_filter",
                     instance_id,
                     &entry.dedupe_key,
-                ))
-                .selected_text(format!(
-                    "Version: {}",
-                    selected_detail_minecraft_version_label(state)
-                ))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut state.detail_minecraft_version_filter,
-                        String::new(),
-                        "Any version",
-                    );
-                    for version in &state.available_game_versions {
-                        ui.selectable_value(
-                            &mut state.detail_minecraft_version_filter,
-                            version.id.clone(),
-                            version.display_label(),
-                        );
-                    }
-                });
-            });
+                ),
+                "Minecraft Version",
+                None,
+                &mut selected_version_index,
+                &version_option_refs,
+            );
+            if detail_version_response.changed() {
+                state.detail_minecraft_version_filter = if selected_version_index == 0 {
+                    String::new()
+                } else {
+                    state.available_game_versions[selected_version_index - 1]
+                        .id
+                        .clone()
+                };
+            }
 
             if let Some(error) = state.detail_versions_error.as_deref() {
                 ui.add_space(8.0);
@@ -2201,29 +2291,6 @@ fn themed_svg_bytes(svg_bytes: &[u8], color: egui::Color32) -> Vec<u8> {
     String::from_utf8_lossy(svg_bytes)
         .replace("currentColor", color_hex.as_str())
         .into_bytes()
-}
-
-fn selected_detail_minecraft_version_label(state: &ContentBrowserState) -> String {
-    selected_minecraft_version_label(
-        state.detail_minecraft_version_filter.as_str(),
-        &state.available_game_versions,
-    )
-}
-
-fn selected_minecraft_version_label(
-    selected_filter: &str,
-    available_game_versions: &[MinecraftVersionEntry],
-) -> String {
-    let selected = selected_filter.trim();
-    if selected.is_empty() {
-        return "Any version".to_owned();
-    }
-
-    available_game_versions
-        .iter()
-        .find(|version| version.id == selected)
-        .map(MinecraftVersionEntry::display_label)
-        .unwrap_or_else(|| selected.to_owned())
 }
 
 fn version_row_action(
@@ -2619,6 +2686,13 @@ fn ensure_identify_channel(state: &mut ContentBrowserState) {
 
 fn request_identify_file(state: &mut ContentBrowserState, selected_path: PathBuf) {
     if state.identify_in_flight {
+        return;
+    }
+    if detect_installed_content_kind(selected_path.as_path()).is_none() {
+        state.status_message = Some(format!(
+            "Unsupported content file: {}. Expected a mod .jar or supported pack .zip.",
+            selected_path.display()
+        ));
         return;
     }
 

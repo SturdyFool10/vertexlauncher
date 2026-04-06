@@ -15,6 +15,7 @@ const GAMEPAD_SLIDER_EDIT_ID: &str = "settings_widgets_gamepad_slider_edit";
 const GAMEPAD_SLIDER_STEP_DELTA_ID: &str = "settings_widgets_gamepad_slider_step_delta";
 const GAMEPAD_ACTIVATE_TARGET_ID: &str = "settings_widgets_gamepad_activate_target";
 const GAMEPAD_CUSTOM_ACTIVATE_IDS: &str = "settings_widgets_gamepad_custom_activate_ids";
+const GAMEPAD_INPUT_HISTORY_ID: &str = "settings_widgets_gamepad_input_history";
 const SETTINGS_DEFAULT_FOCUS_REQUEST_ID: &str = "settings_widgets_default_focus_request";
 const DROPDOWN_POPUP_FOCUS_PENDING_ID: &str = "settings_widgets_dropdown_popup_focus_pending";
 const DROPDOWN_OWNER_FOCUS_PENDING_ID: &str = "settings_widgets_dropdown_owner_focus_pending";
@@ -157,6 +158,20 @@ pub fn set_gamepad_activate_target(ctx: &egui::Context, target: Option<egui::Id>
             data.remove::<egui::Id>(key);
         }
     });
+}
+
+pub fn set_gamepad_input_history(ctx: &egui::Context, seen: bool) {
+    if !seen {
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(GAMEPAD_INPUT_HISTORY_ID), true));
+}
+
+pub fn gamepad_input_history(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|data| {
+        data.get_temp::<bool>(egui::Id::new(GAMEPAD_INPUT_HISTORY_ID))
+            .unwrap_or(false)
+    })
 }
 
 pub fn clear_gamepad_custom_activate_ids(ctx: &egui::Context) {
@@ -726,6 +741,23 @@ pub fn full_width_text_input_row(
         label_response.union(input_response)
     })
     .inner
+}
+
+pub fn dropdown_picker(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    selected_index: &mut usize,
+    options: &[&str],
+    width: Option<f32>,
+) -> Response {
+    let mut metrics = control_metrics(ui);
+    metrics.dropdown_width = width.unwrap_or_else(|| ui.available_width()).max(1.0);
+    let response = ui.push_id(id_source, |ui| {
+        dropdown(text_ui, ui, selected_index, options, metrics)
+    });
+    maybe_request_default_focus(ui.ctx(), &response.inner);
+    response.inner
 }
 
 pub fn full_width_dropdown_row(
@@ -1333,7 +1365,7 @@ fn dropdown(
 ) -> Response {
     let open_id = ui.id().with("settings_dropdown_open");
     let was_open = egui::Popup::is_id_open(ui.ctx(), open_id);
-    if !was_open && response_will_open(ui) {
+    if !was_open && response_will_open(ui) && gamepad_input_history(ui.ctx()) {
         set_popup_focus_pending(ui.ctx(), open_id, true);
     }
 
@@ -1531,7 +1563,7 @@ fn searchable_dropdown(
     let state_id = ui.id().with("settings_searchable_dropdown_state");
     let input_id = ui.id().with("settings_searchable_dropdown_input");
     let was_open = egui::Popup::is_id_open(ui.ctx(), open_id);
-    if !was_open && response_will_open(ui) {
+    if !was_open && response_will_open(ui) && gamepad_input_history(ui.ctx()) {
         set_popup_focus_pending(ui.ctx(), open_id, true);
     }
 

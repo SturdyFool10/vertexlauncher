@@ -130,6 +130,7 @@ pub(crate) fn render_log_buffer(
 
 #[derive(Clone, Debug, Default)]
 struct VirtualLogViewerState {
+    initialized: bool,
     max_line_width: f32,
     follow_bottom: bool,
 }
@@ -427,12 +428,12 @@ fn render_virtualized_log_lines(
     let selection_active = selection_state.dragging || selection_state.has_selection();
     let previous_scroll_state =
         egui::scroll_area::State::load(ui.ctx(), scroll_id).unwrap_or_default();
+    if !viewer_state.initialized {
+        viewer_state.initialized = true;
+        viewer_state.follow_bottom = stick_to_bottom;
+    }
     if !stick_to_bottom {
         viewer_state.follow_bottom = false;
-    } else if viewer_state.follow_bottom == false
-        && previous_scroll_state.offset == egui::Vec2::ZERO
-    {
-        viewer_state.follow_bottom = true;
     }
     let allow_stick_to_bottom = stick_to_bottom && viewer_state.follow_bottom && !selection_active;
 

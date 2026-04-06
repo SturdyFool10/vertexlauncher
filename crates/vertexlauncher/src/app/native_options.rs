@@ -1,6 +1,7 @@
 use config::Config;
-use eframe::{self, egui};
+use eframe::{self, egui, egui_wgpu::wgpu};
 use launcher_ui::window_effects;
+use std::fmt::Write as _;
 use std::sync::Arc;
 use vertex_constants::branding::DESKTOP_APP_ID;
 
@@ -8,9 +9,9 @@ use super::{app_icon, app_metadata, platform};
 
 pub fn build(startup_config: &Config) -> eframe::NativeOptions {
     let startup_power_preference = if startup_config.low_power_gpu_preferred() {
-        eframe::egui_wgpu::wgpu::PowerPreference::LowPower
+        wgpu::PowerPreference::LowPower
     } else {
-        eframe::egui_wgpu::wgpu::PowerPreference::HighPerformance
+        wgpu::PowerPreference::HighPerformance
     };
     let blur_enabled =
         startup_config.window_blur_enabled() && window_effects::platform_supports_blur();
@@ -47,17 +48,17 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
         shader_version: None,
         run_and_return: false,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-            present_mode: eframe::egui_wgpu::wgpu::PresentMode::AutoNoVsync,
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             desired_maximum_frame_latency: Some(1),
             wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(
                 eframe::egui_wgpu::WgpuSetupCreateNew {
-                    instance_descriptor: eframe::egui_wgpu::wgpu::InstanceDescriptor {
+                    instance_descriptor: wgpu::InstanceDescriptor {
                         backends: startup_graphics.backends,
                         backend_options: transparent_backend_options(transparent_viewport),
                         ..Default::default()
                     },
                     power_preference: startup_power_preference,
-                    native_adapter_selector: None,
+                    native_adapter_selector: Some(Arc::new(select_adapter_or_diagnose)),
                     device_descriptor: Arc::new(|adapter| {
                         let info = adapter.get_info();
                         let graphics_api = graphics_api_label(&format!("{:?}", info.backend));
@@ -77,14 +78,14 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
                             info.device
                         );
 
-                        let base_limits = if info.backend == eframe::egui_wgpu::wgpu::Backend::Gl {
-                            eframe::egui_wgpu::wgpu::Limits::downlevel_webgl2_defaults()
+                        let base_limits = if info.backend == wgpu::Backend::Gl {
+                            wgpu::Limits::downlevel_webgl2_defaults()
                         } else {
-                            eframe::egui_wgpu::wgpu::Limits::default()
+                            wgpu::Limits::default()
                         };
                         let adapter_limits = adapter.limits();
 
-                        eframe::egui_wgpu::wgpu::DeviceDescriptor {
+                        wgpu::DeviceDescriptor {
                             label: Some("egui wgpu device"),
                             required_limits: base_limits.using_resolution(adapter_limits),
                             ..Default::default()
@@ -100,6 +101,243 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Adapter selection with diagnostics
+// ---------------------------------------------------------------------------
+
+/// Selects the best hardware adapter whose surface compatibility is confirmed,
+/// or emits a detailed diagnostic and returns an error.
+///
+/// Software renderers (DeviceType::Cpu) are never returned; the launcher
+/// requires hardware acceleration. There is no OpenGL or software fallback.
+fn select_adapter_or_diagnose(
+    adapters: &[wgpu::Adapter],
+    surface: Option<&wgpu::Surface<'_>>,
+) -> Result<wgpu::Adapter, String> {
+    tracing::info!(
+        target: "vertexlauncher/app/graphics",
+        "Evaluating {} GPU adapter(s) for hardware + surface compatibility.",
+        adapters.len()
+    );
+
+    let mut surface_capable: Vec<usize> = Vec::new();
+
+    for (i, adapter) in adapters.iter().enumerate() {
+        let info = adapter.get_info();
+        let is_software = matches!(info.device_type, wgpu::DeviceType::Cpu);
+        let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
+
+        tracing::info!(
+            target: "vertexlauncher/app/graphics",
+            "  [{i}] {:?} | backend={:?} | type={:?} | vendor=0x{:04x} | device=0x{:04x} | driver={:?} | surface_ok={}",
+            info.name, info.backend, info.device_type,
+            info.vendor, info.device, info.driver, surface_ok
+        );
+
+        if !is_software && surface_ok {
+            surface_capable.push(i);
+        }
+    }
+
+    // Prefer discrete > integrated > virtual GPU.
+    let chosen = surface_capable
+        .iter()
+        .max_by_key(|&&i| match adapters[i].get_info().device_type {
+            wgpu::DeviceType::DiscreteGpu => 2,
+            wgpu::DeviceType::IntegratedGpu => 1,
+            _ => 0,
+        })
+        .copied();
+
+    if let Some(i) = chosen {
+        let info = adapters[i].get_info();
+        tracing::info!(
+            target: "vertexlauncher/app/graphics",
+            "Chose adapter [{i}] {:?} (backend={:?} type={:?})",
+            info.name, info.backend, info.device_type
+        );
+        return Ok(adapters[i].clone());
+    }
+
+    // Nothing usable — build and emit the diagnostic before returning the error.
+    let diag = build_adapter_diagnostic(adapters, surface);
+    eprintln!("{diag}");
+    tracing::error!(target: "vertexlauncher/app/graphics", "{diag}");
+    Err(diag)
+}
+
+fn build_adapter_diagnostic(
+    adapters: &[wgpu::Adapter],
+    surface: Option<&wgpu::Surface<'_>>,
+) -> String {
+    let mut out = String::new();
+
+    writeln!(out).ok();
+    writeln!(out, "╔══════════════════════════════════════════════════════╗").ok();
+    writeln!(out, "║  Vertex Launcher — GPU initialisation failed         ║").ok();
+    writeln!(out, "╚══════════════════════════════════════════════════════╝").ok();
+    writeln!(out).ok();
+    writeln!(
+        out,
+        "Hardware GPU acceleration is required. Software rendering and OpenGL are not supported."
+    )
+    .ok();
+    writeln!(out).ok();
+
+    if adapters.is_empty() {
+        writeln!(out, "No GPU adapters were enumerated for the active backends.").ok();
+        writeln!(out).ok();
+        writeln!(out, "Likely causes:").ok();
+        writeln!(
+            out,
+            "  • No Vulkan-capable GPU or Vulkan driver is installed."
+        )
+        .ok();
+        writeln!(out, "  • The GPU device nodes are not accessible:").ok();
+
+        #[cfg(target_os = "linux")]
+        emit_dri_status(&mut out);
+
+        writeln!(out).ok();
+        writeln!(
+            out,
+            "  • You are running inside a container or Flatpak without --device=all."
+        )
+        .ok();
+        writeln!(
+            out,
+            "  • The WGPU_BACKEND environment variable is forcing a backend with no adapters."
+        )
+        .ok();
+    } else {
+        let all_software = adapters
+            .iter()
+            .all(|a| matches!(a.get_info().device_type, wgpu::DeviceType::Cpu));
+
+        if all_software {
+            writeln!(
+                out,
+                "Only software/CPU renderers were found. Hardware GPU acceleration is required."
+            )
+            .ok();
+        } else {
+            writeln!(
+                out,
+                "Hardware GPU adapter(s) were found but none can present to the display surface."
+            )
+            .ok();
+        }
+        writeln!(out).ok();
+
+        for (i, adapter) in adapters.iter().enumerate() {
+            let info = adapter.get_info();
+            let is_software = matches!(info.device_type, wgpu::DeviceType::Cpu);
+            let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
+
+            writeln!(out, "  Adapter [{i}]: {:?}", info.name).ok();
+            writeln!(out, "    Backend  : {:?}", info.backend).ok();
+            writeln!(out, "    Type     : {:?}", info.device_type).ok();
+            writeln!(out, "    Vendor   : 0x{:04x}", info.vendor).ok();
+            writeln!(out, "    Device   : 0x{:04x}", info.device).ok();
+            writeln!(out, "    Driver   : {} ({})", info.driver, info.driver_info).ok();
+            writeln!(
+                out,
+                "    Surface  : {}",
+                if surface_ok {
+                    "compatible"
+                } else {
+                    "NOT compatible with this window surface"
+                }
+            )
+            .ok();
+
+            if !is_software && !surface_ok {
+                writeln!(out, "    Why      : {}", surface_incompatibility_reason(&info)).ok();
+            } else if is_software {
+                writeln!(
+                    out,
+                    "    Why      : software renderer — hardware acceleration required."
+                )
+                .ok();
+            }
+            writeln!(out).ok();
+        }
+    }
+
+    writeln!(out, "Environment:").ok();
+    for var in &[
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "WGPU_BACKEND",
+        "WGPU_POWER_PREF",
+        "XDG_SESSION_TYPE",
+        "GDK_BACKEND",
+    ] {
+        let val = std::env::var(var).unwrap_or_else(|_| "(not set)".into());
+        writeln!(out, "  {var:<22} = {val}").ok();
+    }
+
+    out
+}
+
+/// Returns a human-readable explanation for why a hardware adapter cannot
+/// present to the window surface, based on the backend and platform.
+fn surface_incompatibility_reason(info: &wgpu::AdapterInfo) -> &'static str {
+    match info.backend {
+        wgpu::Backend::Vulkan => {
+            // The DMA-buf import error is the most common cause on Wayland.
+            // NVIDIA proprietary drivers frequently fail here when paired with
+            // compositors that do not support the GPU's preferred DMA-buf
+            // format modifiers.
+            "Vulkan adapter cannot import the Wayland surface buffers. \
+             This usually means the DMA-buf format or modifier negotiation \
+             between the Vulkan driver and the Wayland compositor failed. \
+             Common on NVIDIA proprietary drivers with certain compositors. \
+             Ensure Mesa or the NVIDIA driver is up to date, or try running \
+             under an Xwayland session (DISPLAY set, WAYLAND_DISPLAY unset)."
+        }
+        wgpu::Backend::Gl => {
+            "OpenGL adapter — the launcher does not use the OpenGL backend."
+        }
+        wgpu::Backend::Metal => {
+            "Metal adapter found on a non-macOS platform — this should not happen."
+        }
+        wgpu::Backend::Dx12 => {
+            "DirectX 12 adapter found on a non-Windows platform — this should not happen."
+        }
+        _ => "Adapter cannot present to this surface for an unknown reason.",
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn emit_dri_status(out: &mut String) {
+    match std::fs::read_dir("/dev/dri") {
+        Ok(entries) => {
+            let nodes: Vec<_> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            if nodes.is_empty() {
+                writeln!(out, "    /dev/dri  : exists but contains no device nodes.").ok();
+            } else {
+                writeln!(out, "    /dev/dri  : {}", nodes.join(", ")).ok();
+            }
+        }
+        Err(e) => {
+            writeln!(
+                out,
+                "    /dev/dri  : not accessible ({e}) — \
+                 GPU passthrough or --device=all may be missing."
+            )
+            .ok();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers (unchanged)
+// ---------------------------------------------------------------------------
+
 fn graphics_api_label(backend_name: &str) -> String {
     let backend_name = match backend_name {
         "Dx12" => "DX12",
@@ -110,15 +348,13 @@ fn graphics_api_label(backend_name: &str) -> String {
     format!("WGPU({backend_name})")
 }
 
-fn transparent_backend_options(
-    transparent_viewport: bool,
-) -> eframe::egui_wgpu::wgpu::BackendOptions {
+fn transparent_backend_options(transparent_viewport: bool) -> wgpu::BackendOptions {
     #[cfg(target_os = "windows")]
     {
-        let mut options = eframe::egui_wgpu::wgpu::BackendOptions::default();
+        let mut options = wgpu::BackendOptions::default();
         if transparent_viewport {
             options.dx12.presentation_system =
-                eframe::egui_wgpu::wgpu::wgt::Dx12SwapchainKind::DxgiFromVisual;
+                wgpu::wgt::Dx12SwapchainKind::DxgiFromVisual;
         }
         return options;
     }
@@ -126,6 +362,6 @@ fn transparent_backend_options(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = transparent_viewport;
-        eframe::egui_wgpu::wgpu::BackendOptions::default()
+        wgpu::BackendOptions::default()
     }
 }

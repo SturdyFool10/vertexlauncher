@@ -365,6 +365,32 @@ impl VertexApp {
                 0.0
             },
         );
+        screens::set_home_screenshot_viewer_gamepad_input(
+            ctx,
+            if self.active_screen == screens::AppScreen::Home {
+                gamepad_update.screenshot_viewer_pan
+            } else {
+                egui::Vec2::ZERO
+            },
+            if self.active_screen == screens::AppScreen::Home {
+                gamepad_update.screenshot_viewer_zoom
+            } else {
+                0.0
+            },
+        );
+        screens::set_instance_screenshot_viewer_gamepad_input(
+            ctx,
+            if self.active_screen == screens::AppScreen::Instance {
+                gamepad_update.screenshot_viewer_pan
+            } else {
+                egui::Vec2::ZERO
+            },
+            if self.active_screen == screens::AppScreen::Instance {
+                gamepad_update.screenshot_viewer_zoom
+            } else {
+                0.0
+            },
+        );
         if let Some(device) = gamepad_update.calibration_requested
             && !self.show_gamepad_calibration_modal
         {

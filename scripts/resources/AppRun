@@ -8,6 +8,20 @@ export LD_LIBRARY_PATH="${HERE}/usr/lib:${HERE}/usr/lib64:${HERE}/usr/lib/x86_64
 export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas"
 
+# Tell GDK which display backends to try and in which order.  Without this,
+# GDK probes every compiled-in backend at startup; on Wayland-only compositors
+# the X11 probe fails loudly, and on some minimal X11 setups the Wayland probe
+# hangs waiting for a socket that never arrives.
+export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+
+# Avoid starting the dconf daemon just to read GTK settings.  WebKitGTK and
+# GTK itself will try to activate dconf over D-Bus if no backend is set;
+# on systems where dconf is not installed (or the session bus is absent)
+# this causes a several-second activation timeout before GLib falls back.
+# The keyfile backend reads from ~/.config/glib-2.0/settings/keyfile instead
+# and is always available without any daemon.
+export GSETTINGS_BACKEND="${GSETTINGS_BACKEND:-keyfile}"
+
 for gio_dir in \
     "${HERE}/usr/lib/gio/modules" \
     "${HERE}/usr/lib64/gio/modules" \
@@ -132,6 +146,41 @@ fi
 if [[ -n "${WEBKIT_BUNDLE_DIR}" ]]; then
     mkdir -p "${TMP_WEBKIT_ROOT}"
     ln -s "${WEBKIT_BUNDLE_DIR}" "${TMP_WEBKIT_ROOT}/injected-bundle"
+fi
+
+# Warn when no WebKit helper process was located — the Microsoft sign-in
+# webview will not work in this case.  This is expected on immutable distros
+# such as SteamOS / Bazzite where the host WebKitGTK stack is absent and the
+# AppImage build environment did not include one either.  Point the user at
+# the Flatpak release which ships with a self-contained WebKitGTK runtime.
+if [[ -z "${WEBKIT_HELPER_DIR}" ]]; then
+    echo "Vertex Launcher: WebKitGTK helper processes were not found in this AppImage" >&2
+    echo "or on the host system.  Microsoft sign-in will not work." >&2
+    echo "" >&2
+    echo "On immutable or WebKitGTK-free systems (SteamOS, Bazzite, etc.) install" >&2
+    echo "the Flatpak build instead — it bundles a complete WebKitGTK runtime:" >&2
+    echo "  https://github.com/SturdyFool10/vertexlauncher/releases" >&2
+    echo "" >&2
+fi
+
+# If a bundled dynamic linker is present, invoke it directly so the
+# AppImage loads its own glibc instead of the host's.  This decouples
+# the AppImage from the host glibc version (WebKitGTK requires ≥ 2.35,
+# which predates several common LTS distributions).
+# LD_LIBRARY_PATH is already set above to point at the bundled libs, so
+# the bundled linker will find both glibc and all other bundled libraries
+# from inside the AppDir.  Fall back to a plain exec when the bundled
+# linker is absent (custom builds, developer machines, etc.).
+BUNDLED_LD=""
+case "$(uname -m)" in
+    x86_64)  BUNDLED_LD="${HERE}/usr/lib/ld-linux-x86-64.so.2" ;;
+    aarch64) BUNDLED_LD="${HERE}/usr/lib/ld-linux-aarch64.so.1" ;;
+esac
+
+if [[ -n "${BUNDLED_LD}" && -x "${BUNDLED_LD}" ]]; then
+    exec "${BUNDLED_LD}" \
+        --library-path "${HERE}/usr/lib:${HERE}/usr/lib64" \
+        "${HERE}/usr/bin/vertexlauncher" "$@"
 fi
 
 exec "${HERE}/usr/bin/vertexlauncher" "$@"

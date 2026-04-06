@@ -60,6 +60,8 @@ pub struct GamepadStickSample {
 pub struct GamepadUpdate {
     pub calibration_requested: Option<GamepadDeviceIdentity>,
     pub skins_preview_orbit: f32,
+    pub screenshot_viewer_pan: egui::Vec2,
+    pub screenshot_viewer_zoom: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +90,10 @@ struct DeviceState {
     right_stick_y: f32,
     /// Last sampled right-stick X value (for continuous horizontal scrolling).
     right_stick_x: f32,
+    /// Last sampled analog left-trigger value.
+    left_trigger: f32,
+    /// Last sampled analog right-trigger value.
+    right_trigger: f32,
 }
 
 impl Default for DeviceState {
@@ -105,6 +111,8 @@ impl Default for DeviceState {
             stick_y_armed: false,
             right_stick_y: 0.0,
             right_stick_x: 0.0,
+            left_trigger: 0.0,
+            right_trigger: 0.0,
         }
     }
 }
@@ -178,8 +186,11 @@ impl GamepadNavigator {
         let mut scroll_delta: f32 = 0.0;
         let mut h_scroll_delta: f32 = 0.0;
         let mut skins_preview_orbit: f32 = 0.0;
+        let mut screenshot_viewer_pan = egui::Vec2::ZERO;
+        let mut screenshot_viewer_zoom: f32 = 0.0;
         let mut slider_step_delta: i32 = 0;
         let mut nav_actions = Vec::new();
+        let mut controller_input_seen = false;
         let active_slider = settings_widgets::gamepad_active_slider(ctx);
         let focused_id = ctx.memory(|memory| memory.focused());
 
@@ -220,16 +231,24 @@ impl GamepadNavigator {
                     }
                 }
                 EventType::ButtonPressed(button, _) => match button {
-                    Button::DPadUp => nav_actions.push((ev.id, NavDir::Up, HoldSource::Dpad)),
+                    Button::DPadUp => {
+                        controller_input_seen = true;
+                        nav_actions.push((ev.id, NavDir::Up, HoldSource::Dpad))
+                    }
                     Button::DPadRight => {
+                        controller_input_seen = true;
                         if active_slider.is_some() && active_slider == focused_id {
                             slider_step_delta += 1;
                         } else {
                             nav_actions.push((ev.id, NavDir::Right, HoldSource::Dpad))
                         }
                     }
-                    Button::DPadDown => nav_actions.push((ev.id, NavDir::Down, HoldSource::Dpad)),
+                    Button::DPadDown => {
+                        controller_input_seen = true;
+                        nav_actions.push((ev.id, NavDir::Down, HoldSource::Dpad))
+                    }
                     Button::DPadLeft => {
+                        controller_input_seen = true;
                         if active_slider.is_some() && active_slider == focused_id {
                             slider_step_delta -= 1;
                         } else {
@@ -237,22 +256,30 @@ impl GamepadNavigator {
                         }
                     }
                     Button::South => {
+                        controller_input_seen = true;
                         settings_widgets::set_gamepad_activate_target(ctx, focused_id);
                         activate = focused_id
                             .map(|id| !settings_widgets::is_gamepad_custom_activate_id(ctx, id))
                             .unwrap_or(true);
                     }
-                    Button::East => back = true,
+                    Button::East => {
+                        controller_input_seen = true;
+                        back = true
+                    }
                     Button::LeftThumb => {
+                        controller_input_seen = true;
                         settings_widgets::set_gamepad_active_slider(ctx, None);
                         sidebar::request_home_focus(ctx, true);
                     }
                     // Bumpers: coarse scroll
-                    Button::LeftTrigger => scroll_delta += 200.0,
-                    Button::RightTrigger => scroll_delta -= 200.0,
-                    // Triggers: fine scroll
-                    Button::LeftTrigger2 => scroll_delta += 80.0,
-                    Button::RightTrigger2 => scroll_delta -= 80.0,
+                    Button::LeftTrigger => {
+                        controller_input_seen = true;
+                        scroll_delta += 200.0
+                    }
+                    Button::RightTrigger => {
+                        controller_input_seen = true;
+                        scroll_delta -= 200.0
+                    }
                     _ => {}
                 },
                 EventType::ButtonReleased(button, _) => {
@@ -267,6 +294,12 @@ impl GamepadNavigator {
         }
 
         self.poll_current_axes(calibrations, &mut nav_actions);
+        if nav_actions
+            .iter()
+            .any(|(_, _, source)| *source == HoldSource::Analog)
+        {
+            controller_input_seen = true;
+        }
         if active_slider.is_some() && active_slider == focused_id {
             if let Some(dir) = nav_actions
                 .iter()
@@ -323,14 +356,33 @@ impl GamepadNavigator {
         for state in self.device_states.values() {
             if state.right_stick_y.abs() > RIGHT_STICK_SCROLL_DEADZONE {
                 scroll_delta += state.right_stick_y * RIGHT_STICK_SCROLL_SPEED;
+                controller_input_seen = true;
             }
             if active_screen == AppScreen::Skins {
                 if state.right_stick_x.abs() > RIGHT_STICK_SCROLL_DEADZONE {
                     skins_preview_orbit += state.right_stick_x;
+                    controller_input_seen = true;
+                }
+            } else if matches!(active_screen, AppScreen::Home | AppScreen::Instance) {
+                if state.right_stick_x.abs() > RIGHT_STICK_SCROLL_DEADZONE
+                    || state.right_stick_y.abs() > RIGHT_STICK_SCROLL_DEADZONE
+                {
+                    screenshot_viewer_pan += egui::vec2(state.right_stick_x, -state.right_stick_y);
+                    controller_input_seen = true;
+                }
+                let trigger_zoom = state.right_trigger - state.left_trigger;
+                if trigger_zoom.abs() > 0.05 {
+                    screenshot_viewer_zoom += trigger_zoom;
+                    controller_input_seen = true;
                 }
             } else if state.right_stick_x.abs() > RIGHT_STICK_SCROLL_DEADZONE {
                 h_scroll_delta -= state.right_stick_x * RIGHT_STICK_SCROLL_SPEED;
+                controller_input_seen = true;
             }
+        }
+
+        if controller_input_seen {
+            settings_widgets::set_gamepad_input_history(ctx, true);
         }
 
         let scroll_delta = egui::vec2(h_scroll_delta, scroll_delta) * dt;
@@ -364,9 +416,17 @@ impl GamepadNavigator {
             ctx.request_repaint();
         }
 
+        let screenshot_viewer_pan = if screenshot_viewer_pan.length_sq() > 1.0 {
+            screenshot_viewer_pan.normalized()
+        } else {
+            screenshot_viewer_pan
+        };
+
         GamepadUpdate {
             calibration_requested: self.pending_calibration_request.take(),
             skins_preview_orbit: skins_preview_orbit.clamp(-1.0, 1.0),
+            screenshot_viewer_pan,
+            screenshot_viewer_zoom: screenshot_viewer_zoom.clamp(-1.0, 1.0),
         }
     }
 
@@ -387,14 +447,28 @@ impl GamepadNavigator {
                     gamepad.value(Axis::LeftStickY),
                     gamepad.value(Axis::RightStickX),
                     gamepad.value(Axis::RightStickY),
+                    gamepad.value(Axis::LeftZ),
+                    gamepad.value(Axis::RightZ),
                 )
             })
             .collect::<Vec<_>>();
 
-        for (gamepad_id, calibration, left_x, left_y, right_x, right_y) in snapshots {
+        for (
+            gamepad_id,
+            calibration,
+            left_x,
+            left_y,
+            right_x,
+            right_y,
+            left_trigger,
+            right_trigger,
+        ) in snapshots
+        {
             let state = self.device_states.entry(gamepad_id).or_default();
             state.right_stick_x = right_x;
             state.right_stick_y = right_y;
+            state.left_trigger = left_trigger;
+            state.right_trigger = right_trigger;
 
             let Some(calibration) = calibration else {
                 state.stick_x = left_x;
@@ -751,6 +825,130 @@ impl GamepadNavigator {
                 screens::request_skins_model_focus(ctx, MinecraftSkinVariant::Classic);
                 ctx.request_repaint();
                 return true;
+            }
+        }
+
+        if active_screen == AppScreen::Instance {
+            let focused_id = ctx.memory(|memory| memory.focused());
+            if dir == NavDir::Right
+                && focused_id == screens::instance_top_content_tab_id(ctx)
+                && let Some(target) = screens::instance_top_screenshots_tab_id(ctx)
+            {
+                ctx.memory_mut(|memory| {
+                    if let Some(focused_id) = focused_id {
+                        memory.surrender_focus(focused_id);
+                    }
+                    memory.request_focus(target);
+                });
+                ctx.request_repaint();
+                return true;
+            }
+            if dir == NavDir::Right
+                && focused_id == screens::instance_top_screenshots_tab_id(ctx)
+                && let Some(target) = screens::instance_top_logs_tab_id(ctx)
+            {
+                ctx.memory_mut(|memory| {
+                    if let Some(focused_id) = focused_id {
+                        memory.surrender_focus(focused_id);
+                    }
+                    memory.request_focus(target);
+                });
+                ctx.request_repaint();
+                return true;
+            }
+            if dir == NavDir::Left
+                && focused_id == screens::instance_top_logs_tab_id(ctx)
+                && let Some(target) = screens::instance_top_screenshots_tab_id(ctx)
+            {
+                ctx.memory_mut(|memory| {
+                    if let Some(focused_id) = focused_id {
+                        memory.surrender_focus(focused_id);
+                    }
+                    memory.request_focus(target);
+                });
+                ctx.request_repaint();
+                return true;
+            }
+            if dir == NavDir::Left
+                && focused_id == screens::instance_top_screenshots_tab_id(ctx)
+                && let Some(target) = screens::instance_top_content_tab_id(ctx)
+            {
+                ctx.memory_mut(|memory| {
+                    if let Some(focused_id) = focused_id {
+                        memory.surrender_focus(focused_id);
+                    }
+                    memory.request_focus(target);
+                });
+                ctx.request_repaint();
+                return true;
+            }
+            if dir == NavDir::Right
+                && focused_id == screens::instance_content_resource_packs_tab_id(ctx)
+                && let Some(target) = screens::instance_content_shader_packs_tab_id(ctx)
+            {
+                ctx.memory_mut(|memory| {
+                    if let Some(focused_id) = focused_id {
+                        memory.surrender_focus(focused_id);
+                    }
+                    memory.request_focus(target);
+                });
+                ctx.request_repaint();
+                return true;
+            }
+            if dir == NavDir::Left
+                && focused_id == screens::instance_content_shader_packs_tab_id(ctx)
+                && let Some(target) = screens::instance_content_resource_packs_tab_id(ctx)
+            {
+                ctx.memory_mut(|memory| {
+                    if let Some(focused_id) = focused_id {
+                        memory.surrender_focus(focused_id);
+                    }
+                    memory.request_focus(target);
+                });
+                ctx.request_repaint();
+                return true;
+            }
+        }
+
+        if active_screen == AppScreen::ContentBrowser {
+            let focused_id = ctx.memory(|memory| memory.focused());
+            let move_focus = |target: Option<egui::Id>| {
+                if let Some(target) = target {
+                    ctx.memory_mut(|memory| {
+                        if let Some(focused_id) = focused_id {
+                            memory.surrender_focus(focused_id);
+                        }
+                        memory.request_focus(target);
+                    });
+                    ctx.request_repaint();
+                    return true;
+                }
+                false
+            };
+
+            if dir == NavDir::Right
+                && focused_id == screens::content_browser_version_dropdown_id(ctx)
+            {
+                return move_focus(screens::content_browser_scope_dropdown_id(ctx));
+            }
+            if dir == NavDir::Right && focused_id == screens::content_browser_scope_dropdown_id(ctx)
+            {
+                return move_focus(screens::content_browser_sort_dropdown_id(ctx));
+            }
+            if dir == NavDir::Right && focused_id == screens::content_browser_sort_dropdown_id(ctx)
+            {
+                return move_focus(screens::content_browser_loader_dropdown_id(ctx));
+            }
+            if dir == NavDir::Left && focused_id == screens::content_browser_loader_dropdown_id(ctx)
+            {
+                return move_focus(screens::content_browser_sort_dropdown_id(ctx));
+            }
+            if dir == NavDir::Left && focused_id == screens::content_browser_sort_dropdown_id(ctx) {
+                return move_focus(screens::content_browser_scope_dropdown_id(ctx));
+            }
+            if dir == NavDir::Left && focused_id == screens::content_browser_scope_dropdown_id(ctx)
+            {
+                return move_focus(screens::content_browser_version_dropdown_id(ctx));
             }
         }
 

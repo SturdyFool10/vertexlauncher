@@ -627,6 +627,72 @@ bundle_runtime_support_assets() {
       "/usr/lib64/webkit2gtk-4.1/injected-bundle/" \
       "lib64/webkit2gtk-4.0/injected-bundle/"
   fi
+
+  #-----------------------------------------------------------------------
+  # Bundle the glibc runtime so the AppImage is self-sufficient with
+  # respect to the host C library.  WebKitGTK and the bundled GTK stack
+  # require glibc ≥ 2.35; hosts running Debian 11, Ubuntu 20.04, or any
+  # other distribution with an older glibc would otherwise crash at
+  # load time with a version-symbol error.  We copy the core glibc
+  # objects plus the matching dynamic linker from the packaging host
+  # (which always has a recent enough glibc because it also provides
+  # WebKitGTK).  AppRun then invokes the bundled linker directly, so
+  # the host glibc is bypassed entirely.
+  local host_arch; host_arch="$(uname -m)"
+  local ld_name=""
+  case "${host_arch}" in
+    x86_64)  ld_name="ld-linux-x86-64.so.2" ;;
+    aarch64) ld_name="ld-linux-aarch64.so.1" ;;
+  esac
+
+  if [[ -n "${ld_name}" ]]; then
+    local ld_src=""
+    local candidate=""
+    for candidate in \
+      "/lib/${host_arch}-linux-gnu/${ld_name}" \
+      "/lib64/${ld_name}" \
+      "/lib/${ld_name}" \
+      "/usr/lib/${host_arch}-linux-gnu/${ld_name}" \
+      "/usr/lib64/${ld_name}"; do
+      if [[ -f "${candidate}" || -L "${candidate}" ]]; then
+        ld_src="${candidate}"
+        break
+      fi
+    done
+
+    if [[ -n "${ld_src}" ]]; then
+      local ld_real; ld_real="$(realpath "${ld_src}")"
+      install -Dm755 "${ld_real}" "${appdir}/usr/lib/${ld_name}"
+      echo "[appimage] bundled glibc dynamic linker: ${ld_name}"
+    else
+      echo "[appimage] warning: could not locate ${ld_name}; glibc will not be bundled" >&2
+    fi
+
+    local lib_name=""
+    # libstdc++ and libgcc_s are the C++ runtime; WebKitGTK is a C++ library
+    # and will fail to load on hosts that have an older ABI than what the
+    # bundled build was compiled against.  Bundle them alongside glibc so
+    # the bundled dynamic linker resolves them from the AppDir too.
+    for lib_name in libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 libresolv.so.2 libstdc++.so.6 libgcc_s.so.1; do
+      local lib_src=""
+      for candidate in \
+        "/lib/${host_arch}-linux-gnu/${lib_name}" \
+        "/lib64/${lib_name}" \
+        "/lib/${lib_name}" \
+        "/usr/lib/${host_arch}-linux-gnu/${lib_name}" \
+        "/usr/lib64/${lib_name}"; do
+        if [[ -f "${candidate}" || -L "${candidate}" ]]; then
+          lib_src="${candidate}"
+          break
+        fi
+      done
+
+      if [[ -n "${lib_src}" ]]; then
+        local lib_real; lib_real="$(realpath "${lib_src}")"
+        install -Dm755 "${lib_real}" "${appdir}/usr/lib/${lib_name}"
+      fi
+    done
+  fi
 }
 
 machine_arch="$(uname -m)"

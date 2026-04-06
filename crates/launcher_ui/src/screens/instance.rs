@@ -32,8 +32,8 @@ use std::{
 };
 use textui::{ButtonOptions, InputOptions, LabelOptions, TextUi, TooltipOptions};
 use ui_foundation::{
-    DialogPreset, danger_button, dialog_options, fill_tab_row, is_compact_width, primary_button,
-    secondary_button, selectable_row_button, show_dialog, themed_text_input,
+    DialogPreset, danger_button, dialog_options, is_compact_width, primary_button,
+    secondary_button, selectable_row_button, show_dialog, tab_button, themed_text_input,
 };
 use vtmpack::{
     VTMPACK_EXTENSION, VtmpackInstanceMetadata, VtmpackProviderMode, default_vtmpack_file_name,
@@ -110,6 +110,7 @@ const INSTANCE_SCREENSHOT_OVERSCAN: f32 = 420.0;
 const INSTANCE_SCREENSHOT_MIN_COLUMN_WIDTH: f32 = 180.0;
 const MAX_INSTANCE_LOG_LINES: usize = 12_000;
 const INSTANCE_SCREENSHOT_COPY_BUTTON_SIZE: f32 = 28.0;
+const INSTANCE_TOP_TAB_ID_KEY: &str = "instance_top_tab_id";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstancePresenceSection {
@@ -184,6 +185,51 @@ pub fn purge_screenshot_state(ctx: &egui::Context, selected_instance_id: Option<
         };
         state.purge_screenshot_state(ctx);
         data.insert_temp(state_id, state);
+    });
+}
+
+pub fn instance_content_resource_packs_tab_id(ctx: &egui::Context) -> Option<egui::Id> {
+    content::installed_content_tab_id(ctx, content_resolver::InstalledContentKind::ResourcePacks)
+}
+
+pub fn instance_content_shader_packs_tab_id(ctx: &egui::Context) -> Option<egui::Id> {
+    content::installed_content_tab_id(ctx, content_resolver::InstalledContentKind::ShaderPacks)
+}
+
+pub fn instance_top_content_tab_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| {
+        data.get_temp::<egui::Id>(egui::Id::new((
+            INSTANCE_TOP_TAB_ID_KEY,
+            InstanceScreenTab::Content,
+        )))
+    })
+}
+
+pub fn instance_top_screenshots_tab_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| {
+        data.get_temp::<egui::Id>(egui::Id::new((
+            INSTANCE_TOP_TAB_ID_KEY,
+            InstanceScreenTab::ScreenshotGallery,
+        )))
+    })
+}
+
+pub fn instance_top_logs_tab_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| {
+        data.get_temp::<egui::Id>(egui::Id::new((
+            INSTANCE_TOP_TAB_ID_KEY,
+            InstanceScreenTab::Logs,
+        )))
+    })
+}
+
+pub fn set_gamepad_screenshot_viewer_input(ctx: &egui::Context, pan: egui::Vec2, zoom: f32) {
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new("instance_screenshot_viewer_gamepad_pan"), pan);
+        data.insert_temp(
+            egui::Id::new("instance_screenshot_viewer_gamepad_zoom"),
+            zoom,
+        );
     });
 }
 
@@ -566,15 +612,31 @@ pub fn render(
 }
 
 fn render_instance_tab_row(ui: &mut Ui, text_ui: &mut TextUi, active_tab: &mut InstanceScreenTab) {
-    fill_tab_row(
-        text_ui,
-        ui,
-        "instance_tab_row",
-        active_tab,
-        &InstanceScreenTab::ALL.map(|tab| (tab, tab.label())),
-        INSTANCE_TABS_HEIGHT,
-        8.0,
-    );
+    let tabs = InstanceScreenTab::ALL.map(|tab| (tab, tab.label()));
+    let spacing = 8.0;
+    let width =
+        ((ui.available_width() - spacing * (tabs.len() as f32 - 1.0)) / tabs.len() as f32).max(0.0);
+    ui.push_id("instance_tab_row", |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = spacing;
+            for &(tab, label) in &tabs {
+                let selected = *active_tab == tab;
+                let response = text_ui.selectable_button(
+                    ui,
+                    ("fill_tab_row", label),
+                    label,
+                    selected,
+                    &tab_button(ui, selected, egui::vec2(width, INSTANCE_TABS_HEIGHT)),
+                );
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(egui::Id::new((INSTANCE_TOP_TAB_ID_KEY, tab)), response.id)
+                });
+                if response.clicked() {
+                    *active_tab = tab;
+                }
+            }
+        });
+    });
 }
 
 fn render_instance_screenshot_gallery(
@@ -889,6 +951,15 @@ fn render_instance_screenshot_viewer_modal(
         .screenshot_images
         .request(image_key.clone(), screenshot.path.clone());
     let image_bytes = state.screenshot_images.bytes(image_key.as_str());
+    let gamepad_pan = ctx
+        .data(|data| {
+            data.get_temp::<egui::Vec2>(egui::Id::new("instance_screenshot_viewer_gamepad_pan"))
+        })
+        .unwrap_or(egui::Vec2::ZERO);
+    let gamepad_zoom = ctx
+        .data(|data| data.get_temp::<f32>(egui::Id::new("instance_screenshot_viewer_gamepad_zoom")))
+        .unwrap_or(0.0);
+    let frame_dt = ctx.input(|input| input.stable_dt).clamp(1.0 / 240.0, 0.05);
 
     let mut close_requested = false;
     let mut delete_requested = false;
@@ -1032,6 +1103,26 @@ fn render_instance_screenshot_viewer_modal(
                 let delta = ui.ctx().input(|input| input.pointer.delta());
                 viewer_state.pan_uv.x -= delta.x / image_rect.width().max(1.0) * visible_fraction;
                 viewer_state.pan_uv.y -= delta.y / image_rect.height().max(1.0) * visible_fraction;
+                clamp_instance_screenshot_pan(viewer_state);
+                ui.ctx().request_repaint();
+            }
+            if gamepad_zoom.abs() > 0.05 {
+                let zoom_scale = (1.0 + gamepad_zoom * 1.8 * frame_dt).clamp(0.7, 1.3);
+                viewer_state.zoom = (viewer_state.zoom * zoom_scale).clamp(
+                    INSTANCE_SCREENSHOT_VIEWER_MIN_ZOOM,
+                    INSTANCE_SCREENSHOT_VIEWER_MAX_ZOOM,
+                );
+                clamp_instance_screenshot_pan(viewer_state);
+                ui.ctx().request_repaint();
+            }
+            if viewer_state.zoom > INSTANCE_SCREENSHOT_VIEWER_MIN_ZOOM
+                && (gamepad_pan.x.abs() > 0.05 || gamepad_pan.y.abs() > 0.05)
+            {
+                let visible_fraction =
+                    1.0 / viewer_state.zoom.max(INSTANCE_SCREENSHOT_VIEWER_MIN_ZOOM);
+                let pan_speed = 1.35 * frame_dt * visible_fraction;
+                viewer_state.pan_uv.x += gamepad_pan.x * pan_speed;
+                viewer_state.pan_uv.y += gamepad_pan.y * pan_speed;
                 clamp_instance_screenshot_pan(viewer_state);
                 ui.ctx().request_repaint();
             }
