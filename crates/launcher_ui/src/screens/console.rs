@@ -563,14 +563,14 @@ fn render_virtualized_log_lines(
                         && horizontal_scroll_delta.abs() > f32::EPSILON;
                     let scroll_delta = vec2(
                         if horizontal_scroll_delta.abs() > f32::EPSILON {
-                            -horizontal_scroll_delta
+                            horizontal_scroll_delta
                         } else {
                             0.0
                         },
                         if !horizontal_uses_vertical_wheel
                             && vertical_scroll_delta.abs() > f32::EPSILON
                         {
-                            -vertical_scroll_delta
+                            vertical_scroll_delta
                         } else {
                             0.0
                         },
