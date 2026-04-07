@@ -268,6 +268,73 @@ fn hash_code_block_scene_request(
     hasher.finish()
 }
 
+fn hash_rich_text_scene_request(
+    spans: &[RichTextSpan],
+    options: &LabelOptions,
+    width_points_opt: Option<f32>,
+    scale: f32,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "rich_text_scene".hash(&mut hasher);
+    for span in spans {
+        span.text.hash(&mut hasher);
+        span.style.color.hash(&mut hasher);
+        span.style.monospace.hash(&mut hasher);
+        span.style.italic.hash(&mut hasher);
+        span.style.weight.hash(&mut hasher);
+    }
+    hash_label_options(&mut hasher, options);
+    width_points_opt.map(f32::to_bits).hash(&mut hasher);
+    scale.to_bits().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_text_render_scene(scene: &TextRenderScene) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "text_render_scene".hash(&mut hasher);
+    scene.bounds.min.x.to_bits().hash(&mut hasher);
+    scene.bounds.min.y.to_bits().hash(&mut hasher);
+    scene.bounds.max.x.to_bits().hash(&mut hasher);
+    scene.bounds.max.y.to_bits().hash(&mut hasher);
+    scene.size_points.x.to_bits().hash(&mut hasher);
+    scene.size_points.y.to_bits().hash(&mut hasher);
+    for quad in &scene.quads {
+        quad.atlas_page_index.hash(&mut hasher);
+        for point in quad.positions {
+            point.x.to_bits().hash(&mut hasher);
+            point.y.to_bits().hash(&mut hasher);
+        }
+        for point in quad.uvs {
+            point.x.to_bits().hash(&mut hasher);
+            point.y.to_bits().hash(&mut hasher);
+        }
+        quad.tint.hash(&mut hasher);
+        quad.is_color.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn retained_gpu_scene_for_render_scene(
+    text_ui: &TextUi,
+    ctx: &Context,
+    scene: &TextRenderScene,
+) -> Arc<TextGpuScene> {
+    let fingerprint = hash_text_render_scene(scene);
+    retained_gpu_scene(
+        ctx,
+        Id::new(("textui_render_scene", fingerprint)),
+        fingerprint,
+        || {
+            let mut gpu_scene = Arc::new(text_ui.gpu_scene_for_scene(scene));
+            if let Some(scene) = Arc::get_mut(&mut gpu_scene) {
+                scene.fingerprint = fingerprint;
+            }
+            Some(gpu_scene)
+        },
+    )
+    .expect("text render scene conversion should always produce a gpu scene")
+}
+
 fn hash_gpu_scene_page(page: &TextAtlasPageData, sampling: TextAtlasSampling) -> u64 {
     let mut hasher = DefaultHasher::new();
     page.size_px.hash(&mut hasher);
@@ -1098,13 +1165,23 @@ impl TextUiEguiExt for TextUi {
         options: &LabelOptions,
         width_points_opt: Option<f32>,
     ) -> TextTextureHandle {
-        let scene = self.prepare_label_gpu_scene_at_scale(
-            id_source,
-            text,
-            &options.to_text_label_options(),
-            width_points_opt,
-            ctx.pixels_per_point(),
-        );
+        let scale = ctx.pixels_per_point();
+        let fingerprint = hash_label_scene_request(text, options, width_points_opt, scale);
+        let scene = retained_gpu_scene(
+            ctx,
+            Id::new((&id_source, "textui_prepare_label_texture_scene")),
+            fingerprint,
+            || {
+                Some(self.prepare_label_gpu_scene_at_scale(
+                    &id_source,
+                    text,
+                    &options.to_text_label_options(),
+                    width_points_opt,
+                    scale,
+                ))
+            },
+        )
+        .expect("synchronous label texture scene should always be available");
         TextTextureHandle {
             size_points: egui::vec2(scene.size_points[0], scene.size_points[1]),
             scene,
@@ -1119,13 +1196,23 @@ impl TextUiEguiExt for TextUi {
         options: &LabelOptions,
         width_points_opt: Option<f32>,
     ) -> TextTextureHandle {
-        let scene = self.prepare_rich_text_gpu_scene_at_scale(
-            id_source,
-            spans,
-            &options.to_text_label_options(),
-            width_points_opt,
-            ctx.pixels_per_point(),
-        );
+        let scale = ctx.pixels_per_point();
+        let fingerprint = hash_rich_text_scene_request(spans, options, width_points_opt, scale);
+        let scene = retained_gpu_scene(
+            ctx,
+            Id::new((&id_source, "textui_prepare_rich_texture_scene")),
+            fingerprint,
+            || {
+                Some(self.prepare_rich_text_gpu_scene_at_scale(
+                    &id_source,
+                    spans,
+                    &options.to_text_label_options(),
+                    width_points_opt,
+                    scale,
+                ))
+            },
+        )
+        .expect("synchronous rich text texture scene should always be available");
         TextTextureHandle {
             size_points: egui::vec2(scene.size_points[0], scene.size_points[1]),
             scene,
@@ -1193,7 +1280,7 @@ impl TextUiEguiExt for TextUi {
     }
 
     fn paint_scene_in_rect(&mut self, painter: &Painter, rect: Rect, scene: &TextRenderScene) {
-        let gpu_scene = self.gpu_scene_for_scene(scene);
+        let gpu_scene = retained_gpu_scene_for_render_scene(self, painter.ctx(), scene);
         paint_gpu_scene_in_rect(self, painter, rect, &gpu_scene, Color32::WHITE)
     }
 
@@ -1204,7 +1291,7 @@ impl TextUiEguiExt for TextUi {
         scene: &TextRenderScene,
         tint: egui::Color32,
     ) {
-        let gpu_scene = self.gpu_scene_for_scene(scene);
+        let gpu_scene = retained_gpu_scene_for_render_scene(self, painter.ctx(), scene);
         paint_gpu_scene_in_rect(self, painter, rect, &gpu_scene, tint)
     }
 

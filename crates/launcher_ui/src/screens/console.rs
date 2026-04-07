@@ -5,9 +5,9 @@ use std::{
 };
 
 use egui::{
-    CornerRadius, FontId, Margin, Ui,
+    CornerRadius, FontId, Margin, Ui, pos2,
     text::{LayoutJob, TextFormat},
-    pos2, vec2,
+    vec2,
 };
 use textui::TextUi;
 use textui_egui::{make_gamepad_scrollable, prelude::*};
@@ -45,6 +45,8 @@ const LOG_SELECTION_AUTOSCROLL_MARGIN: f32 = 32.0;
 const LOG_SELECTION_AUTOSCROLL_MAX_SPEED: f32 = 1100.0;
 const CONSOLE_LINE_LAYOUT_CACHE_ID: &str = "console_line_layout_cache";
 const CONSOLE_LINE_LAYOUT_CACHE_STALE_FRAMES: u64 = 600;
+const CONSOLE_LOG_PARSE_CACHE_ID: &str = "console_log_parse_cache";
+const CONSOLE_LOG_PARSE_CACHE_STALE_FRAMES: u64 = 600;
 
 fn log_console_context_menu(message: impl AsRef<str>) {
     eprintln!("[console_context_menu] {}", message.as_ref());
@@ -213,6 +215,22 @@ struct ConsoleLineLayoutCacheState {
 
 type ConsoleLineLayoutCache = Arc<Mutex<ConsoleLineLayoutCacheState>>;
 
+#[derive(Clone)]
+struct CachedConsoleLogParse {
+    fingerprint: u64,
+    level: Option<LogLevel>,
+    in_error_trace_after: bool,
+    last_used_frame: u64,
+}
+
+#[derive(Default)]
+struct ConsoleLogParseCacheState {
+    entries: HashMap<egui::Id, CachedConsoleLogParse>,
+    last_eviction_frame: u64,
+}
+
+type ConsoleLogParseCache = Arc<Mutex<ConsoleLogParseCacheState>>;
+
 fn virtual_log_line_options(ui: &Ui, level: Option<LogLevel>) -> LabelOptions {
     let mut options = style::body(ui);
     options.wrap = false;
@@ -225,14 +243,21 @@ fn virtual_log_line_options(ui: &Ui, level: Option<LogLevel>) -> LabelOptions {
     options
 }
 
-fn warm_log_parse_context(lines: &[String], first_visible_line: usize) -> LogParseContext {
+fn warm_log_parse_context(
+    ui: &Ui,
+    text_base_id: egui::Id,
+    lines: &[String],
+    first_visible_line: usize,
+) -> LogParseContext {
     const LOOKBACK_LINES: usize = 64;
 
     let start = first_visible_line.saturating_sub(LOOKBACK_LINES);
     let mut context = LogParseContext::default();
 
-    for line in &lines[start..first_visible_line] {
-        let _ = resolve_log_level(line, &mut context);
+    for (line_index, line) in lines[start..first_visible_line].iter().enumerate() {
+        let cache_id =
+            ui.make_persistent_id((text_base_id, "virtual_line_parse", start + line_index));
+        let _ = cached_resolve_log_level(ui, cache_id, line, &mut context);
     }
 
     context
@@ -394,6 +419,69 @@ fn cached_console_line_layout(
         },
     );
     (galley, line_len_chars)
+}
+
+fn hash_console_log_parse_request(line: &str, context: &LogParseContext) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "console_log_parse".hash(&mut hasher);
+    line.hash(&mut hasher);
+    context.in_error_trace.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn console_log_parse_cache(ui: &Ui) -> ConsoleLogParseCache {
+    ui.ctx().data_mut(|data| {
+        let cache_key = egui::Id::new(CONSOLE_LOG_PARSE_CACHE_ID);
+        if let Some(cache) = data.get_temp::<ConsoleLogParseCache>(cache_key) {
+            cache
+        } else {
+            let cache = Arc::new(Mutex::new(ConsoleLogParseCacheState::default()));
+            data.insert_temp(cache_key, Arc::clone(&cache));
+            cache
+        }
+    })
+}
+
+fn cached_resolve_log_level(
+    ui: &Ui,
+    cache_id: egui::Id,
+    line: &str,
+    context: &mut LogParseContext,
+) -> Option<LogLevel> {
+    let current_frame = ui.ctx().cumulative_frame_nr();
+    let fingerprint = hash_console_log_parse_request(line, context);
+    let cache = console_log_parse_cache(ui);
+    {
+        let mut cache_guard = cache.lock().expect("console log parse cache poisoned");
+        if current_frame > cache_guard.last_eviction_frame {
+            cache_guard.last_eviction_frame = current_frame;
+            cache_guard.entries.retain(|_, entry| {
+                current_frame.saturating_sub(entry.last_used_frame)
+                    <= CONSOLE_LOG_PARSE_CACHE_STALE_FRAMES
+            });
+        }
+
+        if let Some(entry) = cache_guard.entries.get_mut(&cache_id)
+            && entry.fingerprint == fingerprint
+        {
+            entry.last_used_frame = current_frame;
+            context.in_error_trace = entry.in_error_trace_after;
+            return entry.level;
+        }
+    }
+
+    let level = resolve_log_level(line, context);
+    let mut cache_guard = cache.lock().expect("console log parse cache poisoned");
+    cache_guard.entries.insert(
+        cache_id,
+        CachedConsoleLogParse {
+            fingerprint,
+            level,
+            in_error_trace_after: context.in_error_trace,
+            last_used_frame: current_frame,
+        },
+    );
+    level
 }
 
 fn row_contains_text(row: &VisibleLogRowHit, pointer_pos: egui::Pos2) -> bool {
@@ -587,7 +675,7 @@ fn render_virtualized_log_lines(
             let top_space = first_row as f32 * row_height;
             let bottom_space = total_rows.saturating_sub(last_row) as f32 * row_height;
 
-            let mut parse_context = warm_log_parse_context(lines, first_row);
+            let mut parse_context = warm_log_parse_context(ui, text_base_id, lines, first_row);
             let mut row_hits: Vec<VisibleLogRowHit> =
                 Vec::with_capacity(last_row.saturating_sub(first_row));
 
@@ -601,7 +689,12 @@ fn render_virtualized_log_lines(
 
             for (offset, line) in lines[first_row..last_row].iter().enumerate() {
                 let line_index = first_row + offset;
-                let level = resolve_log_level(line, &mut parse_context);
+                let level = cached_resolve_log_level(
+                    ui,
+                    ui.make_persistent_id((text_base_id, "virtual_line_parse", line_index)),
+                    line,
+                    &mut parse_context,
+                );
                 let options = virtual_log_line_options(ui, level);
                 let (galley, line_len_chars) = cached_console_line_layout(
                     ui,
@@ -1064,21 +1157,47 @@ fn parse_minecraft_log_level(line: &str) -> Option<LogLevel> {
 }
 
 fn parse_generic_log_level(line: &str) -> Option<LogLevel> {
-    for (token, level) in [
-        ("FATAL", LogLevel::Fatal),
-        ("ERROR", LogLevel::Error),
-        ("WARN", LogLevel::Warn),
-        ("INFO", LogLevel::Info),
-        ("DEBUG", LogLevel::Debug),
-        ("TRACE", LogLevel::Trace),
-    ] {
-        if line.contains(&format!("][{token}]["))
-            || line.contains(&format!("][{token}]:"))
-            || line.contains(&format!("/{token}]"))
-            || line.contains(&format!("/{token}]:"))
-        {
-            return Some(level);
-        }
+    if line.contains("][FATAL][")
+        || line.contains("][FATAL]:")
+        || line.contains("/FATAL]")
+        || line.contains("/FATAL]:")
+    {
+        return Some(LogLevel::Fatal);
+    }
+    if line.contains("][ERROR][")
+        || line.contains("][ERROR]:")
+        || line.contains("/ERROR]")
+        || line.contains("/ERROR]:")
+    {
+        return Some(LogLevel::Error);
+    }
+    if line.contains("][WARN][")
+        || line.contains("][WARN]:")
+        || line.contains("/WARN]")
+        || line.contains("/WARN]:")
+    {
+        return Some(LogLevel::Warn);
+    }
+    if line.contains("][INFO][")
+        || line.contains("][INFO]:")
+        || line.contains("/INFO]")
+        || line.contains("/INFO]:")
+    {
+        return Some(LogLevel::Info);
+    }
+    if line.contains("][DEBUG][")
+        || line.contains("][DEBUG]:")
+        || line.contains("/DEBUG]")
+        || line.contains("/DEBUG]:")
+    {
+        return Some(LogLevel::Debug);
+    }
+    if line.contains("][TRACE][")
+        || line.contains("][TRACE]:")
+        || line.contains("/TRACE]")
+        || line.contains("/TRACE]:")
+    {
+        return Some(LogLevel::Trace);
     }
     None
 }

@@ -1232,7 +1232,7 @@ fn build_text_graphics_config(
     config: &Config,
     startup_graphics: platform::StartupGraphicsConfig,
 ) -> textui::TextGraphicsConfig {
-    textui::TextGraphicsConfig {
+    let mut graphics_config = textui::TextGraphicsConfig {
         renderer_backend: match startup_graphics.renderer {
             eframe::Renderer::Wgpu => textui::TextRendererBackend::Auto,
             _ => textui::TextRendererBackend::EguiMesh,
@@ -1244,7 +1244,15 @@ fn build_text_graphics_config(
             textui::TextGpuPowerPreference::HighPerformance
         },
         ..textui::TextGraphicsConfig::default()
-    }
+    };
+    graphics_config.rasterization.glyph_raster_mode = match config.text_rendering_path() {
+        config::TextRenderingPath::Auto => textui::TextGlyphRasterMode::Auto,
+        config::TextRenderingPath::AlphaMask => textui::TextGlyphRasterMode::AlphaMask,
+        config::TextRenderingPath::Sdf => textui::TextGlyphRasterMode::Sdf,
+        config::TextRenderingPath::Msdf => textui::TextGlyphRasterMode::Msdf,
+    };
+
+    graphics_config
 }
 
 fn preferred_text_graphics_api(backends: wgpu::Backends) -> textui::TextGraphicsApi {

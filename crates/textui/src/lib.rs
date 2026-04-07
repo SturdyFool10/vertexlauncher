@@ -29,7 +29,8 @@ use bytemuck::{Pod, Zeroable};
 use cosmic_text::{
     Action, Affinity, Attrs, AttrsOwned, BorrowedWithFontSystem, Buffer, CacheKey, Color, Cursor,
     Edit, Editor, Family, FontFeatures, FontSystem, LayoutGlyph, LayoutRun, Metrics, Motion,
-    Selection, Shaping, Style as FontStyle, SwashContent, SwashImage, Weight, Wrap, fontdb,
+    Selection, Shaping, Style as FontStyle, SubpixelBin, SwashContent, SwashImage, Weight, Wrap,
+    fontdb,
 };
 use egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense,
@@ -75,12 +76,13 @@ use crate::{
 pub use advanced_text::{
     RichTextSpan, RichTextStyle, TextAtlasPageData, TextAtlasPageSnapshot, TextAtlasQuad,
     TextAtlasSampling, TextColor, TextFeatureSetting, TextFrameInfo, TextFrameOutput,
-    TextFundamentals, TextGpuPowerPreference, TextGpuQuad, TextGpuScene, TextGraphicsApi,
-    TextGraphicsConfig, TextHintingMode, TextInputEvent, TextKerning, TextKey, TextLabelOptions,
-    TextMarkdownBlock, TextMarkdownHeadingLevel, TextModifiers, TextOpticalSizingMode, TextPath,
-    TextPathError, TextPathGlyph, TextPathLayout, TextPathOptions, TextPoint, TextPointerButton,
-    TextRasterizationConfig, TextRect, TextRenderScene, TextRendererBackend, TextStemDarkeningMode,
-    TextVariationSetting, TextVector, VectorGlyphShape, VectorPathCommand, VectorTextShape,
+    TextFundamentals, TextGlyphRasterMode, TextGpuPowerPreference, TextGpuQuad, TextGpuScene,
+    TextGraphicsApi, TextGraphicsConfig, TextHintingMode, TextInputEvent, TextKerning, TextKey,
+    TextLabelOptions, TextMarkdownBlock, TextMarkdownHeadingLevel, TextModifiers,
+    TextOpticalSizingMode, TextPath, TextPathError, TextPathGlyph, TextPathLayout, TextPathOptions,
+    TextPoint, TextPointerButton, TextRasterizationConfig, TextRect, TextRenderScene,
+    TextRendererBackend, TextStemDarkeningMode, TextVariationSetting, TextVector, VectorGlyphShape,
+    VectorPathCommand, VectorTextShape,
 };
 #[doc(hidden)]
 pub use input_options::InputOptions as EguiInputOptions;
@@ -89,6 +91,7 @@ const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "liga, calt";
 const PREPARED_TEXT_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 const ASYNC_RASTER_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
 const GPU_SCENE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+const GPU_SCENE_GLYPH_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
 const GLYPH_ATLAS_MAX_BYTES: usize = 64 * 1024 * 1024;
 const GLYPH_ATLAS_STALE_FRAMES: u64 = 900;
 const GLYPH_ATLAS_PAGE_TARGET_PX: usize = 1024;
@@ -96,6 +99,7 @@ const GLYPH_ATLAS_PADDING_PX: i32 = 1;
 const GLYPH_ATLAS_FETCH_MAX_PER_FRAME: usize = 128;
 const GLYPH_ATLAS_UPLOAD_MAX_GLYPHS_PER_FRAME: usize = 64;
 const GLYPH_ATLAS_UPLOAD_MAX_BYTES_PER_FRAME: usize = 512 * 1024;
+const AUTO_MSDF_MIN_LOGICAL_FONT_SIZE_PT: f32 = 28.0;
 const INPUT_STATE_STALE_FRAMES: u64 = 900;
 const UNDO_STACK_MAX: usize = 200;
 
@@ -133,6 +137,16 @@ fn texture_options_for_sampling(sampling: TextAtlasSampling) -> TextureOptions {
     match sampling {
         TextAtlasSampling::Linear => TextureOptions::LINEAR,
         TextAtlasSampling::Nearest => TextureOptions::NEAREST,
+    }
+}
+
+#[inline]
+fn glyph_content_mode_from_rasterization(mode: TextGlyphRasterMode) -> GlyphContentMode {
+    match mode {
+        TextGlyphRasterMode::Auto => GlyphContentMode::AlphaMask,
+        TextGlyphRasterMode::AlphaMask => GlyphContentMode::AlphaMask,
+        TextGlyphRasterMode::Sdf => GlyphContentMode::Sdf,
+        TextGlyphRasterMode::Msdf => GlyphContentMode::Msdf,
     }
 }
 
@@ -238,6 +252,8 @@ struct GlyphRasterKey {
     cache_key: CacheKey,
     display_scale_bits: u32,
     raster_flags: u8,
+    content_mode: GlyphContentMode,
+    field_range_bits: u32,
     variation_settings: Arc<[TextVariationSetting]>,
 }
 
@@ -249,6 +265,8 @@ impl GlyphRasterKey {
         cache_key: CacheKey,
         display_scale: f32,
         stem_darkening: bool,
+        content_mode: GlyphContentMode,
+        field_range_px: f32,
         variation_settings: Arc<[TextVariationSetting]>,
     ) -> Self {
         Self {
@@ -259,6 +277,8 @@ impl GlyphRasterKey {
             } else {
                 0
             },
+            content_mode,
+            field_range_bits: field_range_px.to_bits(),
             variation_settings,
         }
     }
@@ -272,6 +292,41 @@ impl GlyphRasterKey {
     fn stem_darkening(&self) -> bool {
         self.raster_flags & Self::STEM_DARKENING != 0
     }
+
+    #[inline]
+    fn content_mode(&self) -> GlyphContentMode {
+        self.content_mode
+    }
+
+    #[inline]
+    fn field_range_px(&self) -> f32 {
+        f32::from_bits(self.field_range_bits)
+    }
+
+    fn for_content_mode(&self, content_mode: GlyphContentMode, field_range_px: f32) -> Self {
+        let mut key = self.clone();
+        key.content_mode = content_mode;
+        key.field_range_bits = field_range_px.to_bits();
+        if content_mode != GlyphContentMode::AlphaMask {
+            key.cache_key.x_bin = SubpixelBin::Zero;
+            key.cache_key.y_bin = SubpixelBin::Zero;
+        }
+        key
+    }
+}
+
+#[inline]
+fn glyph_logical_font_size_points(glyph: &GlyphRasterKey) -> f32 {
+    let ppem = f32::from_bits(glyph.cache_key.font_size_bits);
+    let display_scale = glyph.display_scale().max(1.0);
+    (ppem / display_scale).max(1.0)
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum GlyphContentMode {
+    AlphaMask,
+    Sdf,
+    Msdf,
 }
 
 #[inline]
@@ -446,6 +501,7 @@ struct GlyphAtlas {
 
 struct GlyphAtlasPage {
     allocator: AtlasAllocator,
+    content_mode: GlyphContentMode,
     texture: GlyphAtlasTexture,
     backing: ColorImage,
     dirty_rect: Option<DirtyAtlasRect>,
@@ -512,6 +568,8 @@ struct GlyphAtlasEntry {
     placement_left_px: i32,
     placement_top_px: i32,
     is_color: bool,
+    content_mode: GlyphContentMode,
+    field_range_px: f32,
     last_used_frame: u64,
     approx_bytes: usize,
 }
@@ -524,14 +582,19 @@ struct ResolvedGlyphAtlasEntry {
     placement_left_px: i32,
     placement_top_px: i32,
     is_color: bool,
+    content_mode: GlyphContentMode,
+    field_range_px: f32,
 }
 
+#[derive(Clone)]
 struct PreparedAtlasGlyph {
     upload_image: ColorImage,
     size_px: [usize; 2],
     placement_left_px: i32,
     placement_top_px: i32,
     is_color: bool,
+    content_mode: GlyphContentMode,
+    field_range_px: f32,
     approx_bytes: usize,
 }
 
@@ -541,6 +604,8 @@ struct PaintTextQuad {
     positions: [Pos2; 4],
     uvs: [Pos2; 4],
     tint: Color32,
+    content_mode: GlyphContentMode,
+    field_range_px: f32,
 }
 
 #[repr(C)]
@@ -562,6 +627,9 @@ struct TextWgpuInstance {
     uv2: [f32; 2],
     uv3: [f32; 2],
     color: [f32; 4],
+    decode_mode: f32,
+    field_range_px: f32,
+    _padding: [f32; 2],
 }
 
 impl TextWgpuInstance {
@@ -576,6 +644,13 @@ impl TextWgpuInstance {
             uv2: [quad.uvs[2].x, quad.uvs[2].y],
             uv3: [quad.uvs[3].x, quad.uvs[3].y],
             color: quad.tint.to_normalized_gamma_f32(),
+            decode_mode: match quad.content_mode {
+                GlyphContentMode::AlphaMask => 0.0,
+                GlyphContentMode::Sdf => 1.0,
+                GlyphContentMode::Msdf => 2.0,
+            },
+            field_range_px: quad.field_range_px,
+            _padding: [0.0, 0.0],
         }
     }
 }
@@ -859,6 +934,8 @@ fn collect_prepared_glyphs_from_buffer(
                     physical.cache_key,
                     scale,
                     fundamentals.stem_darkening,
+                    GlyphContentMode::AlphaMask,
+                    0.0,
                     Arc::clone(&variation_settings),
                 ),
                 offset_points: egui::vec2(
@@ -1027,6 +1104,9 @@ pub struct TextUi {
     /// Cache for built GPU scenes: fingerprint → scene.
     /// Avoids re-rasterizing glyphs via Swash every frame for unchanged text.
     gpu_scene_cache: ThreadSafeLru<u64, Arc<TextGpuScene>>,
+    /// Cache for CPU-side glyph bitmaps used while assembling retained GPU scenes.
+    /// This keeps repeated scene rebuilds from paying Swash raster cost for glyphs we just saw.
+    gpu_scene_glyph_cache: ThreadSafeLru<GlyphRasterKey, Arc<PreparedAtlasGlyph>>,
 }
 
 impl Default for TextUi {
@@ -1100,6 +1180,7 @@ impl TextUi {
             frame_events: Vec::new(),
             markdown_cache: FxHashMap::default(),
             gpu_scene_cache: ThreadSafeLru::new(GPU_SCENE_CACHE_MAX_BYTES),
+            gpu_scene_glyph_cache: ThreadSafeLru::new(GPU_SCENE_GLYPH_CACHE_MAX_BYTES),
         }
     }
 
@@ -1225,6 +1306,31 @@ impl TextUi {
                 .min(max_texture_side_px.max(1)),
             atlas_padding_px: self.graphics_config.atlas_padding_px,
             rasterization: self.graphics_config.rasterization,
+        }
+    }
+
+    fn resolved_glyph_content_mode(
+        &self,
+        graphics_config: ResolvedTextGraphicsConfig,
+        glyph: &GlyphRasterKey,
+    ) -> GlyphContentMode {
+        if graphics_config.renderer_backend != ResolvedTextRendererBackend::WgpuInstanced {
+            return GlyphContentMode::AlphaMask;
+        }
+        if self.glyph_atlas.wgpu_render_state.is_none() {
+            return GlyphContentMode::AlphaMask;
+        }
+
+        match graphics_config.rasterization.glyph_raster_mode {
+            TextGlyphRasterMode::Auto => {
+                let logical_font_size = glyph_logical_font_size_points(glyph);
+                if logical_font_size >= AUTO_MSDF_MIN_LOGICAL_FONT_SIZE_PT {
+                    GlyphContentMode::Msdf
+                } else {
+                    GlyphContentMode::Sdf
+                }
+            }
+            mode => glyph_content_mode_from_rasterization(mode),
         }
     }
 
@@ -1719,13 +1825,17 @@ impl TextUi {
         options.color.hash(&mut hasher);
         hash_text_fundamentals(&options.fundamentals, &mut hasher);
         scale.to_bits().hash(&mut hasher);
-        binned_width.map(f32::to_bits).unwrap_or(0).hash(&mut hasher);
+        binned_width
+            .map(f32::to_bits)
+            .unwrap_or(0)
+            .hash(&mut hasher);
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
 
-        if let Some(scene) = self.gpu_scene_cache.write(|state| {
-            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
-        }) {
+        if let Some(scene) = self
+            .gpu_scene_cache
+            .write(|state| state.touch(&fingerprint).map(|e| Arc::clone(&e.value)))
+        {
             return scene;
         }
 
@@ -1771,13 +1881,17 @@ impl TextUi {
         options.wrap.hash(&mut hasher);
         hash_text_fundamentals(&options.fundamentals, &mut hasher);
         scale.to_bits().hash(&mut hasher);
-        binned_width.map(f32::to_bits).unwrap_or(0).hash(&mut hasher);
+        binned_width
+            .map(f32::to_bits)
+            .unwrap_or(0)
+            .hash(&mut hasher);
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
 
-        if let Some(scene) = self.gpu_scene_cache.write(|state| {
-            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
-        }) {
+        if let Some(scene) = self
+            .gpu_scene_cache
+            .write(|state| state.touch(&fingerprint).map(|e| Arc::clone(&e.value)))
+        {
             return scene;
         }
 
@@ -1828,9 +1942,10 @@ impl TextUi {
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
 
-        if let Some(scene) = self.gpu_scene_cache.write(|state| {
-            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
-        }) {
+        if let Some(scene) = self
+            .gpu_scene_cache
+            .write(|state| state.touch(&fingerprint).map(|e| Arc::clone(&e.value)))
+        {
             return Some(scene);
         }
 
@@ -1883,9 +1998,10 @@ impl TextUi {
         self.hash_typography(&mut hasher);
         let fingerprint = hasher.finish();
 
-        if let Some(scene) = self.gpu_scene_cache.write(|state| {
-            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
-        }) {
+        if let Some(scene) = self
+            .gpu_scene_cache
+            .write(|state| state.touch(&fingerprint).map(|e| Arc::clone(&e.value)))
+        {
             return Some(scene);
         }
 
@@ -2080,14 +2196,20 @@ impl TextUi {
             path_options,
         )?;
         let scale = painter.pixels_per_point();
+        let graphics_config = self.resolved_graphics_config(self.max_texture_side_px.max(1));
+        let field_range_px = graphics_config.rasterization.field_range_px.max(1.0);
         let mut quads = Vec::with_capacity(layout.glyphs.len());
 
         for (glyph, path_glyph) in layout.glyphs.iter().zip(path_layout.glyphs.iter()) {
+            let content_mode = self.resolved_glyph_content_mode(graphics_config, &glyph.cache_key);
+            let raster_key = glyph
+                .cache_key
+                .for_content_mode(content_mode, field_range_px);
             let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
                 painter.ctx(),
                 &mut self.font_system,
                 &mut self.scale_context,
-                glyph.cache_key.clone(),
+                raster_key,
                 self.current_frame,
             ) else {
                 continue;
@@ -2117,6 +2239,8 @@ impl TextUi {
                 ),
                 uvs: uv_quad_points(atlas_entry.uv),
                 tint,
+                content_mode: atlas_entry.content_mode,
+                field_range_px: atlas_entry.field_range_px,
             });
         }
 
@@ -4006,6 +4130,8 @@ impl TextUi {
                             physical.cache_key,
                             scale,
                             options.fundamentals.stem_darkening,
+                            GlyphContentMode::AlphaMask,
+                            0.0,
                             Arc::clone(&variation_settings),
                         ),
                         x_px: physical.x as f32 + prefixes[glyph_index] - horizontal_scroll_px,
@@ -4026,13 +4152,17 @@ impl TextUi {
         }
 
         // --- Resolve glyphs through the atlas and build text quads ---
+        let graphics_config = self.resolved_graphics_config(self.max_texture_side_px.max(1));
+        let field_range_px = graphics_config.rasterization.field_range_px.max(1.0);
         let mut quads = Vec::with_capacity(glyph_cmds.len());
         for cmd in glyph_cmds {
+            let content_mode = self.resolved_glyph_content_mode(graphics_config, &cmd.cache_key);
+            let raster_key = cmd.cache_key.for_content_mode(content_mode, field_range_px);
             let Some(atlas_entry) = self.glyph_atlas.resolve_or_queue(
                 painter.ctx(),
                 &mut self.font_system,
                 &mut self.scale_context,
-                cmd.cache_key,
+                raster_key,
                 self.current_frame,
             ) else {
                 continue;
@@ -4060,6 +4190,8 @@ impl TextUi {
                 positions: quad_positions_from_min_size(glyph_rect.min, glyph_rect.size()),
                 uvs: uv_quad_points(atlas_entry.uv),
                 tint,
+                content_mode: atlas_entry.content_mode,
+                field_range_px: atlas_entry.field_range_px,
             });
         }
 
@@ -4541,15 +4673,21 @@ impl TextUi {
         layout: &PreparedTextLayout,
         scale: f32,
     ) -> TextRenderScene {
+        let graphics_config = self.resolved_graphics_config(self.max_texture_side_px.max(1));
+        let field_range_px = graphics_config.rasterization.field_range_px.max(1.0);
         let mut quads = Vec::with_capacity(layout.glyphs.len());
         let mut bounds: Option<Rect> = None;
 
         for glyph in layout.glyphs.iter() {
+            let content_mode = self.resolved_glyph_content_mode(graphics_config, &glyph.cache_key);
+            let raster_key = glyph
+                .cache_key
+                .for_content_mode(content_mode, field_range_px);
             let Some(atlas_entry) = self.glyph_atlas.resolve_sync(
                 ctx,
                 &mut self.font_system,
                 &mut self.scale_context,
-                glyph.cache_key.clone(),
+                raster_key,
                 self.current_frame,
             ) else {
                 continue;
@@ -4599,9 +4737,7 @@ impl TextUi {
         let mut bounds: Option<Rect> = None;
 
         for glyph in layout.glyphs.iter() {
-            let Some(atlas_glyph) = rasterize_atlas_glyph(
-                &mut self.font_system,
-                &mut self.scale_context,
+            let Some(atlas_glyph) = self.get_or_rasterize_gpu_scene_glyph(
                 &glyph.cache_key,
                 graphics_config.rasterization,
                 graphics_config.atlas_padding_px,
@@ -4716,16 +4852,22 @@ impl TextUi {
             path,
             path_options,
         )?;
+        let graphics_config = self.resolved_graphics_config(self.max_texture_side_px.max(1));
+        let field_range_px = graphics_config.rasterization.field_range_px.max(1.0);
 
         let mut quads = Vec::with_capacity(layout.glyphs.len());
         let mut bounds: Option<Rect> = None;
 
         for (glyph, path_glyph) in layout.glyphs.iter().zip(path_layout.glyphs.iter()) {
+            let content_mode = self.resolved_glyph_content_mode(graphics_config, &glyph.cache_key);
+            let raster_key = glyph
+                .cache_key
+                .for_content_mode(content_mode, field_range_px);
             let Some(atlas_entry) = self.glyph_atlas.resolve_sync(
                 ctx,
                 &mut self.font_system,
                 &mut self.scale_context,
-                glyph.cache_key.clone(),
+                raster_key,
                 self.current_frame,
             ) else {
                 continue;
@@ -4793,9 +4935,7 @@ impl TextUi {
         let mut bounds: Option<Rect> = None;
 
         for (glyph, path_glyph) in layout.glyphs.iter().zip(path_layout.glyphs.iter()) {
-            let Some(atlas_glyph) = rasterize_atlas_glyph(
-                &mut self.font_system,
-                &mut self.scale_context,
+            let Some(atlas_glyph) = self.get_or_rasterize_gpu_scene_glyph(
                 &glyph.cache_key,
                 graphics_config.rasterization,
                 graphics_config.atlas_padding_px,
@@ -5015,6 +5155,7 @@ impl TextUi {
         self.glyph_atlas.clear();
         self.markdown_cache.clear();
         let _ = self.gpu_scene_cache.write(|state| state.clear());
+        let _ = self.gpu_scene_glyph_cache.write(|state| state.clear());
         if clear_input_states {
             self.input_states.clear();
         }
@@ -5036,6 +5177,35 @@ impl TextUi {
         self.gpu_scene_cache.write(|state| {
             let _ = state.evict_to_budget();
         });
+        self.gpu_scene_glyph_cache.write(|state| {
+            let _ = state.evict_to_budget();
+        });
+    }
+
+    fn get_or_rasterize_gpu_scene_glyph(
+        &mut self,
+        cache_key: &GlyphRasterKey,
+        rasterization: TextRasterizationConfig,
+        padding_px: usize,
+    ) -> Option<Arc<PreparedAtlasGlyph>> {
+        if let Some(glyph) = self
+            .gpu_scene_glyph_cache
+            .write(|state| state.touch(cache_key).map(|entry| Arc::clone(&entry.value)))
+        {
+            return Some(glyph);
+        }
+
+        let glyph = Arc::new(rasterize_atlas_glyph(
+            &mut self.font_system,
+            &mut self.scale_context,
+            cache_key,
+            rasterization,
+            padding_px,
+        )?);
+        self.gpu_scene_glyph_cache.write(|state| {
+            let _ = state.insert(cache_key.clone(), Arc::clone(&glyph), glyph.approx_bytes);
+        });
+        Some(glyph)
     }
 
     fn hash_typography<H: Hasher>(&self, state: &mut H) {
@@ -5646,10 +5816,10 @@ impl GlyphAtlas {
         }
 
         let (page_index, allocation) = loop {
-            if let Some(found) = self.try_allocate(allocation_size) {
+            if let Some(found) = self.try_allocate(allocation_size, glyph.content_mode) {
                 break found;
             }
-            if self.try_add_page(ctx) {
+            if self.try_add_page(ctx, glyph.content_mode) {
                 continue;
             }
             if !self.evict_one_lru() {
@@ -5670,6 +5840,8 @@ impl GlyphAtlas {
             placement_left_px: glyph.placement_left_px,
             placement_top_px: glyph.placement_top_px,
             is_color: glyph.is_color,
+            content_mode: glyph.content_mode,
+            field_range_px: glyph.field_range_px,
             last_used_frame: current_frame,
             approx_bytes: glyph.approx_bytes,
         };
@@ -5684,8 +5856,15 @@ impl GlyphAtlas {
         Some(resolved)
     }
 
-    fn try_allocate(&mut self, size: etagere::Size) -> Option<(usize, Allocation)> {
+    fn try_allocate(
+        &mut self,
+        size: etagere::Size,
+        content_mode: GlyphContentMode,
+    ) -> Option<(usize, Allocation)> {
         for (page_index, page) in self.pages.iter_mut().enumerate() {
+            if page.content_mode != content_mode {
+                continue;
+            }
             if let Some(allocation) = page.allocator.allocate(size) {
                 return Some((page_index, allocation));
             }
@@ -5693,14 +5872,14 @@ impl GlyphAtlas {
         None
     }
 
-    fn try_add_page(&mut self, ctx: &Context) -> bool {
+    fn try_add_page(&mut self, ctx: &Context, content_mode: GlyphContentMode) -> bool {
         let side = self.page_side_px;
         let side_i = side as i32;
 
         // Reuse any page that has been fully evicted — reset its allocator in place.
         // The GPU texture is kept as-is; stale pixels at unreachable UVs are harmless.
         for page in &mut self.pages {
-            if page.live_glyphs == 0 {
+            if page.live_glyphs == 0 && page.content_mode == content_mode {
                 page.allocator = AtlasAllocator::new(size2(side_i, side_i));
                 return true;
             }
@@ -5710,6 +5889,7 @@ impl GlyphAtlas {
         let texture = self.allocate_page_texture(ctx, side);
         self.pages.push(GlyphAtlasPage {
             allocator: AtlasAllocator::new(size2(side_i, side_i)),
+            content_mode,
             texture,
             backing: ColorImage::filled([side, side], Color32::TRANSPARENT),
             dirty_rect: None,
@@ -5792,6 +5972,8 @@ impl GlyphAtlas {
             placement_left_px: entry.placement_left_px,
             placement_top_px: entry.placement_top_px,
             is_color: entry.is_color,
+            content_mode: entry.content_mode,
+            field_range_px: entry.field_range_px,
         }
     }
 
@@ -5923,6 +6105,23 @@ fn rasterize_atlas_glyph(
     rasterization: TextRasterizationConfig,
     padding_px: usize,
 ) -> Option<PreparedAtlasGlyph> {
+    if cache_key.content_mode() != GlyphContentMode::AlphaMask
+        && !cache_key
+            .cache_key
+            .flags
+            .contains(cosmic_text::CacheKeyFlags::PIXEL_FONT)
+    {
+        if let Some(glyph) = rasterize_field_glyph(
+            font_system,
+            scale_context,
+            cache_key,
+            rasterization,
+            padding_px,
+        ) {
+            return Some(glyph);
+        }
+    }
+
     let image = render_swash_image(font_system, scale_context, cache_key, rasterization)?;
     let glyph_width = image.placement.width as usize;
     let glyph_height = image.placement.height as usize;
@@ -5939,6 +6138,8 @@ fn rasterize_atlas_glyph(
         placement_left_px: image.placement.left,
         placement_top_px: image.placement.top,
         is_color: matches!(image.content, SwashContent::Color),
+        content_mode: GlyphContentMode::AlphaMask,
+        field_range_px: 0.0,
     })
 }
 
@@ -6122,6 +6323,305 @@ fn render_swash_outline_commands(
         ));
     }
     Some(outline.path().commands().collect())
+}
+
+#[derive(Clone, Copy)]
+struct FieldLineSegment {
+    a: [f32; 2],
+    b: [f32; 2],
+    color_mask: u8,
+}
+
+#[derive(Default)]
+struct FlattenedOutline {
+    contours: Vec<Vec<[f32; 2]>>,
+    segments: Vec<FieldLineSegment>,
+    min: [f32; 2],
+    max: [f32; 2],
+}
+
+impl FlattenedOutline {
+    fn new() -> Self {
+        Self {
+            contours: Vec::new(),
+            segments: Vec::new(),
+            min: [f32::INFINITY, f32::INFINITY],
+            max: [f32::NEG_INFINITY, f32::NEG_INFINITY],
+        }
+    }
+
+    fn include_point(&mut self, point: [f32; 2]) {
+        self.min[0] = self.min[0].min(point[0]);
+        self.min[1] = self.min[1].min(point[1]);
+        self.max[0] = self.max[0].max(point[0]);
+        self.max[1] = self.max[1].max(point[1]);
+    }
+}
+
+fn rasterize_field_glyph(
+    font_system: &mut FontSystem,
+    scale_context: &mut ScaleContext,
+    cache_key: &GlyphRasterKey,
+    rasterization: TextRasterizationConfig,
+    padding_px: usize,
+) -> Option<PreparedAtlasGlyph> {
+    let commands =
+        render_swash_outline_commands(font_system, scale_context, cache_key, rasterization)?;
+    let outline = flatten_outline_commands_for_field(&commands, cache_key.content_mode());
+    if outline.segments.is_empty()
+        || !outline.min[0].is_finite()
+        || !outline.min[1].is_finite()
+        || !outline.max[0].is_finite()
+        || !outline.max[1].is_finite()
+    {
+        return None;
+    }
+
+    let field_range_px = cache_key.field_range_px().max(1.0);
+    let left = (outline.min[0] - field_range_px).floor() as i32;
+    let bottom = (outline.min[1] - field_range_px).floor() as i32;
+    let right = (outline.max[0] + field_range_px).ceil() as i32;
+    let top = (outline.max[1] + field_range_px).ceil() as i32;
+    let glyph_width = (right - left).max(1) as usize;
+    let glyph_height = (top - bottom).max(1) as usize;
+
+    let mut glyph_image = ColorImage::filled([glyph_width, glyph_height], Color32::TRANSPARENT);
+    for y in 0..glyph_height {
+        for x in 0..glyph_width {
+            let sample = [left as f32 + x as f32 + 0.5, top as f32 - y as f32 - 0.5];
+            let inside = point_inside_outline(sample, &outline.contours);
+            let rgba = match cache_key.content_mode() {
+                GlyphContentMode::Sdf => {
+                    encode_sdf_sample(sample, inside, &outline.segments, field_range_px)
+                }
+                GlyphContentMode::Msdf => {
+                    encode_msdf_sample(sample, inside, &outline.segments, field_range_px)
+                }
+                GlyphContentMode::AlphaMask => unreachable!(),
+            };
+            glyph_image.pixels[y * glyph_width + x] =
+                Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]);
+        }
+    }
+
+    let upload_image = build_atlas_upload_image(&glyph_image, padding_px);
+    Some(PreparedAtlasGlyph {
+        approx_bytes: color_image_byte_size(&upload_image),
+        upload_image,
+        size_px: [glyph_width, glyph_height],
+        placement_left_px: left,
+        placement_top_px: top,
+        is_color: false,
+        content_mode: cache_key.content_mode(),
+        field_range_px,
+    })
+}
+
+fn flatten_outline_commands_for_field(
+    commands: &[swash::zeno::Command],
+    content_mode: GlyphContentMode,
+) -> FlattenedOutline {
+    let mut outline = FlattenedOutline::new();
+    let mut current = [0.0, 0.0];
+    let mut contour_start = [0.0, 0.0];
+    let mut contour_points = Vec::<[f32; 2]>::new();
+    let mut contour_segments = Vec::<([f32; 2], [f32; 2])>::new();
+
+    let flush_contour = |outline: &mut FlattenedOutline,
+                         contour_points: &mut Vec<[f32; 2]>,
+                         contour_segments: &mut Vec<([f32; 2], [f32; 2])>| {
+        if contour_segments.is_empty() {
+            contour_points.clear();
+            return;
+        }
+        if contour_points.len() >= 3 {
+            outline.contours.push(contour_points.clone());
+        }
+        let colors = [1_u8, 2_u8, 4_u8];
+        for (index, (a, b)) in contour_segments.iter().copied().enumerate() {
+            outline.include_point(a);
+            outline.include_point(b);
+            let color_mask = match content_mode {
+                GlyphContentMode::AlphaMask | GlyphContentMode::Sdf => 0b111,
+                GlyphContentMode::Msdf => colors[index % colors.len()],
+            };
+            outline.segments.push(FieldLineSegment { a, b, color_mask });
+        }
+        contour_points.clear();
+        contour_segments.clear();
+    };
+
+    for command in commands {
+        match *command {
+            swash::zeno::Command::MoveTo(point) => {
+                flush_contour(&mut outline, &mut contour_points, &mut contour_segments);
+                current = [point.x, point.y];
+                contour_start = current;
+                contour_points.push(current);
+            }
+            swash::zeno::Command::LineTo(point) => {
+                let next = [point.x, point.y];
+                contour_segments.push((current, next));
+                contour_points.push(next);
+                current = next;
+            }
+            swash::zeno::Command::QuadTo(control, point) => {
+                let next = [point.x, point.y];
+                let control = [control.x, control.y];
+                let steps = curve_steps(current, control, control, next);
+                let mut prev = current;
+                for step in 1..=steps {
+                    let t = step as f32 / steps as f32;
+                    let p = eval_quad(current, control, next, t);
+                    contour_segments.push((prev, p));
+                    contour_points.push(p);
+                    prev = p;
+                }
+                current = next;
+            }
+            swash::zeno::Command::CurveTo(control_a, control_b, point) => {
+                let next = [point.x, point.y];
+                let control_a = [control_a.x, control_a.y];
+                let control_b = [control_b.x, control_b.y];
+                let steps = curve_steps(current, control_a, control_b, next);
+                let mut prev = current;
+                for step in 1..=steps {
+                    let t = step as f32 / steps as f32;
+                    let p = eval_cubic(current, control_a, control_b, next, t);
+                    contour_segments.push((prev, p));
+                    contour_points.push(p);
+                    prev = p;
+                }
+                current = next;
+            }
+            swash::zeno::Command::Close => {
+                if current != contour_start {
+                    contour_segments.push((current, contour_start));
+                    contour_points.push(contour_start);
+                    current = contour_start;
+                }
+                flush_contour(&mut outline, &mut contour_points, &mut contour_segments);
+            }
+        }
+    }
+    flush_contour(&mut outline, &mut contour_points, &mut contour_segments);
+    outline
+}
+
+fn curve_steps(p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], p3: [f32; 2]) -> usize {
+    let len = point_distance(p0, p1) + point_distance(p1, p2) + point_distance(p2, p3);
+    ((len / 6.0).ceil() as usize).clamp(4, 24)
+}
+
+fn eval_quad(p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], t: f32) -> [f32; 2] {
+    let mt = 1.0 - t;
+    [
+        mt * mt * p0[0] + 2.0 * mt * t * p1[0] + t * t * p2[0],
+        mt * mt * p0[1] + 2.0 * mt * t * p1[1] + t * t * p2[1],
+    ]
+}
+
+fn eval_cubic(p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], p3: [f32; 2], t: f32) -> [f32; 2] {
+    let mt = 1.0 - t;
+    let mt2 = mt * mt;
+    let t2 = t * t;
+    [
+        mt2 * mt * p0[0] + 3.0 * mt2 * t * p1[0] + 3.0 * mt * t2 * p2[0] + t2 * t * p3[0],
+        mt2 * mt * p0[1] + 3.0 * mt2 * t * p1[1] + 3.0 * mt * t2 * p2[1] + t2 * t * p3[1],
+    ]
+}
+
+fn point_distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+fn point_inside_outline(point: [f32; 2], contours: &[Vec<[f32; 2]>]) -> bool {
+    let mut inside = false;
+    for contour in contours {
+        if contour.len() < 3 {
+            continue;
+        }
+        let mut j = contour.len() - 1;
+        for i in 0..contour.len() {
+            let a = contour[i];
+            let b = contour[j];
+            let intersects = ((a[1] > point[1]) != (b[1] > point[1]))
+                && (point[0] < (b[0] - a[0]) * (point[1] - a[1]) / ((b[1] - a[1]) + 1e-6) + a[0]);
+            if intersects {
+                inside = !inside;
+            }
+            j = i;
+        }
+    }
+    inside
+}
+
+fn encode_sdf_sample(
+    point: [f32; 2],
+    inside: bool,
+    segments: &[FieldLineSegment],
+    field_range_px: f32,
+) -> [u8; 4] {
+    let signed = signed_distance_to_segments(point, inside, segments.iter().copied());
+    let encoded = encode_signed_distance(signed, field_range_px);
+    [encoded, encoded, encoded, 255]
+}
+
+fn encode_msdf_sample(
+    point: [f32; 2],
+    inside: bool,
+    segments: &[FieldLineSegment],
+    field_range_px: f32,
+) -> [u8; 4] {
+    let sign = if inside { 1.0 } else { -1.0 };
+    let mut channel_distances = [field_range_px; 3];
+    for segment in segments {
+        let distance = distance_to_segment(point, segment.a, segment.b);
+        if segment.color_mask & 1 != 0 {
+            channel_distances[0] = channel_distances[0].min(distance);
+        }
+        if segment.color_mask & 2 != 0 {
+            channel_distances[1] = channel_distances[1].min(distance);
+        }
+        if segment.color_mask & 4 != 0 {
+            channel_distances[2] = channel_distances[2].min(distance);
+        }
+    }
+    [
+        encode_signed_distance(sign * channel_distances[0], field_range_px),
+        encode_signed_distance(sign * channel_distances[1], field_range_px),
+        encode_signed_distance(sign * channel_distances[2], field_range_px),
+        255,
+    ]
+}
+
+fn signed_distance_to_segments(
+    point: [f32; 2],
+    inside: bool,
+    segments: impl Iterator<Item = FieldLineSegment>,
+) -> f32 {
+    let mut min_distance = f32::INFINITY;
+    for segment in segments {
+        min_distance = min_distance.min(distance_to_segment(point, segment.a, segment.b));
+    }
+    if inside { min_distance } else { -min_distance }
+}
+
+fn encode_signed_distance(distance: f32, field_range_px: f32) -> u8 {
+    let normalized = (0.5 + 0.5 * (distance / field_range_px).clamp(-1.0, 1.0)).clamp(0.0, 1.0);
+    (normalized * 255.0).round() as u8
+}
+
+fn distance_to_segment(point: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ap = [point[0] - a[0], point[1] - a[1]];
+    let denom = ab[0] * ab[0] + ab[1] * ab[1];
+    if denom <= 1e-6 {
+        return point_distance(point, a);
+    }
+    let t = ((ap[0] * ab[0] + ap[1] * ab[1]) / denom).clamp(0.0, 1.0);
+    let closest = [a[0] + ab[0] * t, a[1] + ab[1] * t];
+    point_distance(point, closest)
 }
 
 fn swash_image_to_color_image(image: &cosmic_text::SwashImage) -> Option<ColorImage> {
@@ -6340,7 +6840,9 @@ impl TextWgpuPipelineResources {
                         5 => Float32x2,
                         6 => Float32x2,
                         7 => Float32x2,
-                        8 => Float32x4
+                        8 => Float32x4,
+                        9 => Float32,
+                        10 => Float32
                     ],
                 }],
             },
@@ -6557,6 +7059,8 @@ fn map_scene_quads_to_rect(
                 )
             }),
             tint: multiply_color32(quad.tint.into(), tint),
+            content_mode: GlyphContentMode::AlphaMask,
+            field_range_px: 0.0,
         })
         .collect()
 }

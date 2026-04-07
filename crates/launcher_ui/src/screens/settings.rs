@@ -1,8 +1,8 @@
 use config::{
     Config, DOWNLOAD_CONCURRENCY_MAX, DOWNLOAD_CONCURRENCY_MIN, DropdownSettingId, FloatSettingId,
     INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP, IntSettingId,
-    JavaRuntimeVersion, SkinPreviewAaMode, SkinPreviewTexelAaMode, SvgAaMode, UiFontFamily,
-    parse_bitrate_to_bps,
+    JavaRuntimeVersion, SkinPreviewAaMode, SkinPreviewTexelAaMode, SvgAaMode, TextRenderingPath,
+    UiFontFamily, parse_bitrate_to_bps,
 };
 use egui::Ui;
 use installation::purge_cache as purge_installation_cache;
@@ -69,10 +69,9 @@ fn render_settings_contents(
         ui,
         text_ui,
         "Appearance & Privacy",
-        "Theme, typography, and on-stream safety settings.",
+        "Theme, launcher chrome, and on-stream safety settings.",
         |ui, text_ui| {
             render_theme_setting(ui, text_ui, config, available_themes);
-            render_ui_font_settings(ui, text_ui, config, available_ui_fonts);
             render_skin_preview_setting(ui, text_ui, config);
             render_svg_aa_setting(ui, text_ui, config);
             render_window_blur_setting(ui, text_ui, config);
@@ -83,11 +82,27 @@ fn render_settings_contents(
                 config,
                 &[
                     config::ToggleSettingId::StreamerModeEnabled,
-                    config::ToggleSettingId::OpenTypeFeaturesEnabled,
                     config::ToggleSettingId::NotificationExpiryBarsEmptyLeft,
                     config::ToggleSettingId::SkinPreviewFreshFormatEnabled,
                     config::ToggleSettingId::SkinPreview3dLayersEnabled,
                 ],
+            );
+        },
+    );
+
+    render_settings_section(
+        ui,
+        text_ui,
+        "Text",
+        "Font, shaping, and glyph rendering settings that affect launcher text.",
+        |ui, text_ui| {
+            render_ui_font_settings(ui, text_ui, config, available_ui_fonts);
+            render_text_rendering_path_setting(ui, text_ui, config);
+            render_selected_toggles(
+                ui,
+                text_ui,
+                config,
+                &[config::ToggleSettingId::OpenTypeFeaturesEnabled],
             );
             render_selected_text_settings(
                 ui,
@@ -410,6 +425,33 @@ fn render_ui_font_settings(
     });
 
     render_selected_int_settings(ui, text_ui, config, &[IntSettingId::UiFontWeight]);
+}
+
+fn render_text_rendering_path_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let options = TextRenderingPath::ALL;
+    let option_labels: Vec<&str> = options.iter().map(|option| option.label()).collect();
+    let selected_index = options
+        .iter()
+        .position(|option| *option == config.text_rendering_path())
+        .unwrap_or(0);
+    let mut selected_index = selected_index;
+    let response = settings_widgets::full_width_dropdown_row(
+        text_ui,
+        ui,
+        "text_rendering_path",
+        "Text Rendering Path",
+        Some(
+            "Controls how glyphs are rasterized for the launcher UI. Auto keeps the default path. SDF/MSDF are mainly useful for testing the new text pipeline.",
+        ),
+        &mut selected_index,
+        &option_labels,
+    );
+    if response.changed() {
+        if let Some(next) = options.get(selected_index).copied() {
+            config.set_text_rendering_path(next);
+        }
+    }
+    ui.add_space(style::SPACE_MD);
 }
 
 fn render_svg_aa_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {

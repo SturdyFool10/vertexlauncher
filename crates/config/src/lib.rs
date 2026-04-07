@@ -152,6 +152,33 @@ pub enum SvgAaMode {
     Ultra,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextRenderingPath {
+    Auto,
+    AlphaMask,
+    Sdf,
+    Msdf,
+}
+
+impl TextRenderingPath {
+    pub const ALL: [TextRenderingPath; 4] = [
+        TextRenderingPath::Auto,
+        TextRenderingPath::AlphaMask,
+        TextRenderingPath::Sdf,
+        TextRenderingPath::Msdf,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            TextRenderingPath::Auto => "Auto",
+            TextRenderingPath::AlphaMask => "Alpha Mask",
+            TextRenderingPath::Sdf => "SDF",
+            TextRenderingPath::Msdf => "MSDF",
+        }
+    }
+}
+
 impl SvgAaMode {
     pub const ALL: [SvgAaMode; 4] = [
         SvgAaMode::Balanced,
@@ -791,6 +818,7 @@ pub struct Config {
     open_type_features_to_enable: String,
     notification_expiry_bars_empty_left: bool,
     ui_font_family: UiFontFamily,
+    text_rendering_path: TextRenderingPath,
     skin_preview_aa_mode: SkinPreviewAaMode,
     skin_preview_texel_aa_mode: SkinPreviewTexelAaMode,
     svg_aa_mode: SvgAaMode,
@@ -846,6 +874,14 @@ impl Config {
     /// Returns currently selected UI font family.
     pub fn ui_font_family(&self) -> UiFontFamily {
         self.ui_font_family.clone()
+    }
+
+    pub fn text_rendering_path(&self) -> TextRenderingPath {
+        self.text_rendering_path
+    }
+
+    pub fn set_text_rendering_path(&mut self, value: TextRenderingPath) {
+        self.text_rendering_path = value;
     }
 
     /// Returns configured skin preview anti-aliasing mode.
@@ -1219,6 +1255,9 @@ impl Config {
             }
         }
         self.ui_font_family.normalize();
+        if !TextRenderingPath::ALL.contains(&self.text_rendering_path) {
+            self.text_rendering_path = TextRenderingPath::Auto;
+        }
         self.ui_opacity_percent = self
             .ui_opacity_percent
             .clamp(UI_OPACITY_PERCENT_MIN, UI_OPACITY_PERCENT_MAX);
@@ -1292,6 +1331,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left,
             ui_font_family: _,
+            text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
             svg_aa_mode: _,
@@ -1390,6 +1430,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left: _,
             ui_font_family,
+            text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
             svg_aa_mode: _,
@@ -1442,6 +1483,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
+            text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
             svg_aa_mode: _,
@@ -1502,6 +1544,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
+            text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
             svg_aa_mode: _,
@@ -1563,6 +1606,7 @@ impl Config {
             open_type_features_to_enable,
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
+            text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
             svg_aa_mode: _,
@@ -1635,6 +1679,7 @@ impl Default for Config {
             open_type_features_to_enable: String::new(),
             notification_expiry_bars_empty_left: false,
             ui_font_family: UiFontFamily::included_default(),
+            text_rendering_path: TextRenderingPath::Auto,
             skin_preview_aa_mode: SkinPreviewAaMode::Fxaa,
             skin_preview_texel_aa_mode: SkinPreviewTexelAaMode::Off,
             svg_aa_mode: SvgAaMode::Balanced,
