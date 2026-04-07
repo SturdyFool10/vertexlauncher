@@ -771,6 +771,7 @@ impl VertexApp {
                             wgpu_target_format,
                             skin_preview_msaa_samples,
                             self.fonts.available_ui_fonts(),
+                            self.fonts.available_emoji_fonts(),
                             self.theme_catalog.themes(),
                             &settings_info,
                             &mut self.content_browser_state,

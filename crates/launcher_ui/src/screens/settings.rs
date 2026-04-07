@@ -2,7 +2,7 @@ use config::{
     Config, DOWNLOAD_CONCURRENCY_MAX, DOWNLOAD_CONCURRENCY_MIN, DropdownSettingId, FloatSettingId,
     INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP, IntSettingId,
     JavaRuntimeVersion, SkinPreviewAaMode, SkinPreviewTexelAaMode, SvgAaMode, TextRenderingPath,
-    UiFontFamily, parse_bitrate_to_bps,
+    UiEmojiFontFamily, UiFontFamily, parse_bitrate_to_bps,
 };
 use egui::Ui;
 use installation::purge_cache as purge_installation_cache;
@@ -31,6 +31,7 @@ pub fn render(
     text_ui: &mut TextUi,
     config: &mut Config,
     available_ui_fonts: &[UiFontFamily],
+    available_emoji_fonts: &[UiEmojiFontFamily],
     available_themes: &[Theme],
     settings_info: &SettingsInfo,
 ) {
@@ -45,6 +46,7 @@ pub fn render(
                 text_ui,
                 config,
                 available_ui_fonts,
+                available_emoji_fonts,
                 available_themes,
                 settings_info,
             );
@@ -62,6 +64,7 @@ fn render_settings_contents(
     text_ui: &mut TextUi,
     config: &mut Config,
     available_ui_fonts: &[UiFontFamily],
+    available_emoji_fonts: &[UiEmojiFontFamily],
     available_themes: &[Theme],
     settings_info: &SettingsInfo,
 ) {
@@ -97,6 +100,7 @@ fn render_settings_contents(
         "Font, shaping, and glyph rendering settings that affect launcher text.",
         |ui, text_ui| {
             render_ui_font_settings(ui, text_ui, config, available_ui_fonts);
+            render_emoji_font_settings(ui, text_ui, config, available_emoji_fonts);
             render_text_rendering_path_setting(ui, text_ui, config);
             render_selected_toggles(
                 ui,
@@ -425,6 +429,43 @@ fn render_ui_font_settings(
     });
 
     render_selected_int_settings(ui, text_ui, config, &[IntSettingId::UiFontWeight]);
+}
+
+fn render_emoji_font_settings(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    config: &mut Config,
+    available_emoji_fonts: &[UiEmojiFontFamily],
+) {
+    if available_emoji_fonts.is_empty() {
+        return;
+    }
+    let current = config.ui_emoji_font_family();
+    let selected_option_index = available_emoji_fonts
+        .iter()
+        .position(|option| option.matches(&current))
+        .unwrap_or(0);
+    let option_labels: Vec<String> = available_emoji_fonts
+        .iter()
+        .map(|option| option.settings_label())
+        .collect();
+    let option_label_refs: Vec<&str> = option_labels.iter().map(|s| s.as_str()).collect();
+    let mut selected_index = selected_option_index;
+    let response = settings_widgets::searchable_dropdown_row(
+        text_ui,
+        ui,
+        egui::Id::new("emoji_font_family_dropdown"),
+        "Emoji Font",
+        Some("Font used for emoji characters. Noto Color Emoji is included and selected by default."),
+        &mut selected_index,
+        &option_label_refs,
+    );
+    if response.changed() {
+        if let Some(next_value) = available_emoji_fonts.get(selected_index) {
+            config.set_ui_emoji_font_family(next_value.clone());
+        }
+    }
+    ui.add_space(style::SPACE_MD);
 }
 
 fn render_text_rendering_path_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {

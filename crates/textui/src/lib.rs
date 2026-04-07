@@ -6994,7 +6994,7 @@ fn swash_image_to_color_image(image: &cosmic_text::SwashImage) -> Option<ColorIm
         SwashContent::Color | SwashContent::SubpixelMask => image
             .data
             .chunks_exact(4)
-            .map(|rgba| Color32::from_rgba_premultiplied(rgba[0], rgba[1], rgba[2], rgba[3]))
+            .map(|rgba| Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]))
             .collect::<Vec<_>>(),
     };
 

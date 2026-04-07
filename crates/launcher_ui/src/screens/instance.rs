@@ -1121,7 +1121,7 @@ fn render_instance_screenshot_viewer_modal(
             {
                 let visible_fraction =
                     1.0 / viewer_state.zoom.max(INSTANCE_SCREENSHOT_VIEWER_MIN_ZOOM);
-                let pan_speed = 1.35 * frame_dt * visible_fraction;
+                let pan_speed = 1.35 * 0.2 * frame_dt * visible_fraction;
                 viewer_state.pan_uv.x += gamepad_pan.x * pan_speed;
                 viewer_state.pan_uv.y += gamepad_pan.y * pan_speed;
                 clamp_instance_screenshot_pan(viewer_state);

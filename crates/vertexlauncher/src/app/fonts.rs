@@ -1,4 +1,4 @@
-use config::{Config, DropdownSettingId, UiFontFamily};
+use config::{Config, DropdownSettingId, UiEmojiFontFamily, UiFontFamily};
 use eframe::egui;
 use fontloader::{FontCatalog, FontSpec, Slant, Stretch, Weight};
 use launcher_ui::console;
@@ -7,6 +7,8 @@ use textui::TextUi;
 
 const MAPLE_MONO_NF_REGULAR_TTF: &[u8] =
     include_bytes!("../included_fonts/MapleMono-NF-Regular.ttf");
+
+const NOTO_COLOR_EMOJI_TTF: &[u8] = include_bytes!("../included_fonts/NotoColorEmoji.ttf");
 
 #[derive(Clone, Debug, PartialEq)]
 struct AppliedFontSignature {
@@ -27,8 +29,10 @@ struct AppliedTextSignature {
 pub struct FontController {
     font_catalog: FontCatalog,
     available_ui_fonts: Vec<UiFontFamily>,
+    available_emoji_fonts: Vec<UiEmojiFontFamily>,
     applied_font_signature: Option<AppliedFontSignature>,
     applied_text_signature: Option<AppliedTextSignature>,
+    applied_emoji_font: Option<UiEmojiFontFamily>,
     effective_ui_font_family: UiFontFamily,
 }
 
@@ -39,19 +43,26 @@ impl FontController {
 
         Self {
             available_ui_fonts: detect_available_ui_fonts(&catalog),
+            available_emoji_fonts: detect_available_emoji_fonts(&catalog),
             font_catalog: catalog,
             applied_font_signature: None,
             applied_text_signature: None,
+            applied_emoji_font: None,
             effective_ui_font_family: initial_family,
         }
     }
 
     pub fn register_included_fonts(text_ui: &mut TextUi) {
         text_ui.register_font_data(MAPLE_MONO_NF_REGULAR_TTF.to_vec());
+        text_ui.register_font_data(NOTO_COLOR_EMOJI_TTF.to_vec());
     }
 
     pub fn available_ui_fonts(&self) -> &[UiFontFamily] {
         &self.available_ui_fonts
+    }
+
+    pub fn available_emoji_fonts(&self) -> &[UiEmojiFontFamily] {
+        &self.available_emoji_fonts
     }
 
     pub fn ensure_selected_font_is_available(&self, config: &mut Config) {
@@ -156,6 +167,32 @@ impl FontController {
             console::mark_text_for_redraw();
             ctx.request_repaint();
         }
+
+        let desired_emoji_font = config.ui_emoji_font_family();
+        if self
+            .applied_emoji_font
+            .as_ref()
+            .is_none_or(|prev| !prev.matches(&desired_emoji_font))
+        {
+            if !desired_emoji_font.is_included_default() {
+                let family_name = desired_emoji_font.family_name().to_owned();
+                let family_candidates: Vec<&str> = vec![family_name.as_str()];
+                let spec = FontSpec::new(&family_candidates)
+                    .weight(Weight(400))
+                    .slant(Slant::Upright)
+                    .stretch(Stretch::Normal);
+                if let Ok((bytes, _)) = self.font_catalog.query_bytes(&spec) {
+                    text_ui.register_font_data(bytes);
+                } else {
+                    tracing::warn!(
+                        target: "vertexlauncher/app/fonts",
+                        configured_font = desired_emoji_font.label(),
+                        "configured emoji font not available; falling back to included default"
+                    );
+                }
+            }
+            self.applied_emoji_font = Some(desired_emoji_font);
+        }
     }
 }
 
@@ -167,6 +204,22 @@ fn install_included_maple_font(ctx: &egui::Context, size_pt: f32) {
         MAPLE_MONO_NF_REGULAR_TTF.to_vec(),
         size_pt,
     );
+}
+
+fn detect_available_emoji_fonts(font_catalog: &FontCatalog) -> Vec<UiEmojiFontFamily> {
+    let mut available = vec![UiEmojiFontFamily::included_default()];
+
+    for family_name in font_catalog.deduplicated_family_names() {
+        let family = UiEmojiFontFamily::new(family_name);
+        if family.is_included_default()
+            || available.iter().any(|existing| existing.matches(&family))
+        {
+            continue;
+        }
+        available.push(family);
+    }
+
+    available
 }
 
 fn detect_available_ui_fonts(font_catalog: &FontCatalog) -> Vec<UiFontFamily> {

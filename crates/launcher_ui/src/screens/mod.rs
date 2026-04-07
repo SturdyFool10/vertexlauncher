@@ -1,6 +1,6 @@
 use std::{collections::HashMap, env};
 
-use config::{Config, UiFontFamily};
+use config::{Config, UiEmojiFontFamily, UiFontFamily};
 use curseforge::set_api_key_override as set_curseforge_api_key_override;
 use eframe::egui_wgpu::wgpu;
 use egui::Ui;
@@ -287,6 +287,7 @@ pub fn render(
     wgpu_target_format: Option<wgpu::TextureFormat>,
     skin_preview_msaa_samples: u32,
     available_ui_fonts: &[UiFontFamily],
+    available_emoji_fonts: &[UiEmojiFontFamily],
     available_themes: &[Theme],
     settings_info: &SettingsInfo,
     content_browser_state: &mut ContentBrowserState,
@@ -417,6 +418,7 @@ pub fn render(
                 text_ui,
                 config,
                 available_ui_fonts,
+                available_emoji_fonts,
                 available_themes,
                 settings_info,
             );

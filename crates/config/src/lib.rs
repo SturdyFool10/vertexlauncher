@@ -445,6 +445,101 @@ where
     deserializer.deserialize_any(U128Visitor)
 }
 
+const INCLUDED_DEFAULT_EMOJI_FONT_FAMILY: &str = "Noto Color Emoji";
+const INCLUDED_EMOJI_FONT_SETTINGS_LABEL: &str = "Noto Color Emoji (Included)";
+
+/// Identifies which emoji font to use for glyph fallback when text contains emoji.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct UiEmojiFontFamily(String);
+
+impl UiEmojiFontFamily {
+    /// Creates the bundled Noto Color Emoji selection.
+    pub fn included_default() -> Self {
+        Self(INCLUDED_EMOJI_FONT_SETTINGS_LABEL.to_owned())
+    }
+
+    /// Creates an emoji font family from a discovered or configured family name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(normalize_emoji_font_family_name(name.into()))
+    }
+
+    /// Returns whether this font family is the bundled Noto Color Emoji.
+    pub fn is_included_default(&self) -> bool {
+        normalize_emoji_font_family_key(&self.0) == normalize_emoji_font_family_key(INCLUDED_EMOJI_FONT_SETTINGS_LABEL)
+            || normalize_emoji_font_family_key(&self.0) == normalize_emoji_font_family_key(INCLUDED_DEFAULT_EMOJI_FONT_FAMILY)
+    }
+
+    /// Display label used in the settings UI.
+    pub fn label(&self) -> &str {
+        &self.0
+    }
+
+    /// Settings-facing label with the included marker when applicable.
+    pub fn settings_label(&self) -> String {
+        if self.is_included_default() {
+            INCLUDED_EMOJI_FONT_SETTINGS_LABEL.to_owned()
+        } else {
+            self.0.clone()
+        }
+    }
+
+    /// The font family name to query from the font catalog.
+    pub fn family_name(&self) -> &str {
+        if self.is_included_default() {
+            INCLUDED_DEFAULT_EMOJI_FONT_FAMILY
+        } else {
+            &self.0
+        }
+    }
+
+    /// Case-insensitive match used when reconciling discovered font families.
+    pub fn matches(&self, other: &Self) -> bool {
+        normalize_emoji_font_family_key(self.family_name())
+            == normalize_emoji_font_family_key(other.family_name())
+    }
+
+    /// Normalizes the stored family name in place.
+    pub fn normalize(&mut self) {
+        self.0 = normalize_emoji_font_family_name(std::mem::take(&mut self.0));
+    }
+}
+
+impl Serialize for UiEmojiFontFamily {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.settings_label())
+    }
+}
+
+impl<'de> Deserialize<'de> for UiEmojiFontFamily {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(Self::new(raw))
+    }
+}
+
+fn normalize_emoji_font_family_name(name: String) -> String {
+    let trimmed = name.trim();
+    if trimmed.is_empty()
+        || normalize_emoji_font_family_key(trimmed)
+            == normalize_emoji_font_family_key(INCLUDED_DEFAULT_EMOJI_FONT_FAMILY)
+        || normalize_emoji_font_family_key(trimmed)
+            == normalize_emoji_font_family_key(INCLUDED_EMOJI_FONT_SETTINGS_LABEL)
+    {
+        return INCLUDED_EMOJI_FONT_SETTINGS_LABEL.to_owned();
+    }
+    trimmed.to_owned()
+}
+
+fn normalize_emoji_font_family_key(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
 fn normalize_ui_font_family_name(name: String) -> String {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -818,6 +913,7 @@ pub struct Config {
     open_type_features_to_enable: String,
     notification_expiry_bars_empty_left: bool,
     ui_font_family: UiFontFamily,
+    ui_emoji_font_family: UiEmojiFontFamily,
     text_rendering_path: TextRenderingPath,
     skin_preview_aa_mode: SkinPreviewAaMode,
     skin_preview_texel_aa_mode: SkinPreviewTexelAaMode,
@@ -874,6 +970,16 @@ impl Config {
     /// Returns currently selected UI font family.
     pub fn ui_font_family(&self) -> UiFontFamily {
         self.ui_font_family.clone()
+    }
+
+    /// Returns currently selected emoji font family.
+    pub fn ui_emoji_font_family(&self) -> UiEmojiFontFamily {
+        self.ui_emoji_font_family.clone()
+    }
+
+    /// Sets the emoji font family.
+    pub fn set_ui_emoji_font_family(&mut self, value: UiEmojiFontFamily) {
+        self.ui_emoji_font_family = value;
     }
 
     pub fn text_rendering_path(&self) -> TextRenderingPath {
@@ -1255,6 +1361,7 @@ impl Config {
             }
         }
         self.ui_font_family.normalize();
+        self.ui_emoji_font_family.normalize();
         if !TextRenderingPath::ALL.contains(&self.text_rendering_path) {
             self.text_rendering_path = TextRenderingPath::Auto;
         }
@@ -1331,6 +1438,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left,
             ui_font_family: _,
+            ui_emoji_font_family: _,
             text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
@@ -1430,6 +1538,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left: _,
             ui_font_family,
+            ui_emoji_font_family: _,
             text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
@@ -1483,6 +1592,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
+            ui_emoji_font_family: _,
             text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
@@ -1544,6 +1654,7 @@ impl Config {
             open_type_features_to_enable: _,
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
+            ui_emoji_font_family: _,
             text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
@@ -1606,6 +1717,7 @@ impl Config {
             open_type_features_to_enable,
             notification_expiry_bars_empty_left: _,
             ui_font_family: _,
+            ui_emoji_font_family: _,
             text_rendering_path: _,
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
@@ -1679,6 +1791,7 @@ impl Default for Config {
             open_type_features_to_enable: String::new(),
             notification_expiry_bars_empty_left: false,
             ui_font_family: UiFontFamily::included_default(),
+            ui_emoji_font_family: UiEmojiFontFamily::included_default(),
             text_rendering_path: TextRenderingPath::Auto,
             skin_preview_aa_mode: SkinPreviewAaMode::Fxaa,
             skin_preview_texel_aa_mode: SkinPreviewTexelAaMode::Off,

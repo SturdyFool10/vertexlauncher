@@ -355,6 +355,9 @@ impl HomeState {
 #[derive(Debug, Clone)]
 struct ScreenshotViewerState {
     screenshot_key: String,
+    /// Snapshot of the entry's metadata and path as of the last time it was found in the gallery.
+    /// Used to retain and display the image during rescans when `screenshots` is temporarily empty.
+    entry_snapshot: ScreenshotEntry,
     zoom: f32,
     pan_uv: egui::Vec2,
 }
@@ -1153,11 +1156,19 @@ fn render_screenshot_gallery(
     }
 
     if let Some(screenshot_key) = open_screenshot_key {
-        state.screenshot_viewer = Some(ScreenshotViewerState {
-            screenshot_key,
-            zoom: SCREENSHOT_VIEWER_MIN_ZOOM,
-            pan_uv: egui::Vec2::ZERO,
-        });
+        if let Some(entry) = state
+            .screenshots
+            .iter()
+            .find(|e| e.key() == screenshot_key)
+            .cloned()
+        {
+            state.screenshot_viewer = Some(ScreenshotViewerState {
+                screenshot_key,
+                entry_snapshot: entry,
+                zoom: SCREENSHOT_VIEWER_MIN_ZOOM,
+                pan_uv: egui::Vec2::ZERO,
+            });
+        }
     }
     if let Some(screenshot_key) = delete_screenshot_key {
         state.pending_delete_screenshot_key = Some(screenshot_key);
@@ -1323,25 +1334,14 @@ fn paint_screenshot_tile_placeholder(
 }
 
 fn retain_home_viewer_image(state: &mut HomeState, retained_image_keys: &mut HashSet<String>) {
-    let Some(viewer_key) = state
-        .screenshot_viewer
-        .as_ref()
-        .map(|viewer| viewer.screenshot_key.as_str())
-    else {
+    let Some(viewer) = state.screenshot_viewer.as_ref() else {
         return;
     };
-    let Some(screenshot) = state
-        .screenshots
-        .iter()
-        .find(|entry| entry.key() == viewer_key)
-    else {
-        return;
-    };
-    let image_key = screenshot.uri();
+    // Use the snapshot so the image stays loaded during rescans when `screenshots` is empty.
+    let snapshot = viewer.entry_snapshot.clone();
+    let image_key = snapshot.uri();
     retained_image_keys.insert(image_key.clone());
-    state
-        .screenshot_images
-        .request(image_key, screenshot.path.clone());
+    state.screenshot_images.request(image_key, snapshot.path);
 }
 
 fn render_screenshot_viewer_modal(
@@ -1357,16 +1357,13 @@ fn render_screenshot_viewer_modal(
     else {
         return;
     };
-    let Some(screenshot) = state
+    // Prefer the live entry so metadata stays fresh; fall back to the snapshot during rescans.
+    let live_entry = state
         .screenshots
         .iter()
         .find(|entry| entry.key() == screenshot_key)
-        .cloned()
-    else {
-        if state.screenshot_scan_pending {
-            render_screenshot_viewer_loading_modal(ctx, text_ui, screenshot_key.as_str());
-            return;
-        }
+        .cloned();
+    if live_entry.is_none() && !state.screenshot_scan_pending {
         tracing::info!(
             target: "vertexlauncher/screenshots",
             screenshot_key = screenshot_key.as_str(),
@@ -1374,10 +1371,14 @@ fn render_screenshot_viewer_modal(
         );
         state.screenshot_viewer = None;
         return;
-    };
+    }
     let Some(viewer_state) = state.screenshot_viewer.as_mut() else {
         return;
     };
+    if let Some(ref entry) = live_entry {
+        viewer_state.entry_snapshot = entry.clone();
+    }
+    let screenshot = live_entry.unwrap_or_else(|| viewer_state.entry_snapshot.clone());
     let image_key = screenshot.uri();
     let image_status = state
         .screenshot_images
@@ -1583,7 +1584,7 @@ fn render_screenshot_viewer_modal(
                 && (gamepad_pan.x.abs() > 0.05 || gamepad_pan.y.abs() > 0.05)
             {
                 let visible_fraction = 1.0 / viewer_state.zoom.max(SCREENSHOT_VIEWER_MIN_ZOOM);
-                let pan_speed = 1.35 * frame_dt * visible_fraction;
+                let pan_speed = 1.35 * 0.2 * frame_dt * visible_fraction;
                 viewer_state.pan_uv.x += gamepad_pan.x * pan_speed;
                 viewer_state.pan_uv.y += gamepad_pan.y * pan_speed;
                 clamp_viewer_pan(viewer_state);
@@ -1679,54 +1680,6 @@ fn render_screenshot_viewer_modal(
         );
         state.screenshot_viewer = None;
     }
-}
-
-fn render_screenshot_viewer_loading_modal(
-    ctx: &egui::Context,
-    text_ui: &mut TextUi,
-    screenshot_key: &str,
-) {
-    let title = Path::new(screenshot_key)
-        .file_name()
-        .and_then(OsStr::to_str)
-        .unwrap_or("Screenshot");
-
-    let response = show_dialog(
-        ctx,
-        dialog_options("home_screenshot_viewer_window", DialogPreset::Viewer),
-        |ui| {
-            let title_style = style::heading(ui, 24.0, 28.0);
-            let body_style = style::muted(ui);
-            let _ = text_ui.label(
-                ui,
-                "home_screenshot_viewer_title_loading",
-                title,
-                &title_style,
-            );
-            let _ = text_ui.label(
-                ui,
-                "home_screenshot_viewer_loading",
-                "Refreshing screenshot preview...",
-                &body_style,
-            );
-            ui.add_space(12.0);
-            let canvas_size = ui.available_size().max(egui::vec2(1.0, 1.0));
-            let (canvas_rect, _) = ui.allocate_exact_size(canvas_size, egui::Sense::hover());
-            ui.painter().rect_filled(
-                canvas_rect,
-                egui::CornerRadius::same(12),
-                ui.visuals().faint_bg_color,
-            );
-            ui.painter().text(
-                canvas_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Loading screenshot...",
-                egui::TextStyle::Button.resolve(ui.style()),
-                ui.visuals().weak_text_color(),
-            );
-        },
-    );
-    let _ = response;
 }
 
 fn render_delete_screenshot_modal(
@@ -3567,8 +3520,6 @@ fn refresh_screenshot_state(
     state.screenshot_tasks_total = 0;
     state.screenshot_tasks_done = 0;
     state.screenshots.clear();
-    state.screenshot_viewer = None;
-    state.pending_delete_screenshot_key = None;
     state.mark_screenshot_layout_dirty();
 
     // Directory listing reads only file names and mtimes — no file content.
