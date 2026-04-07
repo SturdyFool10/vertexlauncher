@@ -100,6 +100,12 @@ const GLYPH_ATLAS_FETCH_MAX_PER_FRAME: usize = 128;
 const GLYPH_ATLAS_UPLOAD_MAX_GLYPHS_PER_FRAME: usize = 64;
 const GLYPH_ATLAS_UPLOAD_MAX_BYTES_PER_FRAME: usize = 512 * 1024;
 const AUTO_MSDF_MIN_LOGICAL_FONT_SIZE_PT: f32 = 28.0;
+const FIELD_GLYPH_MEAN_ALPHA_ERROR_LIMIT: f32 = 0.045;
+const FIELD_GLYPH_MAX_ALPHA_ERROR_LIMIT: f32 = 0.25;
+const FIELD_GLYPH_LARGE_ERROR_PIXEL_RATIO_LIMIT: f32 = 0.02;
+const OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS: usize = 4;
+const TEXT_WGPU_PASS_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const TEXT_WGPU_PASS_MSAA_SAMPLES: u32 = 4;
 const INPUT_STATE_STALE_FRAMES: u64 = 900;
 const UNDO_STACK_MAX: usize = 200;
 
@@ -1122,7 +1128,7 @@ impl TextUi {
     }
 
     /// Creates a new text renderer with an explicit graphics configuration.
-    pub fn new_with_graphics_config(mut graphics_config: TextGraphicsConfig) -> Self {
+    pub fn new_with_graphics_config(graphics_config: TextGraphicsConfig) -> Self {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
         let code_theme = theme_set
@@ -1147,12 +1153,6 @@ impl TextUi {
         let glyph_atlas = GlyphAtlas::new();
         let mut font_system = FontSystem::new();
         configure_text_font_defaults(&mut font_system);
-        if cfg!(target_os = "linux") {
-            if graphics_config.renderer_backend == TextRendererBackend::Auto {
-                graphics_config.renderer_backend = TextRendererBackend::EguiMesh;
-            }
-        }
-
         Self {
             font_system,
             scale_context: ScaleContext::new(),
@@ -1286,13 +1286,7 @@ impl TextUi {
 
     fn resolved_graphics_config(&self, max_texture_side_px: usize) -> ResolvedTextGraphicsConfig {
         let renderer_backend = match self.graphics_config.renderer_backend {
-            TextRendererBackend::Auto => {
-                if cfg!(target_os = "linux") {
-                    ResolvedTextRendererBackend::EguiMesh
-                } else {
-                    ResolvedTextRendererBackend::WgpuInstanced
-                }
-            }
+            TextRendererBackend::Auto => ResolvedTextRendererBackend::WgpuInstanced,
             TextRendererBackend::EguiMesh => ResolvedTextRendererBackend::EguiMesh,
             TextRendererBackend::WgpuInstanced => ResolvedTextRendererBackend::WgpuInstanced,
         };
@@ -5621,6 +5615,21 @@ impl GlyphAtlas {
     }
 
     fn set_render_state(&mut self, render_state: Option<&EguiWgpuRenderState>) {
+        let render_state_changed = match (&self.wgpu_render_state, render_state) {
+            (Some(current), Some(next)) => {
+                !Arc::ptr_eq(&current.renderer, &next.renderer)
+                    || current.target_format != next.target_format
+            }
+            (None, None) => false,
+            _ => true,
+        };
+        if render_state_changed {
+            self.generation = self.generation.saturating_add(1);
+            self.pending.clear();
+            self.ready.clear();
+            let _ = self.entries.write(|state| state.clear());
+            self.free_all_pages();
+        }
         self.wgpu_render_state = render_state.cloned();
     }
 
@@ -6062,6 +6071,14 @@ impl GlyphAtlas {
     }
 }
 
+impl Drop for GlyphAtlas {
+    fn drop(&mut self) {
+        self.pending.clear();
+        self.ready.clear();
+        self.free_all_pages();
+    }
+}
+
 fn glyph_atlas_worker_loop(
     rx: mpsc::Receiver<GlyphAtlasWorkerMessage>,
     tx: mpsc::Sender<GlyphAtlasWorkerResponse>,
@@ -6122,7 +6139,7 @@ fn rasterize_atlas_glyph(
         }
     }
 
-    let image = render_swash_image(font_system, scale_context, cache_key, rasterization)?;
+    let image = rasterize_best_alpha_glyph(font_system, scale_context, cache_key, rasterization)?;
     let glyph_width = image.placement.width as usize;
     let glyph_height = image.placement.height as usize;
     if glyph_width == 0 || glyph_height == 0 {
@@ -6141,6 +6158,67 @@ fn rasterize_atlas_glyph(
         content_mode: GlyphContentMode::AlphaMask,
         field_range_px: 0.0,
     })
+}
+
+fn rasterize_best_alpha_glyph(
+    font_system: &mut FontSystem,
+    scale_context: &mut ScaleContext,
+    raster_key: &GlyphRasterKey,
+    rasterization: TextRasterizationConfig,
+) -> Option<SwashImage> {
+    let primary = render_swash_image(font_system, scale_context, raster_key, rasterization)?;
+    if !matches!(primary.content, SwashContent::Mask) {
+        return Some(primary);
+    }
+
+    let mut reference_rasterization = rasterization;
+    reference_rasterization.hinting = TextHintingMode::Disabled;
+    let Some(outline_commands) = render_swash_outline_commands(
+        font_system,
+        scale_context,
+        raster_key,
+        reference_rasterization,
+    ) else {
+        return Some(primary);
+    };
+    let outline = flatten_outline_commands_for_field(&outline_commands, GlyphContentMode::Sdf);
+    if outline.segments.is_empty()
+        || !outline.min[0].is_finite()
+        || !outline.min[1].is_finite()
+        || !outline.max[0].is_finite()
+        || !outline.max[1].is_finite()
+    {
+        return Some(primary);
+    }
+
+    let mut best_image = primary.clone();
+    let mut best_score = alpha_glyph_error_against_outline(&outline, &primary);
+
+    let mut variants = [rasterization; 3];
+    variants[0].stem_darkening = TextStemDarkeningMode::Disabled;
+    variants[1].hinting = TextHintingMode::Disabled;
+    variants[2].stem_darkening = TextStemDarkeningMode::Disabled;
+    variants[2].hinting = TextHintingMode::Disabled;
+
+    for variant in variants {
+        if variant == rasterization {
+            continue;
+        }
+        let Some(candidate) = render_swash_image(font_system, scale_context, raster_key, variant)
+        else {
+            continue;
+        };
+        if !matches!(candidate.content, SwashContent::Mask) {
+            continue;
+        }
+        let score = alpha_glyph_error_against_outline(&outline, &candidate);
+        if score.total_error < best_score.total_error {
+            best_image = candidate;
+            best_score = score;
+        }
+    }
+
+    Some(best_image)
 }
 
 fn render_swash_image(
@@ -6358,6 +6436,58 @@ impl FlattenedOutline {
     }
 }
 
+/// Returns true when two or more contours wind in the same direction and their bounding boxes
+/// overlap. This indicates overlapping filled regions that our even-odd `point_inside_outline`
+/// will mis-classify as "outside", making SDF/MSDF distances incorrect.
+///
+/// Counter-wound nested contours (holes, like the inside of "O") wind opposite to their parent,
+/// so they are correctly excluded by the same-winding filter.
+fn outline_has_same_winding_overlap(contours: &[Vec<[f32; 2]>]) -> bool {
+    if contours.len() < 2 {
+        return false;
+    }
+
+    // Compute signed area (shoelace) and bounding box per contour.
+    // Positive area → CCW in the swash coordinate space; negative → CW.
+    let mut winding = Vec::with_capacity(contours.len());
+    let mut bboxes: Vec<([f32; 2], [f32; 2])> = Vec::with_capacity(contours.len());
+    for contour in contours {
+        let mut min = [f32::INFINITY, f32::INFINITY];
+        let mut max = [f32::NEG_INFINITY, f32::NEG_INFINITY];
+        let mut area = 0.0f32;
+        let n = contour.len();
+        for i in 0..n {
+            let a = contour[i];
+            let b = contour[(i + 1) % n];
+            area += (b[0] - a[0]) * (b[1] + a[1]);
+            min[0] = min[0].min(a[0]);
+            min[1] = min[1].min(a[1]);
+            max[0] = max[0].max(a[0]);
+            max[1] = max[1].max(a[1]);
+        }
+        winding.push(area.signum());
+        bboxes.push((min, max));
+    }
+
+    for i in 0..contours.len() {
+        for j in (i + 1)..contours.len() {
+            if winding[i] != winding[j] {
+                continue;
+            }
+            let (a_min, a_max) = bboxes[i];
+            let (b_min, b_max) = bboxes[j];
+            if a_min[0] < b_max[0]
+                && a_max[0] > b_min[0]
+                && a_min[1] < b_max[1]
+                && a_max[1] > b_min[1]
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn rasterize_field_glyph(
     font_system: &mut FontSystem,
     scale_context: &mut ScaleContext,
@@ -6374,6 +6504,16 @@ fn rasterize_field_glyph(
         || !outline.max[0].is_finite()
         || !outline.max[1].is_finite()
     {
+        return None;
+    }
+
+    // Glyphs with overlapping same-winding contours (common in CJK, e.g. "经") fail SDF/MSDF
+    // rendering because point_inside_outline uses the even-odd rule. Under even-odd, regions
+    // covered by two same-winding contours flip back to "outside", producing wrong signed
+    // distances and a glyph that renders too dark. field_glyph_matches_reference would catch
+    // this, but only after the expensive O(width * height * segments) pixel loop and a full
+    // reference rasterization. Detect the failure condition up-front from the contour geometry.
+    if outline_has_same_winding_overlap(&outline.contours) {
         return None;
     }
 
@@ -6404,6 +6544,19 @@ fn rasterize_field_glyph(
         }
     }
 
+    if !field_glyph_matches_reference(
+        font_system,
+        scale_context,
+        cache_key,
+        rasterization,
+        &glyph_image,
+        left,
+        top,
+        field_range_px,
+    ) {
+        return None;
+    }
+
     let upload_image = build_atlas_upload_image(&glyph_image, padding_px);
     Some(PreparedAtlasGlyph {
         approx_bytes: color_image_byte_size(&upload_image),
@@ -6415,6 +6568,116 @@ fn rasterize_field_glyph(
         content_mode: cache_key.content_mode(),
         field_range_px,
     })
+}
+
+fn field_glyph_matches_reference(
+    font_system: &mut FontSystem,
+    scale_context: &mut ScaleContext,
+    cache_key: &GlyphRasterKey,
+    rasterization: TextRasterizationConfig,
+    field_image: &ColorImage,
+    field_left: i32,
+    field_top: i32,
+    field_range_px: f32,
+) -> bool {
+    let Some(reference) = render_swash_image(font_system, scale_context, cache_key, rasterization)
+    else {
+        return false;
+    };
+    let Some(reference_image) = swash_image_to_color_image(&reference) else {
+        return false;
+    };
+
+    let reference_left = reference.placement.left;
+    let reference_top = reference.placement.top;
+    let field_bottom = field_top - field_image.size[1] as i32;
+    let reference_bottom = reference_top - reference_image.size[1] as i32;
+    let compare_left = field_left.min(reference_left);
+    let compare_right = (field_left + field_image.size[0] as i32)
+        .max(reference_left + reference_image.size[0] as i32);
+    let compare_bottom = field_bottom.min(reference_bottom);
+    let compare_top = field_top.max(reference_top);
+    let total_pixels =
+        ((compare_right - compare_left).max(0) * (compare_top - compare_bottom).max(0)) as usize;
+    if total_pixels == 0 {
+        return false;
+    }
+
+    let mut total_error = 0.0;
+    let mut max_error = 0.0_f32;
+    let mut large_error_pixels = 0usize;
+    for y in compare_bottom..compare_top {
+        for x in compare_left..compare_right {
+            let reference_alpha =
+                sample_color_image_alpha(reference_left, reference_top, &reference_image, x, y);
+            let field_alpha = sample_field_image_alpha(
+                cache_key.content_mode(),
+                field_left,
+                field_top,
+                field_image,
+                x,
+                y,
+                field_range_px,
+            );
+            let error = (field_alpha - reference_alpha).abs();
+            total_error += error;
+            max_error = max_error.max(error);
+            if error > FIELD_GLYPH_MAX_ALPHA_ERROR_LIMIT {
+                large_error_pixels += 1;
+            }
+        }
+    }
+
+    let mean_error = total_error / total_pixels as f32;
+    let large_error_ratio = large_error_pixels as f32 / total_pixels as f32;
+    mean_error <= FIELD_GLYPH_MEAN_ALPHA_ERROR_LIMIT
+        && max_error <= FIELD_GLYPH_MAX_ALPHA_ERROR_LIMIT
+        && large_error_ratio <= FIELD_GLYPH_LARGE_ERROR_PIXEL_RATIO_LIMIT
+}
+
+#[derive(Clone, Copy)]
+struct GlyphErrorScore {
+    total_error: f32,
+}
+
+fn alpha_glyph_error_against_outline(
+    outline: &FlattenedOutline,
+    image: &SwashImage,
+) -> GlyphErrorScore {
+    let Some(color_image) = swash_image_to_color_image(image) else {
+        return GlyphErrorScore {
+            total_error: f32::INFINITY,
+        };
+    };
+
+    let image_left = image.placement.left;
+    let image_top = image.placement.top;
+    let outline_left = outline.min[0].floor() as i32;
+    let outline_right = outline.max[0].ceil() as i32;
+    let outline_bottom = outline.min[1].floor() as i32;
+    let outline_top = outline.max[1].ceil() as i32;
+    let compare_left = image_left.min(outline_left);
+    let compare_right = (image_left + color_image.size[0] as i32).max(outline_right);
+    let image_bottom = image_top - color_image.size[1] as i32;
+    let compare_bottom = image_bottom.min(outline_bottom);
+    let compare_top = image_top.max(outline_top);
+
+    if compare_left >= compare_right || compare_bottom >= compare_top {
+        return GlyphErrorScore {
+            total_error: f32::INFINITY,
+        };
+    }
+
+    let mut total_error = 0.0_f32;
+    for y in compare_bottom..compare_top {
+        for x in compare_left..compare_right {
+            let actual_alpha = sample_color_image_alpha(image_left, image_top, &color_image, x, y);
+            let reference_alpha = outline_pixel_coverage(outline, x, y);
+            total_error += (actual_alpha - reference_alpha).abs();
+        }
+    }
+
+    GlyphErrorScore { total_error }
 }
 
 fn flatten_outline_commands_for_field(
@@ -6610,6 +6873,97 @@ fn signed_distance_to_segments(
 fn encode_signed_distance(distance: f32, field_range_px: f32) -> u8 {
     let normalized = (0.5 + 0.5 * (distance / field_range_px).clamp(-1.0, 1.0)).clamp(0.0, 1.0);
     (normalized * 255.0).round() as u8
+}
+
+fn decode_signed_distance(encoded: u8, field_range_px: f32) -> f32 {
+    (((encoded as f32) / 255.0) - 0.5) * 2.0 * field_range_px
+}
+
+fn decode_field_alpha_from_pixel(
+    content_mode: GlyphContentMode,
+    pixel: Color32,
+    field_range_px: f32,
+) -> f32 {
+    let signed_distance = match content_mode {
+        GlyphContentMode::AlphaMask => pixel.a() as f32 / 255.0,
+        GlyphContentMode::Sdf => decode_signed_distance(pixel.r(), field_range_px),
+        GlyphContentMode::Msdf => {
+            let red = decode_signed_distance(pixel.r(), field_range_px);
+            let green = decode_signed_distance(pixel.g(), field_range_px);
+            let blue = decode_signed_distance(pixel.b(), field_range_px);
+            median3(red, green, blue)
+        }
+    };
+    smoothstep(-0.5, 0.5, signed_distance)
+}
+
+fn sample_color_image_alpha(left: i32, top: i32, image: &ColorImage, x: i32, y: i32) -> f32 {
+    let Some(pixel) = color_image_pixel_at_world_position(left, top, image, x, y) else {
+        return 0.0;
+    };
+    pixel.a() as f32 / 255.0
+}
+
+fn sample_field_image_alpha(
+    content_mode: GlyphContentMode,
+    left: i32,
+    top: i32,
+    image: &ColorImage,
+    x: i32,
+    y: i32,
+    field_range_px: f32,
+) -> f32 {
+    let Some(pixel) = color_image_pixel_at_world_position(left, top, image, x, y) else {
+        return 0.0;
+    };
+    decode_field_alpha_from_pixel(content_mode, pixel, field_range_px)
+}
+
+fn color_image_pixel_at_world_position(
+    left: i32,
+    top: i32,
+    image: &ColorImage,
+    x: i32,
+    y: i32,
+) -> Option<Color32> {
+    let width = image.size[0] as i32;
+    let height = image.size[1] as i32;
+    let ix = x - left;
+    let iy = top - 1 - y;
+    if ix < 0 || iy < 0 || ix >= width || iy >= height {
+        return None;
+    }
+    image
+        .pixels
+        .get(iy as usize * image.size[0] + ix as usize)
+        .copied()
+}
+
+fn median3(a: f32, b: f32, c: f32) -> f32 {
+    a.max(b).min(a.min(b).max(c))
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn outline_pixel_coverage(outline: &FlattenedOutline, x: i32, y: i32) -> f32 {
+    let samples = OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS as f32;
+    let mut covered = 0usize;
+    let total = OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS * OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS;
+    for sy in 0..OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS {
+        for sx in 0..OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS {
+            let sample = [
+                x as f32 + (sx as f32 + 0.5) / samples,
+                y as f32 + (sy as f32 + 0.5) / samples,
+            ];
+            if point_inside_outline(sample, &outline.contours) {
+                covered += 1;
+            }
+        }
+    }
+    covered as f32 / total as f32
 }
 
 fn distance_to_segment(point: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -6857,8 +7211,18 @@ impl TextWgpuPipelineResources {
                 })],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: TEXT_WGPU_PASS_DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: TEXT_WGPU_PASS_MSAA_SAMPLES.max(1),
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
