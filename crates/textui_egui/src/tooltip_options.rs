@@ -1,9 +1,7 @@
 use egui::{Color32, Stroke, Vec2};
 
-use crate::label_options::LabelOptions;
+use crate::LabelOptions;
 
-/// Styling options for tooltip overlays.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct TooltipOptions {
     pub text: LabelOptions,

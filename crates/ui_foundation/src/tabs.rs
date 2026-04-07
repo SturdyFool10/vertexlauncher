@@ -2,6 +2,7 @@ use std::hash::Hash;
 
 use egui::{Ui, vec2};
 use textui::TextUi;
+use textui_egui::TextUiEguiExt;
 
 use crate::tab_button;
 

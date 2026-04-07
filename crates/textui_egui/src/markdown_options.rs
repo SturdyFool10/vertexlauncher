@@ -1,7 +1,5 @@
-use crate::{code_block_options::CodeBlockOptions, label_options::LabelOptions};
+use crate::{CodeBlockOptions, LabelOptions};
 
-/// Markdown rendering options.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct MarkdownOptions {
     pub body: LabelOptions,

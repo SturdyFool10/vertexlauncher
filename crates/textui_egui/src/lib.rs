@@ -1,41 +1,63 @@
-use egui::{Context, Id, Painter, Rect, Response, Ui, Vec2};
+mod button_options;
+mod code_block_options;
+mod input_options;
+mod label_options;
+mod markdown_options;
+mod text_helpers;
+mod tooltip_options;
+
+use egui::{
+    Color32, Context, CornerRadius, Id, Painter, Rect, Response, Sense, TextureHandle, TextureId,
+    TextureOptions, Ui, Vec2,
+};
 use egui_wgpu::RenderState;
-use std::hash::Hash;
+use std::{
+    collections::HashMap,
+    hash::DefaultHasher,
+    hash::{Hash, Hasher},
+    sync::{Arc, Mutex},
+};
 use textui::{
-    TextFrameInfo, TextFrameOutput, TextPath, TextPathError, TextPathLayout, TextPathOptions,
-    TextRenderScene, TextUi,
+    TextAtlasPageData, TextAtlasSampling, TextFrameInfo, TextFrameOutput, TextGpuScene,
+    TextInputEvent, TextKey, TextMarkdownBlock, TextMarkdownHeadingLevel, TextModifiers, TextPath,
+    TextPathError, TextPathLayout, TextPathOptions, TextPointerButton, TextRenderScene, TextUi,
 };
 
-pub use textui::{
-    ButtonOptions, CodeBlockOptions, InputOptions, LabelOptions, MarkdownOptions, RichTextSpan,
-    RichTextStyle, TextColor, TooltipOptions, normalize_inline_whitespace,
-    truncate_single_line_text_with_ellipsis,
+pub use button_options::ButtonOptions;
+pub use code_block_options::CodeBlockOptions;
+pub use input_options::InputOptions;
+pub use label_options::LabelOptions;
+pub use markdown_options::MarkdownOptions;
+pub use text_helpers::{
+    normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
     truncate_single_line_text_with_ellipsis_preserving_whitespace,
 };
+pub use textui::{RichTextSpan, RichTextStyle, TextColor};
+pub use tooltip_options::TooltipOptions;
 
 #[derive(Clone)]
 pub struct TextTextureHandle {
-    scene: TextRenderScene,
+    scene: Arc<TextGpuScene>,
     pub size_points: Vec2,
 }
 
 impl TextTextureHandle {
-    pub fn scene(&self) -> &TextRenderScene {
+    pub fn scene(&self) -> &TextGpuScene {
         &self.scene
     }
 
-    pub fn into_scene(self) -> TextRenderScene {
+    pub fn into_scene(self) -> Arc<TextGpuScene> {
         self.scene
     }
 
     pub fn paint(&self, text_ui: &mut TextUi, ui: &Ui, rect: Rect) {
         let painter = ui.painter().with_clip_rect(ui.clip_rect());
-        text_ui.paint_scene_in_rect(&painter, rect, &self.scene);
+        paint_gpu_scene_in_rect(text_ui, &painter, rect, &self.scene, Color32::WHITE);
     }
 
     pub fn paint_tinted(&self, text_ui: &mut TextUi, ui: &Ui, rect: Rect, tint: egui::Color32) {
         let painter = ui.painter().with_clip_rect(ui.clip_rect());
-        text_ui.paint_scene_in_rect_tinted(&painter, rect, &self.scene, tint);
+        paint_gpu_scene_in_rect(text_ui, &painter, rect, &self.scene, tint);
     }
 
     pub fn paint_on(
@@ -45,8 +67,460 @@ impl TextTextureHandle {
         rect: Rect,
         tint: egui::Color32,
     ) {
-        text_ui.paint_scene_in_rect_tinted(painter, rect, &self.scene, tint);
+        paint_gpu_scene_in_rect(text_ui, painter, rect, &self.scene, tint);
     }
+}
+
+const GPU_SCENE_TEXTURE_CACHE_ID: &str = "textui_egui_gpu_scene_texture_cache";
+const GPU_SCENE_TEXTURE_CACHE_STALE_FRAMES: u64 = 600;
+const RETAINED_GPU_SCENE_CACHE_ID: &str = "textui_egui_retained_gpu_scene_cache";
+const RETAINED_GPU_SCENE_CACHE_STALE_FRAMES: u64 = 600;
+
+#[derive(Clone)]
+struct CachedGpuSceneTexture {
+    handle: TextureHandle,
+    last_used_frame: u64,
+}
+
+#[derive(Default)]
+struct GpuSceneTextureCacheState {
+    entries: HashMap<u64, CachedGpuSceneTexture>,
+    /// Frame on which `entries.retain` was last run. Ensures the O(N) eviction
+    /// scan runs at most once per frame rather than once per text element.
+    last_eviction_frame: u64,
+}
+
+type GpuSceneTextureCache = Arc<Mutex<GpuSceneTextureCacheState>>;
+
+#[derive(Clone)]
+struct CachedRetainedGpuScene {
+    fingerprint: u64,
+    scene: Arc<TextGpuScene>,
+    last_used_frame: u64,
+}
+
+#[derive(Default)]
+struct RetainedGpuSceneCacheState {
+    entries: HashMap<Id, CachedRetainedGpuScene>,
+    last_eviction_frame: u64,
+}
+
+type RetainedGpuSceneCache = Arc<Mutex<RetainedGpuSceneCacheState>>;
+
+fn snap_rect_to_pixel_grid(rect: Rect, pixels_per_point: f32) -> Rect {
+    if !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
+        return rect;
+    }
+    let snap = |value: f32| (value * pixels_per_point).round() / pixels_per_point;
+    Rect::from_min_max(
+        egui::pos2(snap(rect.min.x), snap(rect.min.y)),
+        egui::pos2(snap(rect.max.x), snap(rect.max.y)),
+    )
+}
+
+fn multiply_color32(a: Color32, b: Color32) -> Color32 {
+    Color32::from_rgba_premultiplied(
+        ((u16::from(a.r()) * u16::from(b.r())) / 255) as u8,
+        ((u16::from(a.g()) * u16::from(b.g())) / 255) as u8,
+        ((u16::from(a.b()) * u16::from(b.b())) / 255) as u8,
+        ((u16::from(a.a()) * u16::from(b.a())) / 255) as u8,
+    )
+}
+
+fn texture_options_for_sampling(sampling: TextAtlasSampling) -> TextureOptions {
+    match sampling {
+        TextAtlasSampling::Linear => TextureOptions::LINEAR,
+        TextAtlasSampling::Nearest => TextureOptions::NEAREST,
+    }
+}
+
+fn gpu_scene_texture_cache(ctx: &Context) -> GpuSceneTextureCache {
+    ctx.data_mut(|data| {
+        let id = Id::new(GPU_SCENE_TEXTURE_CACHE_ID);
+        if let Some(cache) = data.get_temp::<GpuSceneTextureCache>(id) {
+            cache
+        } else {
+            let cache = Arc::new(Mutex::new(GpuSceneTextureCacheState::default()));
+            data.insert_temp(id, Arc::clone(&cache));
+            cache
+        }
+    })
+}
+
+fn retained_gpu_scene_cache(ctx: &Context) -> RetainedGpuSceneCache {
+    ctx.data_mut(|data| {
+        let id = Id::new(RETAINED_GPU_SCENE_CACHE_ID);
+        if let Some(cache) = data.get_temp::<RetainedGpuSceneCache>(id) {
+            cache
+        } else {
+            let cache = Arc::new(Mutex::new(RetainedGpuSceneCacheState::default()));
+            data.insert_temp(id, Arc::clone(&cache));
+            cache
+        }
+    })
+}
+
+fn retained_gpu_scene(
+    ctx: &Context,
+    cache_id: Id,
+    fingerprint: u64,
+    build_scene: impl FnOnce() -> Option<Arc<TextGpuScene>>,
+) -> Option<Arc<TextGpuScene>> {
+    let current_frame = ctx.cumulative_frame_nr();
+    let cache = retained_gpu_scene_cache(ctx);
+    {
+        let mut cache_guard = cache
+            .lock()
+            .expect("textui_egui retained scene cache poisoned");
+        if current_frame > cache_guard.last_eviction_frame {
+            cache_guard.last_eviction_frame = current_frame;
+            cache_guard.entries.retain(|_, entry| {
+                current_frame.saturating_sub(entry.last_used_frame)
+                    <= RETAINED_GPU_SCENE_CACHE_STALE_FRAMES
+            });
+        }
+        if let Some(entry) = cache_guard.entries.get_mut(&cache_id)
+            && entry.fingerprint == fingerprint
+        {
+            entry.last_used_frame = current_frame;
+            return Some(Arc::clone(&entry.scene));
+        }
+    }
+
+    let scene = build_scene()?;
+    let mut cache_guard = cache
+        .lock()
+        .expect("textui_egui retained scene cache poisoned");
+    cache_guard.entries.insert(
+        cache_id,
+        CachedRetainedGpuScene {
+            fingerprint,
+            scene: Arc::clone(&scene),
+            last_used_frame: current_frame,
+        },
+    );
+    Some(scene)
+}
+
+fn hash_text_fundamentals(hasher: &mut DefaultHasher, fundamentals: &textui::TextFundamentals) {
+    fundamentals.kerning.hash(hasher);
+    fundamentals.stem_darkening.hash(hasher);
+    fundamentals.standard_ligatures.hash(hasher);
+    fundamentals.contextual_alternates.hash(hasher);
+    fundamentals.discretionary_ligatures.hash(hasher);
+    fundamentals.historical_ligatures.hash(hasher);
+    fundamentals.case_sensitive_forms.hash(hasher);
+    fundamentals.slashed_zero.hash(hasher);
+    fundamentals.tabular_numbers.hash(hasher);
+    fundamentals.letter_spacing_points.to_bits().hash(hasher);
+    fundamentals.word_spacing_points.to_bits().hash(hasher);
+    fundamentals.feature_settings.hash(hasher);
+    fundamentals.variation_settings.hash(hasher);
+}
+
+fn hash_label_options(hasher: &mut DefaultHasher, options: &LabelOptions) {
+    options.font_size.to_bits().hash(hasher);
+    options.line_height.to_bits().hash(hasher);
+    options.color.hash(hasher);
+    options.wrap.hash(hasher);
+    options.monospace.hash(hasher);
+    options.weight.hash(hasher);
+    options.italic.hash(hasher);
+    options.padding.x.to_bits().hash(hasher);
+    options.padding.y.to_bits().hash(hasher);
+    hash_text_fundamentals(hasher, &options.fundamentals);
+}
+
+fn hash_label_scene_request(
+    text: &str,
+    options: &LabelOptions,
+    width_points_opt: Option<f32>,
+    scale: f32,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "label_scene".hash(&mut hasher);
+    text.hash(&mut hasher);
+    hash_label_options(&mut hasher, options);
+    width_points_opt.map(f32::to_bits).hash(&mut hasher);
+    scale.to_bits().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_code_block_scene_request(
+    code: &str,
+    options: &CodeBlockOptions,
+    width_points_opt: Option<f32>,
+    scale: f32,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "code_block_scene".hash(&mut hasher);
+    code.hash(&mut hasher);
+    options.font_size.to_bits().hash(&mut hasher);
+    options.line_height.to_bits().hash(&mut hasher);
+    options.text_color.hash(&mut hasher);
+    options.wrap.hash(&mut hasher);
+    options.language.hash(&mut hasher);
+    options.padding.x.to_bits().hash(&mut hasher);
+    options.padding.y.to_bits().hash(&mut hasher);
+    hash_text_fundamentals(&mut hasher, &options.fundamentals);
+    width_points_opt.map(f32::to_bits).hash(&mut hasher);
+    scale.to_bits().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_gpu_scene_page(page: &TextAtlasPageData, sampling: TextAtlasSampling) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    page.size_px.hash(&mut hasher);
+    page.rgba8.hash(&mut hasher);
+    match sampling {
+        TextAtlasSampling::Linear => 0_u8,
+        TextAtlasSampling::Nearest => 1_u8,
+    }
+    .hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_gpu_scene_page_fast(
+    scene_fingerprint: u64,
+    page_index: usize,
+    sampling: TextAtlasSampling,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    scene_fingerprint.hash(&mut hasher);
+    page_index.hash(&mut hasher);
+    match sampling {
+        TextAtlasSampling::Linear => 0_u8,
+        TextAtlasSampling::Nearest => 1_u8,
+    }
+    .hash(&mut hasher);
+    hasher.finish()
+}
+
+fn texture_ids_for_gpu_scene(
+    text_ui: &TextUi,
+    ctx: &Context,
+    scene: &TextGpuScene,
+) -> HashMap<usize, TextureId> {
+    let sampling = text_ui.graphics_config().atlas_sampling;
+    let current_frame = ctx.cumulative_frame_nr();
+    let cache = gpu_scene_texture_cache(ctx);
+    let mut texture_ids = HashMap::new();
+    let mut cache_guard = cache.lock().expect("textui_egui texture cache poisoned");
+    if current_frame > cache_guard.last_eviction_frame {
+        cache_guard.last_eviction_frame = current_frame;
+        cache_guard.entries.retain(|_, entry| {
+            current_frame.saturating_sub(entry.last_used_frame)
+                <= GPU_SCENE_TEXTURE_CACHE_STALE_FRAMES
+        });
+    }
+
+    for page in &scene.atlas_pages {
+        let key = if scene.fingerprint != 0 {
+            hash_gpu_scene_page_fast(scene.fingerprint, page.page_index, sampling)
+        } else {
+            hash_gpu_scene_page(page, sampling)
+        };
+        let entry = cache_guard
+            .entries
+            .entry(key)
+            .or_insert_with(|| CachedGpuSceneTexture {
+                handle: ctx.load_texture(
+                    format!("textui_egui_gpu_scene_{key:016x}"),
+                    egui::ColorImage::from_rgba_premultiplied(page.size_px, &page.rgba8),
+                    texture_options_for_sampling(sampling),
+                ),
+                last_used_frame: current_frame,
+            });
+        entry.last_used_frame = current_frame;
+        texture_ids.insert(page.page_index, entry.handle.id());
+    }
+
+    texture_ids
+}
+
+fn text_modifiers(modifiers: egui::Modifiers) -> TextModifiers {
+    TextModifiers {
+        alt: modifiers.alt,
+        ctrl: modifiers.ctrl,
+        shift: modifiers.shift,
+        command: modifiers.command,
+        mac_cmd: modifiers.mac_cmd,
+    }
+}
+
+fn text_key(key: egui::Key) -> Option<TextKey> {
+    Some(match key {
+        egui::Key::A => TextKey::A,
+        egui::Key::ArrowDown => TextKey::Down,
+        egui::Key::ArrowLeft => TextKey::Left,
+        egui::Key::ArrowRight => TextKey::Right,
+        egui::Key::ArrowUp => TextKey::Up,
+        egui::Key::B => TextKey::B,
+        egui::Key::Backspace => TextKey::Backspace,
+        egui::Key::Delete => TextKey::Delete,
+        egui::Key::E => TextKey::E,
+        egui::Key::End => TextKey::End,
+        egui::Key::Enter => TextKey::Enter,
+        egui::Key::Escape => TextKey::Escape,
+        egui::Key::F => TextKey::F,
+        egui::Key::H => TextKey::H,
+        egui::Key::Home => TextKey::Home,
+        egui::Key::K => TextKey::K,
+        egui::Key::N => TextKey::N,
+        egui::Key::P => TextKey::P,
+        egui::Key::PageDown => TextKey::PageDown,
+        egui::Key::PageUp => TextKey::PageUp,
+        egui::Key::Tab => TextKey::Tab,
+        egui::Key::U => TextKey::U,
+        egui::Key::W => TextKey::W,
+        egui::Key::Y => TextKey::Y,
+        egui::Key::Z => TextKey::Z,
+        _ => return None,
+    })
+}
+
+fn text_pointer_button(button: egui::PointerButton) -> TextPointerButton {
+    match button {
+        egui::PointerButton::Primary => TextPointerButton::Primary,
+        egui::PointerButton::Secondary => TextPointerButton::Secondary,
+        egui::PointerButton::Middle => TextPointerButton::Middle,
+        egui::PointerButton::Extra1 => TextPointerButton::Extra1,
+        egui::PointerButton::Extra2 => TextPointerButton::Extra2,
+    }
+}
+
+fn translate_input_events(events: &[egui::Event]) -> Vec<TextInputEvent> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            egui::Event::Text(text) => Some(TextInputEvent::Text(text.clone())),
+            egui::Event::Copy => Some(TextInputEvent::Copy),
+            egui::Event::Cut => Some(TextInputEvent::Cut),
+            egui::Event::Paste(text) => Some(TextInputEvent::Paste(text.clone())),
+            egui::Event::Key {
+                key,
+                pressed,
+                modifiers,
+                ..
+            } => text_key(*key).map(|key| TextInputEvent::Key {
+                key,
+                pressed: *pressed,
+                modifiers: text_modifiers(*modifiers),
+            }),
+            egui::Event::PointerButton {
+                button,
+                pressed,
+                modifiers,
+                ..
+            } => Some(TextInputEvent::PointerButton {
+                button: text_pointer_button(*button),
+                pressed: *pressed,
+                modifiers: text_modifiers(*modifiers),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn add_gpu_quad(
+    mesh: &mut egui::epaint::Mesh,
+    positions: [egui::Pos2; 4],
+    uvs: [egui::Pos2; 4],
+    tint: Color32,
+) {
+    let start = mesh.vertices.len() as u32;
+    for (pos, uv) in positions.into_iter().zip(uvs) {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos,
+            uv,
+            color: tint,
+        });
+    }
+    mesh.indices
+        .extend_from_slice(&[start, start + 1, start + 2, start, start + 2, start + 3]);
+}
+
+/// Optional affine transform applied to quad positions during painting.
+/// When `None`, positions are used as-is (absolute mode).
+struct PaintTransform {
+    offset: [f32; 2],
+    scale: [f32; 2],
+}
+
+fn paint_gpu_scene_impl(
+    text_ui: &TextUi,
+    painter: &Painter,
+    scene: &TextGpuScene,
+    tint: Color32,
+    transform: Option<&PaintTransform>,
+) {
+    let texture_ids = texture_ids_for_gpu_scene(text_ui, painter.ctx(), scene);
+    let mut meshes: HashMap<TextureId, egui::epaint::Mesh> = HashMap::new();
+
+    for quad in &scene.quads {
+        let Some(texture_id) = texture_ids.get(&quad.atlas_page_index).copied() else {
+            continue;
+        };
+        let positions = if let Some(t) = transform {
+            quad.positions.map(|point| {
+                egui::pos2(
+                    t.offset[0] + point[0] * t.scale[0],
+                    t.offset[1] + point[1] * t.scale[1],
+                )
+            })
+        } else {
+            quad.positions.map(|point| egui::pos2(point[0], point[1]))
+        };
+        let uvs = quad.uvs.map(|point| egui::pos2(point[0], point[1]));
+        let final_tint = multiply_color32(
+            Color32::from_rgba_premultiplied(
+                quad.tint_rgba[0],
+                quad.tint_rgba[1],
+                quad.tint_rgba[2],
+                quad.tint_rgba[3],
+            ),
+            tint,
+        );
+        let mesh = meshes
+            .entry(texture_id)
+            .or_insert_with(|| egui::epaint::Mesh::with_texture(texture_id));
+        add_gpu_quad(mesh, positions, uvs, final_tint);
+    }
+
+    for (_, mesh) in meshes {
+        if !mesh.is_empty() {
+            painter.add(egui::Shape::mesh(mesh));
+        }
+    }
+}
+
+fn paint_gpu_scene_absolute(
+    text_ui: &TextUi,
+    painter: &Painter,
+    scene: &TextGpuScene,
+    tint: Color32,
+) {
+    paint_gpu_scene_impl(text_ui, painter, scene, tint, None);
+}
+
+fn paint_gpu_scene_in_rect(
+    text_ui: &TextUi,
+    painter: &Painter,
+    rect: Rect,
+    scene: &TextGpuScene,
+    tint: Color32,
+) {
+    let size = egui::vec2(scene.size_points[0], scene.size_points[1]);
+    if size.x.abs() <= f32::EPSILON || size.y.abs() <= f32::EPSILON {
+        return;
+    }
+
+    let rect = snap_rect_to_pixel_grid(rect, painter.pixels_per_point());
+    let transform = PaintTransform {
+        offset: [rect.min.x, rect.min.y],
+        scale: [rect.width() / size.x, rect.height() / size.y],
+    };
+    paint_gpu_scene_impl(text_ui, painter, scene, tint, Some(&transform));
 }
 
 pub trait TextUiEguiExt {
@@ -185,6 +659,387 @@ pub trait TextUiEguiExt {
     ) -> Response;
 }
 
+fn label_impl(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    text: &str,
+    options: &LabelOptions,
+    sense: Sense,
+    async_mode: bool,
+) -> Response {
+    let scale = ui.ctx().pixels_per_point();
+    let width_points_opt = options.wrap.then(|| ui.available_width().max(1.0));
+    let cache_id = ui.make_persistent_id((&id_source, "textui_label_retained_scene"));
+    let fingerprint = hash_label_scene_request(text, options, width_points_opt, scale);
+    let text_options = options.to_text_label_options();
+    let scene_opt = retained_gpu_scene(ui.ctx(), cache_id, fingerprint, || {
+        if async_mode {
+            text_ui.prepare_label_gpu_scene_async_at_scale(
+                &id_source,
+                text,
+                &text_options,
+                width_points_opt,
+                scale,
+            )
+        } else {
+            Some(text_ui.prepare_label_gpu_scene_at_scale(
+                &id_source,
+                text,
+                &text_options,
+                width_points_opt,
+                scale,
+            ))
+        }
+    });
+
+    let Some(scene) = scene_opt else {
+        let fallback_height = (options.line_height + options.padding.y * 2.0).max(20.0);
+        let fallback_width = width_points_opt.unwrap_or_else(|| ui.available_width().max(1.0));
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(fallback_width, fallback_height), sense);
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(4), ui.visuals().faint_bg_color);
+        ui.ctx().request_repaint();
+        return response;
+    };
+
+    let scene_size = egui::vec2(scene.size_points[0], scene.size_points[1]);
+    if scene_size == Vec2::ZERO {
+        let fallback_height = (options.line_height + options.padding.y * 2.0).max(20.0);
+        let fallback_width = width_points_opt.unwrap_or_else(|| ui.available_width().max(1.0));
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(fallback_width, fallback_height), sense);
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(4), ui.visuals().faint_bg_color);
+        ui.ctx().request_repaint();
+        return response;
+    }
+
+    let desired_size = scene_size + options.padding * 2.0;
+    let (rect, response) = ui.allocate_exact_size(desired_size, sense);
+    let image_rect = Rect::from_min_size(rect.min + options.padding, scene_size);
+    let painter = ui.painter().with_clip_rect(ui.clip_rect());
+    paint_gpu_scene_in_rect(text_ui, &painter, image_rect, &scene, Color32::WHITE);
+    response
+}
+
+fn code_block_impl(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    code: &str,
+    options: &CodeBlockOptions,
+    async_mode: bool,
+) -> Response {
+    let scale = ui.ctx().pixels_per_point();
+    let width_points_opt = if options.wrap {
+        Some((ui.available_width() - options.padding.x * 2.0).max(1.0))
+    } else {
+        None
+    };
+    let cache_id = ui.make_persistent_id((&id_source, "textui_code_block_retained_scene"));
+    let fingerprint = hash_code_block_scene_request(code, options, width_points_opt, scale);
+    let label_options = LabelOptions {
+        font_size: options.font_size,
+        line_height: options.line_height,
+        color: options.text_color,
+        wrap: options.wrap,
+        monospace: true,
+        weight: 400,
+        italic: false,
+        padding: egui::Vec2::ZERO,
+        fundamentals: options.fundamentals.clone(),
+    };
+    let scene_opt = retained_gpu_scene(ui.ctx(), cache_id, fingerprint, || {
+        let spans = text_ui.highlight_code_spans(
+            code,
+            options.language.as_deref(),
+            options.text_color.into(),
+        );
+        let text_options = label_options.to_text_label_options();
+        if async_mode {
+            text_ui.prepare_rich_text_gpu_scene_async_at_scale(
+                &id_source,
+                &spans,
+                &text_options,
+                width_points_opt,
+                scale,
+            )
+        } else {
+            Some(text_ui.prepare_rich_text_gpu_scene_at_scale(
+                &id_source,
+                &spans,
+                &text_options,
+                width_points_opt,
+                scale,
+            ))
+        }
+    });
+
+    let Some(scene) = scene_opt else {
+        let fallback_height = (options.line_height * 2.0 + options.padding.y * 2.0).max(32.0);
+        let desired_size = egui::vec2(
+            width_points_opt.unwrap_or_else(|| ui.available_width().max(1.0)),
+            fallback_height,
+        );
+        let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
+        ui.painter().rect_filled(
+            rect,
+            CornerRadius::same(options.corner_radius),
+            options.background_color,
+        );
+        ui.ctx().request_repaint();
+        return response;
+    };
+
+    let scene_size = egui::vec2(scene.size_points[0], scene.size_points[1]);
+    let desired_size = scene_size + options.padding * 2.0;
+    let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(options.corner_radius),
+        options.background_color,
+    );
+    if options.stroke.width > 0.0 {
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(options.corner_radius),
+            options.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    let image_rect = Rect::from_min_size(rect.min + options.padding, scene_size);
+    let painter = ui.painter().with_clip_rect(ui.clip_rect());
+    paint_gpu_scene_in_rect(text_ui, &painter, image_rect, &scene, Color32::WHITE);
+    response
+}
+
+fn markdown_impl(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    markdown: &str,
+    options: &MarkdownOptions,
+) {
+    let mut hasher = DefaultHasher::new();
+    "markdown_blocks".hash(&mut hasher);
+    markdown.hash(&mut hasher);
+    options.heading_scale.to_bits().hash(&mut hasher);
+    options.paragraph_spacing.to_bits().hash(&mut hasher);
+    options.body.font_size.to_bits().hash(&mut hasher);
+    options.body.line_height.to_bits().hash(&mut hasher);
+    options.body.color.hash(&mut hasher);
+    options.code.font_size.to_bits().hash(&mut hasher);
+    let fingerprint = hasher.finish();
+    let blocks = text_ui.parse_markdown_blocks_cached(id_source, markdown, fingerprint);
+
+    ui.push_id("textui_markdown", |ui| {
+        for (index, block) in blocks.iter().enumerate() {
+            match block {
+                TextMarkdownBlock::Heading { level, text } => {
+                    let factor = match level {
+                        TextMarkdownHeadingLevel::H1 => options.heading_scale + 0.26,
+                        TextMarkdownHeadingLevel::H2 => options.heading_scale + 0.12,
+                        TextMarkdownHeadingLevel::H3 => options.heading_scale,
+                        TextMarkdownHeadingLevel::H4 => options.heading_scale - 0.08,
+                        TextMarkdownHeadingLevel::H5 => options.heading_scale - 0.12,
+                        TextMarkdownHeadingLevel::H6 => options.heading_scale - 0.16,
+                    }
+                    .max(1.0);
+                    let heading_style = LabelOptions {
+                        font_size: options.body.font_size * factor,
+                        line_height: options.body.line_height * factor,
+                        color: options.body.color,
+                        wrap: true,
+                        monospace: false,
+                        weight: 700,
+                        italic: false,
+                        padding: egui::Vec2::ZERO,
+                        fundamentals: options.body.fundamentals.clone(),
+                    };
+                    let _ = label_impl(
+                        text_ui,
+                        ui,
+                        ("md_h", index),
+                        text,
+                        &heading_style,
+                        Sense::hover(),
+                        false,
+                    );
+                }
+                TextMarkdownBlock::Paragraph(text) => {
+                    let _ = label_impl(
+                        text_ui,
+                        ui,
+                        ("md_p", index),
+                        text,
+                        &options.body,
+                        Sense::hover(),
+                        false,
+                    );
+                }
+                TextMarkdownBlock::Code { language, text } => {
+                    let mut code_options = options.code.clone();
+                    code_options.language = language.clone();
+                    let _ = code_block_impl(
+                        text_ui,
+                        ui,
+                        ("md_code", index),
+                        text,
+                        &code_options,
+                        false,
+                    );
+                }
+            }
+
+            if index + 1 < blocks.len() {
+                ui.add_space(options.paragraph_spacing);
+            }
+        }
+    });
+}
+
+fn selectable_button_impl(
+    text_ui: &mut TextUi,
+    ui: &mut Ui,
+    id_source: impl Hash,
+    text: &str,
+    selected: bool,
+    options: &ButtonOptions,
+) -> Response {
+    let label_style = LabelOptions {
+        font_size: options.font_size,
+        line_height: options.line_height,
+        color: options.text_color,
+        wrap: false,
+        monospace: false,
+        weight: 400,
+        italic: false,
+        padding: egui::Vec2::ZERO,
+        fundamentals: Default::default(),
+    };
+    let scale = ui.ctx().pixels_per_point();
+    let cache_id = ui.make_persistent_id((&id_source, "textui_button_retained_scene"));
+    let fingerprint = hash_label_scene_request(text, &label_style, None, scale);
+    let scene = retained_gpu_scene(ui.ctx(), cache_id, fingerprint, || {
+        Some(text_ui.prepare_label_gpu_scene_at_scale(
+            (&id_source, "button_text"),
+            text,
+            &label_style.to_text_label_options(),
+            None,
+            scale,
+        ))
+    })
+    .expect("synchronous textui button scene should always be available");
+    let text_size = egui::vec2(scene.size_points[0], scene.size_points[1]);
+    let desired_size = egui::vec2(
+        (text_size.x + options.padding.x * 2.0).max(options.min_size.x),
+        (text_size.y + options.padding.y * 2.0).max(options.min_size.y),
+    );
+    let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+    let has_focus = response.has_focus();
+    let fill = if response.is_pointer_button_down_on() {
+        options.fill_active
+    } else if response.hovered() {
+        options.fill_hovered
+    } else if selected || has_focus {
+        options.fill_selected
+    } else {
+        options.fill
+    };
+    let stroke = if has_focus {
+        ui.visuals().selection.stroke
+    } else {
+        options.stroke
+    };
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(options.corner_radius), fill);
+    if stroke.width > 0.0 {
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(options.corner_radius),
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    if has_focus {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            CornerRadius::same(options.corner_radius.saturating_add(2)),
+            egui::Stroke::new(
+                (ui.visuals().selection.stroke.width + 1.0).max(2.0),
+                ui.visuals().selection.stroke.color,
+            ),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let text_rect = Rect::from_center_size(rect.center(), text_size);
+    let painter = ui.painter().with_clip_rect(ui.clip_rect());
+    paint_gpu_scene_in_rect(text_ui, &painter, text_rect, &scene, Color32::WHITE);
+    response
+}
+
+fn tooltip_impl(
+    text_ui: &mut TextUi,
+    ui: &Ui,
+    id_source: impl Hash,
+    response: &Response,
+    text: &str,
+    options: &TooltipOptions,
+) {
+    if !response.hovered() {
+        return;
+    }
+
+    let pointer = response.hover_pos().unwrap_or(response.rect.right_bottom());
+    let scale = ui.ctx().pixels_per_point();
+    let width_points_opt = Some(320.0_f32.min(ui.ctx().input(|i| i.content_rect().width() * 0.35)));
+    let cache_id = ui.make_persistent_id((&id_source, "textui_tooltip_retained_scene"));
+    let fingerprint = hash_label_scene_request(text, &options.text, width_points_opt, scale);
+    let scene = retained_gpu_scene(ui.ctx(), cache_id, fingerprint, || {
+        Some(text_ui.prepare_label_gpu_scene_at_scale(
+            (&id_source, "tooltip"),
+            text,
+            &options.text.to_text_label_options(),
+            width_points_opt,
+            scale,
+        ))
+    })
+    .expect("synchronous textui tooltip scene should always be available");
+    let raster_size = egui::vec2(scene.size_points[0], scene.size_points[1]);
+    let size = raster_size + options.padding * 2.0;
+    let mut rect = Rect::from_min_size(pointer + options.offset, size);
+    let min_y = ui.clip_rect().top();
+    if rect.min.y < min_y {
+        rect = rect.translate(egui::vec2(0.0, min_y - rect.min.y));
+    }
+    rect = snap_rect_to_pixel_grid(rect, scale);
+    let layer_id = egui::LayerId::new(
+        egui::Order::Tooltip,
+        ui.make_persistent_id(&id_source).with("tooltip_layer"),
+    );
+    let painter = ui.ctx().layer_painter(layer_id);
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(options.corner_radius),
+        options.background,
+    );
+    if options.stroke.width > 0.0 {
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(options.corner_radius),
+            options.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    let text_rect = snap_rect_to_pixel_grid(
+        Rect::from_min_size(rect.min + options.padding, raster_size),
+        scale,
+    );
+    paint_gpu_scene_in_rect(text_ui, &painter, text_rect, &scene, Color32::WHITE);
+}
+
 impl TextUiEguiExt for TextUi {
     fn label_async<H: Hash>(
         &mut self,
@@ -193,7 +1048,7 @@ impl TextUiEguiExt for TextUi {
         text: &str,
         options: &LabelOptions,
     ) -> Response {
-        TextUi::label_async(self, ui, id_source, text, options)
+        label_impl(self, ui, id_source, text, options, Sense::hover(), true)
     }
 
     fn code_block_async<H: Hash>(
@@ -203,7 +1058,7 @@ impl TextUiEguiExt for TextUi {
         code: &str,
         options: &CodeBlockOptions,
     ) -> Response {
-        TextUi::code_block_async(self, ui, id_source, code, options)
+        code_block_impl(self, ui, id_source, code, options, true)
     }
 
     fn label<H: Hash>(
@@ -213,7 +1068,7 @@ impl TextUiEguiExt for TextUi {
         text: &str,
         options: &LabelOptions,
     ) -> Response {
-        TextUi::label(self, ui, id_source, text, options)
+        label_impl(self, ui, id_source, text, options, Sense::hover(), false)
     }
 
     fn clickable_label<H: Hash>(
@@ -223,11 +1078,16 @@ impl TextUiEguiExt for TextUi {
         text: &str,
         options: &LabelOptions,
     ) -> Response {
-        TextUi::clickable_label(self, ui, id_source, text, options)
+        label_impl(self, ui, id_source, text, options, Sense::click(), false)
     }
 
     fn measure_text_size(&mut self, ui: &Ui, text: &str, options: &LabelOptions) -> Vec2 {
-        TextUi::measure_text_size(self, ui, text, options)
+        self.measure_text_size_at_scale(
+            ui.ctx().pixels_per_point(),
+            text,
+            &options.to_text_label_options(),
+        )
+        .into()
     }
 
     fn prepare_label_texture<H: Hash>(
@@ -238,10 +1098,15 @@ impl TextUiEguiExt for TextUi {
         options: &LabelOptions,
         width_points_opt: Option<f32>,
     ) -> TextTextureHandle {
-        let scene =
-            TextUi::prepare_label_scene(self, ctx, id_source, text, options, width_points_opt);
+        let scene = self.prepare_label_gpu_scene_at_scale(
+            id_source,
+            text,
+            &options.to_text_label_options(),
+            width_points_opt,
+            ctx.pixels_per_point(),
+        );
         TextTextureHandle {
-            size_points: scene.size_points.into(),
+            size_points: egui::vec2(scene.size_points[0], scene.size_points[1]),
             scene,
         }
     }
@@ -254,10 +1119,15 @@ impl TextUiEguiExt for TextUi {
         options: &LabelOptions,
         width_points_opt: Option<f32>,
     ) -> TextTextureHandle {
-        let scene =
-            TextUi::prepare_rich_text_scene(self, ctx, id_source, spans, options, width_points_opt);
+        let scene = self.prepare_rich_text_gpu_scene_at_scale(
+            id_source,
+            spans,
+            &options.to_text_label_options(),
+            width_points_opt,
+            ctx.pixels_per_point(),
+        );
         TextTextureHandle {
-            size_points: scene.size_points.into(),
+            size_points: egui::vec2(scene.size_points[0], scene.size_points[1]),
             scene,
         }
     }
@@ -272,16 +1142,24 @@ impl TextUiEguiExt for TextUi {
         path: &TextPath,
         path_options: &TextPathOptions,
     ) -> Result<TextPathLayout, TextPathError> {
-        TextUi::paint_label_on_path(
-            self,
-            painter,
-            id_source,
+        let scene = self.prepare_label_path_gpu_scene_at_scale(
+            &id_source,
             text,
-            options,
+            &options.to_text_label_options(),
+            width_points_opt,
+            painter.pixels_per_point(),
+            path,
+            path_options,
+        )?;
+        let layout = self.prepare_label_path_layout(
+            text,
+            &options.to_text_label_options(),
             width_points_opt,
             path,
             path_options,
-        )
+        )?;
+        paint_gpu_scene_absolute(self, painter, &scene, Color32::WHITE);
+        Ok(layout)
     }
 
     fn paint_rich_text_on_path<H: Hash>(
@@ -294,20 +1172,29 @@ impl TextUiEguiExt for TextUi {
         path: &TextPath,
         path_options: &TextPathOptions,
     ) -> Result<TextPathLayout, TextPathError> {
-        TextUi::paint_rich_text_on_path(
-            self,
-            painter,
-            id_source,
+        let scene = self.prepare_rich_text_path_gpu_scene_at_scale(
+            &id_source,
             spans,
-            options,
+            &options.to_text_label_options(),
+            width_points_opt,
+            painter.pixels_per_point(),
+            path,
+            path_options,
+        )?;
+        let layout = self.prepare_rich_text_path_layout(
+            spans,
+            &options.to_text_label_options(),
             width_points_opt,
             path,
             path_options,
-        )
+        )?;
+        paint_gpu_scene_absolute(self, painter, &scene, Color32::WHITE);
+        Ok(layout)
     }
 
     fn paint_scene_in_rect(&mut self, painter: &Painter, rect: Rect, scene: &TextRenderScene) {
-        TextUi::paint_scene_in_rect(self, painter, rect, scene)
+        let gpu_scene = self.gpu_scene_for_scene(scene);
+        paint_gpu_scene_in_rect(self, painter, rect, &gpu_scene, Color32::WHITE)
     }
 
     fn paint_scene_in_rect_tinted(
@@ -317,7 +1204,8 @@ impl TextUiEguiExt for TextUi {
         scene: &TextRenderScene,
         tint: egui::Color32,
     ) {
-        TextUi::paint_scene_in_rect_tinted(self, painter, rect, scene, tint)
+        let gpu_scene = self.gpu_scene_for_scene(scene);
+        paint_gpu_scene_in_rect(self, painter, rect, &gpu_scene, tint)
     }
 
     fn button<H: Hash>(
@@ -327,7 +1215,7 @@ impl TextUiEguiExt for TextUi {
         text: &str,
         options: &ButtonOptions,
     ) -> Response {
-        TextUi::button(self, ui, id_source, text, options)
+        selectable_button_impl(self, ui, id_source, text, false, options)
     }
 
     fn selectable_button<H: Hash>(
@@ -338,7 +1226,7 @@ impl TextUiEguiExt for TextUi {
         selected: bool,
         options: &ButtonOptions,
     ) -> Response {
-        TextUi::selectable_button(self, ui, id_source, text, selected, options)
+        selectable_button_impl(self, ui, id_source, text, selected, options)
     }
 
     fn tooltip_for_response<H: Hash>(
@@ -349,7 +1237,7 @@ impl TextUiEguiExt for TextUi {
         text: &str,
         options: &TooltipOptions,
     ) {
-        TextUi::tooltip_for_response(self, ui, id_source, response, text, options)
+        tooltip_impl(self, ui, id_source, response, text, options)
     }
 
     fn code_block<H: Hash>(
@@ -359,7 +1247,7 @@ impl TextUiEguiExt for TextUi {
         code: &str,
         options: &CodeBlockOptions,
     ) -> Response {
-        TextUi::code_block(self, ui, id_source, code, options)
+        code_block_impl(self, ui, id_source, code, options, false)
     }
 
     fn markdown<H: Hash>(
@@ -369,7 +1257,7 @@ impl TextUiEguiExt for TextUi {
         markdown: &str,
         options: &MarkdownOptions,
     ) {
-        TextUi::markdown(self, ui, id_source, markdown, options)
+        markdown_impl(self, ui, id_source, markdown, options)
     }
 
     fn singleline_input<H: Hash>(
@@ -379,7 +1267,7 @@ impl TextUiEguiExt for TextUi {
         text: &mut String,
         options: &InputOptions,
     ) -> Response {
-        TextUi::singleline_input(self, ui, id_source, text, options)
+        TextUi::egui_singleline_input(self, ui, id_source, text, &options.to_core_input_options())
     }
 
     fn multiline_input<H: Hash>(
@@ -389,7 +1277,7 @@ impl TextUiEguiExt for TextUi {
         text: &mut String,
         options: &InputOptions,
     ) -> Response {
-        TextUi::multiline_input(self, ui, id_source, text, options)
+        TextUi::egui_multiline_input(self, ui, id_source, text, &options.to_core_input_options())
     }
 
     fn multiline_rich_viewer<H: Hash>(
@@ -401,7 +1289,15 @@ impl TextUiEguiExt for TextUi {
         stick_to_bottom: bool,
         wrap: bool,
     ) -> Response {
-        TextUi::multiline_rich_viewer(self, ui, id_source, spans, options, stick_to_bottom, wrap)
+        TextUi::egui_multiline_rich_viewer(
+            self,
+            ui,
+            id_source,
+            spans,
+            &options.to_core_input_options(),
+            stick_to_bottom,
+            wrap,
+        )
     }
 }
 
@@ -447,13 +1343,13 @@ pub fn begin_frame(
     ctx: &Context,
     render_state: Option<&RenderState>,
 ) -> TextFrameOutput {
-    text_ui.set_egui_wgpu_render_state(render_state);
+    text_ui.egui_set_render_state(render_state);
     text_ui.begin_frame_info(TextFrameInfo::new(
         ctx.cumulative_frame_nr(),
         ctx.input(|i| i.max_texture_side).max(1),
     ));
-    text_ui.set_frame_events(ctx.input(|i| i.events.clone()));
-    text_ui.flush_egui_frame(ctx)
+    text_ui.set_frame_input_events(ctx.input(|i| translate_input_events(&i.events)));
+    text_ui.egui_flush_frame(ctx)
 }
 
 pub fn set_gamepad_scroll_delta(ctx: &Context, delta: Vec2) {

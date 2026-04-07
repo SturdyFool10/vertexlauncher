@@ -22,7 +22,7 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use textui::{TextUi, normalize_inline_whitespace};
+use textui::TextUi;
 use textui_egui::prelude::*;
 use ui_foundation::{UiMetrics, themed_text_input};
 

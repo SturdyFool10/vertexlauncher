@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use installation::{is_instance_running, normalize_path_key, stop_running_instance};
@@ -26,7 +26,7 @@ pub struct ConsoleTabSnapshot {
 pub struct ConsoleSnapshot {
     pub tabs: Vec<ConsoleTabSnapshot>,
     pub active_tab_id: String,
-    pub active_lines: Vec<String>,
+    pub active_lines: Arc<[String]>,
     pub text_redraw_generation: u64,
 }
 
@@ -39,6 +39,8 @@ struct ConsoleTab {
     keep_alive_while_loading: bool,
     missing_since: Option<Instant>,
     lines: VecDeque<String>,
+    lines_generation: u64,
+    cached_lines_snapshot: Option<(u64, Arc<[String]>)>,
 }
 
 #[derive(Debug)]
@@ -61,6 +63,8 @@ fn store() -> &'static Mutex<ConsoleState> {
                 keep_alive_while_loading: false,
                 missing_since: None,
                 lines: VecDeque::new(),
+                lines_generation: 0,
+                cached_lines_snapshot: None,
             }],
             active_tab_id: DEFAULT_TAB_ID.to_owned(),
             text_redraw_generation: 0,
@@ -97,6 +101,8 @@ pub fn push_line_to_tab(tab_id: &str, line: impl Into<String>) {
         while tab.lines.len() > MAX_CONSOLE_LINES {
             let _ = tab.lines.pop_front();
         }
+        tab.lines_generation = tab.lines_generation.saturating_add(1);
+        tab.cached_lines_snapshot = None;
         return;
     }
 
@@ -106,6 +112,8 @@ pub fn push_line_to_tab(tab_id: &str, line: impl Into<String>) {
         while default_tab.lines.len() > MAX_CONSOLE_LINES {
             let _ = default_tab.lines.pop_front();
         }
+        default_tab.lines_generation = default_tab.lines_generation.saturating_add(1);
+        default_tab.cached_lines_snapshot = None;
     }
 }
 
@@ -197,6 +205,8 @@ pub fn ensure_instance_tab(
         keep_alive_while_loading: false,
         missing_since: None,
         lines: VecDeque::new(),
+        lines_generation: 0,
+        cached_lines_snapshot: None,
     });
     state.active_tab_id = id.clone();
     id
@@ -313,6 +323,8 @@ pub fn prune_instance_tabs(active_instance_roots: &[String]) {
             keep_alive_while_loading: false,
             missing_since: None,
             lines: VecDeque::new(),
+            lines_generation: 0,
+            cached_lines_snapshot: None,
         });
     }
 
@@ -392,6 +404,8 @@ pub fn close_tab(tab_id: &str) -> bool {
             keep_alive_while_loading: false,
             missing_since: None,
             lines: VecDeque::new(),
+            lines_generation: 0,
+            cached_lines_snapshot: None,
         });
     }
 
@@ -412,7 +426,7 @@ pub fn close_tab(tab_id: &str) -> bool {
 }
 
 pub fn snapshot() -> ConsoleSnapshot {
-    let Ok(state) = store().lock() else {
+    let Ok(mut state) = store().lock() else {
         return ConsoleSnapshot {
             tabs: vec![ConsoleTabSnapshot {
                 id: DEFAULT_TAB_ID.to_owned(),
@@ -420,17 +434,28 @@ pub fn snapshot() -> ConsoleSnapshot {
                 can_close: false,
             }],
             active_tab_id: DEFAULT_TAB_ID.to_owned(),
-            active_lines: Vec::new(),
+            active_lines: Arc::from([]),
             text_redraw_generation: 0,
         };
     };
 
+    let active_tab_id = state.active_tab_id.clone();
     let active_lines = state
         .tabs
-        .iter()
-        .find(|tab| tab.id == state.active_tab_id)
-        .map(|tab| tab.lines.iter().cloned().collect())
-        .unwrap_or_default();
+        .iter_mut()
+        .find(|tab| tab.id == active_tab_id)
+        .map(|tab| {
+            if let Some((generation, snapshot)) = tab.cached_lines_snapshot.as_ref()
+                && *generation == tab.lines_generation
+            {
+                return Arc::clone(snapshot);
+            }
+
+            let snapshot: Arc<[String]> = tab.lines.iter().cloned().collect::<Vec<_>>().into();
+            tab.cached_lines_snapshot = Some((tab.lines_generation, Arc::clone(&snapshot)));
+            snapshot
+        })
+        .unwrap_or_else(|| Arc::from([]));
     let tabs = state
         .tabs
         .iter()
@@ -443,7 +468,7 @@ pub fn snapshot() -> ConsoleSnapshot {
 
     ConsoleSnapshot {
         tabs,
-        active_tab_id: state.active_tab_id.clone(),
+        active_tab_id,
         active_lines,
         text_redraw_generation: state.text_redraw_generation,
     }

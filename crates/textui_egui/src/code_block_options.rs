@@ -1,8 +1,6 @@
-use crate::TextFundamentals;
 use egui::{Color32, Stroke, Vec2};
+use textui::TextFundamentals;
 
-/// Styling options for syntax-highlighted code blocks.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct CodeBlockOptions {
     pub font_size: f32,

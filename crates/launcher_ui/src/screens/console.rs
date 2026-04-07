@@ -1,6 +1,14 @@
-use std::hash::Hash;
+use std::{
+    collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
+    sync::{Arc, Mutex},
+};
 
-use egui::{Color32, CornerRadius, Margin, Ui, pos2, vec2};
+use egui::{
+    CornerRadius, FontId, Margin, Ui,
+    text::{LayoutJob, TextFormat},
+    pos2, vec2,
+};
 use textui::TextUi;
 use textui_egui::{make_gamepad_scrollable, prelude::*};
 
@@ -35,6 +43,8 @@ const ACTION_CLEAR_SELECTION: &str = "clear_selection";
 const ACTION_COPY_LINE: &str = "copy_line";
 const LOG_SELECTION_AUTOSCROLL_MARGIN: f32 = 32.0;
 const LOG_SELECTION_AUTOSCROLL_MAX_SPEED: f32 = 1100.0;
+const CONSOLE_LINE_LAYOUT_CACHE_ID: &str = "console_line_layout_cache";
+const CONSOLE_LINE_LAYOUT_CACHE_STALE_FRAMES: u64 = 600;
 
 fn log_console_context_menu(message: impl AsRef<str>) {
     eprintln!("[console_context_menu] {}", message.as_ref());
@@ -108,7 +118,7 @@ pub(crate) fn render_log_buffer(
     lines: &[String],
     empty_message: &str,
     stick_to_bottom: bool,
-    _text_redraw_generation: u64,
+    text_redraw_generation: u64,
 ) {
     let viewport_height = ui.available_height().max(1.0);
     let text_base_id = ui.make_persistent_id((&id_source, "text"));
@@ -126,7 +136,14 @@ pub(crate) fn render_log_buffer(
         return;
     }
 
-    render_virtualized_log_lines(ui, text_ui, text_base_id, lines, stick_to_bottom);
+    render_virtualized_log_lines(
+        ui,
+        text_ui,
+        text_base_id,
+        lines,
+        stick_to_bottom,
+        text_redraw_generation,
+    );
 }
 
 #[derive(Clone, Debug, Default)]
@@ -176,9 +193,25 @@ struct VisibleLogRowHit {
     line_index: usize,
     rect: egui::Rect,
     text_rect: egui::Rect,
-    galley: std::sync::Arc<egui::Galley>,
+    galley: Arc<egui::Galley>,
     line_len_chars: usize,
 }
+
+#[derive(Clone)]
+struct CachedConsoleLineLayout {
+    fingerprint: u64,
+    galley: Arc<egui::Galley>,
+    line_len_chars: usize,
+    last_used_frame: u64,
+}
+
+#[derive(Default)]
+struct ConsoleLineLayoutCacheState {
+    entries: HashMap<egui::Id, CachedConsoleLineLayout>,
+    last_eviction_frame: u64,
+}
+
+type ConsoleLineLayoutCache = Arc<Mutex<ConsoleLineLayoutCacheState>>;
 
 fn virtual_log_line_options(ui: &Ui, level: Option<LogLevel>) -> LabelOptions {
     let mut options = style::body(ui);
@@ -268,12 +301,99 @@ fn selection_fill_color(ui: &Ui) -> egui::Color32 {
     ui.visuals().selection.bg_fill.linear_multiply(0.55)
 }
 
-fn galley_font_id(options: &LabelOptions) -> egui::FontId {
-    if options.monospace {
-        egui::FontId::monospace(options.font_size)
-    } else {
-        egui::FontId::proportional(options.font_size)
+fn layout_console_line_galley(ui: &Ui, line: &str, options: &LabelOptions) -> Arc<egui::Galley> {
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = f32::INFINITY;
+    job.append(
+        line,
+        0.0,
+        TextFormat {
+            font_id: FontId {
+                size: options.font_size,
+                family: if options.monospace {
+                    egui::FontFamily::Monospace
+                } else {
+                    egui::FontFamily::Proportional
+                },
+            },
+            color: options.color,
+            italics: options.italic,
+            ..Default::default()
+        },
+    );
+    ui.painter().layout_job(job)
+}
+
+fn hash_console_line_layout_request(
+    line: &str,
+    options: &LabelOptions,
+    text_redraw_generation: u64,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    "console_line_layout".hash(&mut hasher);
+    line.hash(&mut hasher);
+    options.font_size.to_bits().hash(&mut hasher);
+    options.color.hash(&mut hasher);
+    options.monospace.hash(&mut hasher);
+    options.italic.hash(&mut hasher);
+    text_redraw_generation.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn console_line_layout_cache(ui: &Ui) -> ConsoleLineLayoutCache {
+    ui.ctx().data_mut(|data| {
+        let cache_key = egui::Id::new(CONSOLE_LINE_LAYOUT_CACHE_ID);
+        if let Some(cache) = data.get_temp::<ConsoleLineLayoutCache>(cache_key) {
+            cache
+        } else {
+            let cache = Arc::new(Mutex::new(ConsoleLineLayoutCacheState::default()));
+            data.insert_temp(cache_key, Arc::clone(&cache));
+            cache
+        }
+    })
+}
+
+fn cached_console_line_layout(
+    ui: &Ui,
+    cache_id: egui::Id,
+    line: &str,
+    options: &LabelOptions,
+    text_redraw_generation: u64,
+) -> (Arc<egui::Galley>, usize) {
+    let current_frame = ui.ctx().cumulative_frame_nr();
+    let fingerprint = hash_console_line_layout_request(line, options, text_redraw_generation);
+    let cache = console_line_layout_cache(ui);
+    {
+        let mut cache_guard = cache.lock().expect("console line layout cache poisoned");
+        if current_frame > cache_guard.last_eviction_frame {
+            cache_guard.last_eviction_frame = current_frame;
+            cache_guard.entries.retain(|_, entry| {
+                current_frame.saturating_sub(entry.last_used_frame)
+                    <= CONSOLE_LINE_LAYOUT_CACHE_STALE_FRAMES
+            });
+        }
+
+        if let Some(entry) = cache_guard.entries.get_mut(&cache_id)
+            && entry.fingerprint == fingerprint
+        {
+            entry.last_used_frame = current_frame;
+            return (Arc::clone(&entry.galley), entry.line_len_chars);
+        }
     }
+
+    let galley = layout_console_line_galley(ui, line, options);
+    let line_len_chars = log_char_count(line);
+    let mut cache_guard = cache.lock().expect("console line layout cache poisoned");
+    cache_guard.entries.insert(
+        cache_id,
+        CachedConsoleLineLayout {
+            fingerprint,
+            galley: Arc::clone(&galley),
+            line_len_chars,
+            last_used_frame: current_frame,
+        },
+    );
+    (galley, line_len_chars)
 }
 
 fn row_contains_text(row: &VisibleLogRowHit, pointer_pos: egui::Pos2) -> bool {
@@ -375,10 +495,11 @@ fn paint_log_selection_for_line(
 
 fn render_virtualized_log_lines(
     ui: &mut Ui,
-    text_ui: &mut TextUi,
+    _text_ui: &mut TextUi,
     text_base_id: egui::Id,
     lines: &[String],
     stick_to_bottom: bool,
+    text_redraw_generation: u64,
 ) {
     let body_style = style::body(ui);
     let row_height = body_style.line_height.max(1.0);
@@ -482,54 +603,39 @@ fn render_virtualized_log_lines(
                 let line_index = first_row + offset;
                 let level = resolve_log_level(line, &mut parse_context);
                 let options = virtual_log_line_options(ui, level);
-                let spans = [RichTextSpan {
-                    text: line.clone(),
-                    style: RichTextStyle {
-                        color: options.color.into(),
-                        monospace: options.monospace,
-                        italic: options.italic,
-                        weight: options.weight,
-                    },
-                }];
-
-                let texture = text_ui.prepare_rich_text_texture(
-                    ui.ctx(),
-                    (text_base_id, "virtual_line", line_index),
-                    &spans,
+                let (galley, line_len_chars) = cached_console_line_layout(
+                    ui,
+                    ui.make_persistent_id((text_base_id, "virtual_line_layout", line_index)),
+                    line,
                     &options,
-                    None,
+                    text_redraw_generation,
                 );
-
+                let galley_size = galley.size();
                 viewer_state.max_line_width = viewer_state
                     .max_line_width
-                    .max(texture.size_points.x.ceil().max(1.0));
+                    .max(galley_size.x.ceil().max(1.0));
 
                 let desired_width = viewer_state.max_line_width.max(viewport.width()).max(1.0);
                 let desired_height = row_height;
-
-                let galley = ui.painter().layout_no_wrap(
-                    line.clone(),
-                    galley_font_id(&options),
-                    Color32::TRANSPARENT,
-                );
 
                 let (rect, _) = ui.allocate_exact_size(
                     vec2(desired_width, desired_height),
                     egui::Sense::hover(),
                 );
 
-                let text_rect = egui::Rect::from_min_size(rect.min, texture.size_points);
+                let text_rect = egui::Rect::from_min_size(rect.min, galley_size);
 
                 row_hits.push(VisibleLogRowHit {
                     line_index,
                     rect,
                     text_rect,
-                    galley: galley.clone(),
-                    line_len_chars: log_char_count(line),
+                    galley: Arc::clone(&galley),
+                    line_len_chars,
                 });
 
                 paint_log_selection_for_line(ui, rect, &galley, line, line_index, &selection_state);
-                texture.paint(text_ui, ui, text_rect);
+                ui.painter()
+                    .galley(text_rect.min, Arc::clone(&galley), options.color);
             }
 
             let mut current_hovered_line: Option<usize> = None;

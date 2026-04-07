@@ -263,6 +263,35 @@ impl Default for TextFundamentals {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextLabelOptions {
+    pub font_size: f32,
+    pub line_height: f32,
+    pub color: TextColor,
+    pub wrap: bool,
+    pub monospace: bool,
+    pub weight: u16,
+    pub italic: bool,
+    pub padding: TextVector,
+    pub fundamentals: TextFundamentals,
+}
+
+impl Default for TextLabelOptions {
+    fn default() -> Self {
+        Self {
+            font_size: 18.0,
+            line_height: 24.0,
+            color: TextColor::WHITE,
+            wrap: true,
+            monospace: false,
+            weight: 400,
+            italic: false,
+            padding: TextVector::ZERO,
+            fundamentals: TextFundamentals::default(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TextPath {
     pub points: Vec<TextPoint>,
@@ -373,6 +402,29 @@ impl Default for RichTextStyle {
 pub struct RichTextSpan {
     pub text: String,
     pub style: RichTextStyle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TextMarkdownHeadingLevel {
+    H1,
+    H2,
+    H3,
+    H4,
+    H5,
+    H6,
+}
+
+#[derive(Clone, Debug)]
+pub enum TextMarkdownBlock {
+    Heading {
+        level: TextMarkdownHeadingLevel,
+        text: String,
+    },
+    Paragraph(String),
+    Code {
+        language: Option<String>,
+        text: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -531,6 +583,75 @@ pub struct TextGpuScene {
     pub bounds_min: [f32; 2],
     pub bounds_max: [f32; 2],
     pub size_points: [f32; 2],
+    /// Stable content fingerprint set by the scene cache. Non-zero when the scene
+    /// came from the cache, allowing O(1) texture-cache lookups instead of hashing
+    /// the full pixel data every frame.
+    pub fingerprint: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct TextModifiers {
+    pub alt: bool,
+    pub ctrl: bool,
+    pub shift: bool,
+    pub command: bool,
+    pub mac_cmd: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TextKey {
+    A,
+    B,
+    Delete,
+    Down,
+    E,
+    End,
+    Enter,
+    Escape,
+    F,
+    H,
+    Home,
+    K,
+    Left,
+    N,
+    P,
+    PageDown,
+    PageUp,
+    Right,
+    Tab,
+    U,
+    Up,
+    W,
+    Y,
+    Z,
+    Backspace,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TextPointerButton {
+    Primary,
+    Secondary,
+    Middle,
+    Extra1,
+    Extra2,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum TextInputEvent {
+    Text(String),
+    Copy,
+    Cut,
+    Paste(String),
+    Key {
+        key: TextKey,
+        pressed: bool,
+        modifiers: TextModifiers,
+    },
+    PointerButton {
+        button: TextPointerButton,
+        pressed: bool,
+        modifiers: TextModifiers,
+    },
 }
 
 impl TextRenderScene {
@@ -561,6 +682,7 @@ impl TextRenderScene {
             bounds_min: [self.bounds.min.x, self.bounds.min.y],
             bounds_max: [self.bounds.max.x, self.bounds.max.y],
             size_points: [self.size_points.x, self.size_points.y],
+            fingerprint: 0,
         }
     }
 }

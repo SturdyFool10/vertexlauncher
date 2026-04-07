@@ -1,7 +1,5 @@
 use egui::{Color32, Stroke, Vec2};
 
-/// Styling options for button widgets.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ButtonOptions {
     pub font_size: f32,

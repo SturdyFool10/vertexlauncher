@@ -31,7 +31,6 @@ use cosmic_text::{
     Edit, Editor, Family, FontFeatures, FontSystem, LayoutGlyph, LayoutRun, Metrics, Motion,
     Selection, Shaping, Style as FontStyle, SwashContent, SwashImage, Weight, Wrap, fontdb,
 };
-use egui::PointerButton;
 use egui::{
     self, Color32, ColorImage, Context, CornerRadius, Id, Key, Pos2, Rect, Response, Sense,
     TextureHandle, TextureId, TextureOptions, Ui, Vec2,
@@ -67,29 +66,29 @@ mod markdown_options;
 mod text_helpers;
 mod tooltip_options;
 
+use crate::{
+    button_options::ButtonOptions, code_block_options::CodeBlockOptions,
+    input_options::InputOptions, label_options::LabelOptions, markdown_options::MarkdownOptions,
+    tooltip_options::TooltipOptions,
+};
+
 pub use advanced_text::{
     RichTextSpan, RichTextStyle, TextAtlasPageData, TextAtlasPageSnapshot, TextAtlasQuad,
     TextAtlasSampling, TextColor, TextFeatureSetting, TextFrameInfo, TextFrameOutput,
     TextFundamentals, TextGpuPowerPreference, TextGpuQuad, TextGpuScene, TextGraphicsApi,
-    TextGraphicsConfig, TextHintingMode, TextKerning, TextOpticalSizingMode, TextPath,
-    TextPathError, TextPathGlyph, TextPathLayout, TextPathOptions, TextPoint,
+    TextGraphicsConfig, TextHintingMode, TextInputEvent, TextKerning, TextKey, TextLabelOptions,
+    TextMarkdownBlock, TextMarkdownHeadingLevel, TextModifiers, TextOpticalSizingMode, TextPath,
+    TextPathError, TextPathGlyph, TextPathLayout, TextPathOptions, TextPoint, TextPointerButton,
     TextRasterizationConfig, TextRect, TextRenderScene, TextRendererBackend, TextStemDarkeningMode,
     TextVariationSetting, TextVector, VectorGlyphShape, VectorPathCommand, VectorTextShape,
 };
-pub use button_options::ButtonOptions;
-pub use code_block_options::CodeBlockOptions;
-pub use input_options::InputOptions;
-pub use label_options::LabelOptions;
-pub use markdown_options::MarkdownOptions;
-pub use text_helpers::{
-    normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
-    truncate_single_line_text_with_ellipsis_preserving_whitespace,
-};
-pub use tooltip_options::TooltipOptions;
+#[doc(hidden)]
+pub use input_options::InputOptions as EguiInputOptions;
 
 const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "liga, calt";
 const PREPARED_TEXT_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 const ASYNC_RASTER_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
+const GPU_SCENE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const GLYPH_ATLAS_MAX_BYTES: usize = 64 * 1024 * 1024;
 const GLYPH_ATLAS_STALE_FRAMES: u64 = 900;
 const GLYPH_ATLAS_PAGE_TARGET_PX: usize = 1024;
@@ -134,6 +133,60 @@ fn texture_options_for_sampling(sampling: TextAtlasSampling) -> TextureOptions {
     match sampling {
         TextAtlasSampling::Linear => TextureOptions::LINEAR,
         TextAtlasSampling::Nearest => TextureOptions::NEAREST,
+    }
+}
+
+fn egui_key_from_text(key: TextKey) -> Key {
+    match key {
+        TextKey::A => Key::A,
+        TextKey::B => Key::B,
+        TextKey::Backspace => Key::Backspace,
+        TextKey::Delete => Key::Delete,
+        TextKey::Down => Key::ArrowDown,
+        TextKey::E => Key::E,
+        TextKey::End => Key::End,
+        TextKey::Enter => Key::Enter,
+        TextKey::Escape => Key::Escape,
+        TextKey::F => Key::F,
+        TextKey::H => Key::H,
+        TextKey::Home => Key::Home,
+        TextKey::K => Key::K,
+        TextKey::Left => Key::ArrowLeft,
+        TextKey::N => Key::N,
+        TextKey::P => Key::P,
+        TextKey::PageDown => Key::PageDown,
+        TextKey::PageUp => Key::PageUp,
+        TextKey::Right => Key::ArrowRight,
+        TextKey::Tab => Key::Tab,
+        TextKey::U => Key::U,
+        TextKey::Up => Key::ArrowUp,
+        TextKey::W => Key::W,
+        TextKey::Y => Key::Y,
+        TextKey::Z => Key::Z,
+    }
+}
+
+fn egui_modifiers_from_text(modifiers: TextModifiers) -> egui::Modifiers {
+    egui::Modifiers {
+        alt: modifiers.alt,
+        ctrl: modifiers.ctrl,
+        shift: modifiers.shift,
+        mac_cmd: modifiers.mac_cmd,
+        command: modifiers.command,
+    }
+}
+
+fn core_label_options(options: &TextLabelOptions) -> LabelOptions {
+    LabelOptions {
+        font_size: options.font_size,
+        line_height: options.line_height,
+        color: options.color.into(),
+        wrap: options.wrap,
+        monospace: options.monospace,
+        weight: options.weight,
+        italic: options.italic,
+        padding: options.padding.into(),
+        fundamentals: options.fundamentals.clone(),
     }
 }
 
@@ -947,19 +1000,6 @@ impl ViewerScrollbarTracks {
     }
 }
 
-#[derive(Clone, Debug)]
-enum MarkdownBlock {
-    Heading {
-        level: HeadingLevel,
-        text: String,
-    },
-    Paragraph(String),
-    Code {
-        language: Option<String>,
-        text: String,
-    },
-}
-
 /// High-level text rendering engine built on cosmic-text + Swash.
 pub struct TextUi {
     font_system: FontSystem,
@@ -980,10 +1020,13 @@ pub struct TextUi {
     graphics_config: TextGraphicsConfig,
     current_frame: u64,
     max_texture_side_px: usize,
-    frame_events: Vec<egui::Event>,
+    frame_events: Vec<TextInputEvent>,
     /// Cache for parsed markdown blocks: Id → (fingerprint, last_used_frame, blocks).
     /// Prevents re-parsing unchanged markdown every frame.
-    markdown_cache: FxHashMap<Id, (u64, u64, Arc<[MarkdownBlock]>)>,
+    markdown_cache: FxHashMap<Id, (u64, u64, Arc<[TextMarkdownBlock]>)>,
+    /// Cache for built GPU scenes: fingerprint → scene.
+    /// Avoids re-rasterizing glyphs via Swash every frame for unchanged text.
+    gpu_scene_cache: ThreadSafeLru<u64, Arc<TextGpuScene>>,
 }
 
 impl Default for TextUi {
@@ -1056,6 +1099,7 @@ impl TextUi {
             max_texture_side_px: usize::MAX,
             frame_events: Vec::new(),
             markdown_cache: FxHashMap::default(),
+            gpu_scene_cache: ThreadSafeLru::new(GPU_SCENE_CACHE_MAX_BYTES),
         }
     }
 
@@ -1096,29 +1140,32 @@ impl TextUi {
         self.glyph_atlas.trim_stale(current_frame);
         self.enforce_prepared_text_cache_budget();
         self.enforce_async_raster_cache_budget();
+        self.enforce_gpu_scene_cache_budget();
         self.poll_async_raster_results();
     }
 
     /// Replaces the per-frame input event buffer used by interactive widgets.
-    pub fn set_frame_events(&mut self, frame_events: Vec<egui::Event>) {
+    pub fn set_frame_input_events(&mut self, frame_events: Vec<TextInputEvent>) {
         self.frame_events = frame_events;
     }
 
-    /// Clears any per-frame input events previously set by [`Self::set_frame_events`].
-    pub fn clear_frame_events(&mut self) {
+    /// Clears any per-frame input events previously set by [`Self::set_frame_input_events`].
+    pub fn clear_frame_input_events(&mut self) {
         self.frame_events.clear();
     }
 
+    #[doc(hidden)]
     /// Updates the optional native WGPU render state used by the atlas renderer.
     ///
     /// When using native atlas pages, set this before [`Self::begin_frame_info`] so any
     /// frame-start invalidation can release old textures through the current renderer.
-    pub fn set_egui_wgpu_render_state(&mut self, render_state: Option<&EguiWgpuRenderState>) {
+    pub fn egui_set_render_state(&mut self, render_state: Option<&EguiWgpuRenderState>) {
         self.glyph_atlas.set_render_state(render_state);
     }
 
+    #[doc(hidden)]
     /// Flushes pending atlas work that still needs an [`egui::Context`] for texture uploads.
-    pub fn flush_egui_frame(&mut self, ctx: &Context) -> TextFrameOutput {
+    pub fn egui_flush_frame(&mut self, ctx: &Context) -> TextFrameOutput {
         self.glyph_atlas.poll_ready(ctx, self.current_frame);
         let needs_repaint = !self.glyph_atlas.pending.is_empty();
         if needs_repaint {
@@ -1194,7 +1241,8 @@ impl TextUi {
     }
 
     /// Renders an asynchronously rasterized label.
-    pub fn label_async(
+    #[allow(dead_code)]
+    fn label_async(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -1205,7 +1253,8 @@ impl TextUi {
     }
 
     /// Renders an asynchronously rasterized syntax-highlighted code block.
-    pub fn code_block_async(
+    #[allow(dead_code)]
+    fn code_block_async(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -1223,7 +1272,7 @@ impl TextUi {
         };
 
         let spans =
-            self.highlight_code_spans(code, options.language.as_deref(), options.text_color);
+            self.highlight_code_spans_impl(code, options.language.as_deref(), options.text_color);
         let label_options = LabelOptions {
             font_size: options.font_size,
             line_height: options.line_height,
@@ -1436,7 +1485,8 @@ impl TextUi {
     }
 
     /// Renders a plain label synchronously.
-    pub fn label(
+    #[allow(dead_code)]
+    fn label(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -1447,7 +1497,8 @@ impl TextUi {
     }
 
     /// Renders a clickable label synchronously.
-    pub fn clickable_label(
+    #[allow(dead_code)]
+    fn clickable_label(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -1458,8 +1509,34 @@ impl TextUi {
     }
 
     /// Measures rendered size of text for the provided style options.
-    pub fn measure_text_size(&mut self, ui: &Ui, text: &str, options: &LabelOptions) -> Vec2 {
-        let scale = ui.ctx().pixels_per_point();
+    #[allow(dead_code)]
+    fn measure_text_size(&mut self, ui: &Ui, text: &str, options: &LabelOptions) -> Vec2 {
+        self.measure_text_size_at_scale(
+            ui.ctx().pixels_per_point(),
+            text,
+            &TextLabelOptions {
+                font_size: options.font_size,
+                line_height: options.line_height,
+                color: options.color.into(),
+                wrap: options.wrap,
+                monospace: options.monospace,
+                weight: options.weight,
+                italic: options.italic,
+                padding: options.padding.into(),
+                fundamentals: options.fundamentals.clone(),
+            },
+        )
+        .into()
+    }
+
+    /// Measures rendered size of text at the provided output scale.
+    pub fn measure_text_size_at_scale(
+        &mut self,
+        scale: f32,
+        text: &str,
+        options: &TextLabelOptions,
+    ) -> TextVector {
+        let options = core_label_options(options);
         let metrics = Metrics::new(
             (self.effective_font_size(options.font_size) * scale).max(1.0),
             (self.effective_line_height(options.line_height) * scale).max(1.0),
@@ -1490,7 +1567,17 @@ impl TextUi {
         }
 
         let (width_px, height_px) = measure_buffer_pixels(&buffer);
-        egui::vec2(width_px as f32 / scale, height_px as f32 / scale)
+        TextVector::new(width_px as f32 / scale, height_px as f32 / scale)
+    }
+
+    /// Produces syntax-highlighted rich spans for code rendering.
+    pub fn highlight_code_spans(
+        &self,
+        code: &str,
+        language: Option<&str>,
+        fallback_color: TextColor,
+    ) -> Vec<RichTextSpan> {
+        self.highlight_code_spans_impl(code, language, fallback_color.into())
     }
 
     fn get_or_prepare_label_layout(
@@ -1571,7 +1658,7 @@ impl TextUi {
             })
     }
 
-    pub fn prepare_label_scene(
+    fn prepare_label_scene(
         &mut self,
         ctx: &Context,
         id_source: impl Hash,
@@ -1590,7 +1677,8 @@ impl TextUi {
         self.build_text_scene_from_layout(ctx, &layout, scale)
     }
 
-    pub fn prepare_rich_text_scene(
+    #[allow(dead_code)]
+    fn prepare_rich_text_scene(
         &mut self,
         ctx: &Context,
         id_source: impl Hash,
@@ -1613,47 +1701,247 @@ impl TextUi {
         &mut self,
         id_source: impl Hash,
         text: &str,
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
         scale: f32,
-    ) -> TextGpuScene {
+    ) -> Arc<TextGpuScene> {
+        let options = core_label_options(options);
+        let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
+        let mut hasher = new_fingerprint_hasher();
+        "label_gpu_scene".hash(&mut hasher);
+        text.hash(&mut hasher);
+        options.font_size.to_bits().hash(&mut hasher);
+        options.line_height.to_bits().hash(&mut hasher);
+        options.wrap.hash(&mut hasher);
+        options.monospace.hash(&mut hasher);
+        options.weight.hash(&mut hasher);
+        options.italic.hash(&mut hasher);
+        options.color.hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
+        scale.to_bits().hash(&mut hasher);
+        binned_width.map(f32::to_bits).unwrap_or(0).hash(&mut hasher);
+        self.hash_typography(&mut hasher);
+        let fingerprint = hasher.finish();
+
+        if let Some(scene) = self.gpu_scene_cache.write(|state| {
+            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
+        }) {
+            return scene;
+        }
+
         let layout = self.get_or_prepare_label_layout(
             Id::new(id_source).with("textui_prepare_label_gpu_scene"),
             text,
-            options,
+            &options,
             width_points_opt,
             scale,
         );
-        self.build_text_gpu_scene_from_layout(&layout, scale)
+        let mut scene = Arc::new(self.build_text_gpu_scene_from_layout(&layout, scale));
+        if let Some(s) = Arc::get_mut(&mut scene) {
+            s.fingerprint = fingerprint;
+        }
+        let approx_bytes = gpu_scene_approx_bytes(&scene);
+        self.gpu_scene_cache.write(|state| {
+            let _ = state.insert(fingerprint, Arc::clone(&scene), approx_bytes);
+        });
+        scene
     }
 
     pub fn prepare_rich_text_gpu_scene_at_scale(
         &mut self,
         id_source: impl Hash,
         spans: &[RichTextSpan],
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
         scale: f32,
-    ) -> TextGpuScene {
+    ) -> Arc<TextGpuScene> {
+        let options = core_label_options(options);
+        let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
+        let mut hasher = new_fingerprint_hasher();
+        "rich_gpu_scene".hash(&mut hasher);
+        for span in spans {
+            span.text.hash(&mut hasher);
+            span.style.color.hash(&mut hasher);
+            span.style.monospace.hash(&mut hasher);
+            span.style.italic.hash(&mut hasher);
+            span.style.weight.hash(&mut hasher);
+        }
+        options.font_size.to_bits().hash(&mut hasher);
+        options.line_height.to_bits().hash(&mut hasher);
+        options.wrap.hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
+        scale.to_bits().hash(&mut hasher);
+        binned_width.map(f32::to_bits).unwrap_or(0).hash(&mut hasher);
+        self.hash_typography(&mut hasher);
+        let fingerprint = hasher.finish();
+
+        if let Some(scene) = self.gpu_scene_cache.write(|state| {
+            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
+        }) {
+            return scene;
+        }
+
         let layout = self.get_or_prepare_rich_layout(
             Id::new(id_source).with("textui_prepare_rich_gpu_scene"),
             spans,
-            options,
+            &options,
             width_points_opt,
             scale,
         );
-        self.build_text_gpu_scene_from_layout(&layout, scale)
+        let mut scene = Arc::new(self.build_text_gpu_scene_from_layout(&layout, scale));
+        if let Some(s) = Arc::get_mut(&mut scene) {
+            s.fingerprint = fingerprint;
+        }
+        let approx_bytes = gpu_scene_approx_bytes(&scene);
+        self.gpu_scene_cache.write(|state| {
+            let _ = state.insert(fingerprint, Arc::clone(&scene), approx_bytes);
+        });
+        scene
+    }
+
+    pub fn prepare_label_gpu_scene_async_at_scale(
+        &mut self,
+        _id_source: impl Hash,
+        text: &str,
+        options: &TextLabelOptions,
+        width_points_opt: Option<f32>,
+        scale: f32,
+    ) -> Option<Arc<TextGpuScene>> {
+        let options = core_label_options(options);
+        let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
+        let mut hasher = new_fingerprint_hasher();
+        "label_async_gpu_scene".hash(&mut hasher);
+        text.hash(&mut hasher);
+        options.font_size.to_bits().hash(&mut hasher);
+        options.line_height.to_bits().hash(&mut hasher);
+        options.wrap.hash(&mut hasher);
+        options.monospace.hash(&mut hasher);
+        options.weight.hash(&mut hasher);
+        options.italic.hash(&mut hasher);
+        options.color.hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
+        scale.to_bits().hash(&mut hasher);
+        binned_width
+            .map(f32::to_bits)
+            .unwrap_or(0)
+            .hash(&mut hasher);
+        self.hash_typography(&mut hasher);
+        let fingerprint = hasher.finish();
+
+        if let Some(scene) = self.gpu_scene_cache.write(|state| {
+            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
+        }) {
+            return Some(scene);
+        }
+
+        let layout_opt = self.get_or_queue_async_plain_layout(
+            fingerprint,
+            text.to_owned(),
+            &options,
+            binned_width,
+            scale,
+        );
+        layout_opt.map(|layout| {
+            let scene = Arc::new(self.build_text_gpu_scene_from_layout(&layout, scale));
+            let approx_bytes = gpu_scene_approx_bytes(&scene);
+            self.gpu_scene_cache.write(|state| {
+                let _ = state.insert(fingerprint, Arc::clone(&scene), approx_bytes);
+            });
+            scene
+        })
+    }
+
+    pub fn prepare_rich_text_gpu_scene_async_at_scale(
+        &mut self,
+        id_source: impl Hash,
+        spans: &[RichTextSpan],
+        options: &TextLabelOptions,
+        width_points_opt: Option<f32>,
+        scale: f32,
+    ) -> Option<Arc<TextGpuScene>> {
+        let options = core_label_options(options);
+        let _cache_id = Id::new(id_source).with("textui_prepare_rich_gpu_scene_async");
+        let binned_width = width_points_opt.map(|w| snap_width_to_bin(w.max(1.0), scale));
+        let mut hasher = new_fingerprint_hasher();
+        "prepare_rich_gpu_async".hash(&mut hasher);
+        for span in spans {
+            span.text.hash(&mut hasher);
+            span.style.color.hash(&mut hasher);
+            span.style.monospace.hash(&mut hasher);
+            span.style.italic.hash(&mut hasher);
+            span.style.weight.hash(&mut hasher);
+        }
+        options.font_size.to_bits().hash(&mut hasher);
+        options.line_height.to_bits().hash(&mut hasher);
+        options.wrap.hash(&mut hasher);
+        hash_text_fundamentals(&options.fundamentals, &mut hasher);
+        scale.to_bits().hash(&mut hasher);
+        binned_width
+            .map(f32::to_bits)
+            .unwrap_or(0)
+            .hash(&mut hasher);
+        self.hash_typography(&mut hasher);
+        let fingerprint = hasher.finish();
+
+        if let Some(scene) = self.gpu_scene_cache.write(|state| {
+            state.touch(&fingerprint).map(|e| Arc::clone(&e.value))
+        }) {
+            return Some(scene);
+        }
+
+        let layout_opt = self.get_or_queue_async_rich_layout(
+            fingerprint,
+            spans.to_vec(),
+            &options,
+            binned_width,
+            scale,
+        );
+        layout_opt.map(|layout| {
+            let scene = Arc::new(self.build_text_gpu_scene_from_layout(&layout, scale));
+            let approx_bytes = gpu_scene_approx_bytes(&scene);
+            self.gpu_scene_cache.write(|state| {
+                let _ = state.insert(fingerprint, Arc::clone(&scene), approx_bytes);
+            });
+            scene
+        })
+    }
+
+    pub fn parse_markdown_blocks_cached(
+        &mut self,
+        id_source: impl Hash,
+        markdown: &str,
+        fingerprint: u64,
+    ) -> Arc<[TextMarkdownBlock]> {
+        let cache_id = Id::new(id_source).with("textui_markdown_blocks");
+        if let Some((fp, last_used, cached)) = self.markdown_cache.get_mut(&cache_id) {
+            *last_used = self.current_frame;
+            if *fp == fingerprint {
+                return Arc::clone(cached);
+            }
+            let blocks = Arc::<[TextMarkdownBlock]>::from(parse_markdown_blocks(markdown));
+            *fp = fingerprint;
+            *cached = Arc::clone(&blocks);
+            return blocks;
+        }
+
+        let blocks = Arc::<[TextMarkdownBlock]>::from(parse_markdown_blocks(markdown));
+        self.markdown_cache.insert(
+            cache_id,
+            (fingerprint, self.current_frame, Arc::clone(&blocks)),
+        );
+        blocks
     }
 
     pub fn prepare_label_path_layout(
         &mut self,
         text: &str,
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
         path: &TextPath,
         path_options: &TextPathOptions,
     ) -> Result<TextPathLayout, TextPathError> {
-        let layout = self.prepare_plain_text_layout(text, options, width_points_opt, 1.0);
+        let options = core_label_options(options);
+        let layout = self.prepare_plain_text_layout(text, &options, width_points_opt, 1.0);
         build_path_layout_from_prepared_layout(
             &layout,
             options.font_size,
@@ -1666,12 +1954,13 @@ impl TextUi {
     pub fn prepare_rich_text_path_layout(
         &mut self,
         spans: &[RichTextSpan],
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
         path: &TextPath,
         path_options: &TextPathOptions,
     ) -> Result<TextPathLayout, TextPathError> {
-        let layout = self.prepare_rich_text_layout(spans, options, width_points_opt, 1.0);
+        let options = core_label_options(options);
+        let layout = self.prepare_rich_text_layout(spans, &options, width_points_opt, 1.0);
         build_path_layout_from_prepared_layout(
             &layout,
             options.font_size,
@@ -1684,10 +1973,11 @@ impl TextUi {
     pub fn export_label_as_shapes(
         &mut self,
         text: &str,
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
     ) -> VectorTextShape {
-        let layout = self.prepare_plain_text_layout(text, options, width_points_opt, 1.0);
+        let options = core_label_options(options);
+        let layout = self.prepare_plain_text_layout(text, &options, width_points_opt, 1.0);
         export_prepared_layout_as_shapes(
             &layout,
             &mut self.font_system,
@@ -1700,10 +1990,11 @@ impl TextUi {
     pub fn export_rich_text_as_shapes(
         &mut self,
         spans: &[RichTextSpan],
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
     ) -> VectorTextShape {
-        let layout = self.prepare_rich_text_layout(spans, options, width_points_opt, 1.0);
+        let options = core_label_options(options);
+        let layout = self.prepare_rich_text_layout(spans, &options, width_points_opt, 1.0);
         export_prepared_layout_as_shapes(
             &layout,
             &mut self.font_system,
@@ -1713,7 +2004,8 @@ impl TextUi {
         )
     }
 
-    pub fn paint_label_on_path(
+    #[allow(dead_code)]
+    fn paint_label_on_path(
         &mut self,
         painter: &egui::Painter,
         id_source: impl Hash,
@@ -1741,7 +2033,8 @@ impl TextUi {
         )
     }
 
-    pub fn paint_rich_text_on_path(
+    #[allow(dead_code)]
+    fn paint_rich_text_on_path(
         &mut self,
         painter: &egui::Painter,
         id_source: impl Hash,
@@ -1769,6 +2062,7 @@ impl TextUi {
         )
     }
 
+    #[allow(dead_code)]
     fn paint_prepared_layout_on_path(
         &mut self,
         painter: &egui::Painter,
@@ -1831,7 +2125,8 @@ impl TextUi {
         Ok(path_layout)
     }
 
-    pub fn prepare_label_path_scene(
+    #[allow(dead_code)]
+    fn prepare_label_path_scene(
         &mut self,
         ctx: &Context,
         id_source: impl Hash,
@@ -1864,16 +2159,17 @@ impl TextUi {
         &mut self,
         id_source: impl Hash,
         text: &str,
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
         scale: f32,
         path: &TextPath,
         path_options: &TextPathOptions,
     ) -> Result<TextGpuScene, TextPathError> {
+        let options = core_label_options(options);
         let layout = self.get_or_prepare_label_layout(
             Id::new(id_source).with("textui_prepare_path_label_gpu_scene"),
             text,
-            options,
+            &options,
             width_points_opt,
             scale,
         );
@@ -1891,16 +2187,17 @@ impl TextUi {
         &mut self,
         id_source: impl Hash,
         spans: &[RichTextSpan],
-        options: &LabelOptions,
+        options: &TextLabelOptions,
         width_points_opt: Option<f32>,
         scale: f32,
         path: &TextPath,
         path_options: &TextPathOptions,
     ) -> Result<TextGpuScene, TextPathError> {
+        let options = core_label_options(options);
         let layout = self.get_or_prepare_rich_layout(
             Id::new(id_source).with("textui_prepare_path_rich_gpu_scene"),
             spans,
-            options,
+            &options,
             width_points_opt,
             scale,
         );
@@ -1974,7 +2271,7 @@ impl TextUi {
         scene.to_gpu_scene(self.atlas_page_data_for_scene(scene))
     }
 
-    pub fn paint_scene_in_rect(
+    fn paint_scene_in_rect(
         &mut self,
         painter: &egui::Painter,
         rect: Rect,
@@ -1983,7 +2280,7 @@ impl TextUi {
         self.paint_scene_in_rect_tinted(painter, rect, scene, Color32::WHITE);
     }
 
-    pub fn paint_scene_in_rect_tinted(
+    fn paint_scene_in_rect_tinted(
         &mut self,
         painter: &egui::Painter,
         rect: Rect,
@@ -2001,6 +2298,7 @@ impl TextUi {
         self.paint_text_quads(painter, rect, &quads);
     }
 
+    #[allow(dead_code)]
     fn label_impl(
         &mut self,
         ui: &mut Ui,
@@ -2090,7 +2388,8 @@ impl TextUi {
     }
 
     /// Renders a button with text styles from [`ButtonOptions`].
-    pub fn button(
+    #[allow(dead_code)]
+    fn button(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -2101,7 +2400,8 @@ impl TextUi {
     }
 
     /// Renders a selectable button variant.
-    pub fn selectable_button(
+    #[allow(dead_code)]
+    fn selectable_button(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -2112,6 +2412,7 @@ impl TextUi {
         self.button_impl(ui, id_source, text, selected, options)
     }
 
+    #[allow(dead_code)]
     fn button_impl(
         &mut self,
         ui: &mut Ui,
@@ -2187,7 +2488,8 @@ impl TextUi {
     }
 
     /// Shows a tooltip while the provided response is hovered.
-    pub fn tooltip_for_response(
+    #[allow(dead_code)]
+    fn tooltip_for_response(
         &mut self,
         ui: &Ui,
         id_source: impl Hash,
@@ -2273,7 +2575,8 @@ impl TextUi {
     }
 
     /// Renders a syntax-highlighted code block synchronously.
-    pub fn code_block(
+    #[allow(dead_code)]
+    fn code_block(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -2309,7 +2612,7 @@ impl TextUi {
         let scene_id = ui.make_persistent_id(id_source).with("textui_code");
 
         let spans =
-            self.highlight_code_spans(code, options.language.as_deref(), options.text_color);
+            self.highlight_code_spans_impl(code, options.language.as_deref(), options.text_color);
         let scene = self.prepare_rich_text_scene(
             ui.ctx(),
             scene_id,
@@ -2355,7 +2658,8 @@ impl TextUi {
     }
 
     /// Renders simple markdown (headings, paragraphs, fenced code).
-    pub fn markdown(
+    #[allow(dead_code)]
+    fn markdown(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -2385,13 +2689,13 @@ impl TextUi {
             if *fp == md_fingerprint {
                 Arc::clone(cached)
             } else {
-                let b = Arc::<[MarkdownBlock]>::from(parse_markdown_blocks(markdown));
+                let b = Arc::<[TextMarkdownBlock]>::from(parse_markdown_blocks(markdown));
                 *fp = md_fingerprint;
                 *cached = Arc::clone(&b);
                 b
             }
         } else {
-            let b = Arc::<[MarkdownBlock]>::from(parse_markdown_blocks(markdown));
+            let b = Arc::<[TextMarkdownBlock]>::from(parse_markdown_blocks(markdown));
             self.markdown_cache.insert(
                 cache_id,
                 (md_fingerprint, self.current_frame, Arc::clone(&b)),
@@ -2402,14 +2706,14 @@ impl TextUi {
         ui.push_id(id_source, |ui| {
             for (index, block) in blocks.iter().enumerate() {
                 match block {
-                    MarkdownBlock::Heading { level, text } => {
+                    TextMarkdownBlock::Heading { level, text } => {
                         let factor = match level {
-                            HeadingLevel::H1 => options.heading_scale + 0.26,
-                            HeadingLevel::H2 => options.heading_scale + 0.12,
-                            HeadingLevel::H3 => options.heading_scale,
-                            HeadingLevel::H4 => options.heading_scale - 0.08,
-                            HeadingLevel::H5 => options.heading_scale - 0.12,
-                            HeadingLevel::H6 => options.heading_scale - 0.16,
+                            TextMarkdownHeadingLevel::H1 => options.heading_scale + 0.26,
+                            TextMarkdownHeadingLevel::H2 => options.heading_scale + 0.12,
+                            TextMarkdownHeadingLevel::H3 => options.heading_scale,
+                            TextMarkdownHeadingLevel::H4 => options.heading_scale - 0.08,
+                            TextMarkdownHeadingLevel::H5 => options.heading_scale - 0.12,
+                            TextMarkdownHeadingLevel::H6 => options.heading_scale - 0.16,
                         }
                         .max(1.0);
                         let heading_style = LabelOptions {
@@ -2425,10 +2729,10 @@ impl TextUi {
                         };
                         let _ = self.label(ui, ("md_h", index), text.as_str(), &heading_style);
                     }
-                    MarkdownBlock::Paragraph(text) => {
+                    TextMarkdownBlock::Paragraph(text) => {
                         let _ = self.label(ui, ("md_p", index), text.as_str(), &options.body);
                     }
-                    MarkdownBlock::Code { language, text } => {
+                    TextMarkdownBlock::Code { language, text } => {
                         let mut code_options = options.code.clone();
                         code_options.language = language.clone();
                         let _ =
@@ -2444,7 +2748,8 @@ impl TextUi {
     }
 
     /// Renders a single-line editable text field.
-    pub fn singleline_input(
+    #[doc(hidden)]
+    pub fn egui_singleline_input(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -2455,7 +2760,8 @@ impl TextUi {
     }
 
     /// Renders a multi-line editable text field.
-    pub fn multiline_input(
+    #[doc(hidden)]
+    pub fn egui_multiline_input(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -2470,7 +2776,8 @@ impl TextUi {
     /// This keeps the same font pipeline as the rest of `TextUi`, supports drag selection and
     /// copy/select-all shortcuts, and rasterizes the visible viewport into texture tiles so large
     /// views do not depend on a single oversized GPU texture.
-    pub fn multiline_rich_viewer(
+    #[doc(hidden)]
+    pub fn egui_multiline_rich_viewer(
         &mut self,
         ui: &mut Ui,
         id_source: impl Hash,
@@ -3385,22 +3692,21 @@ impl TextUi {
         if process_keyboard {
             for event in &self.frame_events {
                 match event {
-                    egui::Event::Copy | egui::Event::Cut => {
+                    TextInputEvent::Copy | TextInputEvent::Cut => {
                         if let Some(selection) = editor.copy_selection() {
                             ui.ctx().copy_text(selection);
                         }
                     }
-                    egui::Event::Key {
+                    TextInputEvent::Key {
                         key,
                         pressed,
                         modifiers,
-                        ..
                     } if *pressed => {
                         changed |= handle_read_only_editor_key_event(
                             &mut self.font_system,
                             editor,
-                            *key,
-                            *modifiers,
+                            egui_key_from_text(*key),
+                            egui_modifiers_from_text(*modifiers),
                             preferred_cursor_x_px,
                             fundamentals,
                             scale,
@@ -3906,7 +4212,7 @@ impl TextUi {
         if process_keyboard {
             for event in &self.frame_events {
                 match event {
-                    egui::Event::Text(text) => {
+                    TextInputEvent::Text(text) => {
                         let mut text = text.clone();
                         if !multiline {
                             text = text.replace(['\n', '\r'], "");
@@ -3917,12 +4223,12 @@ impl TextUi {
                             changed = true;
                         }
                     }
-                    egui::Event::Copy => {
+                    TextInputEvent::Copy => {
                         if let Some(selection) = editor.copy_selection() {
                             ui.ctx().copy_text(selection);
                         }
                     }
-                    egui::Event::Cut => {
+                    TextInputEvent::Cut => {
                         if let Some(selection) = editor.copy_selection() {
                             ui.ctx().copy_text(selection);
                             changed |= editor.delete_selection();
@@ -3931,7 +4237,7 @@ impl TextUi {
                             }
                         }
                     }
-                    egui::Event::Paste(pasted) => {
+                    TextInputEvent::Paste(pasted) => {
                         let mut pasted = pasted.clone();
                         if !multiline {
                             pasted = pasted.replace(['\n', '\r'], " ");
@@ -3943,12 +4249,14 @@ impl TextUi {
                         }
                     }
                     // Middle-click paste (X11 primary selection convention)
-                    egui::Event::PointerButton {
-                        button: PointerButton::Middle,
+                    TextInputEvent::PointerButton {
+                        button: TextPointerButton::Middle,
                         pressed: true,
-                        pos,
                         ..
-                    } if content_rect.contains(*pos) => {
+                    } if response.hovered()
+                        || response.has_focus()
+                        || response.is_pointer_button_down_on() =>
+                    {
                         if let Ok(mut cb) = arboard::Clipboard::new() {
                             if let Ok(paste_text) = cb.get_text() {
                                 let paste_text = if multiline {
@@ -3964,17 +4272,16 @@ impl TextUi {
                             }
                         }
                     }
-                    egui::Event::Key {
+                    TextInputEvent::Key {
                         key,
                         pressed,
                         modifiers,
-                        ..
                     } if *pressed => {
                         changed |= handle_editor_key_event(
                             &mut self.font_system,
                             editor,
-                            *key,
-                            *modifiers,
+                            egui_key_from_text(*key),
+                            egui_modifiers_from_text(*modifiers),
                             multiline,
                             preferred_cursor_x_px,
                             fundamentals,
@@ -4001,7 +4308,7 @@ impl TextUi {
         changed
     }
 
-    fn highlight_code_spans(
+    fn highlight_code_spans_impl(
         &self,
         code: &str,
         language: Option<&str>,
@@ -4388,6 +4695,7 @@ impl TextUi {
             bounds_min: [bounds.min.x, bounds.min.y],
             bounds_max: [bounds.max.x, bounds.max.y],
             size_points: [layout.size_points.x, layout.size_points.y],
+            fingerprint: 0,
         }
     }
 
@@ -4586,6 +4894,7 @@ impl TextUi {
             bounds_min: [bounds.min.x, bounds.min.y],
             bounds_max: [bounds.max.x, bounds.max.y],
             size_points: [layout.size_points.x, layout.size_points.y],
+            fingerprint: 0,
         })
     }
 
@@ -4705,6 +5014,7 @@ impl TextUi {
         self.async_raster.pending.clear();
         self.glyph_atlas.clear();
         self.markdown_cache.clear();
+        let _ = self.gpu_scene_cache.write(|state| state.clear());
         if clear_input_states {
             self.input_states.clear();
         }
@@ -4718,6 +5028,12 @@ impl TextUi {
 
     fn enforce_async_raster_cache_budget(&mut self) {
         self.async_raster.cache.write(|state| {
+            let _ = state.evict_to_budget();
+        });
+    }
+
+    fn enforce_gpu_scene_cache_budget(&mut self) {
+        self.gpu_scene_cache.write(|state| {
             let _ = state.evict_to_budget();
         });
     }
@@ -6190,21 +6506,15 @@ fn paint_text_quads_fallback(
     painter: &egui::Painter,
     quads: &[PaintTextQuad],
 ) {
-    let mut meshes: Vec<(TextureId, egui::epaint::Mesh)> = Vec::new();
+    let mut meshes: FxHashMap<TextureId, egui::epaint::Mesh> = FxHashMap::default();
     for quad in quads {
         let Some(texture_id) = glyph_atlas.texture_id_for_page(quad.page_index) else {
             continue;
         };
-        if let Some((_, mesh)) = meshes
-            .iter_mut()
-            .find(|(existing_id, _)| *existing_id == texture_id)
-        {
-            add_text_quad(mesh, quad.positions, quad.uvs, quad.tint);
-        } else {
-            let mut mesh = egui::epaint::Mesh::with_texture(texture_id);
-            add_text_quad(&mut mesh, quad.positions, quad.uvs, quad.tint);
-            meshes.push((texture_id, mesh));
-        }
+        let mesh = meshes
+            .entry(texture_id)
+            .or_insert_with(|| egui::epaint::Mesh::with_texture(texture_id));
+        add_text_quad(mesh, quad.positions, quad.uvs, quad.tint);
     }
 
     for (_, mesh) in meshes {
@@ -6253,6 +6563,16 @@ fn map_scene_quads_to_rect(
 
 fn default_gpu_scene_page_side(graphics_config: ResolvedTextGraphicsConfig) -> usize {
     graphics_config.atlas_page_target_px.max(256)
+}
+
+fn gpu_scene_approx_bytes(scene: &TextGpuScene) -> usize {
+    scene
+        .atlas_pages
+        .iter()
+        .map(|p| p.rgba8.len())
+        .sum::<usize>()
+        + scene.quads.len() * std::mem::size_of::<TextGpuQuad>()
+        + 64
 }
 
 fn allocate_cpu_scene_page_slot(
@@ -6976,29 +7296,29 @@ fn select_all(editor: &mut Editor<'static>) -> bool {
 
 /// Classify a frame event as a text-modifying operation for undo grouping.
 /// Returns `UndoOpKind::None` for non-modifying events (navigation, etc.).
-fn classify_modify_op(event: &egui::Event) -> UndoOpKind {
+fn classify_modify_op(event: &TextInputEvent) -> UndoOpKind {
     match event {
-        egui::Event::Text(t) if !t.is_empty() => UndoOpKind::TextInsert,
-        egui::Event::Paste(p) if !p.is_empty() => UndoOpKind::Paste,
-        egui::Event::Cut => UndoOpKind::Cut,
-        egui::Event::Key {
+        TextInputEvent::Text(t) if !t.is_empty() => UndoOpKind::TextInsert,
+        TextInputEvent::Paste(p) if !p.is_empty() => UndoOpKind::Paste,
+        TextInputEvent::Cut => UndoOpKind::Cut,
+        TextInputEvent::Key {
             key,
             pressed: true,
             modifiers,
-            ..
         } => {
             let word_delete = (modifiers.alt || modifiers.ctrl || modifiers.mac_cmd)
-                && matches!(key, Key::Backspace | Key::Delete);
-            let emacs_delete = modifiers.ctrl && matches!(key, Key::H | Key::K | Key::U | Key::W);
-            if matches!(key, Key::Backspace | Key::Delete) || word_delete || emacs_delete {
+                && matches!(key, TextKey::Backspace | TextKey::Delete);
+            let emacs_delete =
+                modifiers.ctrl && matches!(key, TextKey::H | TextKey::K | TextKey::U | TextKey::W);
+            if matches!(key, TextKey::Backspace | TextKey::Delete) || word_delete || emacs_delete {
                 UndoOpKind::Delete
             } else {
                 UndoOpKind::None
             }
         }
         // Middle-click paste counts as Paste
-        egui::Event::PointerButton {
-            button: PointerButton::Middle,
+        TextInputEvent::PointerButton {
+            button: TextPointerButton::Middle,
             pressed: true,
             ..
         } => UndoOpKind::Paste,
@@ -7008,18 +7328,18 @@ fn classify_modify_op(event: &egui::Event) -> UndoOpKind {
 
 /// True if the event is a cursor-navigation key (resets undo grouping so the
 /// next insertion starts a new undo entry).
-fn is_navigation_event(event: &egui::Event) -> bool {
+fn is_navigation_event(event: &TextInputEvent) -> bool {
     matches!(
         event,
-        egui::Event::Key {
-            key: Key::ArrowLeft
-                | Key::ArrowRight
-                | Key::ArrowUp
-                | Key::ArrowDown
-                | Key::Home
-                | Key::End
-                | Key::PageUp
-                | Key::PageDown,
+        TextInputEvent::Key {
+            key: TextKey::Left
+                | TextKey::Right
+                | TextKey::Up
+                | TextKey::Down
+                | TextKey::Home
+                | TextKey::End
+                | TextKey::PageUp
+                | TextKey::PageDown,
             pressed: true,
             ..
         }
@@ -7027,7 +7347,7 @@ fn is_navigation_event(event: &egui::Event) -> bool {
 }
 
 /// Returns the first modifying op kind found in the event list, or None.
-fn pending_modify_op(events: &[egui::Event]) -> UndoOpKind {
+fn pending_modify_op(events: &[TextInputEvent]) -> UndoOpKind {
     events
         .iter()
         .map(classify_modify_op)
@@ -7395,7 +7715,7 @@ fn key_to_action(key: Key, modifiers: egui::Modifiers, multiline: bool) -> Optio
     }
 }
 
-fn parse_markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
+fn parse_markdown_blocks(markdown: &str) -> Vec<TextMarkdownBlock> {
     let parser = Parser::new_ext(markdown, MdOptions::all());
 
     let mut blocks = Vec::new();
@@ -7413,8 +7733,8 @@ fn parse_markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             Event::End(TagEnd::Heading(_)) => {
                 if let Some(level) = current_heading.take() {
                     if !text_buf.trim().is_empty() {
-                        blocks.push(MarkdownBlock::Heading {
-                            level,
+                        blocks.push(TextMarkdownBlock::Heading {
+                            level: text_markdown_heading_level(level),
                             text: text_buf.trim().to_owned(),
                         });
                     }
@@ -7426,7 +7746,7 @@ fn parse_markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             }
             Event::End(TagEnd::Paragraph) => {
                 if !text_buf.trim().is_empty() {
-                    blocks.push(MarkdownBlock::Paragraph(text_buf.trim().to_owned()));
+                    blocks.push(TextMarkdownBlock::Paragraph(text_buf.trim().to_owned()));
                 }
                 text_buf.clear();
             }
@@ -7446,7 +7766,7 @@ fn parse_markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
                 };
             }
             Event::End(TagEnd::CodeBlock) => {
-                blocks.push(MarkdownBlock::Code {
+                blocks.push(TextMarkdownBlock::Code {
                     language: current_code_language.take(),
                     text: text_buf.clone(),
                 });
@@ -7469,10 +7789,10 @@ fn parse_markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             }
             Event::Rule => {
                 if !text_buf.trim().is_empty() {
-                    blocks.push(MarkdownBlock::Paragraph(text_buf.trim().to_owned()));
+                    blocks.push(TextMarkdownBlock::Paragraph(text_buf.trim().to_owned()));
                 }
                 text_buf.clear();
-                blocks.push(MarkdownBlock::Paragraph("---".to_owned()));
+                blocks.push(TextMarkdownBlock::Paragraph("---".to_owned()));
             }
             _ => {}
         }
@@ -7480,21 +7800,32 @@ fn parse_markdown_blocks(markdown: &str) -> Vec<MarkdownBlock> {
 
     if !text_buf.trim().is_empty() {
         if in_code_block {
-            blocks.push(MarkdownBlock::Code {
+            blocks.push(TextMarkdownBlock::Code {
                 language: current_code_language,
                 text: text_buf,
             });
         } else if let Some(level) = current_heading {
-            blocks.push(MarkdownBlock::Heading {
-                level,
+            blocks.push(TextMarkdownBlock::Heading {
+                level: text_markdown_heading_level(level),
                 text: text_buf,
             });
         } else {
-            blocks.push(MarkdownBlock::Paragraph(text_buf));
+            blocks.push(TextMarkdownBlock::Paragraph(text_buf));
         }
     }
 
     blocks
+}
+
+fn text_markdown_heading_level(level: HeadingLevel) -> TextMarkdownHeadingLevel {
+    match level {
+        HeadingLevel::H1 => TextMarkdownHeadingLevel::H1,
+        HeadingLevel::H2 => TextMarkdownHeadingLevel::H2,
+        HeadingLevel::H3 => TextMarkdownHeadingLevel::H3,
+        HeadingLevel::H4 => TextMarkdownHeadingLevel::H4,
+        HeadingLevel::H5 => TextMarkdownHeadingLevel::H5,
+        HeadingLevel::H6 => TextMarkdownHeadingLevel::H6,
+    }
 }
 
 fn measure_buffer_pixels(buffer: &Buffer) -> (usize, usize) {
