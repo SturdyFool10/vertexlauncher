@@ -69,6 +69,7 @@ pub(super) struct EyeExpressionSpec {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BrowExpressionSpec {
+    #[allow(dead_code)]
     pub(super) id: &'static str,
     pub(super) kind: BrowKind,
     pub(super) offset: ExpressionOffset,
