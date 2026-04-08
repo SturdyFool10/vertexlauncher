@@ -2128,12 +2128,6 @@ fn render_instance_usage(
                             18.0,
                         );
                         ui.add_space(8.0);
-                        let _ = text_ui.label(
-                            ui,
-                            ("home_usage_name", index),
-                            instance.name.as_str(),
-                            &style::body_strong(ui),
-                        );
                         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                             let usage_line = format!(
                                 "{} launches | {}",
@@ -2146,6 +2140,14 @@ fn render_instance_usage(
                                 usage_line.as_str(),
                                 &style::muted_single_line(ui),
                             );
+                            ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
+                                let _ = text_ui.label(
+                                    ui,
+                                    ("home_usage_name", index),
+                                    instance.name.as_str(),
+                                    &style::body_strong(ui),
+                                );
+                            });
                         });
                     },
                 );
