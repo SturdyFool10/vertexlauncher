@@ -1,6 +1,29 @@
 use egui::{Color32, Pos2, Rect, Vec2};
 use std::fmt::Write as _;
 
+/// Declares the rendering expectation for a text run.
+///
+/// This enum is the formal rendering policy described in the typography design
+/// document.  It allows call sites to express whether a text run **must** stay
+/// on the GPU path, **prefers** the GPU path, or **may** fall back to software
+/// rendering when required.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum TextRenderingPolicy {
+    /// Do not use software rendering.  If the requested effect cannot be
+    /// represented on the active GPU path, degrade the effect rather than
+    /// leaving the GPU path.
+    GpuRequired,
+
+    /// Use the GPU path if at all possible.  Allow software fallback only for
+    /// hard capability failures.  This is the default for all normal UI text.
+    #[default]
+    GpuPreferred,
+
+    /// Permissive mode for edge cases, exports, debugging, or rare glyph/effect
+    /// paths.
+    FallbackAllowed,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct TextColor {
     r: u8,
@@ -237,8 +260,15 @@ pub struct TextFundamentals {
     pub case_sensitive_forms: bool,
     pub slashed_zero: bool,
     pub tabular_numbers: bool,
+    /// When `true`, straight ASCII quotes (`"` and `'`) are replaced with
+    /// typographic curly quotes for display.  The raw text is preserved
+    /// unchanged and clipboard copy always produces straight quotes.
+    pub smart_quotes: bool,
     pub letter_spacing_points: f32,
     pub word_spacing_points: f32,
+    /// Minimum allowed letter spacing in points.  Negative values permit
+    /// tighter tracking for captions and badges.  The default is `-0.5`.
+    pub letter_spacing_floor: f32,
     pub feature_settings: Vec<TextFeatureSetting>,
     pub variation_settings: Vec<TextVariationSetting>,
 }
@@ -255,13 +285,18 @@ impl Default for TextFundamentals {
             case_sensitive_forms: false,
             slashed_zero: false,
             tabular_numbers: false,
+            smart_quotes: true,
             letter_spacing_points: 0.0,
             word_spacing_points: 0.0,
+            letter_spacing_floor: -0.5,
             feature_settings: Vec::new(),
             variation_settings: Vec::new(),
         }
     }
 }
+
+/// Default ellipsis string used for text truncation.
+pub const DEFAULT_ELLIPSIS: &str = "\u{2026}";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLabelOptions {
@@ -274,13 +309,16 @@ pub struct TextLabelOptions {
     pub italic: bool,
     pub padding: TextVector,
     pub fundamentals: TextFundamentals,
+    /// The string appended when text is truncated.  Defaults to the Unicode
+    /// ellipsis character (U+2026).
+    pub ellipsis: String,
 }
 
 impl Default for TextLabelOptions {
     fn default() -> Self {
         Self {
             font_size: 18.0,
-            line_height: 24.0,
+            line_height: 27.0,
             color: TextColor::WHITE,
             wrap: true,
             monospace: false,
@@ -288,6 +326,7 @@ impl Default for TextLabelOptions {
             italic: false,
             padding: TextVector::ZERO,
             fundamentals: TextFundamentals::default(),
+            ellipsis: DEFAULT_ELLIPSIS.to_owned(),
         }
     }
 }
@@ -505,9 +544,9 @@ impl Default for TextRasterizationConfig {
             stem_darkening: TextStemDarkeningMode::Auto,
             optical_sizing: TextOpticalSizingMode::Auto,
             field_range_px: 8.0,
-            stem_darkening_min_ppem: 10.0,
-            stem_darkening_max_ppem: 50.0,
-            stem_darkening_max_strength: 0.4,
+            stem_darkening_min_ppem: 14.0,
+            stem_darkening_max_ppem: 28.0,
+            stem_darkening_max_strength: 0.22,
         }
     }
 }

@@ -38,21 +38,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
             section_frame(ui).show(ui, |ui| {
-                let text_color = ui.visuals().text_color();
-                let heading = LabelOptions {
-                    font_size: 26.0,
-                    line_height: 30.0,
-                    weight: 700,
-                    color: text_color,
-                    wrap: false,
-                    ..LabelOptions::default()
-                };
-                let body = LabelOptions {
-                    color: text_color,
-                    ..LabelOptions::default()
-                };
-
-                let _ = text_ui.label(ui, "legal_included_heading", "Included Notices", &heading);
+                let _ = text_ui.label(ui, "legal_included_heading", "Included Notices", &style::modal_title(ui));
                 ui.add_space(style::SPACE_XS);
                 ui.separator();
                 ui.add_space(style::SPACE_SM);
@@ -60,17 +46,13 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                     ui,
                     "legal_open_notice",
                     "Open a notice below to read its full legal text.",
-                    &body,
+                    &style::body(ui),
                 );
-                let mut weak = body.clone();
-                weak.color = ui.visuals().weak_text_color();
-                weak.font_size = 13.0;
-                weak.line_height = 16.0;
                 let _ = text_ui.label(
                     ui,
                     "legal_notice_count",
                     &format!("{} total", LEGAL_NOTICES.len()),
-                    &weak,
+                    &style::caption(ui),
                 );
             });
 
@@ -201,8 +183,7 @@ pub fn render(ui: &mut Ui, text_ui: &mut TextUi) {
                                             tabular_numbers: false,
                                             letter_spacing_points: 0.0,
                                             word_spacing_points: 0.0,
-                                            feature_settings: Vec::new(),
-                                            variation_settings: Vec::new(),
+                                            ..TextFundamentals::default()
                                         },
                                         ..CodeBlockOptions::default()
                                     };

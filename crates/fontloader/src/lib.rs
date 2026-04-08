@@ -290,11 +290,19 @@ pub mod egui_integration {
             );
             s.text_styles.insert(
                 TextStyle::Button,
-                FontId::new(size_pt, FontFamily::Proportional),
+                FontId::new(size_pt * 0.94, FontFamily::Proportional),
             );
             s.text_styles.insert(
                 TextStyle::Monospace,
                 FontId::new(size_pt, FontFamily::Monospace),
+            );
+            s.text_styles.insert(
+                TextStyle::Heading,
+                FontId::new((size_pt * 1.414).round(), FontFamily::Proportional),
+            );
+            s.text_styles.insert(
+                TextStyle::Small,
+                FontId::new((size_pt * 0.82).max(11.0), FontFamily::Proportional),
             );
         });
     }

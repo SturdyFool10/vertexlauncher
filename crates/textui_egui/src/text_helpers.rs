@@ -3,6 +3,19 @@ use textui::TextUi;
 
 use crate::LabelOptions;
 
+/// Result of a text truncation operation, providing both the display string
+/// (with an ellipsis appended) and the raw, untruncated original text.
+#[derive(Clone, Debug)]
+pub struct TruncatedText {
+    /// The text as it should be rendered, with an ellipsis appended when
+    /// the original text was too wide.
+    pub display: String,
+    /// The original, unmodified text before truncation.
+    pub raw: String,
+    /// `true` when the text was shortened and an ellipsis was appended.
+    pub was_truncated: bool,
+}
+
 pub fn normalize_inline_whitespace(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
     for word in text.split_whitespace() {
@@ -21,11 +34,23 @@ pub fn truncate_single_line_text_with_ellipsis(
     max_width: f32,
     label_options: &LabelOptions,
 ) -> String {
+    truncate_single_line_text_with_ellipsis_detailed(text_ui, ui, text, max_width, label_options)
+        .display
+}
+
+pub fn truncate_single_line_text_with_ellipsis_detailed(
+    text_ui: &mut TextUi,
+    ui: &Ui,
+    text: &str,
+    max_width: f32,
+    label_options: &LabelOptions,
+) -> TruncatedText {
     let normalized = normalize_inline_whitespace(text);
     truncate_prepared_single_line_text_with_ellipsis(
         text_ui,
         ui,
-        normalized.as_str(),
+        &normalized,
+        text,
         max_width,
         label_options,
     )
@@ -38,10 +63,28 @@ pub fn truncate_single_line_text_with_ellipsis_preserving_whitespace(
     max_width: f32,
     label_options: &LabelOptions,
 ) -> String {
+    truncate_single_line_text_with_ellipsis_preserving_whitespace_detailed(
+        text_ui,
+        ui,
+        text,
+        max_width,
+        label_options,
+    )
+    .display
+}
+
+pub fn truncate_single_line_text_with_ellipsis_preserving_whitespace_detailed(
+    text_ui: &mut TextUi,
+    ui: &Ui,
+    text: &str,
+    max_width: f32,
+    label_options: &LabelOptions,
+) -> TruncatedText {
     truncate_prepared_single_line_text_with_ellipsis(
         text_ui,
         ui,
         text.trim(),
+        text,
         max_width,
         label_options,
     )
@@ -51,15 +94,28 @@ fn truncate_prepared_single_line_text_with_ellipsis(
     text_ui: &mut TextUi,
     ui: &Ui,
     text: &str,
+    raw: &str,
     max_width: f32,
     label_options: &LabelOptions,
-) -> String {
+) -> TruncatedText {
+    let raw_owned = raw.to_owned();
+
     if text.is_empty() {
-        return String::new();
+        return TruncatedText {
+            display: String::new(),
+            raw: raw_owned,
+            was_truncated: false,
+        };
     }
 
+    let ellipsis = &label_options.ellipsis;
+
     if max_width <= 0.0 {
-        return "...".to_owned();
+        return TruncatedText {
+            display: ellipsis.clone(),
+            raw: raw_owned,
+            was_truncated: true,
+        };
     }
 
     let full_width = text_ui
@@ -70,19 +126,26 @@ fn truncate_prepared_single_line_text_with_ellipsis(
         )
         .x;
     if full_width <= max_width {
-        return text.to_owned();
+        return TruncatedText {
+            display: text.to_owned(),
+            raw: raw_owned,
+            was_truncated: false,
+        };
     }
 
-    const ELLIPSIS: &str = "...";
     let ellipsis_width = text_ui
         .measure_text_size_at_scale(
             ui.ctx().pixels_per_point(),
-            ELLIPSIS,
+            ellipsis,
             &label_options.to_text_label_options(),
         )
         .x;
     if ellipsis_width > max_width {
-        return String::new();
+        return TruncatedText {
+            display: String::new(),
+            raw: raw_owned,
+            was_truncated: true,
+        };
     }
 
     let budget = (max_width - ellipsis_width).max(0.0);
@@ -95,9 +158,9 @@ fn truncate_prepared_single_line_text_with_ellipsis(
     };
 
     let candidate = |n: usize| -> String {
-        let mut s = String::with_capacity(n + ELLIPSIS.len());
+        let mut s = String::with_capacity(n + ellipsis.len());
         s.extend(chars[..n].iter());
-        s.push_str(ELLIPSIS);
+        s.push_str(ellipsis);
         s
     };
 
@@ -144,11 +207,19 @@ fn truncate_prepared_single_line_text_with_ellipsis(
     }
 
     if best == 0 {
-        return ELLIPSIS.to_owned();
+        return TruncatedText {
+            display: ellipsis.clone(),
+            raw: raw_owned,
+            was_truncated: true,
+        };
     }
 
-    let mut out = String::with_capacity(best + ELLIPSIS.len());
+    let mut out = String::with_capacity(best + ellipsis.len());
     out.extend(chars[..best].iter());
-    out.push_str(ELLIPSIS);
-    out
+    out.push_str(ellipsis);
+    TruncatedText {
+        display: out,
+        raw: raw_owned,
+        was_truncated: true,
+    }
 }

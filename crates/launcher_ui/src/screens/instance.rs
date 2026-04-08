@@ -646,7 +646,7 @@ fn render_instance_screenshot_gallery(
     state: &mut InstanceScreenState,
     retained_image_keys: &mut HashSet<String>,
 ) {
-    let title_style = style::heading(ui, 18.0, 24.0);
+    let title_style = style::body_strong(ui);
     let body_style = style::muted(ui);
     let _ = text_ui.label(
         ui,
@@ -968,7 +968,7 @@ fn render_instance_screenshot_viewer_modal(
         ctx,
         dialog_options("instance_screenshot_viewer_window", DialogPreset::Viewer),
         |ui| {
-            let title_style = style::heading(ui, 24.0, 28.0);
+            let title_style = style::section_heading(ui);
             let body_style = style::muted_single_line(ui);
 
             ui.horizontal(|ui| {
@@ -1485,7 +1485,7 @@ fn copy_instance_screenshot_to_clipboard(ctx: &egui::Context, label: &str, bytes
 }
 
 fn render_instance_logs_tab(ui: &mut Ui, text_ui: &mut TextUi, state: &mut InstanceScreenState) {
-    let title_style = style::heading(ui, 18.0, 24.0);
+    let title_style = style::body_strong(ui);
     let body_style = style::muted(ui);
     let _ = text_ui.label(ui, "instance_logs_title", "Logs", &title_style);
     let _ = text_ui.label(
@@ -1616,11 +1616,7 @@ fn render_instance_log_viewer(
                 ui,
                 "instance_logs_error",
                 error,
-                &LabelOptions {
-                    color: ui.visuals().error_fg_color,
-                    wrap: true,
-                    ..LabelOptions::default()
-                },
+                &style::error_text(ui),
             );
             return;
         }
@@ -2270,7 +2266,7 @@ fn render_instance_settings_modal(
         .with_dismiss_behavior(modal::DismissBehavior::EscapeAndScrim),
         |ui| {
             let muted_style = style::muted(ui);
-            let section_style = style::heading(ui, 22.0, 26.0);
+            let section_style = style::subtitle(ui);
             let body_style = style::body(ui);
             let action_button_style = ButtonOptions {
                 min_size: egui::vec2(220.0, 34.0),
@@ -2392,11 +2388,7 @@ fn render_instance_settings_modal(
                             ui,
                             ("instance_version_catalog_error", instance_id),
                             catalog_error,
-                            &LabelOptions {
-                                color: ui.visuals().error_fg_color,
-                                wrap: true,
-                                ..LabelOptions::default()
-                            },
+                            &style::error_text(ui),
                         );
                     }
 
@@ -2522,15 +2514,7 @@ fn render_instance_settings_modal(
                                 ui,
                                 ("instance_modloader_versions_status", instance_id),
                                 status,
-                                &LabelOptions {
-                                    color: if is_error {
-                                        ui.visuals().error_fg_color
-                                    } else {
-                                        ui.visuals().weak_text_color()
-                                    },
-                                    wrap: true,
-                                    ..LabelOptions::default()
-                                },
+                                &if is_error { style::error_text(ui) } else { style::muted(ui) },
                             );
                         }
 
@@ -2641,11 +2625,7 @@ fn render_instance_settings_modal(
                             ui,
                             ("instance_save_versions_validation_error", instance_id),
                             error,
-                            &LabelOptions {
-                                color: ui.visuals().error_fg_color,
-                                wrap: true,
-                                ..LabelOptions::default()
-                            },
+                            &style::error_text(ui),
                         );
                         ui.add_space(6.0);
                     }
@@ -2852,11 +2832,7 @@ fn render_instance_settings_modal(
                                 ui,
                                 ("instance_java_override_no_options", instance_id),
                                 "No configured global Java paths found. Add at least one Java path in Settings first.",
-                                &LabelOptions {
-                                    color: ui.visuals().error_fg_color,
-                                    wrap: true,
-                                    ..LabelOptions::default()
-                                },
+                                &style::error_text(ui),
                             );
                         } else {
                             if state
@@ -3113,7 +3089,7 @@ fn render_export_vtmpack_modal(
             DialogPreset::Form,
         ),
         |ui| {
-            let title_style = style::heading(ui, 26.0, 30.0);
+            let title_style = style::modal_title(ui);
             let body_style = style::muted(ui);
             let _ = text_ui.label(
                 ui,
@@ -3158,14 +3134,7 @@ fn render_export_vtmpack_modal(
                         ui,
                         ("instance_export_vtmpack_progress_title", instance_id),
                         "Export in progress",
-                        &LabelOptions {
-                            font_size: 18.0,
-                            line_height: 22.0,
-                            weight: 600,
-                            color: ui.visuals().text_color(),
-                            wrap: false,
-                            ..LabelOptions::default()
-                        },
+                        &style::stat_label(ui),
                     );
                 });
                 ui.add_space(12.0);
@@ -3227,14 +3196,7 @@ fn render_export_vtmpack_modal(
                     ui,
                     ("instance_export_vtmpack_include_label", instance_id),
                     "Include top-level entries from the Minecraft root",
-                    &LabelOptions {
-                        font_size: 18.0,
-                        line_height: 22.0,
-                        weight: 600,
-                        color: ui.visuals().text_color(),
-                        wrap: false,
-                        ..LabelOptions::default()
-                    },
+                    &style::stat_label(ui),
                 );
                 let _ = text_ui.label(
                     ui,
@@ -3625,7 +3587,7 @@ fn render_export_server_modal(
             DialogPreset::Form,
         ),
         |ui| {
-            let title_style = style::heading(ui, 26.0, 30.0);
+            let title_style = style::modal_title(ui);
             let body_style = style::muted(ui);
             let _ = text_ui.label(
                 ui,
@@ -3669,14 +3631,7 @@ fn render_export_server_modal(
                         ui,
                         ("instance_export_server_progress_title", instance_id),
                         "Server export in progress",
-                        &LabelOptions {
-                            font_size: 18.0,
-                            line_height: 22.0,
-                            weight: 600,
-                            color: ui.visuals().text_color(),
-                            wrap: false,
-                            ..LabelOptions::default()
-                        },
+                        &style::stat_label(ui),
                     );
                 });
                 ui.add_space(12.0);
@@ -3711,14 +3666,7 @@ fn render_export_server_modal(
                     ui,
                     ("instance_export_server_include_label", instance_id),
                     "Include top-level entries from the Minecraft root",
-                    &LabelOptions {
-                        font_size: 18.0,
-                        line_height: 22.0,
-                        weight: 600,
-                        color: ui.visuals().text_color(),
-                        wrap: false,
-                        ..LabelOptions::default()
-                    },
+                    &style::stat_label(ui),
                 );
                 let _ = text_ui.label(
                     ui,
@@ -4668,13 +4616,8 @@ fn render_move_instance_modal(
         }),
         |ui| {
             let body_style = style::muted(ui);
-            let title_style = style::heading(ui, 26.0, 30.0);
-            let error_style = LabelOptions {
-                color: egui::Color32::from_rgb(220, 80, 80),
-                font_size: 13.0,
-                line_height: 18.0,
-                ..LabelOptions::default()
-            };
+            let title_style = style::modal_title(ui);
+            let error_style = style::error_text(ui);
             let action_button_style = ButtonOptions::default();
 
             let _ = text_ui.label(
@@ -4799,24 +4742,14 @@ fn render_move_instance_modal(
                 } else {
                     0.0
                 };
-                let status_style = LabelOptions {
-                    font_size: 16.0,
-                    line_height: 20.0,
-                    weight: 600,
-                    color: if state.move_instance_completion_failed {
-                        ui.visuals().error_fg_color
-                    } else {
-                        ui.visuals().text_color()
-                    },
-                    wrap: false,
-                    ..LabelOptions::default()
+                let status_style = if state.move_instance_completion_failed {
+                    LabelOptions { color: ui.visuals().error_fg_color, ..style::stat_label(ui) }
+                } else {
+                    style::stat_label(ui)
                 };
                 let detail_style = LabelOptions {
-                    font_size: 13.0,
-                    line_height: 17.0,
                     color: weak_text_color,
-                    wrap: true,
-                    ..LabelOptions::default()
+                    ..style::caption(ui)
                 };
                 let status_text = if state.move_instance_in_flight {
                     "Moving files..."
@@ -4960,15 +4893,7 @@ fn render_move_instance_modal(
                         ui,
                         ("instance_move_progress_message_inline", instance_id),
                         message,
-                        &LabelOptions {
-                            color: if state.move_instance_completion_failed {
-                                ui.visuals().error_fg_color
-                            } else {
-                                ui.visuals().text_color()
-                            },
-                            wrap: true,
-                            ..LabelOptions::default()
-                        },
+                        &if state.move_instance_completion_failed { style::error_text(ui) } else { style::body(ui) },
                     );
                 }
             }

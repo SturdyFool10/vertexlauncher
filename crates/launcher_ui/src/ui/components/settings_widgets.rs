@@ -9,7 +9,7 @@ use textui_egui::{
 
 use crate::{
     assets,
-    ui::{components::icon_button, text_input_theme},
+    ui::{components::icon_button, style, text_input_theme},
 };
 
 const GAMEPAD_SLIDER_EDIT_ID: &str = "settings_widgets_gamepad_slider_edit";
@@ -2042,7 +2042,7 @@ fn row_label_options(ui: &Ui) -> LabelOptions {
         line_height: 24.0,
         color: ui.visuals().text_color(),
         wrap: false,
-        ..LabelOptions::default()
+        ..style::body(ui)
     }
 }
 

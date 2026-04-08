@@ -1,5 +1,5 @@
 use egui::{Color32, Vec2};
-use textui::{TextFundamentals, TextLabelOptions};
+use textui::{DEFAULT_ELLIPSIS, TextFundamentals, TextLabelOptions};
 
 #[derive(Clone, Debug)]
 pub struct LabelOptions {
@@ -12,6 +12,9 @@ pub struct LabelOptions {
     pub italic: bool,
     pub padding: Vec2,
     pub fundamentals: TextFundamentals,
+    /// The string appended when text is truncated.  Defaults to the Unicode
+    /// ellipsis character (U+2026).
+    pub ellipsis: String,
 }
 
 impl LabelOptions {
@@ -26,6 +29,7 @@ impl LabelOptions {
             italic: self.italic,
             padding: self.padding.into(),
             fundamentals: self.fundamentals.clone(),
+            ellipsis: self.ellipsis.clone(),
         }
     }
 }
@@ -34,7 +38,7 @@ impl Default for LabelOptions {
     fn default() -> Self {
         Self {
             font_size: 18.0,
-            line_height: 24.0,
+            line_height: 27.0,
             color: Color32::WHITE,
             wrap: true,
             monospace: false,
@@ -42,6 +46,7 @@ impl Default for LabelOptions {
             italic: false,
             padding: egui::vec2(0.0, 0.0),
             fundamentals: TextFundamentals::default(),
+            ellipsis: DEFAULT_ELLIPSIS.to_owned(),
         }
     }
 }

@@ -174,11 +174,7 @@ pub fn render(
             ui,
             "library_empty_profiles",
             "No instances created yet.",
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return output;
     }
@@ -487,15 +483,7 @@ fn render_instance_tile(
                 } else {
                     ("No description provided.", true)
                 };
-                let description_style = LabelOptions {
-                    color: if muted {
-                        ui.visuals().weak_text_color()
-                    } else {
-                        ui.visuals().text_color()
-                    },
-                    wrap: true,
-                    ..LabelOptions::default()
-                };
+                let description_style = if muted { style::muted(ui) } else { style::body(ui) };
                 render_scroll_text_block(
                     ui,
                     ("library_instance_description", instance.id.as_str()),
@@ -552,9 +540,7 @@ fn render_instance_tile(
                     let _ = delete_response.on_hover_text(reason);
                 }
 
-                let mut muted_style = LabelOptions::default();
-                muted_style.color = ui.visuals().weak_text_color();
-                muted_style.wrap = true;
+                let muted_style = style::muted(ui);
                 if launch_disabled_for_account {
                     let _ = text_ui.label(
                         ui,
@@ -943,11 +929,7 @@ fn render_delete_instance_modal(
                     ui,
                     ("library_delete_running", instance.id.as_str()),
                     "Stop the running instance before deleting its folder.",
-                    &LabelOptions {
-                        color: danger,
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
+                    &LabelOptions { color: danger, ..style::body(ui) },
                 );
             }
 
@@ -956,11 +938,7 @@ fn render_delete_instance_modal(
                     ui,
                     ("library_delete_error", instance.id.as_str()),
                     error,
-                    &LabelOptions {
-                        color: danger,
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
+                    &LabelOptions { color: danger, ..style::body(ui) },
                 );
             }
 

@@ -138,13 +138,11 @@ pub fn render(
             ui.scope_builder(egui::UiBuilder::new().max_rect(drag_rect), |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add_space(style::SPACE_LG);
-                    let mut section_style = LabelOptions {
+                    let section_style = LabelOptions {
                         font_size: 18.0,
                         line_height: 24.0,
-                        wrap: false,
-                        ..LabelOptions::default()
+                        ..style::muted_single_line(ui)
                     };
-                    section_style.color = ui.visuals().weak_text_color();
                     let _ = text_ui.label(
                         ui,
                         ("topbar_screen", section_label),
@@ -612,12 +610,9 @@ fn render_active_user_terminal_button(
                 |ui| {
                     ui.set_clip_rect(ui.max_rect());
                     let label_style = LabelOptions {
-                        font_size: 16.0,
                         line_height: 20.0,
                         color: text_color,
-                        weight: 700,
-                        wrap: false,
-                        ..LabelOptions::default()
+                        ..style::stat_label(ui)
                     };
                     let _ = text_ui.label(
                         ui,
@@ -652,11 +647,7 @@ fn render_device_code_section(
     let instruction_text = "Scan this QR code to continue with device code on another device, or use browser sign-in on this device to avoid typing the code manually.";
 
     // Instructional text — wraps naturally, normal size
-    let instruction_style = LabelOptions {
-        color: ui.visuals().text_color(),
-        wrap: true,
-        ..LabelOptions::default()
-    };
+    let instruction_style = style::body(ui);
     let _ = text_ui.label(
         ui,
         "device_code_instruction",
@@ -1130,22 +1121,12 @@ fn render_profile_popup(
         ui.available_width().max(220.0)
     };
 
-    let muted_text = ui.visuals().weak_text_color();
     let heading_style = LabelOptions {
         font_size: 18.0,
         line_height: 22.0,
-        weight: 700,
-        color: ui.visuals().text_color(),
-        wrap: false,
-        ..LabelOptions::default()
+        ..style::stat_label(ui)
     };
-    let body_style = LabelOptions {
-        color: ui.visuals().text_color(),
-        wrap: false,
-        ..LabelOptions::default()
-    };
-    let mut muted_style = body_style.clone();
-    muted_style.color = muted_text;
+    let muted_style = style::muted_single_line(ui);
 
     let button_style = ButtonOptions {
         min_size: egui::vec2(full_action_width, style::CONTROL_HEIGHT),

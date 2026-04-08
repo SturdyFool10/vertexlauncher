@@ -29,8 +29,10 @@ pub use input_options::InputOptions;
 pub use label_options::LabelOptions;
 pub use markdown_options::MarkdownOptions;
 pub use text_helpers::{
-    normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
+    TruncatedText, normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
+    truncate_single_line_text_with_ellipsis_detailed,
     truncate_single_line_text_with_ellipsis_preserving_whitespace,
+    truncate_single_line_text_with_ellipsis_preserving_whitespace_detailed,
 };
 pub use textui::{RichTextSpan, RichTextStyle, TextColor};
 pub use tooltip_options::TooltipOptions;
@@ -212,8 +214,10 @@ fn hash_text_fundamentals(hasher: &mut DefaultHasher, fundamentals: &textui::Tex
     fundamentals.case_sensitive_forms.hash(hasher);
     fundamentals.slashed_zero.hash(hasher);
     fundamentals.tabular_numbers.hash(hasher);
+    fundamentals.smart_quotes.hash(hasher);
     fundamentals.letter_spacing_points.to_bits().hash(hasher);
     fundamentals.word_spacing_points.to_bits().hash(hasher);
+    fundamentals.letter_spacing_floor.to_bits().hash(hasher);
     fundamentals.feature_settings.hash(hasher);
     fundamentals.variation_settings.hash(hasher);
 }
@@ -229,6 +233,7 @@ fn hash_label_options(hasher: &mut DefaultHasher, options: &LabelOptions) {
     options.padding.x.to_bits().hash(hasher);
     options.padding.y.to_bits().hash(hasher);
     hash_text_fundamentals(hasher, &options.fundamentals);
+    options.ellipsis.hash(hasher);
 }
 
 fn hash_label_scene_request(
@@ -735,6 +740,15 @@ fn label_impl(
     sense: Sense,
     async_mode: bool,
 ) -> Response {
+    // Apply smart-quote transformation for display when enabled.
+    let display_text;
+    let text = if options.fundamentals.smart_quotes {
+        display_text = textui::apply_smart_quotes(text);
+        display_text.as_str()
+    } else {
+        text
+    };
+
     let scale = ui.ctx().pixels_per_point();
     let width_points_opt = options.wrap.then(|| ui.available_width().max(1.0));
     let cache_id = ui.make_persistent_id((&id_source, "textui_label_retained_scene"));
@@ -817,6 +831,7 @@ fn code_block_impl(
         italic: false,
         padding: egui::Vec2::ZERO,
         fundamentals: options.fundamentals.clone(),
+        ..LabelOptions::default()
     };
     let scene_opt = retained_gpu_scene(ui.ctx(), cache_id, fingerprint, || {
         let spans = text_ui.highlight_code_spans(
@@ -924,6 +939,7 @@ fn markdown_impl(
                         italic: false,
                         padding: egui::Vec2::ZERO,
                         fundamentals: options.body.fundamentals.clone(),
+                        ..LabelOptions::default()
                     };
                     let _ = label_impl(
                         text_ui,
@@ -985,6 +1001,7 @@ fn selectable_button_impl(
         italic: false,
         padding: egui::Vec2::ZERO,
         fundamentals: Default::default(),
+        ..LabelOptions::default()
     };
     let scale = ui.ctx().pixels_per_point();
     let cache_id = ui.make_persistent_id((&id_source, "textui_button_retained_scene"));
@@ -1392,8 +1409,10 @@ pub mod prelude {
     pub use super::{
         ButtonOptions, CodeBlockOptions, InputOptions, LabelOptions, MarkdownOptions, RichTextSpan,
         RichTextStyle, TextColor, TextTextureHandle, TextUiEguiExt, TooltipOptions,
-        normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
+        TruncatedText, normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
+        truncate_single_line_text_with_ellipsis_detailed,
         truncate_single_line_text_with_ellipsis_preserving_whitespace,
+        truncate_single_line_text_with_ellipsis_preserving_whitespace_detailed,
     };
 }
 

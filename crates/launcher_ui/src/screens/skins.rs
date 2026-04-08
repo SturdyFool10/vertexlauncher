@@ -641,7 +641,7 @@ fn render_skin_drop_zone(ui: &mut Ui, text_ui: &mut TextUi, state: &mut SkinMana
         line_height: choose_style.line_height,
         color: choose_style.text_color,
         wrap: false,
-        ..LabelOptions::default()
+        ..style::body(ui)
     };
     let title_size = text_ui.measure_text_size(ui, "Drag Skin Image here", &title_style);
     let or_size = text_ui.measure_text_size(ui, "or", &muted);

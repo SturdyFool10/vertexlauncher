@@ -128,11 +128,7 @@ pub(super) fn render_installed_content_section(
                 "No {} installed.",
                 state.selected_content_tab.label().to_lowercase()
             ),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return;
     }
@@ -153,9 +149,8 @@ pub(super) fn render_installed_content_section(
         ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
         let label_style = LabelOptions {
             line_height: style::CONTROL_HEIGHT - 6.0,
-            color: ui.visuals().text_color(),
             wrap: false,
-            ..LabelOptions::default()
+            ..style::body(ui)
         };
         let muted_label_style = LabelOptions {
             color: ui.visuals().weak_text_color(),
@@ -597,10 +592,8 @@ fn render_installed_content_entry(
                                             &LabelOptions {
                                                 font_size: 19.0,
                                                 line_height: 24.0,
-                                                weight: 700,
-                                                color: ui.visuals().text_color(),
                                                 wrap: true,
-                                                ..LabelOptions::default()
+                                                ..style::stat_label(ui)
                                             },
                                         );
 
@@ -661,9 +654,8 @@ fn render_installed_content_entry(
                                                 ui.set_width(ui.available_width().max(1.0));
                                                 let description_style = LabelOptions {
                                                     line_height: INSTALLED_DESCRIPTION_LINE_HEIGHT,
-                                                    color: ui.visuals().text_color(),
                                                     wrap: false,
-                                                    ..LabelOptions::default()
+                                                    ..style::body(ui)
                                                 };
                                                 let truncated_description =
                                                     cached_truncated_description(

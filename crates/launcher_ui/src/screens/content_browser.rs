@@ -628,11 +628,7 @@ pub fn render(
             ui,
             "content_browser_no_instance",
             "Select an instance first. Content Browser installs into the selected instance.",
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return output;
     };
@@ -642,11 +638,7 @@ pub fn render(
             ui,
             "content_browser_missing_instance",
             "Selected instance no longer exists.",
-            &LabelOptions {
-                color: ui.visuals().error_fg_color,
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::error_text(ui),
         );
         return output;
     };
@@ -702,11 +694,7 @@ pub fn render(
             },
             instance.modloader.trim()
         ),
-        &LabelOptions {
-            color: ui.visuals().weak_text_color(),
-            wrap: true,
-            ..LabelOptions::default()
-        },
+        &style::caption(ui),
     );
     ui.add_space(style::SPACE_MD);
 
@@ -717,11 +705,7 @@ pub fn render(
             ui,
             ("content_browser_status", instance.id.as_str()),
             status,
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
     }
 
@@ -730,11 +714,7 @@ pub fn render(
             ui,
             ("content_browser_warning", instance.id.as_str(), warning),
             warning,
-            &LabelOptions {
-                color: ui.visuals().warn_fg_color,
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::warning_text(ui),
         );
     }
 
@@ -1056,11 +1036,7 @@ fn render_controls(
             ui,
             ("content_browser_queue", instance_id),
             queue_status.as_str(),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
     });
 }
@@ -1118,11 +1094,7 @@ fn render_results(
                 ui,
                 ("content_browser_search_progress", instance_id),
                 progress_label.as_str(),
-                &LabelOptions {
-                    color: ui.visuals().weak_text_color(),
-                    wrap: true,
-                    ..LabelOptions::default()
-                },
+                &style::muted(ui),
             );
             ui.add_space(style::SPACE_MD);
         }
@@ -1141,11 +1113,7 @@ fn render_results(
                         ui,
                         ("content_browser_empty", instance_id),
                         empty_message,
-                        &LabelOptions {
-                            color: ui.visuals().weak_text_color(),
-                            wrap: true,
-                            ..LabelOptions::default()
-                        },
+                        &style::muted(ui),
                     );
                     return;
                 }
@@ -1165,14 +1133,7 @@ fn render_results(
                                 entry.content_type.label(),
                             ),
                             &format!("{} ({group_count})", entry.content_type.label()),
-                            &LabelOptions {
-                                font_size: 17.0,
-                                line_height: 22.0,
-                                weight: 700,
-                                color: ui.visuals().text_color(),
-                                wrap: false,
-                                ..LabelOptions::default()
-                            },
+                            &style::stat_label(ui),
                         );
                         ui.add_space(6.0);
                     }
@@ -1237,11 +1198,7 @@ fn render_results(
                 ui,
                 ("content_browser_page_label", instance_id),
                 "Page",
-                &LabelOptions {
-                    color: ui.visuals().weak_text_color(),
-                    wrap: false,
-                    ..LabelOptions::default()
-                },
+                &style::caption(ui),
             );
             let mut page_value = state.current_page.max(1);
             ui.add(
@@ -1285,11 +1242,7 @@ fn render_results(
                 ui,
                 ("content_browser_page_current", instance_id),
                 &format!("Current: {}", state.current_page.max(1)),
-                &LabelOptions {
-                    color: ui.visuals().weak_text_color(),
-                    wrap: false,
-                    ..LabelOptions::default()
-                },
+                &style::muted_single_line(ui),
             );
         });
     });
@@ -1450,10 +1403,7 @@ fn render_result_tile(
                                             &LabelOptions {
                                                 font_size: 18.0,
                                                 line_height: 22.0,
-                                                weight: 700,
-                                                color: ui.visuals().text_color(),
-                                                wrap: false,
-                                                ..LabelOptions::default()
+                                                ..style::stat_label(ui)
                                             },
                                         );
                                         render_chip(
@@ -1502,11 +1452,7 @@ fn render_result_tile(
                                             ui,
                                             (id_source, "summary"),
                                             summary,
-                                            &LabelOptions {
-                                                color: ui.visuals().text_color(),
-                                                wrap: true,
-                                                ..LabelOptions::default()
-                                            },
+                                            &style::body(ui),
                                         );
                                     });
                             });
@@ -1715,11 +1661,7 @@ fn render_detail_page(
             ui,
             ("content_browser_detail_missing", instance_id),
             "No content item selected.",
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return;
     };
@@ -1757,12 +1699,8 @@ fn render_detail_page(
                         ),
                         entry.name.as_str(),
                         &LabelOptions {
-                            font_size: 22.0,
-                            line_height: 28.0,
-                            weight: 700,
-                            color: ui.visuals().text_color(),
                             wrap: true,
-                            ..LabelOptions::default()
+                            ..style::subtitle(ui)
                         },
                     );
                     ui.add_space(4.0);
@@ -1865,11 +1803,7 @@ fn render_detail_page(
                                     &entry.dedupe_key,
                                 ),
                                 body,
-                                &LabelOptions {
-                                    color: ui.visuals().text_color(),
-                                    wrap: true,
-                                    ..LabelOptions::default()
-                                },
+                                &style::body(ui),
                             );
                         });
                 });
@@ -1961,11 +1895,7 @@ fn render_detail_versions_tab(
                     ui,
                     ("detail_versions_error", instance_id, &entry.dedupe_key),
                     error,
-                    &LabelOptions {
-                        color: ui.visuals().warn_fg_color,
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
+                    &style::warning_text(ui),
                 );
             }
 
@@ -1975,11 +1905,7 @@ fn render_detail_versions_tab(
                     ui,
                     ("detail_versions_loading", instance_id, &entry.dedupe_key),
                     "Loading versions...",
-                    &LabelOptions {
-                        color: ui.visuals().weak_text_color(),
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
+                    &style::muted(ui),
                 );
             }
 
@@ -2001,11 +1927,7 @@ fn render_detail_versions_tab(
                     ui,
                     ("detail_versions_empty", instance_id, &entry.dedupe_key),
                     "No versions match the current filters.",
-                    &LabelOptions {
-                        color: ui.visuals().weak_text_color(),
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
+                    &style::muted(ui),
                 );
                 return;
             }
@@ -2043,10 +1965,7 @@ fn render_detail_versions_tab(
                                                 &LabelOptions {
                                                     font_size: 17.0,
                                                     line_height: 22.0,
-                                                    weight: 700,
-                                                    color: ui.visuals().text_color(),
-                                                    wrap: false,
-                                                    ..LabelOptions::default()
+                                                    ..style::stat_label(ui)
                                                 },
                                             );
                                             ui.add_space(2.0);
@@ -2107,11 +2026,7 @@ fn render_detail_versions_tab(
                                                     "{} | {}",
                                                     version.file_name, version.published_at
                                                 ),
-                                                &LabelOptions {
-                                                    color: ui.visuals().weak_text_color(),
-                                                    wrap: true,
-                                                    ..LabelOptions::default()
-                                                },
+                                                &style::muted(ui),
                                             );
                                         },
                                     );

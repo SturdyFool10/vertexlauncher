@@ -501,11 +501,7 @@ fn render_discover_browse_content(
     }
 
     let muted_style = style::muted(ui);
-    let warning_style = LabelOptions {
-        color: ui.visuals().warn_fg_color,
-        wrap: true,
-        ..LabelOptions::default()
-    };
+    let warning_style = style::warning_text(ui);
     let mut filter_controls_have_focus = false;
 
     egui::Frame::new()
@@ -759,12 +755,8 @@ fn render_discover_detail_content(
 
     let muted_style = style::muted(ui);
     let heading_style = LabelOptions {
-        font_size: 24.0,
-        line_height: 28.0,
-        weight: 700,
-        color: ui.visuals().text_color(),
         wrap: true,
-        ..LabelOptions::default()
+        ..style::subtitle(ui)
     };
     let body_style = style::body(ui);
     let selected_source = selected_detail_source(state, &entry);
@@ -861,11 +853,7 @@ fn render_discover_detail_content(
             ui,
             "discover_detail_install_error",
             error,
-            &LabelOptions {
-                color: ui.visuals().error_fg_color,
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::error_text(ui),
         );
     }
     if state.install_in_flight {
@@ -917,11 +905,7 @@ fn render_discover_detail_content(
                     ui,
                     "discover_detail_versions_error",
                     error,
-                    &LabelOptions {
-                        color: ui.visuals().error_fg_color,
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
+                    &style::error_text(ui),
                 );
                 return;
             }
@@ -959,10 +943,8 @@ fn render_discover_detail_content(
                                                 &LabelOptions {
                                                     font_size: 18.0,
                                                     line_height: 22.0,
-                                                    weight: 700,
-                                                    color: ui.visuals().text_color(),
                                                     wrap: true,
-                                                    ..LabelOptions::default()
+                                                    ..style::stat_label(ui)
                                                 },
                                             );
                                             if let Some(published_at) =
@@ -1306,10 +1288,8 @@ fn render_discover_tile(
     let heading_style = LabelOptions {
         font_size: 20.0,
         line_height: 24.0,
-        weight: 700,
-        color: ui.visuals().text_color(),
         wrap: true,
-        ..LabelOptions::default()
+        ..style::stat_label(ui)
     };
     let body_style = style::body(ui);
     let muted_style = style::muted(ui);
@@ -1387,8 +1367,7 @@ fn render_discover_tile(
                                 source.label(),
                                 &LabelOptions {
                                     wrap: false,
-                                    color: ui.visuals().text_color(),
-                                    ..LabelOptions::default()
+                                    ..style::body(ui)
                                 },
                             );
                         });

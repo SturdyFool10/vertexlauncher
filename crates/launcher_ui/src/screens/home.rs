@@ -1074,7 +1074,7 @@ fn render_screenshot_gallery(
     retained_image_keys: &mut HashSet<String>,
     metrics: HomeUiMetrics,
 ) {
-    let title_style = style::heading(ui, 18.0, 24.0);
+    let title_style = style::body_strong(ui);
     let body_style = style::muted(ui);
     let _ = text_ui.label(ui, "home_screenshots_title", "Screenshots", &title_style);
     let total_candidates = state.screenshot_candidates.len();
@@ -1405,7 +1405,7 @@ fn render_screenshot_viewer_modal(
         ctx,
         dialog_options("home_screenshot_viewer_window", DialogPreset::Viewer),
         |ui| {
-            let title_style = style::heading(ui, 24.0, 28.0);
+            let title_style = style::section_heading(ui);
             let body_style = style::muted_single_line(ui);
 
             ui.horizontal(|ui| {
@@ -2076,11 +2076,7 @@ fn render_instance_usage(
             ui,
             "home_usage_empty",
             "No instances yet.",
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return;
     }
@@ -2136,12 +2132,7 @@ fn render_instance_usage(
                             ui,
                             ("home_usage_name", index),
                             instance.name.as_str(),
-                            &LabelOptions {
-                                weight: 600,
-                                color: ui.visuals().text_color(),
-                                wrap: false,
-                                ..LabelOptions::default()
-                            },
+                            &style::body_strong(ui),
                         );
                         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                             let usage_line = format!(
@@ -2153,11 +2144,7 @@ fn render_instance_usage(
                                 ui,
                                 ("home_usage_count", index),
                                 usage_line.as_str(),
-                                &LabelOptions {
-                                    color: ui.visuals().weak_text_color(),
-                                    wrap: false,
-                                    ..LabelOptions::default()
-                                },
+                                &style::muted_single_line(ui),
                             );
                         });
                     },
@@ -2430,11 +2417,7 @@ fn render_activity_feed(
             ui,
             "home_activity_empty",
             "No worlds or servers found in any instance.",
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return;
     }
@@ -2489,12 +2472,7 @@ fn render_activity_feed(
                     ui,
                     "home_activity_favorites_title",
                     "Favorites",
-                    &LabelOptions {
-                        weight: 700,
-                        color: ui.visuals().text_color(),
-                        wrap: false,
-                        ..LabelOptions::default()
-                    },
+                    &style::body_strong(ui),
                 );
                 ui.add_space(4.0);
                 for (index, entry) in favorites.into_iter().enumerate() {
@@ -2541,11 +2519,7 @@ fn render_activity_feed(
                     ui,
                     "home_activity_recent_empty",
                     "No recent worlds or servers.",
-                    &LabelOptions {
-                        color: ui.visuals().weak_text_color(),
-                        wrap: true,
-                        ..LabelOptions::default()
-                    },
+                    &style::muted(ui),
                 );
                 return;
             }
@@ -2554,12 +2528,7 @@ fn render_activity_feed(
                 ui,
                 "home_activity_recent_title",
                 "Recent",
-                &LabelOptions {
-                    weight: 700,
-                    color: ui.visuals().text_color(),
-                    wrap: false,
-                    ..LabelOptions::default()
-                },
+                &style::body_strong(ui),
             );
             ui.add_space(4.0);
             for (index, entry) in entries.into_iter().enumerate() {
@@ -2920,20 +2889,11 @@ fn render_server_row(
 }
 
 fn activity_entry_name_label_options(ui: &Ui) -> LabelOptions {
-    LabelOptions {
-        weight: 600,
-        color: ui.visuals().text_color(),
-        wrap: false,
-        ..LabelOptions::default()
-    }
+    style::body_strong(ui)
 }
 
 fn activity_entry_meta_label_options(ui: &Ui) -> LabelOptions {
-    LabelOptions {
-        color: ui.visuals().weak_text_color(),
-        wrap: false,
-        ..LabelOptions::default()
-    }
+    style::muted_single_line(ui)
 }
 
 fn activity_entry_min_row_height(

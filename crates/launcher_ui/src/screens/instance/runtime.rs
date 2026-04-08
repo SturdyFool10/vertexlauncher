@@ -42,21 +42,13 @@ pub(super) fn render_install_feedback(
             ui,
             ("instance_runtime_progress_label", instance_id),
             &format!("{progress_label} · {:.0}%", fraction * 100.0),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         let _ = text_ui.label(
             ui,
             ("instance_runtime_progress_message", instance_id),
             progress.message.as_str(),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         let bytes_line = if let Some(total) = progress.total_bytes {
             format!(
@@ -74,11 +66,7 @@ pub(super) fn render_install_feedback(
                 "Files: {}/{} · {}",
                 progress.downloaded_files, progress.total_files, bytes_line
             ),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return;
     }
@@ -90,11 +78,7 @@ pub(super) fn render_install_feedback(
             ui,
             ("instance_runtime_progress_starting", instance_id),
             "Starting installation...",
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         return;
     }
@@ -124,21 +108,13 @@ pub(super) fn render_install_feedback(
             ui,
             ("instance_runtime_progress_label_external", instance_id),
             &format!("{progress_label} · {:.0}%", fraction * 100.0),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         let _ = text_ui.label(
             ui,
             ("instance_runtime_progress_message_external", instance_id),
             activity.message.as_str(),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
         let bytes_line = if let Some(total) = activity.total_bytes {
             format!(
@@ -156,11 +132,7 @@ pub(super) fn render_install_feedback(
                 "Files: {}/{} · {}",
                 activity.downloaded_files, activity.total_files, bytes_line
             ),
-            &LabelOptions {
-                color: ui.visuals().weak_text_color(),
-                wrap: true,
-                ..LabelOptions::default()
-            },
+            &style::muted(ui),
         );
     }
 }

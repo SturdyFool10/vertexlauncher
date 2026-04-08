@@ -81,13 +81,16 @@ pub use advanced_text::{
     TextLabelOptions, TextMarkdownBlock, TextMarkdownHeadingLevel, TextModifiers,
     TextOpticalSizingMode, TextPath, TextPathError, TextPathGlyph, TextPathLayout, TextPathOptions,
     TextPoint, TextPointerButton, TextRasterizationConfig, TextRect, TextRenderScene,
-    TextRendererBackend, TextStemDarkeningMode, TextVariationSetting, TextVector, VectorGlyphShape,
-    VectorPathCommand, VectorTextShape,
+    TextRendererBackend, TextRenderingPolicy, TextStemDarkeningMode, TextVariationSetting,
+    TextVector, VectorGlyphShape, VectorPathCommand, VectorTextShape,
 };
 #[doc(hidden)]
 pub use input_options::InputOptions as EguiInputOptions;
+pub use advanced_text::DEFAULT_ELLIPSIS;
 
-const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "liga, calt";
+/// Default OpenType feature tags applied when no explicit feature string is
+/// provided to [`TextUi::apply_open_type_features`].
+pub const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "kern, liga, calt, onum, pnum";
 const PREPARED_TEXT_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 const ASYNC_RASTER_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
 const GPU_SCENE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -207,6 +210,7 @@ fn core_label_options(options: &TextLabelOptions) -> LabelOptions {
         italic: options.italic,
         padding: options.padding.into(),
         fundamentals: options.fundamentals.clone(),
+        ellipsis: options.ellipsis.clone(),
     }
 }
 
@@ -726,8 +730,10 @@ fn hash_text_fundamentals<H: Hasher>(fundamentals: &TextFundamentals, state: &mu
     fundamentals.case_sensitive_forms.hash(state);
     fundamentals.slashed_zero.hash(state);
     fundamentals.tabular_numbers.hash(state);
+    fundamentals.smart_quotes.hash(state);
     fundamentals.letter_spacing_points.to_bits().hash(state);
     fundamentals.word_spacing_points.to_bits().hash(state);
+    fundamentals.letter_spacing_floor.to_bits().hash(state);
     fundamentals.feature_settings.len().hash(state);
     for feature in &fundamentals.feature_settings {
         feature.hash(state);
@@ -746,6 +752,78 @@ fn glyph_cluster_text<'a>(run_text: &'a str, glyph: &LayoutGlyph) -> &'a str {
     run_text.get(glyph.start..glyph.end).unwrap_or_default()
 }
 
+/// Replaces typographic characters with their plain-text equivalents so that
+/// clipboard content is maximally compatible with other applications.
+///
+/// Currently converts:
+/// - `…` (U+2026 HORIZONTAL ELLIPSIS) → `...`
+/// - `\u{201C}` (LEFT DOUBLE QUOTATION MARK) → `"`
+/// - `\u{201D}` (RIGHT DOUBLE QUOTATION MARK) → `"`
+/// - `\u{2018}` (LEFT SINGLE QUOTATION MARK) → `'`
+/// - `\u{2019}` (RIGHT SINGLE QUOTATION MARK) → `'`
+pub fn sanitize_for_clipboard(text: &str) -> String {
+    // Fast path: if no replaceable chars exist, avoid allocation.
+    let needs_work = text.contains('\u{2026}')
+        || text.contains('\u{201C}')
+        || text.contains('\u{201D}')
+        || text.contains('\u{2018}')
+        || text.contains('\u{2019}');
+    if !needs_work {
+        return text.to_owned();
+    }
+    text.replace('\u{2026}', "...")
+        .replace('\u{201C}', "\"")
+        .replace('\u{201D}', "\"")
+        .replace('\u{2018}', "'")
+        .replace('\u{2019}', "'")
+}
+
+/// Replace straight ASCII quotes with typographic curly quotes for display.
+///
+/// Uses simple heuristic: a quote preceded by whitespace, at the start of
+/// text, or after an opening bracket/paren is an opening quote; otherwise
+/// it is a closing quote.
+pub fn apply_smart_quotes(text: &str) -> String {
+    if !text.contains('"') && !text.contains('\'') {
+        return text.to_owned();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut prev = ' '; // treat start-of-string as whitespace
+    for ch in text.chars() {
+        match ch {
+            '"' => {
+                if is_opening_context(prev) {
+                    out.push('\u{201C}'); // "
+                } else {
+                    out.push('\u{201D}'); // "
+                }
+            }
+            '\'' => {
+                // Avoid converting apostrophes inside words (e.g. "don't").
+                // An opening single quote appears after whitespace or at SOL.
+                if is_opening_context(prev) {
+                    out.push('\u{2018}'); // '
+                } else {
+                    out.push('\u{2019}'); // '
+                }
+            }
+            _ => out.push(ch),
+        }
+        prev = ch;
+    }
+    out
+}
+
+#[inline]
+fn is_opening_context(prev: char) -> bool {
+    prev.is_whitespace() || matches!(prev, '(' | '[' | '{' | '\u{2014}' | '\u{2013}' | '\0')
+}
+
+/// Copy text to the egui clipboard after sanitising typographic characters.
+fn copy_sanitized(ctx: &Context, text: String) {
+    ctx.copy_text(sanitize_for_clipboard(&text));
+}
+
 fn spacing_after_glyph_points(
     run_text: &str,
     glyph: &LayoutGlyph,
@@ -756,7 +834,9 @@ fn spacing_after_glyph_points(
     if glyph_index + 1 >= glyph_count {
         return 0.0;
     }
-    let mut spacing = fundamentals.letter_spacing_points.max(0.0);
+    let mut spacing = fundamentals
+        .letter_spacing_points
+        .max(fundamentals.letter_spacing_floor);
     let cluster = glyph_cluster_text(run_text, glyph);
     if !cluster.is_empty() && cluster.chars().all(char::is_whitespace) {
         spacing += fundamentals.word_spacing_points.max(0.0);
@@ -1383,6 +1463,7 @@ impl TextUi {
             italic: false,
             padding: egui::Vec2::ZERO,
             fundamentals: options.fundamentals.clone(),
+            ..LabelOptions::default()
         };
 
         let mut hasher = new_fingerprint_hasher();
@@ -1624,6 +1705,7 @@ impl TextUi {
                 italic: options.italic,
                 padding: options.padding.into(),
                 fundamentals: options.fundamentals.clone(),
+                ellipsis: options.ellipsis.clone(),
             },
         )
         .into()
@@ -2426,6 +2508,15 @@ impl TextUi {
         sense: Sense,
         async_mode: bool,
     ) -> Response {
+        // Apply smart-quote transformation for display when enabled.
+        let display_text;
+        let text = if options.fundamentals.smart_quotes {
+            display_text = apply_smart_quotes(text);
+            display_text.as_str()
+        } else {
+            text
+        };
+
         let scale = ui.ctx().pixels_per_point();
         // Snap available_width to bin boundaries so sub-pixel jitter
         // (scrollbars appearing, fractional DPI) does not bust the cache for
@@ -2745,6 +2836,7 @@ impl TextUi {
                 italic: false,
                 padding: egui::Vec2::ZERO,
                 fundamentals: options.fundamentals.clone(),
+                ..LabelOptions::default()
             },
             width_points_opt,
         );
@@ -2844,6 +2936,7 @@ impl TextUi {
                             italic: false,
                             padding: egui::Vec2::ZERO,
                             fundamentals: options.body.fundamentals.clone(),
+                            ..LabelOptions::default()
                         };
                         let _ = self.label(ui, ("md_h", index), text.as_str(), &heading_style);
                     }
@@ -3356,7 +3449,7 @@ impl TextUi {
                 );
                 state.redo_stack.clear();
                 state.last_undo_op = UndoOpKind::None;
-                ui.ctx().copy_text(sel);
+                copy_sanitized(ui.ctx(), sel);
                 state.editor.delete_selection();
                 state.preferred_cursor_x_px = None;
                 changed = true;
@@ -3364,7 +3457,7 @@ impl TextUi {
         }
         if ctx_copy {
             if let Some(sel) = state.editor.copy_selection() {
-                ui.ctx().copy_text(sel);
+                copy_sanitized(ui.ctx(), sel);
             }
         }
         if ctx_paste {
@@ -3812,7 +3905,7 @@ impl TextUi {
                 match event {
                     TextInputEvent::Copy | TextInputEvent::Cut => {
                         if let Some(selection) = editor.copy_selection() {
-                            ui.ctx().copy_text(selection);
+                            copy_sanitized(ui.ctx(), selection);
                         }
                     }
                     TextInputEvent::Key {
@@ -4351,12 +4444,12 @@ impl TextUi {
                     }
                     TextInputEvent::Copy => {
                         if let Some(selection) = editor.copy_selection() {
-                            ui.ctx().copy_text(selection);
+                            copy_sanitized(ui.ctx(), selection);
                         }
                     }
                     TextInputEvent::Cut => {
                         if let Some(selection) = editor.copy_selection() {
-                            ui.ctx().copy_text(selection);
+                            copy_sanitized(ui.ctx(), selection);
                             changed |= editor.delete_selection();
                             if changed {
                                 *preferred_cursor_x_px = None;
