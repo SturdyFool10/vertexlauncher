@@ -19,6 +19,7 @@ members = [
     "crates/modrinth",
     "crates/runtime_bootstrap",
     "crates/shared_lru",
+    "crates/skin_preview",
     "crates/textui",
     "crates/textui_egui",
     "crates/vertex_constants",
@@ -77,6 +78,7 @@ modprovider = { path = "crates/modprovider" }
 fontloader = { path = "crates/fontloader" }
 runtime_bootstrap = { path = "crates/runtime_bootstrap" }
 shared_lru = { path = "crates/shared_lru" }
+skin_preview = { path = "crates/skin_preview" }
 textui = { path = "crates/textui" }
 textui_egui = { path = "crates/textui_egui" }
 vtmpack = { path = "crates/vtmpack" }

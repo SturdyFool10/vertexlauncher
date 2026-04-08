@@ -200,7 +200,9 @@ pub(super) fn detect_launcher_kind(path: &Path) -> LauncherKind {
     }
 }
 
-pub(super) fn inspect_modrinth_launcher_instance(path: &Path) -> Result<LauncherInspection, String> {
+pub(super) fn inspect_modrinth_launcher_instance(
+    path: &Path,
+) -> Result<LauncherInspection, String> {
     if !path.join("profile.json").is_file() {
         let mut inspection =
             inspect_generic_launcher_instance_with_launcher(path, LauncherKind::Modrinth)?;
@@ -358,7 +360,9 @@ pub(super) fn infer_modrinth_loader_from_profile(path: &Path) -> (Option<String>
     (None, None)
 }
 
-pub(super) fn infer_modrinth_loader_from_dependencies_file(path: &Path) -> Option<(String, String)> {
+pub(super) fn infer_modrinth_loader_from_dependencies_file(
+    path: &Path,
+) -> Option<(String, String)> {
     let value = read_json_file_optional(path).ok()??;
     let fabric_requirement = value
         .get("overrides")
@@ -396,7 +400,9 @@ pub(super) fn clean_version_requirement(raw: &str) -> Option<String> {
     if out.is_empty() { None } else { Some(out) }
 }
 
-pub(super) fn infer_modrinth_loader_from_mod_filenames(path: &Path) -> Option<(String, Option<String>)> {
+pub(super) fn infer_modrinth_loader_from_mod_filenames(
+    path: &Path,
+) -> Option<(String, Option<String>)> {
     let mods_dir = path.join("mods");
     let entries = fs::read_dir(mods_dir).ok()?;
     for entry in entries.flatten() {
@@ -553,7 +559,9 @@ pub(super) fn infer_loader_from_meta_version(value: &Value) -> Option<(String, S
     None
 }
 
-pub(super) fn inspect_curseforge_launcher_instance(path: &Path) -> Result<LauncherInspection, String> {
+pub(super) fn inspect_curseforge_launcher_instance(
+    path: &Path,
+) -> Result<LauncherInspection, String> {
     let manifest = read_json_file(path.join("minecraftinstance.json").as_path())?;
     let source_root = path.to_path_buf();
     let name = first_non_empty([
@@ -777,7 +785,11 @@ pub(super) fn copy_launcher_instance_content(
     Ok(())
 }
 
-pub(super) fn copy_dir_recursive(root: &Path, current: &Path, destination_root: &Path) -> Result<(), String> {
+pub(super) fn copy_dir_recursive(
+    root: &Path,
+    current: &Path,
+    destination_root: &Path,
+) -> Result<(), String> {
     let entries = fs_read_dir_logged(current)
         .map_err(|err| format!("failed to read {}: {err}", current.display()))?;
     for entry in entries {
@@ -986,7 +998,9 @@ pub(super) fn trailing_loader_version(loader_hint: &str, explicit_version: &str)
         .unwrap_or_default()
 }
 
-pub(super) fn load_existing_managed_manifest(path: &Path) -> Result<ContentInstallManifest, String> {
+pub(super) fn load_existing_managed_manifest(
+    path: &Path,
+) -> Result<ContentInstallManifest, String> {
     let manifest_path = path.join(CONTENT_MANIFEST_FILE_NAME);
     if !manifest_path.exists() {
         return Ok(ContentInstallManifest::default());
@@ -1165,7 +1179,10 @@ pub(super) fn maybe_add_project_from_json(
     );
 }
 
-pub(super) fn json_object_string(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+pub(super) fn json_object_string(
+    map: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<String> {
     keys.iter().find_map(|key| {
         map.get(*key)
             .and_then(Value::as_str)
@@ -1247,4 +1264,3 @@ pub(super) fn count_regular_files_recursive(path: &Path) -> Result<usize, String
     }
     Ok(count)
 }
-

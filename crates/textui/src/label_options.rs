@@ -1,4 +1,4 @@
-use crate::{TextFundamentals, DEFAULT_ELLIPSIS};
+use crate::{DEFAULT_ELLIPSIS, TextFundamentals};
 use egui::{Color32, Vec2};
 
 /// Styling options for plain/rich labels.

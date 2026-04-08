@@ -11,7 +11,8 @@ pub struct ImportInstanceState {
     pub(super) preview_in_flight: bool,
     pub(super) preview_request_serial: u64,
     pub(super) preview_results_tx: Option<mpsc::Sender<(u64, Result<ImportPreview, String>)>>,
-    pub(super) preview_results_rx: Option<Arc<Mutex<mpsc::Receiver<(u64, Result<ImportPreview, String>)>>>>,
+    pub(super) preview_results_rx:
+        Option<Arc<Mutex<mpsc::Receiver<(u64, Result<ImportPreview, String>)>>>>,
     pub import_in_flight: bool,
     pub import_latest_progress: Option<ImportProgress>,
     pub import_progress_tx: Option<mpsc::Sender<ImportProgress>>,
@@ -305,4 +306,3 @@ pub(super) fn update_path_from_input(path: &mut PathBuf, input: &str) -> bool {
     *path = next;
     true
 }
-

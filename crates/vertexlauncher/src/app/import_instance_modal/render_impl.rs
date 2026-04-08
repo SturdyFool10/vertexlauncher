@@ -607,4 +607,3 @@ pub(super) fn pick_import_file() -> Option<PathBuf> {
 pub(super) fn pick_import_directory() -> Option<PathBuf> {
     rfd::FileDialog::new().pick_folder()
 }
-

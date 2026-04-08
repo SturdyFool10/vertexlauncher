@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn ensure_create_instance_channel(state: &mut create_instance_modal::CreateInstanceState) {
+pub(super) fn ensure_create_instance_channel(
+    state: &mut create_instance_modal::CreateInstanceState,
+) {
     if state.create_results_tx.is_some() && state.create_results_rx.is_some() {
         return;
     }
@@ -99,7 +101,9 @@ pub(super) fn poll_create_instance_result(app: &mut VertexApp) {
     }
 }
 
-pub(super) fn ensure_import_instance_channel(state: &mut import_instance_modal::ImportInstanceState) {
+pub(super) fn ensure_import_instance_channel(
+    state: &mut import_instance_modal::ImportInstanceState,
+) {
     if state.import_results_tx.is_some() && state.import_results_rx.is_some() {
         return;
     }
@@ -108,7 +112,9 @@ pub(super) fn ensure_import_instance_channel(state: &mut import_instance_modal::
     state.import_results_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
-pub(super) fn ensure_import_instance_progress_channel(state: &mut import_instance_modal::ImportInstanceState) {
+pub(super) fn ensure_import_instance_progress_channel(
+    state: &mut import_instance_modal::ImportInstanceState,
+) {
     if state.import_progress_tx.is_some() && state.import_progress_rx.is_some() {
         return;
     }
@@ -251,7 +257,10 @@ pub(super) fn poll_curseforge_manual_download_preflight(app: &mut VertexApp) {
     }
 }
 
-pub(super) fn spawn_import_instance_task(app: &mut VertexApp, request: import_instance_modal::ImportRequest) {
+pub(super) fn spawn_import_instance_task(
+    app: &mut VertexApp,
+    request: import_instance_modal::ImportRequest,
+) {
     ensure_import_instance_channel(&mut app.import_instance_state);
     ensure_import_instance_progress_channel(&mut app.import_instance_state);
     let Some(tx) = app
@@ -289,7 +298,9 @@ pub(super) fn spawn_import_instance_task(app: &mut VertexApp, request: import_in
     });
 }
 
-pub(super) fn cleanup_import_request_manual_staging(request: Option<&import_instance_modal::ImportRequest>) {
+pub(super) fn cleanup_import_request_manual_staging(
+    request: Option<&import_instance_modal::ImportRequest>,
+) {
     let Some(request) = request else {
         return;
     };
@@ -889,4 +900,3 @@ pub(super) fn import_package_in_background(
     )?;
     Ok((store, instance))
 }
-

@@ -90,14 +90,16 @@ pub(super) struct VertexApp {
     pub(super) show_gamepad_calibration_modal: bool,
     pub(super) gamepad_calibration_state: gamepad_calibration_modal::GamepadCalibrationState,
     pub(super) in_flight_import_request: Option<import_instance_modal::ImportRequest>,
-    pub(super) curseforge_manual_download_preflight_request: Option<import_instance_modal::ImportRequest>,
+    pub(super) curseforge_manual_download_preflight_request:
+        Option<import_instance_modal::ImportRequest>,
     pub(super) curseforge_manual_download_preflight_in_flight: bool,
     pub(super) curseforge_manual_download_preflight_rx: Option<
         mpsc::Receiver<
             Result<Option<Vec<import_instance_modal::CurseForgeManualDownloadRequirement>>, String>,
         >,
     >,
-    pub(super) discover_curseforge_manual_download_preflight_request: Option<screens::DiscoverInstallRequest>,
+    pub(super) discover_curseforge_manual_download_preflight_request:
+        Option<screens::DiscoverInstallRequest>,
     pub(super) discover_curseforge_manual_download_preflight_in_flight: bool,
     pub(super) discover_curseforge_manual_download_preflight_tx: Option<
         mpsc::Sender<
@@ -110,10 +112,12 @@ pub(super) struct VertexApp {
         >,
     >,
     pub(super) pending_curseforge_manual_download: Option<PendingCurseForgeManualDownloadState>,
-    pub(super) discover_install_progress_tx: Option<mpsc::Sender<import_instance_modal::ImportProgress>>,
+    pub(super) discover_install_progress_tx:
+        Option<mpsc::Sender<import_instance_modal::ImportProgress>>,
     pub(super) discover_install_progress_rx:
         Option<Arc<Mutex<mpsc::Receiver<import_instance_modal::ImportProgress>>>>,
-    pub(super) discover_install_results_tx: Option<mpsc::Sender<import_instance_modal::ImportTaskResult>>,
+    pub(super) discover_install_results_tx:
+        Option<mpsc::Sender<import_instance_modal::ImportTaskResult>>,
     pub(super) discover_install_results_rx:
         Option<Arc<Mutex<mpsc::Receiver<import_instance_modal::ImportTaskResult>>>>,
     pub(super) auth: AuthState,
@@ -1154,4 +1158,3 @@ impl VertexApp {
         )
     }
 }
-

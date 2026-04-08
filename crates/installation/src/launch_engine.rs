@@ -29,7 +29,10 @@ pub(crate) fn normalize_java_executable(configured: Option<&str>) -> String {
     java
 }
 
-pub(crate) fn run_command_output(cmd: &mut Command, executable: &str) -> Result<Output, InstallationError> {
+pub(crate) fn run_command_output(
+    cmd: &mut Command,
+    executable: &str,
+) -> Result<Output, InstallationError> {
     cmd.output().map_err(|err| {
         if err.kind() == ErrorKind::NotFound {
             InstallationError::JavaExecutableNotFound {
@@ -41,7 +44,10 @@ pub(crate) fn run_command_output(cmd: &mut Command, executable: &str) -> Result<
     })
 }
 
-pub(crate) fn spawn_command_child(cmd: &mut Command, executable: &str) -> Result<Child, InstallationError> {
+pub(crate) fn spawn_command_child(
+    cmd: &mut Command,
+    executable: &str,
+) -> Result<Child, InstallationError> {
     #[cfg(target_os = "windows")]
     {
         cmd.creation_flags(CREATE_NO_WINDOW);
@@ -621,7 +627,10 @@ pub(crate) fn build_launch_context(
     }
 }
 
-pub(crate) fn resolve_assets_index_name<'a>(chain: &'a [serde_json::Value], fallback: &'a str) -> &'a str {
+pub(crate) fn resolve_assets_index_name<'a>(
+    chain: &'a [serde_json::Value],
+    fallback: &'a str,
+) -> &'a str {
     for profile in chain.iter().rev() {
         if let Some(id) = profile
             .get("assetIndex")
@@ -636,7 +645,10 @@ pub(crate) fn resolve_assets_index_name<'a>(chain: &'a [serde_json::Value], fall
     fallback
 }
 
-pub(crate) fn collect_jvm_arguments(chain: &[serde_json::Value], context: &LaunchContext) -> Vec<String> {
+pub(crate) fn collect_jvm_arguments(
+    chain: &[serde_json::Value],
+    context: &LaunchContext,
+) -> Vec<String> {
     let mut args = Vec::new();
     for profile in chain {
         if let Some(values) = profile
@@ -657,7 +669,10 @@ pub(crate) fn collect_jvm_arguments(chain: &[serde_json::Value], context: &Launc
         .collect()
 }
 
-pub(crate) fn collect_game_arguments(chain: &[serde_json::Value], context: &LaunchContext) -> Vec<String> {
+pub(crate) fn collect_game_arguments(
+    chain: &[serde_json::Value],
+    context: &LaunchContext,
+) -> Vec<String> {
     let mut args = Vec::new();
     for profile in chain {
         if let Some(values) = profile
@@ -686,7 +701,10 @@ pub(crate) fn collect_game_arguments(chain: &[serde_json::Value], context: &Laun
     normalize_quick_play_arguments(resolved, context)
 }
 
-pub(crate) fn normalize_quick_play_arguments(args: Vec<String>, context: &LaunchContext) -> Vec<String> {
+pub(crate) fn normalize_quick_play_arguments(
+    args: Vec<String>,
+    context: &LaunchContext,
+) -> Vec<String> {
     let quick_play_path = context
         .substitutions
         .get("quickPlayPath")
@@ -775,7 +793,10 @@ pub(crate) fn normalize_quick_play_arguments(args: Vec<String>, context: &Launch
     out
 }
 
-pub(crate) fn collect_argument_array(values: &[serde_json::Value], context: &LaunchContext) -> Vec<String> {
+pub(crate) fn collect_argument_array(
+    values: &[serde_json::Value],
+    context: &LaunchContext,
+) -> Vec<String> {
     let mut out = Vec::new();
     for value in values {
         if let Some(raw) = value.as_str() {
@@ -947,7 +968,10 @@ pub(crate) fn arch_matches_current_target(expected: &str) -> bool {
     }
 }
 
-pub(crate) fn report_install_progress(progress: Option<&InstallProgressSink>, event: InstallProgress) {
+pub(crate) fn report_install_progress(
+    progress: Option<&InstallProgressSink>,
+    event: InstallProgress,
+) {
     if let Some(callback) = progress {
         callback(event);
     }
@@ -1135,7 +1159,9 @@ pub(crate) fn collect_library_download_tasks(
     }
 }
 
-pub(crate) fn resolve_library_maven_download(library: &serde_json::Value) -> Option<(String, String)> {
+pub(crate) fn resolve_library_maven_download(
+    library: &serde_json::Value,
+) -> Option<(String, String)> {
     let name = library.get("name")?.as_str()?.trim();
     if name.is_empty() {
         return None;
@@ -2407,8 +2433,8 @@ pub(crate) fn canonicalize_existing_path(path: PathBuf) -> PathBuf {
     fs_canonicalize(path.as_path()).unwrap_or(path)
 }
 
-pub(crate) fn platform_for_adoptium() -> Result<(&'static str, &'static str, &'static str), InstallationError>
-{
+pub(crate) fn platform_for_adoptium()
+-> Result<(&'static str, &'static str, &'static str), InstallationError> {
     let os = if cfg!(target_os = "linux") {
         "linux"
     } else if cfg!(target_os = "windows") {
@@ -2507,7 +2533,10 @@ pub(crate) fn detected_runtime_architecture() -> Option<String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(crate) fn command_stdout_trimmed<const N: usize>(program: &str, args: [&str; N]) -> Option<String> {
+pub(crate) fn command_stdout_trimmed<const N: usize>(
+    program: &str,
+    args: [&str; N],
+) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     if !output.status.success() {
         return None;
@@ -2650,7 +2679,10 @@ pub(crate) fn temporary_download_path(destination: &Path) -> PathBuf {
     destination.with_file_name(file_name)
 }
 
-pub(crate) fn extract_archive(archive_path: &Path, destination: &Path) -> Result<(), InstallationError> {
+pub(crate) fn extract_archive(
+    archive_path: &Path,
+    destination: &Path,
+) -> Result<(), InstallationError> {
     if destination.exists() {
         fs_remove_dir_all(destination)?;
     }
@@ -2700,7 +2732,9 @@ pub(crate) fn extract_archive(archive_path: &Path, destination: &Path) -> Result
     )))
 }
 
-pub(crate) fn find_java_executable_under(root: &Path) -> Result<Option<PathBuf>, InstallationError> {
+pub(crate) fn find_java_executable_under(
+    root: &Path,
+) -> Result<Option<PathBuf>, InstallationError> {
     if !root.exists() {
         return Ok(None);
     }
@@ -3261,7 +3295,9 @@ pub(crate) fn parse_forge_loader_catalog_from_metadata(metadata_xml: &str) -> Lo
     catalog.finalize()
 }
 
-pub(crate) fn parse_neoforge_loader_catalog_from_metadata(metadata_xml: &str) -> LoaderVersionCatalog {
+pub(crate) fn parse_neoforge_loader_catalog_from_metadata(
+    metadata_xml: &str,
+) -> LoaderVersionCatalog {
     let mut catalog = LoaderVersionCatalog::default();
     for raw in parse_xml_versions(metadata_xml) {
         let trimmed = raw.trim();
@@ -3343,7 +3379,9 @@ pub(crate) fn push_unique_loader_version(
     }
 }
 
-pub(crate) fn sort_loader_version_map_desc(versions_by_game_version: &mut BTreeMap<String, Vec<String>>) {
+pub(crate) fn sort_loader_version_map_desc(
+    versions_by_game_version: &mut BTreeMap<String, Vec<String>>,
+) {
     for versions in versions_by_game_version.values_mut() {
         sort_loader_versions_desc_in_place(versions);
     }
@@ -3423,7 +3461,11 @@ pub(crate) fn version_like_tokens(raw: &str) -> Vec<VersionToken> {
     tokens
 }
 
-pub(crate) fn push_version_token(tokens: &mut Vec<VersionToken>, current: &mut String, was_digit: bool) {
+pub(crate) fn push_version_token(
+    tokens: &mut Vec<VersionToken>,
+    current: &mut String,
+    was_digit: bool,
+) {
     if current.is_empty() {
         return;
     }
@@ -3436,7 +3478,10 @@ pub(crate) fn push_version_token(tokens: &mut Vec<VersionToken>, current: &mut S
     current.clear();
 }
 
-pub(crate) fn merge_loader_catalog(target: &mut LoaderVersionCatalog, source: LoaderVersionCatalog) {
+pub(crate) fn merge_loader_catalog(
+    target: &mut LoaderVersionCatalog,
+    source: LoaderVersionCatalog,
+) {
     for game_version in source.supported_game_versions {
         target.supported_game_versions.insert(game_version);
     }
@@ -3617,7 +3662,10 @@ pub(crate) fn call_get_response_with_retry(
     }))
 }
 
-pub(crate) fn call_get_with_retry(url: &str, user_agent: &str) -> Result<String, InstallationError> {
+pub(crate) fn call_get_with_retry(
+    url: &str,
+    user_agent: &str,
+) -> Result<String, InstallationError> {
     let mut response = call_get_response_with_retry(url, user_agent)?;
     let mut raw = String::new();
     response

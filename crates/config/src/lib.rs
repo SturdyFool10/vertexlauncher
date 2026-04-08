@@ -465,8 +465,10 @@ impl UiEmojiFontFamily {
 
     /// Returns whether this font family is the bundled Noto Color Emoji.
     pub fn is_included_default(&self) -> bool {
-        normalize_emoji_font_family_key(&self.0) == normalize_emoji_font_family_key(INCLUDED_EMOJI_FONT_SETTINGS_LABEL)
-            || normalize_emoji_font_family_key(&self.0) == normalize_emoji_font_family_key(INCLUDED_DEFAULT_EMOJI_FONT_FAMILY)
+        normalize_emoji_font_family_key(&self.0)
+            == normalize_emoji_font_family_key(INCLUDED_EMOJI_FONT_SETTINGS_LABEL)
+            || normalize_emoji_font_family_key(&self.0)
+                == normalize_emoji_font_family_key(INCLUDED_DEFAULT_EMOJI_FONT_FAMILY)
     }
 
     /// Display label used in the settings UI.

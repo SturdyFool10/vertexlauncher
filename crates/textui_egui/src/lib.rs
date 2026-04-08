@@ -1408,8 +1408,8 @@ impl TextUiEguiExt for TextUi {
 pub mod prelude {
     pub use super::{
         ButtonOptions, CodeBlockOptions, InputOptions, LabelOptions, MarkdownOptions, RichTextSpan,
-        RichTextStyle, TextColor, TextTextureHandle, TextUiEguiExt, TooltipOptions,
-        TruncatedText, normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
+        RichTextStyle, TextColor, TextTextureHandle, TextUiEguiExt, TooltipOptions, TruncatedText,
+        normalize_inline_whitespace, truncate_single_line_text_with_ellipsis,
         truncate_single_line_text_with_ellipsis_detailed,
         truncate_single_line_text_with_ellipsis_preserving_whitespace,
         truncate_single_line_text_with_ellipsis_preserving_whitespace_detailed,

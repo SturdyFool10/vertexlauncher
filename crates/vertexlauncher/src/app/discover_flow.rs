@@ -18,7 +18,10 @@ pub(super) fn ensure_discover_install_progress_channel(app: &mut VertexApp) {
     app.discover_install_progress_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
-pub(super) fn start_discover_install_task(app: &mut VertexApp, request: screens::DiscoverInstallRequest) {
+pub(super) fn start_discover_install_task(
+    app: &mut VertexApp,
+    request: screens::DiscoverInstallRequest,
+) {
     if app.show_import_instance_modal
         || app.import_instance_state.import_in_flight
         || app.curseforge_manual_download_preflight_in_flight
@@ -176,7 +179,10 @@ pub(super) fn poll_discover_curseforge_manual_download_preflight(app: &mut Verte
     }
 }
 
-pub(super) fn spawn_discover_install_task(app: &mut VertexApp, request: screens::DiscoverInstallRequest) {
+pub(super) fn spawn_discover_install_task(
+    app: &mut VertexApp,
+    request: screens::DiscoverInstallRequest,
+) {
     ensure_discover_install_channel(app);
     ensure_discover_install_progress_channel(app);
     let Some(tx) = app.discover_install_results_tx.as_ref().cloned() else {

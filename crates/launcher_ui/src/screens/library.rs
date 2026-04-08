@@ -483,7 +483,11 @@ fn render_instance_tile(
                 } else {
                     ("No description provided.", true)
                 };
-                let description_style = if muted { style::muted(ui) } else { style::body(ui) };
+                let description_style = if muted {
+                    style::muted(ui)
+                } else {
+                    style::body(ui)
+                };
                 render_scroll_text_block(
                     ui,
                     ("library_instance_description", instance.id.as_str()),
@@ -929,7 +933,10 @@ fn render_delete_instance_modal(
                     ui,
                     ("library_delete_running", instance.id.as_str()),
                     "Stop the running instance before deleting its folder.",
-                    &LabelOptions { color: danger, ..style::body(ui) },
+                    &LabelOptions {
+                        color: danger,
+                        ..style::body(ui)
+                    },
                 );
             }
 
@@ -938,7 +945,10 @@ fn render_delete_instance_modal(
                     ui,
                     ("library_delete_error", instance.id.as_str()),
                     error,
-                    &LabelOptions { color: danger, ..style::body(ui) },
+                    &LabelOptions {
+                        color: danger,
+                        ..style::body(ui)
+                    },
                 );
             }
 

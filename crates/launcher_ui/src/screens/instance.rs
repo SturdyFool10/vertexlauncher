@@ -1612,12 +1612,7 @@ fn render_instance_log_viewer(
             ui.add_space(8.0);
         }
         if let Some(error) = state.loaded_log_error.as_deref() {
-            let _ = text_ui.label(
-                ui,
-                "instance_logs_error",
-                error,
-                &style::error_text(ui),
-            );
+            let _ = text_ui.label(ui, "instance_logs_error", error, &style::error_text(ui));
             return;
         }
         console_screen::render_log_buffer(
@@ -4743,7 +4738,10 @@ fn render_move_instance_modal(
                     0.0
                 };
                 let status_style = if state.move_instance_completion_failed {
-                    LabelOptions { color: ui.visuals().error_fg_color, ..style::stat_label(ui) }
+                    LabelOptions {
+                        color: ui.visuals().error_fg_color,
+                        ..style::stat_label(ui)
+                    }
                 } else {
                     style::stat_label(ui)
                 };
@@ -4893,7 +4891,11 @@ fn render_move_instance_modal(
                         ui,
                         ("instance_move_progress_message_inline", instance_id),
                         message,
-                        &if state.move_instance_completion_failed { style::error_text(ui) } else { style::body(ui) },
+                        &if state.move_instance_completion_failed {
+                            style::error_text(ui)
+                        } else {
+                            style::body(ui)
+                        },
                     );
                 }
             }

@@ -121,23 +121,15 @@ mod render_impl;
 mod state;
 
 pub use package_import::{
-    attach_curseforge_modpack_install_state,
-    format_curseforge_download_url_error,
-    prepare_curseforge_manual_download_for_file,
+    CurseForgeManualDownloadRequirement, attach_curseforge_modpack_install_state,
+    format_curseforge_download_url_error, prepare_curseforge_manual_download_for_file,
     prepare_curseforge_manual_downloads,
-    CurseForgeManualDownloadRequirement,
 };
 pub use render_impl::import_package_with_progress;
 pub use render_impl::render;
 pub use state::{
-    ImportInstanceState,
-    ImportPackageError,
-    ImportProgress,
-    ImportRequest,
-    ImportSource,
-    ImportTaskResult,
-    ModalAction,
+    ImportInstanceState, ImportPackageError, ImportProgress, ImportRequest, ImportSource,
+    ImportTaskResult, ModalAction,
 };
 
 use self::{inspection::*, package_import::*, state::*};
-

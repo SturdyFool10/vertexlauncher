@@ -773,4 +773,3 @@ pub fn ensure_game_files(
         resolved_modloader_version,
     })
 }
-

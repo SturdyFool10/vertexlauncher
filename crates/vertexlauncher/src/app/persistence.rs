@@ -284,4 +284,3 @@ pub(super) fn poll_finished_instance_process_notifications(app: &mut VertexApp) 
         }
     }
 }
-

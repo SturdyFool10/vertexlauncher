@@ -456,7 +456,9 @@ fn render_emoji_font_settings(
         ui,
         egui::Id::new("emoji_font_family_dropdown"),
         "Emoji Font",
-        Some("Font used for emoji characters. Noto Color Emoji is included and selected by default."),
+        Some(
+            "Font used for emoji characters. Noto Color Emoji is included and selected by default.",
+        ),
         &mut selected_index,
         &option_label_refs,
     );

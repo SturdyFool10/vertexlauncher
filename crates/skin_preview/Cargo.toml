@@ -1,0 +1,8 @@
+[package]
+name = "skin_preview"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+egui.workspace = true
+image.workspace = true

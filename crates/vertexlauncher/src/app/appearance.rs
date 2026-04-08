@@ -123,4 +123,3 @@ pub(super) fn disable_window_blur_for_startup(
         }
     });
 }
-

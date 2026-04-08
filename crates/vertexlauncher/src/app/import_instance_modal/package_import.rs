@@ -798,7 +798,9 @@ pub(super) fn parse_modrinth_download_source(url: &str) -> Option<ResolvedModrin
     None
 }
 
-pub(super) fn managed_content_folder_for_relative_path(relative_path: &Path) -> Option<&'static str> {
+pub(super) fn managed_content_folder_for_relative_path(
+    relative_path: &Path,
+) -> Option<&'static str> {
     let normalized = relative_path.to_string_lossy().replace('\\', "/");
     let head = normalized.split('/').next()?.to_ascii_lowercase();
     match head.as_str() {
@@ -858,7 +860,10 @@ pub(super) fn preserve_non_pack_managed_content(
 }
 
 #[allow(dead_code)]
-pub(super) fn preserve_instance_user_state(existing_root: &Path, temp_root: &Path) -> Result<(), String> {
+pub(super) fn preserve_instance_user_state(
+    existing_root: &Path,
+    temp_root: &Path,
+) -> Result<(), String> {
     let saves_root = existing_root.join("saves");
     if saves_root.exists() {
         copy_path_recursive(saves_root.as_path(), temp_root.join("saves").as_path())?;
@@ -1547,7 +1552,11 @@ pub(super) fn count_curseforge_override_entries(
     Ok(count)
 }
 
-pub(super) fn import_progress(message: &str, completed_steps: usize, total_steps: usize) -> ImportProgress {
+pub(super) fn import_progress(
+    message: &str,
+    completed_steps: usize,
+    total_steps: usize,
+) -> ImportProgress {
     ImportProgress {
         message: message.to_owned(),
         completed_steps,

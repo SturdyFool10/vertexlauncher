@@ -27,6 +27,7 @@ textui.workspace = true
 textui_egui.workspace = true
 launcher_runtime.workspace = true
 shared_lru.workspace = true
+skin_preview.workspace = true
 tokio.workspace = true
 toml.workspace = true
 raw-window-handle.workspace = true
