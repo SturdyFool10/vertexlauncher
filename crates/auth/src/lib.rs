@@ -12,34 +12,15 @@ mod types;
 mod util;
 
 use std::sync::mpsc;
-
 use tokio::runtime::Handle;
-use types::RefreshTokenState;
 
 pub use constants::{BUILTIN_MICROSOFT_CLIENT_ID, BUILTIN_MICROSOFT_TENANT};
 pub use error::AuthError;
 pub use types::{
-    CachedAccount, CachedAccountsState, DeviceCodeLoginFlow, DeviceCodePrompt, LoginEvent,
-    MinecraftCapeState, MinecraftLoginFlow, MinecraftProfileState, MinecraftSkinState,
-    MinecraftSkinVariant,
+    CachedAccount, CachedAccountRenewalEvent, CachedAccountsState, DeviceCodeLoginFlow,
+    DeviceCodePrompt, LoginEvent, MinecraftCapeState, MinecraftLoginFlow, MinecraftProfileState,
+    MinecraftSkinState, MinecraftSkinVariant, RefreshTokenState,
 };
-
-#[derive(Debug, Clone)]
-pub enum CachedAccountRenewalEvent {
-    Started {
-        profile_id: String,
-        display_name: String,
-    },
-    Succeeded {
-        profile_id: String,
-        display_name: String,
-    },
-    Failed {
-        profile_id: String,
-        display_name: String,
-        error: String,
-    },
-}
 
 /// Returns the built-in Microsoft OAuth client id if configured.
 ///

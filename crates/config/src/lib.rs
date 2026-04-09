@@ -1,12 +1,30 @@
 use app_paths as launcher_paths;
+mod config_format;
+mod gamepad_calibration;
+mod java_runtime_version;
 mod setting_specs;
+mod skin_preview_aa_mode;
+mod skin_preview_texel_aa_mode;
+mod svg_aa_mode;
+mod text_rendering_path;
 mod ui_fonts;
+mod windows_backdrop_type;
+mod windows_transparency_level;
 
+pub use config_format::ConfigFormat;
+pub use gamepad_calibration::GamepadCalibration;
+pub use java_runtime_version::JavaRuntimeVersion;
 pub use setting_specs::{
     DropdownSettingId, DropdownSettingSpec, FloatSettingId, FloatSettingSpec, IntSettingId,
     IntSettingSpec, TextSettingId, TextSettingSpec, ToggleSettingId, ToggleSettingSpec,
 };
+pub use skin_preview_aa_mode::SkinPreviewAaMode;
+pub use skin_preview_texel_aa_mode::SkinPreviewTexelAaMode;
+pub use svg_aa_mode::SvgAaMode;
+pub use text_rendering_path::TextRenderingPath;
 pub use ui_fonts::{UiEmojiFontFamily, UiFontFamily};
+pub use windows_backdrop_type::WindowsBackdropType;
+pub use windows_transparency_level::WindowsTransparencyLevel;
 
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -45,250 +63,12 @@ pub const SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_MIN: i32 = 2;
 pub const SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_MAX: i32 = 16;
 pub const SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_STEP: i32 = 1;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct GamepadCalibration {
-    pub center_x: f32,
-    pub center_y: f32,
-    pub deadzone_x: f32,
-    pub deadzone_y: f32,
-    pub threshold_x: f32,
-    pub threshold_y: f32,
-    pub x_forward_sign: i8,
-    pub y_backward_sign: i8,
-}
-
-impl Default for GamepadCalibration {
-    fn default() -> Self {
-        Self {
-            center_x: 0.0,
-            center_y: 0.0,
-            deadzone_x: 0.25,
-            deadzone_y: 0.25,
-            threshold_x: 0.5,
-            threshold_y: 0.5,
-            x_forward_sign: 1,
-            y_backward_sign: 1,
-        }
-    }
-}
-
-impl GamepadCalibration {
-    pub fn normalize(&mut self) {
-        self.center_x = self.center_x.clamp(-1.0, 1.0);
-        self.center_y = self.center_y.clamp(-1.0, 1.0);
-        self.deadzone_x = self.deadzone_x.clamp(0.05, 0.95);
-        self.deadzone_y = self.deadzone_y.clamp(0.05, 0.95);
-        self.threshold_x = self
-            .threshold_x
-            .clamp((self.deadzone_x + 0.05).min(0.95), 0.98);
-        self.threshold_y = self
-            .threshold_y
-            .clamp((self.deadzone_y + 0.05).min(0.95), 0.98);
-        self.x_forward_sign = if self.x_forward_sign >= 0 { 1 } else { -1 };
-        self.y_backward_sign = if self.y_backward_sign >= 0 { 1 } else { -1 };
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SkinPreviewAaMode {
-    Off,
-    Msaa,
-    Smaa,
-    Fxaa,
-    Taa,
-    FxaaTaa,
-}
-
-impl SkinPreviewAaMode {
-    pub const ALL: [SkinPreviewAaMode; 6] = [
-        SkinPreviewAaMode::Msaa,
-        SkinPreviewAaMode::Smaa,
-        SkinPreviewAaMode::Fxaa,
-        SkinPreviewAaMode::Taa,
-        SkinPreviewAaMode::FxaaTaa,
-        SkinPreviewAaMode::Off,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            SkinPreviewAaMode::Off => "Off",
-            SkinPreviewAaMode::Msaa => "MSAA (GPU)",
-            SkinPreviewAaMode::Smaa => "SMAA (GPU Post)",
-            SkinPreviewAaMode::Fxaa => "FXAA (Post)",
-            SkinPreviewAaMode::Taa => "TAA (Temporal)",
-            SkinPreviewAaMode::FxaaTaa => "FXAA + TAA (Temporal)",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SkinPreviewTexelAaMode {
-    Off,
-    TexelBoundary,
-}
-
-impl SkinPreviewTexelAaMode {
-    pub const ALL: [SkinPreviewTexelAaMode; 2] = [
-        SkinPreviewTexelAaMode::Off,
-        SkinPreviewTexelAaMode::TexelBoundary,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            SkinPreviewTexelAaMode::Off => "Off",
-            SkinPreviewTexelAaMode::TexelBoundary => "Texel Border AA",
-        }
-    }
-}
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SvgAaMode {
-    Off,
-    Balanced,
-    Crisp,
-    Ultra,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TextRenderingPath {
-    Auto,
-    AlphaMask,
-    Sdf,
-    Msdf,
-}
-
-impl TextRenderingPath {
-    pub const ALL: [TextRenderingPath; 4] = [
-        TextRenderingPath::Auto,
-        TextRenderingPath::AlphaMask,
-        TextRenderingPath::Sdf,
-        TextRenderingPath::Msdf,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            TextRenderingPath::Auto => "Auto",
-            TextRenderingPath::AlphaMask => "Alpha Mask",
-            TextRenderingPath::Sdf => "SDF",
-            TextRenderingPath::Msdf => "MSDF",
-        }
-    }
-}
-
-impl SvgAaMode {
-    pub const ALL: [SvgAaMode; 4] = [
-        SvgAaMode::Balanced,
-        SvgAaMode::Crisp,
-        SvgAaMode::Ultra,
-        SvgAaMode::Off,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            SvgAaMode::Off => "Off",
-            SvgAaMode::Balanced => "Balanced (SSAA 2x)",
-            SvgAaMode::Crisp => "Crisp (SSAA 3x)",
-            SvgAaMode::Ultra => "Ultra (SSAA 4x)",
-        }
-    }
-
-    pub const fn supersample_scale(self) -> u32 {
-        match self {
-            SvgAaMode::Off => 1,
-            SvgAaMode::Balanced => 2,
-            SvgAaMode::Crisp => 3,
-            SvgAaMode::Ultra => 4,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WindowsTransparencyLevel {
-    Solid,
-    Low,
-    Medium,
-    High,
-}
-
-impl WindowsTransparencyLevel {
-    pub const fn ui_opacity_percent(self) -> u8 {
-        match self {
-            WindowsTransparencyLevel::Solid => 100,
-            WindowsTransparencyLevel::Low => 70,
-            WindowsTransparencyLevel::Medium => 50,
-            WindowsTransparencyLevel::High => 30,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WindowsBackdropType {
-    Auto,
-    Mica,
-    Acrylic,
-    MicaAlt,
-    LegacyBlur,
-}
-
-impl WindowsBackdropType {
-    pub const ALL: [WindowsBackdropType; 5] = [
-        WindowsBackdropType::Auto,
-        WindowsBackdropType::Mica,
-        WindowsBackdropType::Acrylic,
-        WindowsBackdropType::MicaAlt,
-        WindowsBackdropType::LegacyBlur,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            WindowsBackdropType::Auto => "Auto",
-            WindowsBackdropType::Mica => "Mica",
-            WindowsBackdropType::Acrylic => "Acrylic",
-            WindowsBackdropType::MicaAlt => "Mica Alt",
-            WindowsBackdropType::LegacyBlur => "Legacy Blur",
-        }
-    }
-}
-
 const fn default_windows_backdrop_type() -> WindowsBackdropType {
     WindowsBackdropType::Auto
 }
 
 const fn default_ui_opacity_percent() -> u8 {
     100
-}
-
-/// File format choice for config creation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConfigFormat {
-    Json,
-    Toml,
-}
-
-impl ConfigFormat {
-    /// Human-readable label for config format selection UI.
-    pub fn label(self) -> &'static str {
-        match self {
-            ConfigFormat::Json => "JSON (.json)",
-            ConfigFormat::Toml => "TOML (.toml)",
-        }
-    }
-
-    /// Filename extension associated with this config format.
-    pub fn extension(self) -> &'static str {
-        match self {
-            ConfigFormat::Json => "json",
-            ConfigFormat::Toml => "toml",
-        }
-    }
 }
 
 fn serialize_toml_safe_u128<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
@@ -368,60 +148,6 @@ where
     }
 
     deserializer.deserialize_any(U128Visitor)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum JavaRuntimeVersion {
-    Java8,
-    Java16,
-    Java17,
-    Java21,
-    Java25,
-}
-
-impl JavaRuntimeVersion {
-    pub const ALL: [JavaRuntimeVersion; 5] = [
-        JavaRuntimeVersion::Java8,
-        JavaRuntimeVersion::Java16,
-        JavaRuntimeVersion::Java17,
-        JavaRuntimeVersion::Java21,
-        JavaRuntimeVersion::Java25,
-    ];
-
-    /// Java major version number.
-    pub const fn major(self) -> u8 {
-        match self {
-            JavaRuntimeVersion::Java8 => 8,
-            JavaRuntimeVersion::Java16 => 16,
-            JavaRuntimeVersion::Java17 => 17,
-            JavaRuntimeVersion::Java21 => 21,
-            JavaRuntimeVersion::Java25 => 25,
-        }
-    }
-
-    /// Settings label for Java runtime path input.
-    pub const fn label(self) -> &'static str {
-        match self {
-            JavaRuntimeVersion::Java8 => "Java 8 JVM Path",
-            JavaRuntimeVersion::Java16 => "Java 16 JVM Path",
-            JavaRuntimeVersion::Java17 => "Java 17 JVM Path",
-            JavaRuntimeVersion::Java21 => "Java 21 JVM Path",
-            JavaRuntimeVersion::Java25 => "Java 25 JVM Path",
-        }
-    }
-
-    /// Tooltip explaining Minecraft version compatibility for this runtime.
-    pub const fn info_tooltip(self) -> &'static str {
-        match self {
-            JavaRuntimeVersion::Java8 => "Used for Minecraft 1.16.5 and older release versions.",
-            JavaRuntimeVersion::Java16 => "Used for Minecraft 1.17.x release versions.",
-            JavaRuntimeVersion::Java17 => {
-                "Used for Minecraft 1.18 through 1.20.4 release versions."
-            }
-            JavaRuntimeVersion::Java21 => "Used for Minecraft 1.20.5 through 1.x release versions.",
-            JavaRuntimeVersion::Java25 => "Used for Minecraft 26.x and newer release versions.",
-        }
-    }
 }
 
 /// Launcher configuration persisted as JSON/TOML.

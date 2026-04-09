@@ -8,7 +8,8 @@ use crate::constants::{
 };
 use crate::error::AuthError;
 use crate::secret_store::{self, RefreshTokenLoadResult};
-use crate::types::{CachedAccount, CachedAccountsState, RefreshTokenState};
+use crate::types::RefreshTokenState;
+use crate::{CachedAccount, CachedAccountsState};
 
 enum AccountsStateLocation {
     Disk,
