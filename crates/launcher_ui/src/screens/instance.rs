@@ -27,7 +27,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 use textui::TextUi;
