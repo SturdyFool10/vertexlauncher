@@ -1,5 +1,8 @@
 use std::hash::Hash;
 
+#[path = "settings_widgets_search.rs"]
+mod settings_widgets_search;
+
 use egui::{self, Align, Layout, Response, Sense, Ui};
 use textui::TextUi;
 use textui_egui::{
@@ -11,6 +14,11 @@ use crate::{
     assets,
     ui::{components::icon_button, style, text_input_theme},
 };
+use settings_widgets_search::{
+    SearchableDropdownState, searchable_dropdown_matches, set_owner_focus_pending,
+    set_popup_focus_pending, set_popup_had_focus, take_owner_focus_pending,
+    take_popup_focus_pending, take_popup_had_focus,
+};
 
 const GAMEPAD_SLIDER_EDIT_ID: &str = "settings_widgets_gamepad_slider_edit";
 const GAMEPAD_SLIDER_STEP_DELTA_ID: &str = "settings_widgets_gamepad_slider_step_delta";
@@ -18,9 +26,6 @@ const GAMEPAD_ACTIVATE_TARGET_ID: &str = "settings_widgets_gamepad_activate_targ
 const GAMEPAD_CUSTOM_ACTIVATE_IDS: &str = "settings_widgets_gamepad_custom_activate_ids";
 const GAMEPAD_INPUT_HISTORY_ID: &str = "settings_widgets_gamepad_input_history";
 const SETTINGS_DEFAULT_FOCUS_REQUEST_ID: &str = "settings_widgets_default_focus_request";
-const DROPDOWN_POPUP_FOCUS_PENDING_ID: &str = "settings_widgets_dropdown_popup_focus_pending";
-const DROPDOWN_OWNER_FOCUS_PENDING_ID: &str = "settings_widgets_dropdown_owner_focus_pending";
-const DROPDOWN_POPUP_HAD_FOCUS_ID: &str = "settings_widgets_dropdown_popup_had_focus";
 
 #[derive(Clone, Copy, Debug)]
 struct ControlMetrics {
@@ -51,11 +56,6 @@ struct U128InputState {
     last_valid: u128,
 }
 
-#[derive(Clone, Debug, Default)]
-struct SearchableDropdownState {
-    query: String,
-}
-
 fn paint_focus_outline(ui: &Ui, rect: egui::Rect) {
     ui.painter().rect_stroke(
         rect.expand2(egui::vec2(2.0, 2.0)),
@@ -63,72 +63,6 @@ fn paint_focus_outline(ui: &Ui, rect: egui::Rect) {
         ui.visuals().selection.stroke,
         egui::StrokeKind::Outside,
     );
-}
-
-fn set_popup_focus_pending(ctx: &egui::Context, open_id: egui::Id, pending: bool) {
-    ctx.data_mut(|data| {
-        let key = egui::Id::new((DROPDOWN_POPUP_FOCUS_PENDING_ID, open_id));
-        if pending {
-            data.insert_temp(key, true);
-        } else {
-            data.remove::<bool>(key);
-        }
-    });
-}
-
-fn take_popup_focus_pending(ctx: &egui::Context, open_id: egui::Id) -> bool {
-    ctx.data_mut(|data| {
-        let key = egui::Id::new((DROPDOWN_POPUP_FOCUS_PENDING_ID, open_id));
-        let pending = data.get_temp::<bool>(key).unwrap_or(false);
-        if pending {
-            data.remove::<bool>(key);
-        }
-        pending
-    })
-}
-
-fn set_owner_focus_pending(ctx: &egui::Context, open_id: egui::Id, pending: bool) {
-    ctx.data_mut(|data| {
-        let key = egui::Id::new((DROPDOWN_OWNER_FOCUS_PENDING_ID, open_id));
-        if pending {
-            data.insert_temp(key, true);
-        } else {
-            data.remove::<bool>(key);
-        }
-    });
-}
-
-fn take_owner_focus_pending(ctx: &egui::Context, open_id: egui::Id) -> bool {
-    ctx.data_mut(|data| {
-        let key = egui::Id::new((DROPDOWN_OWNER_FOCUS_PENDING_ID, open_id));
-        let pending = data.get_temp::<bool>(key).unwrap_or(false);
-        if pending {
-            data.remove::<bool>(key);
-        }
-        pending
-    })
-}
-
-fn set_popup_had_focus(ctx: &egui::Context, open_id: egui::Id, had_focus: bool) {
-    ctx.data_mut(|data| {
-        let key = egui::Id::new((DROPDOWN_POPUP_HAD_FOCUS_ID, open_id));
-        if had_focus {
-            data.insert_temp(key, true);
-        } else {
-            data.remove::<bool>(key);
-        }
-    });
-}
-
-fn take_popup_had_focus(ctx: &egui::Context, open_id: egui::Id) -> bool {
-    ctx.data_mut(|data| {
-        let key = egui::Id::new((DROPDOWN_POPUP_HAD_FOCUS_ID, open_id));
-        let had_focus = data.get_temp::<bool>(key).unwrap_or(false);
-        if had_focus {
-            data.remove::<bool>(key);
-        }
-        had_focus
-    })
 }
 
 pub fn set_gamepad_slider_step_delta(ctx: &egui::Context, delta: i32) {
@@ -1818,126 +1752,6 @@ fn response_will_open(ui: &Ui) -> bool {
         input.pointer.primary_clicked()
             || input.key_pressed(egui::Key::Enter)
             || input.key_pressed(egui::Key::Space)
-    })
-}
-
-fn searchable_dropdown_matches(options: &[&str], query: &str) -> Vec<usize> {
-    let normalized_query = query.trim().to_lowercase();
-    if normalized_query.is_empty() {
-        return (0..options.len()).collect();
-    }
-    let query_chars = normalized_query.chars().collect::<Vec<_>>();
-
-    let mut matches = options
-        .iter()
-        .enumerate()
-        .filter_map(|(index, option)| {
-            fuzzy_match_score(normalized_query.as_str(), query_chars.as_slice(), option)
-                .map(|score| (index, score))
-        })
-        .collect::<Vec<_>>();
-
-    matches.sort_by(|(left_index, left_score), (right_index, right_score)| {
-        right_score
-            .category
-            .cmp(&left_score.category)
-            .then_with(|| right_score.score.cmp(&left_score.score))
-            .then_with(|| left_score.start.cmp(&right_score.start))
-            .then_with(|| left_index.cmp(right_index))
-    });
-
-    matches.into_iter().map(|(index, _score)| index).collect()
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct FuzzyMatchScore {
-    category: i32,
-    score: i32,
-    start: usize,
-}
-
-fn fuzzy_match_score(
-    normalized_query: &str,
-    query_chars: &[char],
-    candidate: &str,
-) -> Option<FuzzyMatchScore> {
-    if normalized_query.is_empty() {
-        return Some(FuzzyMatchScore {
-            category: 0,
-            score: 0,
-            start: 0,
-        });
-    }
-
-    let normalized_candidate = candidate.trim().to_lowercase();
-    if normalized_candidate.is_empty() {
-        return None;
-    }
-
-    if normalized_candidate == normalized_query {
-        return Some(FuzzyMatchScore {
-            category: 3,
-            score: i32::MAX,
-            start: 0,
-        });
-    }
-
-    if let Some(start) = normalized_candidate.find(&normalized_query) {
-        return Some(FuzzyMatchScore {
-            category: 2,
-            score: 10_000 - start as i32,
-            start,
-        });
-    }
-
-    let candidate_chars = normalized_candidate.chars().collect::<Vec<_>>();
-    let mut query_index = 0;
-    let mut first_match_start = None;
-    let mut previous_match_index = None;
-    let mut score = 0_i32;
-
-    for (candidate_index, candidate_char) in candidate_chars.iter().enumerate() {
-        if query_index >= query_chars.len() {
-            break;
-        }
-
-        if *candidate_char != query_chars[query_index] {
-            continue;
-        }
-
-        if first_match_start.is_none() {
-            first_match_start = Some(candidate_index);
-            score += 120;
-        }
-
-        if previous_match_index == Some(candidate_index.saturating_sub(1)) {
-            score += 45;
-        } else {
-            score += 18;
-        }
-
-        if candidate_index == 0
-            || !candidate_chars[candidate_index.saturating_sub(1)].is_alphanumeric()
-        {
-            score += 22;
-        }
-
-        previous_match_index = Some(candidate_index);
-        query_index += 1;
-    }
-
-    if query_index != query_chars.len() {
-        return None;
-    }
-
-    let start = first_match_start.unwrap_or(usize::MAX);
-    score -= start as i32;
-    score -= ((candidate_chars.len().saturating_sub(query_chars.len())) as i32) / 4;
-
-    Some(FuzzyMatchScore {
-        category: 1,
-        score,
-        start,
     })
 }
 

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -28,7 +28,7 @@ use crate::{
     },
     ui::{
         components::{
-            image_memory::{load_image_path_for_memory, prepare_owned_image_bytes_for_memory},
+            image_memory::prepare_owned_image_bytes_for_memory,
             image_textures,
             lazy_image_bytes::{LazyImageBytes, LazyImageBytesStatus},
             virtual_masonry::{
@@ -77,6 +77,8 @@ mod home_screenshots;
 mod home_server_ping;
 #[path = "home_support.rs"]
 mod home_support;
+#[path = "home_thumbnails.rs"]
+mod home_thumbnails;
 
 use self::home_screenshots::{
     ScreenshotCandidate, ScreenshotEntry, ScreenshotViewerState,
@@ -93,6 +95,12 @@ use self::home_server_ping::{
 use self::home_support::{
     current_time_millis, format_time_ago, modified_millis, open_home_instance,
     open_home_instance_folder,
+};
+use self::home_thumbnails::{
+    HomeThumbnailState, home_instance_thumbnail_uri, home_world_thumbnail_uri,
+    instance_thumbnail_cache_key, poll_instance_thumbnail_results,
+    purge_activity_image_state as purge_home_activity_thumbnail_state, request_instance_thumbnail,
+    trim_home_thumbnail_cache,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -188,24 +196,13 @@ struct HomeState {
     screenshot_images: LazyImageBytes,
     screenshot_layout_revision: u64,
     screenshot_masonry_layout_cache: Option<CachedVirtualMasonryLayout>,
-    thumbnail_cache_frame_index: u64,
-    instance_thumbnail_results_tx: Option<mpsc::Sender<(String, Option<Arc<[u8]>>)>>,
-    instance_thumbnail_results_rx: Option<Arc<Mutex<mpsc::Receiver<(String, Option<Arc<[u8]>>)>>>>,
-    instance_thumbnail_cache: HashMap<String, ThumbnailCacheEntry>,
-    instance_thumbnail_in_flight: HashSet<String>,
+    thumbnails: HomeThumbnailState,
     screenshot_viewer: Option<ScreenshotViewerState>,
     pending_delete_screenshot_key: Option<String>,
     delete_screenshot_in_flight: bool,
     delete_screenshot_results_tx: Option<mpsc::Sender<(String, String, Result<(), String>)>>,
     delete_screenshot_results_rx:
         Option<Arc<Mutex<mpsc::Receiver<(String, String, Result<(), String>)>>>>,
-}
-
-#[derive(Debug, Clone)]
-struct ThumbnailCacheEntry {
-    bytes: Option<Arc<[u8]>>,
-    approx_bytes: usize,
-    last_touched_frame: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -291,13 +288,7 @@ impl HomeState {
                 ));
             }
         }
-        for key in self.instance_thumbnail_cache.keys() {
-            forget_home_thumbnail(ctx, key);
-        }
-        self.instance_thumbnail_cache.clear();
-        self.instance_thumbnail_in_flight.clear();
-        self.instance_thumbnail_results_tx = None;
-        self.instance_thumbnail_results_rx = None;
+        purge_home_activity_thumbnail_state(ctx, &mut self.thumbnails);
         self.last_scan_at = None;
     }
 }
@@ -451,8 +442,8 @@ pub fn render(
     }
     ui.ctx().request_repaint_after(Duration::from_millis(250));
     state.screenshot_images.begin_frame(ui.ctx());
-    state.thumbnail_cache_frame_index = state.thumbnail_cache_frame_index.saturating_add(1);
-    trim_home_thumbnail_cache(ui.ctx(), &mut state);
+    state.thumbnails.cache_frame_index = state.thumbnails.cache_frame_index.saturating_add(1);
+    trim_home_thumbnail_cache(ui.ctx(), &mut state.thumbnails);
     let screenshot_images_updated = state.screenshot_images.poll(ui.ctx());
     ui.add_space(14.0);
 
@@ -460,7 +451,7 @@ pub fn render(
         HomeTab::InstancesAndWorlds => {
             poll_home_activity_results(&mut state);
             poll_server_ping_results(&mut state);
-            poll_instance_thumbnail_results(ui.ctx(), &mut state);
+            poll_instance_thumbnail_results(ui.ctx(), &mut state.thumbnails);
             let should_scan = state
                 .last_scan_at
                 .is_none_or(|last| last.elapsed() >= HOME_SCAN_INTERVAL)
@@ -472,7 +463,7 @@ pub fn render(
             if state.activity_scan_pending || !state.server_ping_in_flight.is_empty() {
                 ui.ctx().request_repaint_after(Duration::from_millis(50));
             }
-            if !state.instance_thumbnail_in_flight.is_empty() {
+            if !state.thumbnails.cache.is_empty() {
                 ui.ctx().request_repaint_after(Duration::from_millis(50));
             }
 
@@ -645,9 +636,9 @@ fn render_instance_usage(
                     .filter(|path| !path.as_os_str().is_empty())
                     .and_then(|path| {
                         let key = instance_thumbnail_cache_key(instance.id.as_str(), path);
-                        match state.instance_thumbnail_cache.get_mut(&key) {
+                        match state.thumbnails.cache.get_mut(&key) {
                             Some(entry) => {
-                                entry.last_touched_frame = state.thumbnail_cache_frame_index;
+                                entry.last_touched_frame = state.thumbnails.cache_frame_index;
                                 entry.bytes.clone().map(|bytes| {
                                     (
                                         home_instance_thumbnail_uri(instance.id.as_str(), path),
@@ -657,7 +648,7 @@ fn render_instance_usage(
                             }
                             None => {
                                 request_instance_thumbnail(
-                                    state,
+                                    &mut state.thumbnails,
                                     instance.id.as_str(),
                                     path.to_path_buf(),
                                 );
@@ -774,171 +765,6 @@ fn render_instance_usage(
                 ui.add_space(3.0);
             }
         });
-}
-
-fn ensure_instance_thumbnail_channel(state: &mut HomeState) {
-    if state.instance_thumbnail_results_tx.is_some()
-        && state.instance_thumbnail_results_rx.is_some()
-    {
-        return;
-    }
-    let (tx, rx) = mpsc::channel::<(String, Option<Arc<[u8]>>)>();
-    state.instance_thumbnail_results_tx = Some(tx);
-    state.instance_thumbnail_results_rx = Some(Arc::new(Mutex::new(rx)));
-}
-
-fn instance_thumbnail_cache_key(instance_id: &str, path: &Path) -> String {
-    format!("{instance_id}\n{}", path.display())
-}
-
-fn home_instance_thumbnail_uri(instance_id: &str, path: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
-    instance_id.hash(&mut hasher);
-    path.hash(&mut hasher);
-    format!("bytes://home/instance-thumbnail/{:016x}", hasher.finish())
-}
-
-fn home_world_thumbnail_uri(instance_id: &str, world_id: &str) -> String {
-    format!("bytes://home/world-thumbnail/{instance_id}/{world_id}")
-}
-
-fn request_instance_thumbnail(state: &mut HomeState, instance_id: &str, path: PathBuf) {
-    let key = instance_thumbnail_cache_key(instance_id, path.as_path());
-    if state.instance_thumbnail_in_flight.contains(key.as_str()) {
-        return;
-    }
-    ensure_instance_thumbnail_channel(state);
-    let Some(tx) = state.instance_thumbnail_results_tx.as_ref().cloned() else {
-        return;
-    };
-    state.instance_thumbnail_in_flight.insert(key.clone());
-    tokio_runtime::spawn_detached(async move {
-        let bytes = match load_image_path_for_memory(path.clone()).await {
-            Ok(bytes) => Some(bytes),
-            Err(err) => {
-                tracing::warn!(
-                    target: "vertexlauncher/home",
-                    thumbnail_key = %key,
-                    path = %path.display(),
-                    error = %err,
-                    "Failed to read home instance thumbnail."
-                );
-                None
-            }
-        };
-        if let Err(err) = tx.send((key.clone(), bytes)) {
-            tracing::error!(
-                target: "vertexlauncher/home",
-                thumbnail_key = %key,
-                path = %path.display(),
-                error = %err,
-                "Failed to deliver home instance thumbnail result."
-            );
-        }
-    });
-}
-
-fn poll_instance_thumbnail_results(ctx: &egui::Context, state: &mut HomeState) {
-    let Some(rx) = state.instance_thumbnail_results_rx.as_ref() else {
-        return;
-    };
-    let mut updates = Vec::new();
-    let mut should_reset_channel = false;
-    match rx.lock() {
-        Ok(receiver) => loop {
-            match receiver.try_recv() {
-                Ok(update) => updates.push(update),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    tracing::error!(
-                        target: "vertexlauncher/home",
-                        "Home thumbnail worker disconnected unexpectedly."
-                    );
-                    should_reset_channel = true;
-                    break;
-                }
-            }
-        },
-        Err(_) => {
-            tracing::error!(
-                target: "vertexlauncher/home",
-                "Home thumbnail receiver mutex was poisoned."
-            );
-            should_reset_channel = true;
-        }
-    }
-    if should_reset_channel {
-        state.instance_thumbnail_results_tx = None;
-        state.instance_thumbnail_results_rx = None;
-        state.instance_thumbnail_in_flight.clear();
-    }
-    for (key, bytes) in updates {
-        state.instance_thumbnail_in_flight.remove(key.as_str());
-        state.instance_thumbnail_cache.insert(
-            key,
-            ThumbnailCacheEntry {
-                approx_bytes: bytes.as_ref().map_or(0, |bytes| bytes.len()),
-                bytes,
-                last_touched_frame: state.thumbnail_cache_frame_index,
-            },
-        );
-    }
-    trim_home_thumbnail_cache(ctx, state);
-}
-
-fn trim_home_thumbnail_cache(ctx: &egui::Context, state: &mut HomeState) {
-    let stale_before = state
-        .thumbnail_cache_frame_index
-        .saturating_sub(HOME_THUMBNAIL_CACHE_STALE_FRAMES);
-    state.instance_thumbnail_cache.retain(|key, entry| {
-        let keep = state.instance_thumbnail_in_flight.contains(key.as_str())
-            || entry.last_touched_frame >= stale_before;
-        if !keep {
-            forget_home_thumbnail(ctx, key);
-        }
-        keep
-    });
-
-    let mut total_bytes = state
-        .instance_thumbnail_cache
-        .values()
-        .map(|entry| entry.approx_bytes)
-        .sum::<usize>();
-    if total_bytes <= HOME_THUMBNAIL_CACHE_MAX_BYTES {
-        return;
-    }
-
-    let mut eviction_order = state
-        .instance_thumbnail_cache
-        .iter()
-        .filter(|(key, _)| !state.instance_thumbnail_in_flight.contains(key.as_str()))
-        .map(|(key, entry)| (key.clone(), entry.last_touched_frame, entry.approx_bytes))
-        .collect::<Vec<_>>();
-    eviction_order.sort_by_key(|(_, last_touched_frame, _)| *last_touched_frame);
-
-    for (key, _, approx_bytes) in eviction_order {
-        if total_bytes <= HOME_THUMBNAIL_CACHE_MAX_BYTES {
-            break;
-        }
-        if state
-            .instance_thumbnail_cache
-            .remove(key.as_str())
-            .is_some()
-        {
-            forget_home_thumbnail(ctx, key.as_str());
-            total_bytes = total_bytes.saturating_sub(approx_bytes);
-        }
-    }
-}
-
-fn forget_home_thumbnail(ctx: &egui::Context, key: &str) {
-    let Some((instance_id, path)) = key.split_once('\n') else {
-        return;
-    };
-    let _ = ctx;
-    image_textures::evict_source_key(
-        home_instance_thumbnail_uri(instance_id, Path::new(path)).as_str(),
-    );
 }
 
 fn render_activity_feed(
