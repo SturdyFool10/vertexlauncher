@@ -96,6 +96,16 @@ struct DeviceState {
     right_trigger: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct GamepadCapabilities {
+    has_left_stick_x: bool,
+    has_left_stick_y: bool,
+    has_any_primary_stick: bool,
+    has_any_face_button: bool,
+    has_any_dpad_button: bool,
+    has_any_shoulder_or_menu_button: bool,
+}
+
 impl Default for DeviceState {
     fn default() -> Self {
         Self {
@@ -197,6 +207,11 @@ impl GamepadNavigator {
         // Drain all pending events from gilrs.
         while let Some(ev) = self.gilrs.next_event() {
             if ev.is_dropped() {
+                continue;
+            }
+            if !matches!(ev.event, EventType::Disconnected)
+                && self.gamepad_identity(ev.id).is_none()
+            {
                 continue;
             }
             match ev.event {
@@ -438,6 +453,7 @@ impl GamepadNavigator {
         let snapshots = self
             .gilrs
             .gamepads()
+            .filter(|(_, gamepad)| Self::should_track_gamepad(*gamepad))
             .map(|(id, gamepad)| {
                 let identity = Self::identity_from_gamepad(gamepad);
                 (
@@ -579,7 +595,12 @@ impl GamepadNavigator {
     }
 
     fn detect_startup_gamepads(&mut self, calibrations: &BTreeMap<String, GamepadCalibration>) {
-        let connected_ids = self.gilrs.gamepads().map(|(id, _)| id).collect::<Vec<_>>();
+        let connected_ids = self
+            .gilrs
+            .gamepads()
+            .filter(|(_, gamepad)| Self::should_track_gamepad(*gamepad))
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
 
         if !self.startup_scan_complete {
             if connected_ids.is_empty() {
@@ -636,6 +657,12 @@ impl GamepadNavigator {
         identity: &GamepadDeviceIdentity,
         calibrations: &BTreeMap<String, GamepadCalibration>,
     ) {
+        let Some(gamepad) = self.connected_tracked_gamepad_by_key(identity.key.as_str()) else {
+            return;
+        };
+        if !Self::supports_stick_calibration(gamepad) {
+            return;
+        }
         if calibrations.contains_key(identity.key.as_str()) {
             return;
         }
@@ -652,6 +679,9 @@ impl GamepadNavigator {
 
     pub fn current_left_stick(&self, device_key: &str) -> Option<GamepadStickSample> {
         self.gilrs.gamepads().find_map(|(_, gamepad)| {
+            if !Self::should_track_gamepad(gamepad) {
+                return None;
+            }
             let identity = Self::identity_from_gamepad(gamepad);
             (identity.key == device_key).then(|| GamepadStickSample {
                 x: gamepad.value(Axis::LeftStickX),
@@ -665,6 +695,9 @@ impl GamepadNavigator {
             .gilrs
             .gamepads()
             .filter_map(|(id, gamepad)| {
+                if !Self::should_track_gamepad(gamepad) {
+                    return None;
+                }
                 let identity = Self::identity_from_gamepad(gamepad);
                 (identity.key == device_key).then_some(id)
             })
@@ -680,7 +713,89 @@ impl GamepadNavigator {
     pub fn gamepad_identity(&self, id: GamepadId) -> Option<GamepadDeviceIdentity> {
         self.gilrs
             .connected_gamepad(id)
+            .filter(|gamepad| Self::should_track_gamepad(*gamepad))
             .map(Self::identity_from_gamepad)
+    }
+
+    fn connected_tracked_gamepad_by_key(&self, device_key: &str) -> Option<Gamepad<'_>> {
+        self.gilrs.gamepads().find_map(|(_, gamepad)| {
+            if !Self::should_track_gamepad(gamepad) {
+                return None;
+            }
+            let identity = Self::identity_from_gamepad(gamepad);
+            (identity.key == device_key).then_some(gamepad)
+        })
+    }
+
+    fn should_track_gamepad(gamepad: Gamepad<'_>) -> bool {
+        Self::should_track_capabilities(Self::gamepad_capabilities(gamepad))
+    }
+
+    fn supports_stick_calibration(gamepad: Gamepad<'_>) -> bool {
+        Self::supports_stick_calibration_capabilities(Self::gamepad_capabilities(gamepad))
+    }
+
+    fn gamepad_capabilities(gamepad: Gamepad<'_>) -> GamepadCapabilities {
+        GamepadCapabilities {
+            has_left_stick_x: gamepad.axis_data(Axis::LeftStickX).is_some(),
+            has_left_stick_y: gamepad.axis_data(Axis::LeftStickY).is_some(),
+            has_any_primary_stick: [
+                Axis::LeftStickX,
+                Axis::LeftStickY,
+                Axis::RightStickX,
+                Axis::RightStickY,
+                Axis::DPadX,
+                Axis::DPadY,
+            ]
+            .into_iter()
+            .any(|axis| gamepad.axis_data(axis).is_some()),
+            has_any_face_button: [
+                Button::South,
+                Button::East,
+                Button::North,
+                Button::West,
+                Button::C,
+                Button::Z,
+            ]
+            .into_iter()
+            .any(|button| gamepad.button_data(button).is_some()),
+            has_any_dpad_button: [
+                Button::DPadUp,
+                Button::DPadDown,
+                Button::DPadLeft,
+                Button::DPadRight,
+            ]
+            .into_iter()
+            .any(|button| gamepad.button_data(button).is_some()),
+            has_any_shoulder_or_menu_button: [
+                Button::LeftTrigger,
+                Button::LeftTrigger2,
+                Button::RightTrigger,
+                Button::RightTrigger2,
+                Button::Select,
+                Button::Start,
+                Button::Mode,
+                Button::LeftThumb,
+                Button::RightThumb,
+            ]
+            .into_iter()
+            .any(|button| gamepad.button_data(button).is_some()),
+        }
+    }
+
+    fn should_track_capabilities(capabilities: GamepadCapabilities) -> bool {
+        let has_standard_buttons = capabilities.has_any_face_button
+            || capabilities.has_any_dpad_button
+            || capabilities.has_any_shoulder_or_menu_button;
+        has_standard_buttons && capabilities.has_any_primary_stick
+    }
+
+    fn supports_stick_calibration_capabilities(capabilities: GamepadCapabilities) -> bool {
+        capabilities.has_left_stick_x
+            && capabilities.has_left_stick_y
+            && (capabilities.has_any_face_button
+                || capabilities.has_any_dpad_button
+                || capabilities.has_any_shoulder_or_menu_button)
     }
 
     fn identity_from_gamepad(gamepad: Gamepad<'_>) -> GamepadDeviceIdentity {
@@ -1099,4 +1214,57 @@ fn linux_event_device_name(event_path: &std::path::Path) -> Option<String> {
         .ok()
         .map(|name| name.trim().to_owned())
         .filter(|name| !name.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GamepadCapabilities, GamepadNavigator};
+
+    #[test]
+    fn tracked_gamepads_need_standard_controls_and_axes() {
+        let capabilities = GamepadCapabilities {
+            has_left_stick_x: true,
+            has_left_stick_y: true,
+            has_any_primary_stick: true,
+            has_any_face_button: true,
+            has_any_dpad_button: false,
+            has_any_shoulder_or_menu_button: false,
+        };
+
+        assert!(GamepadNavigator::should_track_capabilities(capabilities));
+        assert!(GamepadNavigator::supports_stick_calibration_capabilities(
+            capabilities
+        ));
+    }
+
+    #[test]
+    fn stick_calibration_requires_both_left_stick_axes() {
+        let capabilities = GamepadCapabilities {
+            has_left_stick_x: true,
+            has_left_stick_y: false,
+            has_any_primary_stick: true,
+            has_any_face_button: true,
+            has_any_dpad_button: false,
+            has_any_shoulder_or_menu_button: false,
+        };
+
+        assert!(GamepadNavigator::should_track_capabilities(capabilities));
+        assert!(!GamepadNavigator::supports_stick_calibration_capabilities(
+            capabilities
+        ));
+    }
+
+    #[test]
+    fn pseudo_devices_without_standard_buttons_are_ignored() {
+        let capabilities = GamepadCapabilities {
+            has_left_stick_x: true,
+            has_left_stick_y: true,
+            has_any_primary_stick: true,
+            has_any_face_button: false,
+            has_any_dpad_button: false,
+            has_any_shoulder_or_menu_button: false,
+        };
+
+        assert!(!GamepadNavigator::should_track_capabilities(capabilities));
+    }
 }
