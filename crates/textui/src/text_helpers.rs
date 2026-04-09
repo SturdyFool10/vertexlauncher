@@ -2,19 +2,10 @@ use egui::Ui;
 
 use crate::{TextUi, label_options::LabelOptions};
 
-/// Result of a text truncation operation, providing both the display string
-/// (with an ellipsis appended) and the raw, untruncated original text.
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub struct TruncatedText {
-    /// The text as it should be rendered, with an ellipsis appended when
-    /// the original text was too wide.
-    pub display: String,
-    /// The original, unmodified text before truncation.
-    pub raw: String,
-    /// `true` when the text was shortened and an ellipsis was appended.
-    pub was_truncated: bool,
-}
+#[path = "text_helpers/truncated_text.rs"]
+mod truncated_text;
+
+pub use self::truncated_text::TruncatedText;
 
 /// Collapses any repeated whitespace into single ASCII spaces for single-line UI labels.
 #[allow(dead_code)]

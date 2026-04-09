@@ -18,44 +18,13 @@ use vertex_constants::branding::DISCORD_APPLICATION_ID;
 const CONNECT_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const PRESENCE_RESYNC_INTERVAL: Duration = Duration::from_secs(15);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum DesiredPresence {
-    InGame {
-        instance_id: String,
-        instance_name: String,
-        started_at_unix_secs: i64,
-    },
-    Menu {
-        context: MenuPresenceContext,
-        selected_instance_name: Option<String>,
-    },
-}
+#[path = "discord_presence/desired_presence.rs"]
+mod desired_presence;
+#[path = "discord_presence/discord_presence_manager.rs"]
+mod discord_presence_manager;
 
-pub struct DiscordPresenceManager {
-    client: Option<DiscordIpcClient>,
-    session_start_by_instance_id: HashMap<String, i64>,
-    active_presence: Option<DesiredPresence>,
-    last_desired_presence: Option<DesiredPresence>,
-    connected: bool,
-    last_connect_attempt_at: Option<Instant>,
-    last_connect_error: Option<String>,
-    last_presence_sync_at: Option<Instant>,
-}
-
-impl Default for DiscordPresenceManager {
-    fn default() -> Self {
-        Self {
-            client: None,
-            session_start_by_instance_id: HashMap::new(),
-            active_presence: None,
-            last_desired_presence: None,
-            connected: false,
-            last_connect_attempt_at: None,
-            last_connect_error: None,
-            last_presence_sync_at: None,
-        }
-    }
-}
+use self::desired_presence::DesiredPresence;
+pub use self::discord_presence_manager::DiscordPresenceManager;
 
 impl DiscordPresenceManager {
     pub fn update(

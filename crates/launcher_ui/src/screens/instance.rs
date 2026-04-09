@@ -73,11 +73,15 @@ mod instance_screen_state;
 mod instance_screenshots;
 #[path = "instance_settings_modal.rs"]
 mod instance_settings_modal;
+#[path = "instance/instance_presence_section.rs"]
+mod instance_presence_section;
 mod move_instance;
 mod platform;
 mod runtime;
 mod runtime_prepare_operation;
 mod runtime_prepare_outcome;
+
+pub use self::instance_presence_section::InstancePresenceSection;
 
 use content::ContentApplyResult;
 use content::{poll_content_lookup_results, render_installed_content_section};
@@ -127,19 +131,6 @@ const INSTANCE_SCREENSHOT_MIN_COLUMN_WIDTH: f32 = 180.0;
 const MAX_INSTANCE_LOG_LINES: usize = 12_000;
 const INSTANCE_SCREENSHOT_COPY_BUTTON_SIZE: f32 = 28.0;
 const INSTANCE_TOP_TAB_ID_KEY: &str = "instance_top_tab_id";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InstancePresenceSection {
-    Content,
-    Screenshots,
-    Logs,
-}
-
-impl Default for InstancePresenceSection {
-    fn default() -> Self {
-        Self::Content
-    }
-}
 
 fn instance_screen_state_id(instance_id: &str) -> egui::Id {
     egui::Id::new(("instance_screen_state", instance_id))

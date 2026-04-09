@@ -4,11 +4,35 @@ use super::*;
 mod skins_preview_expressions;
 #[path = "skins_preview_scene.rs"]
 mod skins_preview_scene;
+#[path = "skins_preview/camera.rs"]
+mod camera;
+#[path = "skins_preview/cuboid_spec.rs"]
+mod cuboid_spec;
+#[path = "skins_preview/face_uvs.rs"]
+mod face_uvs;
+#[path = "skins_preview/projection.rs"]
+mod projection;
+#[path = "skins_preview/render_triangle.rs"]
+mod render_triangle;
+#[path = "skins_preview/triangle_texture.rs"]
+mod triangle_texture;
+#[path = "skins_preview/vec3.rs"]
+mod vec3;
+#[path = "skins_preview/weighted_preview_scene.rs"]
+mod weighted_preview_scene;
 
 pub(super) use self::skins_preview_expressions::{
     compatibility_score, eye_face_rects, eye_lid_rects,
 };
+pub(crate) use self::camera::Camera;
+pub(crate) use self::cuboid_spec::CuboidSpec;
+pub(crate) use self::face_uvs::FaceUvs;
+pub(crate) use self::projection::Projection;
+pub(crate) use self::render_triangle::RenderTriangle;
 use self::skins_preview_scene::{build_character_scene, build_motion_blur_scene_samples};
+pub(crate) use self::triangle_texture::TriangleTexture;
+pub(crate) use self::vec3::Vec3;
+pub(crate) use self::weighted_preview_scene::WeightedPreviewScene;
 
 pub(super) fn draw_character(
     ui: &Ui,
@@ -119,140 +143,6 @@ pub(super) fn draw_character(
         preview_texture,
         preview_history,
     );
-}
-
-pub(super) struct WeightedPreviewScene {
-    pub(super) weight: f32,
-    pub(super) triangles: Vec<RenderTriangle>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct Vec3 {
-    pub(super) x: f32,
-    pub(super) y: f32,
-    pub(super) z: f32,
-}
-
-impl Vec3 {
-    pub(super) fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { x, y, z }
-    }
-
-    fn dot(self, rhs: Self) -> f32 {
-        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
-    }
-
-    fn cross(self, rhs: Self) -> Self {
-        Self::new(
-            self.y * rhs.z - self.z * rhs.y,
-            self.z * rhs.x - self.x * rhs.z,
-            self.x * rhs.y - self.y * rhs.x,
-        )
-    }
-
-    fn length(self) -> f32 {
-        self.dot(self).sqrt()
-    }
-
-    fn normalized(self) -> Self {
-        let len = self.length();
-        if len <= 0.000_1 {
-            Self::new(0.0, 0.0, 0.0)
-        } else {
-            self * (1.0 / len)
-        }
-    }
-}
-
-impl std::ops::Add for Vec3 {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
-    }
-}
-
-impl std::ops::Sub for Vec3 {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z)
-    }
-}
-
-impl std::ops::Mul<f32> for Vec3 {
-    type Output = Self;
-
-    fn mul(self, rhs: f32) -> Self::Output {
-        Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct Camera {
-    pub(super) position: Vec3,
-    pub(super) right: Vec3,
-    pub(super) up: Vec3,
-    pub(super) forward: Vec3,
-}
-
-impl Camera {
-    fn look_at(position: Vec3, target: Vec3, world_up: Vec3) -> Self {
-        let forward = (target - position).normalized();
-        let right = forward.cross(world_up).normalized();
-        let up = right.cross(forward).normalized();
-        Self {
-            position,
-            right,
-            up,
-            forward,
-        }
-    }
-
-    fn world_to_camera(self, world: Vec3) -> Vec3 {
-        let rel = world - self.position;
-        Vec3::new(rel.dot(self.right), rel.dot(self.up), rel.dot(self.forward))
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct Projection {
-    pub(super) fov_y_radians: f32,
-    pub(super) near: f32,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct FaceUvs {
-    pub(super) top: Rect,
-    pub(super) bottom: Rect,
-    pub(super) left: Rect,
-    pub(super) right: Rect,
-    pub(super) front: Rect,
-    pub(super) back: Rect,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct CuboidSpec {
-    pub(super) size: Vec3,
-    pub(super) pivot_top_center: Vec3,
-    pub(super) rotate_x: f32,
-    pub(super) rotate_z: f32,
-    pub(super) uv: FaceUvs,
-    pub(super) cull_backfaces: bool,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum TriangleTexture {
-    Skin,
-    Cape,
-}
-
-pub(super) struct RenderTriangle {
-    pub(super) texture: TriangleTexture,
-    pub(super) pos: [Pos2; 3],
-    pub(super) uv: [Pos2; 3],
-    pub(super) depth: [f32; 3],
-    pub(super) color: Color32,
 }
 
 fn rotate_x(point: Vec3, radians: f32) -> Vec3 {

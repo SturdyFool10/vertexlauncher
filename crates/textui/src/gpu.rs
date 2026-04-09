@@ -1,106 +1,36 @@
 use super::*;
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(super) struct TextWgpuScreenUniform {
-    pub(super) screen_size_points: [f32; 2],
-    pub(super) _padding: [f32; 2],
-}
+#[path = "gpu/cpu_scene_atlas_page.rs"]
+mod cpu_scene_atlas_page;
+#[path = "gpu/resolved_text_graphics_config.rs"]
+mod resolved_text_graphics_config;
+#[path = "gpu/resolved_text_renderer_backend.rs"]
+mod resolved_text_renderer_backend;
+#[path = "gpu/text_wgpu_instance.rs"]
+mod text_wgpu_instance;
+#[path = "gpu/text_wgpu_pipeline_resources.rs"]
+mod text_wgpu_pipeline_resources;
+#[path = "gpu/text_wgpu_prepared_batch.rs"]
+mod text_wgpu_prepared_batch;
+#[path = "gpu/text_wgpu_prepared_scene.rs"]
+mod text_wgpu_prepared_scene;
+#[path = "gpu/text_wgpu_scene_batch_source.rs"]
+mod text_wgpu_scene_batch_source;
+#[path = "gpu/text_wgpu_scene_callback.rs"]
+mod text_wgpu_scene_callback;
+#[path = "gpu/text_wgpu_screen_uniform.rs"]
+mod text_wgpu_screen_uniform;
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub(super) struct TextWgpuInstance {
-    pub(super) pos0: [f32; 2],
-    pub(super) pos1: [f32; 2],
-    pub(super) pos2: [f32; 2],
-    pub(super) pos3: [f32; 2],
-    pub(super) uv0: [f32; 2],
-    pub(super) uv1: [f32; 2],
-    pub(super) uv2: [f32; 2],
-    pub(super) uv3: [f32; 2],
-    pub(super) color: [f32; 4],
-    pub(super) decode_mode: f32,
-    pub(super) field_range_px: f32,
-    pub(super) _padding: [f32; 2],
-}
-
-impl TextWgpuInstance {
-    pub(super) fn from_quad(quad: &PaintTextQuad) -> Self {
-        Self {
-            pos0: [quad.positions[0].x, quad.positions[0].y],
-            pos1: [quad.positions[1].x, quad.positions[1].y],
-            pos2: [quad.positions[2].x, quad.positions[2].y],
-            pos3: [quad.positions[3].x, quad.positions[3].y],
-            uv0: [quad.uvs[0].x, quad.uvs[0].y],
-            uv1: [quad.uvs[1].x, quad.uvs[1].y],
-            uv2: [quad.uvs[2].x, quad.uvs[2].y],
-            uv3: [quad.uvs[3].x, quad.uvs[3].y],
-            color: quad.tint.to_normalized_gamma_f32(),
-            decode_mode: match quad.content_mode {
-                GlyphContentMode::AlphaMask => 0.0,
-                GlyphContentMode::Sdf => 1.0,
-                GlyphContentMode::Msdf => 2.0,
-            },
-            field_range_px: quad.field_range_px,
-            _padding: [0.0, 0.0],
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(super) struct TextWgpuSceneBatchSource {
-    pub(super) texture: wgpu::Texture,
-    pub(super) instances: Arc<[TextWgpuInstance]>,
-}
-
-pub(super) struct TextWgpuPreparedBatch {
-    pub(super) bind_group: wgpu::BindGroup,
-    pub(super) instance_buffer: wgpu::Buffer,
-    pub(super) instance_count: u32,
-}
-
-#[derive(Default)]
-pub(super) struct TextWgpuPreparedScene {
-    pub(super) batches: Vec<TextWgpuPreparedBatch>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ResolvedTextRendererBackend {
-    EguiMesh,
-    WgpuInstanced,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct ResolvedTextGraphicsConfig {
-    pub(super) renderer_backend: ResolvedTextRendererBackend,
-    pub(super) atlas_sampling: TextAtlasSampling,
-    pub(super) atlas_page_target_px: usize,
-    pub(super) atlas_padding_px: usize,
-    pub(super) rasterization: TextRasterizationConfig,
-}
-
-#[derive(Clone)]
-pub(super) struct TextWgpuSceneCallback {
-    pub(super) target_format: wgpu::TextureFormat,
-    pub(super) atlas_sampling: TextAtlasSampling,
-    pub(super) batches: Arc<[TextWgpuSceneBatchSource]>,
-    pub(super) prepared: Arc<Mutex<TextWgpuPreparedScene>>,
-}
-
-pub(super) struct TextWgpuPipelineResources {
-    pub(super) target_format: wgpu::TextureFormat,
-    pub(super) atlas_sampling: TextAtlasSampling,
-    pub(super) pipeline: wgpu::RenderPipeline,
-    pub(super) texture_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) sampler: wgpu::Sampler,
-    pub(super) uniform_buffer: wgpu::Buffer,
-    pub(super) uniform_bind_group: wgpu::BindGroup,
-}
-
-pub(super) struct CpuSceneAtlasPage {
-    pub(super) allocator: AtlasAllocator,
-    pub(super) image: ColorImage,
-}
+pub(super) use self::cpu_scene_atlas_page::CpuSceneAtlasPage;
+pub(super) use self::resolved_text_graphics_config::ResolvedTextGraphicsConfig;
+pub(super) use self::resolved_text_renderer_backend::ResolvedTextRendererBackend;
+pub(super) use self::text_wgpu_instance::TextWgpuInstance;
+use self::text_wgpu_pipeline_resources::TextWgpuPipelineResources;
+use self::text_wgpu_prepared_batch::TextWgpuPreparedBatch;
+pub(super) use self::text_wgpu_prepared_scene::TextWgpuPreparedScene;
+pub(super) use self::text_wgpu_scene_batch_source::TextWgpuSceneBatchSource;
+pub(super) use self::text_wgpu_scene_callback::TextWgpuSceneCallback;
+use self::text_wgpu_screen_uniform::TextWgpuScreenUniform;
 
 impl TextWgpuPipelineResources {
     pub(super) fn new(
@@ -260,109 +190,6 @@ impl TextWgpuPipelineResources {
             _padding: [0.0, 0.0],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
-    }
-}
-
-impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
-        callback_resources: &mut egui_wgpu::CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        let resources = callback_resources
-            .entry::<TextWgpuPipelineResources>()
-            .or_insert_with(|| {
-                TextWgpuPipelineResources::new(device, self.target_format, self.atlas_sampling)
-            });
-        if resources.target_format != self.target_format
-            || resources.atlas_sampling != self.atlas_sampling
-        {
-            *resources =
-                TextWgpuPipelineResources::new(device, self.target_format, self.atlas_sampling);
-        }
-        resources.update_uniform(
-            queue,
-            [
-                screen_descriptor.size_in_pixels[0] as f32 / screen_descriptor.pixels_per_point,
-                screen_descriptor.size_in_pixels[1] as f32 / screen_descriptor.pixels_per_point,
-            ],
-        );
-
-        let mut prepared_batches = Vec::with_capacity(self.batches.len());
-        for batch in self.batches.iter() {
-            if batch.instances.is_empty() {
-                continue;
-            }
-            let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("textui_instanced_instance_buffer"),
-                contents: bytemuck::cast_slice(batch.instances.as_ref()),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let view = batch
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("textui_instanced_texture_bg"),
-                layout: &resources.texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&resources.sampler),
-                    },
-                ],
-            });
-            prepared_batches.push(TextWgpuPreparedBatch {
-                bind_group,
-                instance_buffer,
-                instance_count: batch.instances.len() as u32,
-            });
-        }
-
-        if let Ok(mut prepared) = self.prepared.lock() {
-            prepared.batches = prepared_batches;
-        }
-
-        Vec::new()
-    }
-
-    fn paint(
-        &self,
-        info: egui::PaintCallbackInfo,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        callback_resources: &egui_wgpu::CallbackResources,
-    ) {
-        let Some(resources) = callback_resources.get::<TextWgpuPipelineResources>() else {
-            return;
-        };
-        let Ok(prepared) = self.prepared.lock() else {
-            return;
-        };
-        if prepared.batches.is_empty() {
-            return;
-        }
-
-        render_pass.set_viewport(
-            0.0,
-            0.0,
-            info.screen_size_px[0] as f32,
-            info.screen_size_px[1] as f32,
-            0.0,
-            1.0,
-        );
-        render_pass.set_pipeline(&resources.pipeline);
-        render_pass.set_bind_group(0, &resources.uniform_bind_group, &[]);
-        for batch in &prepared.batches {
-            render_pass.set_bind_group(1, &batch.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, batch.instance_buffer.slice(..));
-            render_pass.draw(0..6, 0..batch.instance_count);
-        }
     }
 }
 

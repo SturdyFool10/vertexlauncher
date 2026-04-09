@@ -18,6 +18,17 @@ use crate::{app::tokio_runtime, console, install_activity, notification};
 
 use super::LIBRARY_RUNTIME_LAUNCH_TASK_KIND;
 
+#[path = "library_runtime/pending_launch_context.rs"]
+mod pending_launch_context;
+#[path = "library_runtime/runtime_launch_outcome.rs"]
+mod runtime_launch_outcome;
+#[path = "library_runtime/runtime_launch_result.rs"]
+mod runtime_launch_result;
+
+use self::pending_launch_context::PendingLaunchContext;
+use self::runtime_launch_outcome::RuntimeLaunchOutcome;
+use self::runtime_launch_result::RuntimeLaunchResult;
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct LibraryRuntimeState {
     results_tx: Option<mpsc::Sender<RuntimeLaunchResult>>,
@@ -42,28 +53,6 @@ pub(super) struct LibraryLaunchIdentity {
     pub(super) access_token: Option<String>,
     pub(super) xuid: Option<String>,
     pub(super) user_type: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct PendingLaunchContext {
-    instance_name: String,
-    instance_root_display: String,
-    tab_user_key: Option<String>,
-    tab_username: String,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeLaunchResult {
-    instance_id: String,
-    result: Result<RuntimeLaunchOutcome, String>,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeLaunchOutcome {
-    launch: LaunchResult,
-    downloaded_files: u32,
-    resolved_modloader_version: Option<String>,
-    configured_java: Option<(u8, String)>,
 }
 
 fn ensure_result_channel(state: &mut LibraryRuntimeState) {

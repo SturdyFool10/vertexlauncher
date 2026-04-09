@@ -29,421 +29,80 @@ const VERSION_CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(75);
 const DETAIL_VERSIONS_FETCH_TIMEOUT: Duration = Duration::from_secs(45);
 const DISCOVER_SEARCH_CACHE_MAX_ENTRIES: usize = 10;
 
+#[path = "discover/discover_install_request.rs"]
+mod discover_install_request;
+#[path = "discover/discover_install_source.rs"]
+mod discover_install_source;
+#[path = "discover/discover_loader_filter.rs"]
+mod discover_loader_filter;
+#[path = "discover/discover_entry.rs"]
+mod discover_entry;
+#[path = "discover/discover_masonry_column.rs"]
+mod discover_masonry_column;
+#[path = "discover/discover_masonry_item.rs"]
+mod discover_masonry_item;
+#[path = "discover/discover_masonry_layout.rs"]
+mod discover_masonry_layout;
+#[path = "discover/discover_output.rs"]
+mod discover_output;
+#[path = "discover/discover_project_ref.rs"]
+mod discover_project_ref;
+#[path = "discover/discover_provider_entry.rs"]
+mod discover_provider_entry;
+#[path = "discover/discover_provider_filter.rs"]
+mod discover_provider_filter;
+#[path = "discover/discover_provider_ref.rs"]
+mod discover_provider_ref;
+#[path = "discover/discover_search_request.rs"]
+mod discover_search_request;
+#[path = "discover/discover_search_result.rs"]
+mod discover_search_result;
+#[path = "discover/discover_search_snapshot.rs"]
+mod discover_search_snapshot;
+#[path = "discover/discover_sort_mode.rs"]
+mod discover_sort_mode;
+#[path = "discover/discover_source.rs"]
+mod discover_source;
+#[path = "discover/discover_state.rs"]
+mod discover_state;
+#[path = "discover/discover_tile_render_result.rs"]
+mod discover_tile_render_result;
+#[path = "discover/discover_ui_metrics.rs"]
+mod discover_ui_metrics;
+#[path = "discover/cached_discover_masonry_layout.rs"]
+mod cached_discover_masonry_layout;
+#[path = "discover/search_mode.rs"]
+mod search_mode;
 #[path = "discover_detail.rs"]
 mod discover_detail;
 
+use self::cached_discover_masonry_layout::CachedDiscoverMasonryLayout;
 use self::discover_detail::{
     DiscoverVersionEntry, DiscoverVersionsResult, format_compact_number, format_short_date,
     open_detail_page, render_discover_detail_content,
 };
+pub use self::discover_install_request::DiscoverInstallRequest;
+pub use self::discover_install_source::DiscoverInstallSource;
+use self::discover_entry::DiscoverEntry;
+use self::discover_loader_filter::DiscoverLoaderFilter;
+use self::discover_masonry_column::DiscoverMasonryColumn;
+use self::discover_masonry_item::DiscoverMasonryItem;
+use self::discover_masonry_layout::DiscoverMasonryLayout;
+pub use self::discover_output::DiscoverOutput;
+use self::discover_project_ref::DiscoverProjectRef;
+use self::discover_provider_entry::DiscoverProviderEntry;
+use self::discover_provider_filter::DiscoverProviderFilter;
+use self::discover_provider_ref::DiscoverProviderRef;
+use self::discover_search_request::DiscoverSearchRequest;
+use self::discover_search_result::DiscoverSearchResult;
+use self::discover_search_snapshot::DiscoverSearchSnapshot;
+use self::discover_sort_mode::DiscoverSortMode;
+use self::discover_source::DiscoverSource;
+pub use self::discover_state::DiscoverState;
+use self::discover_tile_render_result::DiscoverTileRenderResult;
+use self::discover_ui_metrics::DiscoverUiMetrics;
+use self::search_mode::SearchMode;
 
-#[derive(Clone, Copy, Debug)]
-struct DiscoverUiMetrics {
-    card_min_width: f32,
-    card_image_height: f32,
-    estimated_card_base_height: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct DiscoverMasonryItem {
-    entry_index: usize,
-    offset_y: f32,
-    height: f32,
-}
-
-#[derive(Clone, Debug)]
-struct DiscoverMasonryColumn {
-    items: Vec<DiscoverMasonryItem>,
-    total_height: f32,
-}
-
-#[derive(Clone, Debug)]
-struct DiscoverMasonryLayout {
-    columns: Vec<DiscoverMasonryColumn>,
-    content_width: f32,
-    column_width: f32,
-}
-
-#[derive(Clone, Debug)]
-struct CachedDiscoverMasonryLayout {
-    width_bucket: u32,
-    entries_fingerprint: u64,
-    height_cache_revision: u64,
-    layout: DiscoverMasonryLayout,
-}
-
-impl DiscoverUiMetrics {
-    fn from_ui(ui: &Ui) -> Self {
-        let metrics = UiMetrics::from_ui(ui, 860.0);
-        Self {
-            card_min_width: metrics.scaled_width(0.18, 220.0, 300.0),
-            card_image_height: metrics.scaled_height(0.15, 112.0, 160.0),
-            estimated_card_base_height: metrics.scaled_height(0.24, 188.0, 236.0),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DiscoverState {
-    query_input: String,
-    search_tags: Vec<String>,
-    game_version_filter: String,
-    provider_filter: DiscoverProviderFilter,
-    loader_filter: DiscoverLoaderFilter,
-    sort_mode: DiscoverSortMode,
-    page: u32,
-    search_in_flight: bool,
-    search_request_serial: u64,
-    initial_search_requested: bool,
-    status_message: Option<String>,
-    warnings: Vec<String>,
-    entries: Vec<DiscoverEntry>,
-    tile_height_cache: HashMap<(String, u32), f32>,
-    tile_height_cache_revision: u64,
-    has_more_results: bool,
-    masonry_layout_cache: Option<CachedDiscoverMasonryLayout>,
-    cached_snapshots: HashMap<DiscoverSearchRequest, DiscoverSearchSnapshot>,
-    available_game_versions: Vec<MinecraftVersionEntry>,
-    version_catalog_error: Option<String>,
-    version_catalog_in_flight: bool,
-    version_catalog_tx: Option<mpsc::Sender<Result<Vec<MinecraftVersionEntry>, String>>>,
-    version_catalog_rx:
-        Option<Arc<Mutex<mpsc::Receiver<Result<Vec<MinecraftVersionEntry>, String>>>>>,
-    search_results_tx: Option<mpsc::Sender<DiscoverSearchResult>>,
-    search_results_rx: Option<Arc<Mutex<mpsc::Receiver<DiscoverSearchResult>>>>,
-    detail_entry: Option<DiscoverEntry>,
-    detail_selected_source: Option<DiscoverSource>,
-    detail_versions: Vec<DiscoverVersionEntry>,
-    detail_versions_error: Option<String>,
-    detail_versions_in_flight: bool,
-    detail_version_request_serial: u64,
-    detail_version_results_tx: Option<mpsc::Sender<DiscoverVersionsResult>>,
-    detail_version_results_rx: Option<Arc<Mutex<mpsc::Receiver<DiscoverVersionsResult>>>>,
-    install_in_flight: bool,
-    install_message: Option<String>,
-    install_completed_steps: usize,
-    install_total_steps: usize,
-    install_error: Option<String>,
-}
-
-impl Default for DiscoverState {
-    fn default() -> Self {
-        Self {
-            query_input: String::new(),
-            search_tags: Vec::new(),
-            game_version_filter: String::new(),
-            provider_filter: DiscoverProviderFilter::default(),
-            loader_filter: DiscoverLoaderFilter::default(),
-            sort_mode: DiscoverSortMode::default(),
-            page: 1,
-            search_in_flight: false,
-            search_request_serial: 0,
-            initial_search_requested: false,
-            status_message: None,
-            warnings: Vec::new(),
-            entries: Vec::new(),
-            tile_height_cache: HashMap::new(),
-            tile_height_cache_revision: 0,
-            has_more_results: true,
-            masonry_layout_cache: None,
-            cached_snapshots: HashMap::new(),
-            available_game_versions: Vec::new(),
-            version_catalog_error: None,
-            version_catalog_in_flight: false,
-            version_catalog_tx: None,
-            version_catalog_rx: None,
-            search_results_tx: None,
-            search_results_rx: None,
-            detail_entry: None,
-            detail_selected_source: None,
-            detail_versions: Vec::new(),
-            detail_versions_error: None,
-            detail_versions_in_flight: false,
-            detail_version_request_serial: 0,
-            detail_version_results_tx: None,
-            detail_version_results_rx: None,
-            install_in_flight: false,
-            install_message: None,
-            install_completed_steps: 0,
-            install_total_steps: 0,
-            install_error: None,
-        }
-    }
-}
-
-impl DiscoverState {
-    pub fn begin_install(&mut self, message: impl Into<String>) {
-        self.install_in_flight = true;
-        self.install_error = None;
-        self.install_message = Some(message.into());
-        self.install_completed_steps = 0;
-        self.install_total_steps = 0;
-    }
-
-    pub fn apply_install_progress(
-        &mut self,
-        message: impl Into<String>,
-        completed_steps: usize,
-        total_steps: usize,
-    ) {
-        self.install_in_flight = true;
-        self.install_error = None;
-        self.install_message = Some(message.into());
-        self.install_completed_steps = completed_steps;
-        self.install_total_steps = total_steps;
-    }
-
-    pub fn finish_install(&mut self, result: Result<String, String>) {
-        self.install_in_flight = false;
-        match result {
-            Ok(message) => {
-                self.install_error = None;
-                self.install_message = Some(message);
-            }
-            Err(error) => {
-                self.install_error = Some(error);
-            }
-        }
-    }
-
-    pub fn purge_inactive_state(&mut self) {
-        self.search_in_flight = false;
-        self.initial_search_requested = false;
-        self.status_message = None;
-        self.warnings.clear();
-        self.entries.clear();
-        self.tile_height_cache.clear();
-        self.tile_height_cache_revision = self.tile_height_cache_revision.saturating_add(1);
-        self.masonry_layout_cache = None;
-        self.cached_snapshots.clear();
-        self.has_more_results = true;
-        self.search_results_tx = None;
-        self.search_results_rx = None;
-        self.detail_entry = None;
-        self.detail_selected_source = None;
-        self.detail_versions.clear();
-        self.detail_versions_error = None;
-        self.detail_versions_in_flight = false;
-        self.detail_version_request_serial = 0;
-        self.detail_version_results_tx = None;
-        self.detail_version_results_rx = None;
-        self.install_in_flight = false;
-        self.install_message = None;
-        self.install_completed_steps = 0;
-        self.install_total_steps = 0;
-        self.install_error = None;
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct DiscoverOutput {
-    pub requested_screen: Option<AppScreen>,
-    pub install_requested: Option<DiscoverInstallRequest>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DiscoverInstallRequest {
-    pub instance_name: String,
-    pub project_summary: Option<String>,
-    pub icon_url: Option<String>,
-    pub version_name: String,
-    pub source: DiscoverInstallSource,
-}
-
-#[derive(Debug, Clone)]
-pub enum DiscoverInstallSource {
-    Modrinth {
-        project_id: String,
-        version_id: String,
-        file_url: String,
-        file_name: String,
-    },
-    CurseForge {
-        project_id: u64,
-        file_id: u64,
-        file_name: String,
-        download_url: Option<String>,
-        manual_download_path: Option<std::path::PathBuf>,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-enum DiscoverProviderFilter {
-    #[default]
-    All,
-    Modrinth,
-    CurseForge,
-}
-
-impl DiscoverProviderFilter {
-    const ALL: [Self; 3] = [Self::All, Self::Modrinth, Self::CurseForge];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::All => "All Sources",
-            Self::Modrinth => "Modrinth",
-            Self::CurseForge => "CurseForge",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-enum DiscoverLoaderFilter {
-    #[default]
-    Any,
-    Fabric,
-    Forge,
-    NeoForge,
-    Quilt,
-}
-
-impl DiscoverLoaderFilter {
-    const ALL: [Self; 5] = [
-        Self::Any,
-        Self::Fabric,
-        Self::Forge,
-        Self::NeoForge,
-        Self::Quilt,
-    ];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Any => "Any Loader",
-            Self::Fabric => "Fabric",
-            Self::Forge => "Forge",
-            Self::NeoForge => "NeoForge",
-            Self::Quilt => "Quilt",
-        }
-    }
-
-    fn modrinth_slug(self) -> Option<&'static str> {
-        match self {
-            Self::Any => None,
-            Self::Fabric => Some("fabric"),
-            Self::Forge => Some("forge"),
-            Self::NeoForge => Some("neoforge"),
-            Self::Quilt => Some("quilt"),
-        }
-    }
-
-    fn curseforge_mod_loader_type(self) -> Option<u32> {
-        match self {
-            Self::Any => None,
-            Self::Forge => Some(1),
-            Self::Fabric => Some(4),
-            Self::Quilt => Some(5),
-            Self::NeoForge => Some(6),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-enum DiscoverSortMode {
-    #[default]
-    Popularity,
-    Relevance,
-    LastUpdated,
-}
-
-impl DiscoverSortMode {
-    const ALL: [Self; 3] = [Self::Popularity, Self::Relevance, Self::LastUpdated];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Popularity => "Popularity",
-            Self::Relevance => "Relevance",
-            Self::LastUpdated => "Last Updated",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum DiscoverSource {
-    Modrinth,
-    CurseForge,
-}
-
-impl DiscoverSource {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Modrinth => "Modrinth",
-            Self::CurseForge => "CurseForge",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct DiscoverSearchRequest {
-    query: String,
-    tags: Vec<String>,
-    game_version: Option<String>,
-    provider_filter: DiscoverProviderFilter,
-    loader_filter: DiscoverLoaderFilter,
-    sort_mode: DiscoverSortMode,
-    page: u32,
-}
-
-#[derive(Clone, Debug)]
-struct DiscoverSearchResult {
-    request_serial: u64,
-    request: DiscoverSearchRequest,
-    outcome: Result<DiscoverSearchSnapshot, String>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct DiscoverSearchSnapshot {
-    entries: Vec<DiscoverEntry>,
-    warnings: Vec<String>,
-    has_more: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SearchMode {
-    Replace,
-    Append,
-}
-
-#[derive(Clone, Debug)]
-struct DiscoverEntry {
-    dedupe_key: String,
-    name: String,
-    summary: String,
-    author: Option<String>,
-    icon_url: Option<String>,
-    primary_url: Option<String>,
-    sources: Vec<DiscoverSource>,
-    provider_refs: Vec<DiscoverProviderRef>,
-    popularity_score: Option<u64>,
-    updated_at: Option<String>,
-    relevance_rank: u32,
-}
-
-#[derive(Clone, Debug)]
-struct DiscoverProviderEntry {
-    project_ref: DiscoverProjectRef,
-    name: String,
-    summary: String,
-    author: Option<String>,
-    icon_url: Option<String>,
-    primary_url: Option<String>,
-    source: DiscoverSource,
-    popularity_score: Option<u64>,
-    updated_at: Option<String>,
-    relevance_rank: u32,
-}
-
-#[derive(Clone, Debug)]
-struct DiscoverProviderRef {
-    source: DiscoverSource,
-    project_ref: DiscoverProjectRef,
-    primary_url: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-enum DiscoverProjectRef {
-    Modrinth { project_id: String },
-    CurseForge { project_id: u64 },
-}
 
 pub fn render(
     ui: &mut Ui,
@@ -1068,11 +727,6 @@ fn render_discover_tile(
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct DiscoverTileRenderResult {
-    clicked: bool,
-    measured_height: f32,
-}
 
 fn ensure_search_channel(state: &mut DiscoverState) {
     if state.search_results_tx.is_some() && state.search_results_rx.is_some() {

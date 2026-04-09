@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "path_layout/text_path_sample.rs"]
+mod text_path_sample;
+
+use self::text_path_sample::TextPathSample;
+
 pub(super) fn build_path_layout_from_prepared_layout(
     layout: &PreparedTextLayout,
     fallback_advance_points: f32,
@@ -87,13 +92,6 @@ pub(super) fn export_prepared_layout_as_shapes(
         glyphs,
         bounds: bounds.unwrap_or(Rect::NOTHING).into(),
     }
-}
-
-#[derive(Clone, Copy)]
-struct TextPathSample {
-    position: Pos2,
-    tangent: Vec2,
-    normal: Vec2,
 }
 
 fn text_path_length(path: &TextPath) -> f32 {

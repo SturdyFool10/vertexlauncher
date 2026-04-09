@@ -12,21 +12,13 @@ use crate::{
 
 use super::{HOME_THUMBNAIL_CACHE_MAX_BYTES, HOME_THUMBNAIL_CACHE_STALE_FRAMES};
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct HomeThumbnailState {
-    pub(super) cache_frame_index: u64,
-    results_tx: Option<mpsc::Sender<(String, Option<Arc<[u8]>>)>>,
-    results_rx: Option<Arc<Mutex<mpsc::Receiver<(String, Option<Arc<[u8]>>)>>>>,
-    pub(super) cache: HashMap<String, ThumbnailCacheEntry>,
-    in_flight: HashSet<String>,
-}
+#[path = "home_thumbnails/home_thumbnail_state.rs"]
+mod home_thumbnail_state;
+#[path = "home_thumbnails/thumbnail_cache_entry.rs"]
+mod thumbnail_cache_entry;
 
-#[derive(Debug, Clone)]
-pub(super) struct ThumbnailCacheEntry {
-    pub(super) bytes: Option<Arc<[u8]>>,
-    pub(super) approx_bytes: usize,
-    pub(super) last_touched_frame: u64,
-}
+pub(super) use self::home_thumbnail_state::HomeThumbnailState;
+use self::thumbnail_cache_entry::ThumbnailCacheEntry;
 
 pub(super) fn purge_activity_image_state(ctx: &egui::Context, state: &mut HomeThumbnailState) {
     for key in state.cache.keys() {

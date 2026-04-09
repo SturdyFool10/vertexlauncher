@@ -19,7 +19,20 @@ mod library;
 mod platform;
 mod settings;
 mod skins;
+#[path = "screens/app_screen.rs"]
+mod app_screen;
+#[path = "screens/launch_auth_context.rs"]
+mod launch_auth_context;
+#[path = "screens/menu_presence_context.rs"]
+mod menu_presence_context;
+#[path = "screens/quick_launch_command_mode.rs"]
+mod quick_launch_command_mode;
+#[path = "screens/screen_output.rs"]
+mod screen_output;
+#[path = "screens/settings_info.rs"]
+mod settings_info;
 
+pub use app_screen::AppScreen;
 pub use console::console_log_scroll_id;
 pub use console::request_console_tab_focus;
 pub use content_browser::ContentBrowserState;
@@ -45,7 +58,12 @@ pub use library::{
     purge_inactive_state as purge_inactive_library_state, render_global_overlays,
     request_delete_instance,
 };
+pub use launch_auth_context::LaunchAuthContext;
+pub use menu_presence_context::MenuPresenceContext;
+pub use quick_launch_command_mode::QuickLaunchCommandMode;
+pub use screen_output::ScreenOutput;
 pub use settings::request_theme_focus as request_settings_theme_focus;
+pub use settings_info::SettingsInfo;
 pub use skins::classic_model_button_id as skins_classic_model_button_id;
 pub use skins::purge_inactive_state as purge_inactive_skins_state;
 pub use skins::request_model_focus as request_skins_model_focus;
@@ -53,98 +71,12 @@ pub use skins::request_motion_focus as request_skins_motion_focus;
 pub use skins::set_gamepad_orbit_input as set_skins_gamepad_orbit_input;
 pub use skins::slim_model_button_id as skins_slim_model_button_id;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppScreen {
-    Home,
-    Library,
-    Discover,
-    DiscoverDetail,
-    ContentBrowser,
-    Skins,
-    Settings,
-    Legal,
-    Console,
-    Instance,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuPresenceContext {
-    Screen(AppScreen),
-    Home(HomePresenceSection),
-    Instance(InstancePresenceSection),
-}
-
-impl AppScreen {
-    pub const FIXED_NAV: [AppScreen; 7] = [
-        AppScreen::Home,
-        AppScreen::Library,
-        AppScreen::Discover,
-        AppScreen::Skins,
-        AppScreen::Settings,
-        AppScreen::Legal,
-        AppScreen::Console,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            AppScreen::Home => "Home",
-            AppScreen::Library => "Library",
-            AppScreen::Discover => "Discover",
-            AppScreen::DiscoverDetail => "Discover",
-            AppScreen::ContentBrowser => "Content Browser",
-            AppScreen::Skins => "Skin Manager",
-            AppScreen::Settings => "Settings",
-            AppScreen::Legal => "Legal",
-            AppScreen::Console => "Console",
-            AppScreen::Instance => "Instance",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-/// Actions emitted by the active screen for the application shell to handle.
-pub struct ScreenOutput {
-    pub instances_changed: bool,
-    pub requested_screen: Option<AppScreen>,
-    pub selected_instance_id: Option<String>,
-    pub delete_requested_instance_id: Option<String>,
-    pub discover_install_requested: Option<DiscoverInstallRequest>,
-    pub menu_presence_context: Option<MenuPresenceContext>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LaunchAuthContext {
-    pub account_key: String,
-    pub player_name: String,
-    pub player_uuid: String,
-    pub access_token: Option<String>,
-    pub xuid: Option<String>,
-    pub user_type: String,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SettingsInfo {
-    pub cpu: String,
-    pub gpu: String,
-    pub memory: String,
-    pub graphics_api: String,
-    pub graphics_driver: String,
-    pub app_version: String,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct PendingLaunchIntent {
     pub nonce: u64,
     pub instance_id: String,
     pub quick_play_singleplayer: Option<String>,
     pub quick_play_multiplayer: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuickLaunchCommandMode {
-    Pack,
-    World,
-    Server,
 }
 
 pub fn selected_quick_launch_user(

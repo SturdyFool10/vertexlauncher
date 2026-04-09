@@ -1,52 +1,27 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(super) enum AsyncRasterKind {
-    Plain(String),
-    Rich(Vec<RichSpan>),
-}
+#[path = "text_ui_async_raster/async_raster_cache_entry.rs"]
+mod async_raster_cache_entry;
+#[path = "text_ui_async_raster/async_raster_kind.rs"]
+mod async_raster_kind;
+#[path = "text_ui_async_raster/async_raster_request.rs"]
+mod async_raster_request;
+#[path = "text_ui_async_raster/async_raster_response.rs"]
+mod async_raster_response;
+#[path = "text_ui_async_raster/async_raster_state.rs"]
+mod async_raster_state;
+#[path = "text_ui_async_raster/async_raster_worker_message.rs"]
+mod async_raster_worker_message;
+#[path = "text_ui_async_raster/typography_snapshot.rs"]
+mod typography_snapshot;
 
-#[derive(Clone, Debug)]
-pub(super) struct AsyncRasterRequest {
-    pub(super) key_hash: u64,
-    pub(super) kind: AsyncRasterKind,
-    pub(super) options: LabelOptions,
-    pub(super) width_points_opt: Option<f32>,
-    pub(super) scale: f32,
-    pub(super) typography: TypographySnapshot,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct AsyncRasterResponse {
-    pub(super) key_hash: u64,
-    pub(super) layout: PreparedTextLayout,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct TypographySnapshot {
-    pub(super) ui_font_family: Option<String>,
-    pub(super) ui_font_size_scale: f32,
-    pub(super) ui_font_weight: i32,
-    pub(super) open_type_feature_tags: Vec<[u8; 4]>,
-}
-
-pub(super) struct AsyncRasterState {
-    pub(super) tx: Option<mpsc::Sender<AsyncRasterWorkerMessage>>,
-    pub(super) rx: Option<mpsc::Receiver<AsyncRasterResponse>>,
-    pub(super) pending: FxHashSet<u64>,
-    pub(super) cache: ThreadSafeLru<u64, AsyncRasterCacheEntry>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct AsyncRasterCacheEntry {
-    pub(super) layout: Arc<PreparedTextLayout>,
-    pub(super) last_used_frame: u64,
-}
-
-pub(super) enum AsyncRasterWorkerMessage {
-    RegisterFont(Vec<u8>),
-    Render(AsyncRasterRequest),
-}
+pub(super) use self::async_raster_cache_entry::AsyncRasterCacheEntry;
+pub(super) use self::async_raster_kind::AsyncRasterKind;
+pub(super) use self::async_raster_request::AsyncRasterRequest;
+pub(super) use self::async_raster_response::AsyncRasterResponse;
+pub(super) use self::async_raster_state::AsyncRasterState;
+pub(super) use self::async_raster_worker_message::AsyncRasterWorkerMessage;
+pub(super) use self::typography_snapshot::TypographySnapshot;
 
 pub(super) fn new_async_raster_state() -> AsyncRasterState {
     let (worker_tx, worker_rx) = mpsc::channel::<AsyncRasterWorkerMessage>();

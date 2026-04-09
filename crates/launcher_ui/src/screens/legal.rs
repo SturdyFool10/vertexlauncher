@@ -7,11 +7,10 @@ use crate::{
     ui::{motion, style},
 };
 
-struct LegalNotice {
-    friendly_name: &'static str,
-    source_path: &'static str,
-    text: &'static str,
-}
+#[path = "legal/legal_notice.rs"]
+mod legal_notice;
+
+use self::legal_notice::LegalNotice;
 
 macro_rules! legal_notice {
     ($friendly_name:literal, $path:literal) => {

@@ -39,6 +39,8 @@ use super::AppScreen;
 
 #[path = "content_browser_install.rs"]
 mod content_browser_install;
+#[path = "content_browser/content_browser_output.rs"]
+mod content_browser_output;
 #[path = "content_browser_state.rs"]
 mod content_browser_state;
 #[path = "content_browser_ui.rs"]
@@ -46,6 +48,7 @@ mod content_browser_ui;
 #[path = "content_browser_workers.rs"]
 mod content_browser_workers;
 use self::content_browser_install::*;
+use self::content_browser_output::ContentBrowserOutput;
 pub(crate) use self::content_browser_state::BulkContentUpdate;
 pub use self::content_browser_state::ContentBrowserState;
 use self::content_browser_state::*;
@@ -75,11 +78,6 @@ const CONTENT_BROWSER_VERSION_DROPDOWN_ID_KEY: &str = "content_browser_version_d
 const CONTENT_BROWSER_SCOPE_DROPDOWN_ID_KEY: &str = "content_browser_scope_dropdown_id";
 const CONTENT_BROWSER_SORT_DROPDOWN_ID_KEY: &str = "content_browser_sort_dropdown_id";
 const CONTENT_BROWSER_LOADER_DROPDOWN_ID_KEY: &str = "content_browser_loader_dropdown_id";
-
-#[derive(Debug, Clone, Default)]
-pub struct ContentBrowserOutput {
-    pub requested_screen: Option<AppScreen>,
-}
 
 static PENDING_EXTERNAL_DETAIL_OPEN: OnceLock<Mutex<Option<UnifiedContentEntry>>> = OnceLock::new();
 

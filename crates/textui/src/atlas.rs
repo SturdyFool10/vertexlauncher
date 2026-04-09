@@ -1,5 +1,28 @@
 use super::*;
 
+#[path = "atlas/dirty_atlas_rect.rs"]
+mod dirty_atlas_rect;
+#[path = "atlas/field_line_segment.rs"]
+mod field_line_segment;
+#[path = "atlas/flattened_outline.rs"]
+mod flattened_outline;
+#[path = "atlas/glyph_atlas_texture.rs"]
+mod glyph_atlas_texture;
+#[path = "atlas/glyph_atlas_worker_message.rs"]
+mod glyph_atlas_worker_message;
+#[path = "atlas/glyph_error_score.rs"]
+mod glyph_error_score;
+#[path = "atlas/native_glyph_atlas_texture.rs"]
+mod native_glyph_atlas_texture;
+
+use self::dirty_atlas_rect::DirtyAtlasRect;
+use self::field_line_segment::FieldLineSegment;
+use self::flattened_outline::FlattenedOutline;
+use self::glyph_atlas_texture::GlyphAtlasTexture;
+use self::glyph_atlas_worker_message::GlyphAtlasWorkerMessage;
+use self::glyph_error_score::GlyphErrorScore;
+use self::native_glyph_atlas_texture::NativeGlyphAtlasTexture;
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(super) struct GlyphRasterKey {
     cache_key: CacheKey,
@@ -108,57 +131,6 @@ pub(super) struct GlyphAtlasPage {
     backing: ColorImage,
     dirty_rect: Option<DirtyAtlasRect>,
     live_glyphs: usize,
-}
-
-enum GlyphAtlasTexture {
-    Egui(TextureHandle),
-    Wgpu(NativeGlyphAtlasTexture),
-}
-
-struct NativeGlyphAtlasTexture {
-    id: TextureId,
-    texture: wgpu::Texture,
-}
-
-impl GlyphAtlasTexture {
-    fn id(&self) -> TextureId {
-        match self {
-            Self::Egui(texture) => texture.id(),
-            Self::Wgpu(texture) => texture.id,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct DirtyAtlasRect {
-    min: [usize; 2],
-    max: [usize; 2],
-}
-
-impl DirtyAtlasRect {
-    fn new(pos: [usize; 2], size: [usize; 2]) -> Self {
-        Self {
-            min: pos,
-            max: [
-                pos[0].saturating_add(size[0]),
-                pos[1].saturating_add(size[1]),
-            ],
-        }
-    }
-
-    fn union(self, other: Self) -> Self {
-        Self {
-            min: [self.min[0].min(other.min[0]), self.min[1].min(other.min[1])],
-            max: [self.max[0].max(other.max[0]), self.max[1].max(other.max[1])],
-        }
-    }
-
-    fn size(self) -> [usize; 2] {
-        [
-            self.max[0].saturating_sub(self.min[0]),
-            self.max[1].saturating_sub(self.min[1]),
-        ]
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -468,16 +440,6 @@ pub(super) fn collect_prepared_glyphs_from_buffer(
     }
 
     (glyphs, max_line_extra_points)
-}
-
-enum GlyphAtlasWorkerMessage {
-    RegisterFont(Vec<u8>),
-    Rasterize {
-        generation: u64,
-        cache_key: GlyphRasterKey,
-        rasterization: TextRasterizationConfig,
-        padding_px: usize,
-    },
 }
 
 pub(super) struct GlyphAtlasWorkerResponse {
@@ -1299,39 +1261,6 @@ pub(super) fn render_swash_outline_commands(
     Some(outline.path().commands().collect())
 }
 
-#[derive(Clone, Copy)]
-struct FieldLineSegment {
-    a: [f32; 2],
-    b: [f32; 2],
-    color_mask: u8,
-}
-
-#[derive(Default)]
-struct FlattenedOutline {
-    contours: Vec<Vec<[f32; 2]>>,
-    segments: Vec<FieldLineSegment>,
-    min: [f32; 2],
-    max: [f32; 2],
-}
-
-impl FlattenedOutline {
-    fn new() -> Self {
-        Self {
-            contours: Vec::new(),
-            segments: Vec::new(),
-            min: [f32::INFINITY, f32::INFINITY],
-            max: [f32::NEG_INFINITY, f32::NEG_INFINITY],
-        }
-    }
-
-    fn include_point(&mut self, point: [f32; 2]) {
-        self.min[0] = self.min[0].min(point[0]);
-        self.min[1] = self.min[1].min(point[1]);
-        self.max[0] = self.max[0].max(point[0]);
-        self.max[1] = self.max[1].max(point[1]);
-    }
-}
-
 /// Returns true when two or more contours wind in the same direction and their bounding boxes
 /// overlap. This indicates overlapping filled regions that our even-odd `point_inside_outline`
 /// will mis-classify as "outside", making SDF/MSDF distances incorrect.
@@ -1529,11 +1458,6 @@ fn field_glyph_matches_reference(
     mean_error <= FIELD_GLYPH_MEAN_ALPHA_ERROR_LIMIT
         && max_error <= FIELD_GLYPH_MAX_ALPHA_ERROR_LIMIT
         && large_error_ratio <= FIELD_GLYPH_LARGE_ERROR_PIXEL_RATIO_LIMIT
-}
-
-#[derive(Clone, Copy)]
-struct GlyphErrorScore {
-    total_error: f32,
 }
 
 fn alpha_glyph_error_against_outline(

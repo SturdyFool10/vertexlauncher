@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "skins_preview_expressions/face_cover_bias.rs"]
+mod face_cover_bias;
+
+use self::face_cover_bias::FaceCoverBias;
+
 #[derive(Clone, Copy)]
 pub(super) struct FaceExpressionPose {
     look_x: f32,
@@ -330,12 +335,6 @@ fn brow_face_rects(spec: BrowExpressionSpec) -> (FacePixelRect, Option<FacePixel
             }),
         ),
     }
-}
-
-#[derive(Clone, Copy)]
-enum FaceCoverBias {
-    Above,
-    Below,
 }
 
 fn face_cover_texel(rect: FacePixelRect, bias: FaceCoverBias) -> TextureRectU32 {

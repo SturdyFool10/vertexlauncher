@@ -1,5 +1,13 @@
 use super::*;
 
+#[path = "skins_preview_gpu_post_process/present_source.rs"]
+mod present_source;
+#[path = "skins_preview_gpu_post_process/skin_preview_post_process_wgpu_resources.rs"]
+mod skin_preview_post_process_wgpu_resources;
+
+use self::present_source::PresentSource;
+use self::skin_preview_post_process_wgpu_resources::SkinPreviewPostProcessWgpuResources;
+
 pub(super) struct SkinPreviewPostProcessWgpuCallback {
     scene_batches: Vec<GpuPreviewSceneBatch>,
     skin_sample: Arc<RgbaImage>,
@@ -243,52 +251,6 @@ impl egui_wgpu::CallbackTrait for SkinPreviewPostProcessWgpuCallback {
         render_pass.set_bind_group(0, bind_group, &[]);
         render_pass.draw(0..3, 0..1);
     }
-}
-
-#[derive(Clone, Copy)]
-enum PresentSource {
-    Accumulation,
-    PostProcess,
-}
-
-struct SkinPreviewPostProcessWgpuResources {
-    scene_pipeline: wgpu::RenderPipeline,
-    accumulate_pipeline: wgpu::RenderPipeline,
-    smaa_pipeline: wgpu::RenderPipeline,
-    fxaa_pipeline: wgpu::RenderPipeline,
-    taa_pipeline: wgpu::RenderPipeline,
-    present_pipeline: wgpu::RenderPipeline,
-    texture_bind_group_layout: wgpu::BindGroupLayout,
-    texture_sampler: wgpu::Sampler,
-    uniform_bind_group: wgpu::BindGroup,
-    uniform_buffer: wgpu::Buffer,
-    scalar_uniform_bind_group_layout: wgpu::BindGroupLayout,
-    scalar_uniform_bind_group: wgpu::BindGroup,
-    scalar_uniform_buffer: wgpu::Buffer,
-    skin_texture: Option<UploadedPreviewTexture>,
-    cape_texture: Option<UploadedPreviewTexture>,
-    accumulation_texture: wgpu::Texture,
-    accumulation_view: wgpu::TextureView,
-    accumulation_bind_group: wgpu::BindGroup,
-    scene_resolve_texture: wgpu::Texture,
-    scene_resolve_view: wgpu::TextureView,
-    scene_resolve_bind_group: wgpu::BindGroup,
-    scene_msaa_texture: Option<wgpu::Texture>,
-    scene_msaa_view: Option<wgpu::TextureView>,
-    scene_depth_texture: wgpu::Texture,
-    scene_depth_view: wgpu::TextureView,
-    post_process_texture: wgpu::Texture,
-    post_process_view: wgpu::TextureView,
-    post_process_bind_group: wgpu::BindGroup,
-    taa_history_texture: wgpu::Texture,
-    taa_history_view: wgpu::TextureView,
-    taa_history_bind_group: wgpu::BindGroup,
-    taa_history_valid: bool,
-    render_target_size: [u32; 2],
-    target_format: wgpu::TextureFormat,
-    scene_msaa_samples: u32,
-    present_msaa_samples: u32,
-    present_source: PresentSource,
 }
 
 impl SkinPreviewPostProcessWgpuResources {

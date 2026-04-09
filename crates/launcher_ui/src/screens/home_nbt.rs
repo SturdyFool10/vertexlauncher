@@ -1,22 +1,15 @@
 use super::*;
 
-#[derive(Debug, Clone)]
-pub(super) struct ServerDatEntry {
-    pub(super) name: String,
-    pub(super) ip: String,
-    pub(super) icon: Option<String>,
-}
+#[path = "home_nbt/nbt_cursor.rs"]
+mod nbt_cursor;
+#[path = "home_nbt/server_dat_entry.rs"]
+mod server_dat_entry;
+#[path = "home_nbt/world_metadata.rs"]
+mod world_metadata;
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct WorldMetadata {
-    pub(super) level_name: Option<String>,
-    pub(super) game_mode: Option<String>,
-    pub(super) hardcore: Option<bool>,
-    pub(super) cheats_enabled: Option<bool>,
-    pub(super) difficulty: Option<String>,
-    pub(super) version_name: Option<String>,
-    pub(super) last_played_ms: Option<u64>,
-}
+use self::nbt_cursor::NbtCursor;
+pub(super) use self::server_dat_entry::ServerDatEntry;
+pub(super) use self::world_metadata::WorldMetadata;
 
 pub(super) fn parse_world_metadata(path: &Path) -> Option<WorldMetadata> {
     let data = read_nbt_file(path)?;
@@ -259,66 +252,5 @@ fn skip_nbt_payload(cursor: &mut NbtCursor<'_>, tag: u8) -> Result<(), ()> {
             cursor.skip((len as usize) * 8)
         }
         _ => Err(()),
-    }
-}
-
-#[derive(Debug)]
-struct NbtCursor<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> NbtCursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
-    }
-
-    fn skip(&mut self, len: usize) -> Result<(), ()> {
-        if self.pos.saturating_add(len) > self.bytes.len() {
-            return Err(());
-        }
-        self.pos += len;
-        Ok(())
-    }
-
-    fn read_u8(&mut self) -> Result<u8, ()> {
-        if self.pos >= self.bytes.len() {
-            return Err(());
-        }
-        let value = self.bytes[self.pos];
-        self.pos += 1;
-        Ok(value)
-    }
-
-    fn read_u16(&mut self) -> Result<u16, ()> {
-        let bytes = self.read_exact(2)?;
-        Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
-    }
-
-    fn read_i32(&mut self) -> Result<i32, ()> {
-        let bytes = self.read_exact(4)?;
-        Ok(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-    }
-
-    fn read_i64(&mut self) -> Result<i64, ()> {
-        let bytes = self.read_exact(8)?;
-        Ok(i64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]))
-    }
-
-    fn read_string(&mut self) -> Result<String, ()> {
-        let len = self.read_u16()? as usize;
-        let bytes = self.read_exact(len)?;
-        Ok(String::from_utf8_lossy(bytes).to_string())
-    }
-
-    fn read_exact(&mut self, len: usize) -> Result<&'a [u8], ()> {
-        if self.pos.saturating_add(len) > self.bytes.len() {
-            return Err(());
-        }
-        let start = self.pos;
-        self.pos += len;
-        Ok(&self.bytes[start..start + len])
     }
 }

@@ -2,101 +2,40 @@ use std::ffi::OsStr;
 
 use super::*;
 
-#[derive(Debug, Clone)]
-pub(super) struct ScreenshotEntry {
-    pub(super) instance_name: String,
-    pub(super) path: PathBuf,
-    pub(super) file_name: String,
-    pub(super) width: u32,
-    pub(super) height: u32,
-    pub(super) modified_at_ms: Option<u64>,
-}
+#[path = "home_screenshots/screenshot_entry.rs"]
+mod screenshot_entry;
+#[path = "home_screenshots/screenshot_candidate.rs"]
+mod screenshot_candidate;
+#[path = "home_screenshots/screenshot_overlay_action.rs"]
+mod screenshot_overlay_action;
+#[path = "home_screenshots/screenshot_overlay_button_result.rs"]
+mod screenshot_overlay_button_result;
+#[path = "home_screenshots/screenshot_overlay_result.rs"]
+mod screenshot_overlay_result;
+#[path = "home_screenshots/screenshot_result_channel.rs"]
+mod screenshot_result_channel;
+#[path = "home_screenshots/screenshot_scan_instance.rs"]
+mod screenshot_scan_instance;
+#[path = "home_screenshots/screenshot_scan_message.rs"]
+mod screenshot_scan_message;
+#[path = "home_screenshots/screenshot_scan_request.rs"]
+mod screenshot_scan_request;
+#[path = "home_screenshots/screenshot_tile_action.rs"]
+mod screenshot_tile_action;
+#[path = "home_screenshots/screenshot_viewer_state.rs"]
+mod screenshot_viewer_state;
 
-impl ScreenshotEntry {
-    pub(super) fn key(&self) -> String {
-        self.path.to_string_lossy().to_string()
-    }
-
-    pub(super) fn uri(&self) -> String {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.path.hash(&mut hasher);
-        self.modified_at_ms.hash(&mut hasher);
-        format!("bytes://home/screenshot/{}.png", hasher.finish())
-    }
-
-    pub(super) fn aspect_ratio(&self) -> f32 {
-        self.width as f32 / self.height.max(1) as f32
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ScreenshotViewerState {
-    pub(super) screenshot_key: String,
-    /// Snapshot of the entry's metadata and path as of the last time it was found in the gallery.
-    /// Used to retain and display the image during rescans when `screenshots` is temporarily empty.
-    pub(super) entry_snapshot: ScreenshotEntry,
-    pub(super) zoom: f32,
-    pub(super) pan_uv: egui::Vec2,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct ScreenshotTileAction {
-    open_viewer: bool,
-    request_delete: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ScreenshotOverlayAction {
-    Copy,
-    Delete,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct ScreenshotOverlayResult {
-    action: Option<ScreenshotOverlayAction>,
-    contains_pointer: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct ScreenshotOverlayButtonResult {
-    clicked: bool,
-    contains_pointer: bool,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ScreenshotCandidate {
-    pub(super) instance_name: String,
-    pub(super) path: PathBuf,
-    pub(super) file_name: String,
-    pub(super) modified_at_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ScreenshotScanRequest {
-    pub(super) scanned_instance_count: usize,
-    pub(super) instances: Vec<ScreenshotScanInstance>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ScreenshotScanInstance {
-    pub(super) instance_name: String,
-    pub(super) screenshots_dir: PathBuf,
-}
-
-enum ScreenshotScanMessage {
-    EntryLoaded {
-        request_id: u64,
-        entry: ScreenshotEntry,
-    },
-    TaskDone {
-        request_id: u64,
-    },
-}
-
-struct ScreenshotResultChannel {
-    tx: mpsc::Sender<ScreenshotScanMessage>,
-    rx: mpsc::Receiver<ScreenshotScanMessage>,
-}
+pub(super) use self::screenshot_candidate::ScreenshotCandidate;
+pub(super) use self::screenshot_entry::ScreenshotEntry;
+use self::screenshot_overlay_action::ScreenshotOverlayAction;
+use self::screenshot_overlay_button_result::ScreenshotOverlayButtonResult;
+use self::screenshot_overlay_result::ScreenshotOverlayResult;
+use self::screenshot_result_channel::ScreenshotResultChannel;
+pub(super) use self::screenshot_scan_instance::ScreenshotScanInstance;
+use self::screenshot_scan_message::ScreenshotScanMessage;
+pub(super) use self::screenshot_scan_request::ScreenshotScanRequest;
+use self::screenshot_tile_action::ScreenshotTileAction;
+pub(super) use self::screenshot_viewer_state::ScreenshotViewerState;
 
 static SCREENSHOT_RESULTS: OnceLock<Mutex<ScreenshotResultChannel>> = OnceLock::new();
 

@@ -1,23 +1,12 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(super) struct DiscoverVersionsResult {
-    pub(super) request_serial: u64,
-    pub(super) versions: Result<Vec<DiscoverVersionEntry>, String>,
-}
+#[path = "discover_detail/discover_version_entry.rs"]
+mod discover_version_entry;
+#[path = "discover_detail/discover_versions_result.rs"]
+mod discover_versions_result;
 
-#[derive(Clone, Debug)]
-pub(super) struct DiscoverVersionEntry {
-    pub(super) source: DiscoverSource,
-    pub(super) version_id: String,
-    pub(super) version_name: String,
-    pub(super) published_at: Option<String>,
-    pub(super) file_name: String,
-    pub(super) file_url: Option<String>,
-    pub(super) game_versions: Vec<String>,
-    pub(super) loaders: Vec<String>,
-    pub(super) download_count: Option<u64>,
-}
+pub(super) use self::discover_version_entry::DiscoverVersionEntry;
+pub(super) use self::discover_versions_result::DiscoverVersionsResult;
 
 pub(super) fn render_discover_detail_content(
     ui: &mut Ui,

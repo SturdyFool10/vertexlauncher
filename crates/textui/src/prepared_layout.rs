@@ -1,21 +1,12 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(crate) struct PreparedTextLayout {
-    pub(crate) glyphs: Arc<[PreparedGlyph]>,
-    pub(crate) size_points: Vec2,
-    pub(crate) approx_bytes: usize,
-}
+#[path = "prepared_layout/prepared_glyph.rs"]
+mod prepared_glyph;
+#[path = "prepared_layout/prepared_text_cache_entry.rs"]
+mod prepared_text_cache_entry;
+#[path = "prepared_layout/prepared_text_layout.rs"]
+mod prepared_text_layout;
 
-#[derive(Clone, Debug)]
-pub(crate) struct PreparedGlyph {
-    pub(crate) cache_key: GlyphRasterKey,
-    pub(crate) offset_points: Vec2,
-    pub(crate) color: Color32,
-}
-
-pub(crate) struct PreparedTextCacheEntry {
-    pub(crate) fingerprint: u64,
-    pub(crate) layout: Arc<PreparedTextLayout>,
-    pub(crate) last_used_frame: u64,
-}
+pub(crate) use self::prepared_glyph::PreparedGlyph;
+pub(crate) use self::prepared_text_cache_entry::PreparedTextCacheEntry;
+pub(crate) use self::prepared_text_layout::PreparedTextLayout;

@@ -17,6 +17,38 @@ use crate::{
     ui::{context_menu, style},
 };
 
+#[path = "console/cached_console_line_layout.rs"]
+mod cached_console_line_layout;
+#[path = "console/cached_console_log_parse.rs"]
+mod cached_console_log_parse;
+#[path = "console/console_line_layout_cache_state.rs"]
+mod console_line_layout_cache_state;
+#[path = "console/console_log_parse_cache_state.rs"]
+mod console_log_parse_cache_state;
+#[path = "console/log_level.rs"]
+mod log_level;
+#[path = "console/log_parse_context.rs"]
+mod log_parse_context;
+#[path = "console/log_selection_cursor.rs"]
+mod log_selection_cursor;
+#[path = "console/log_selection_state.rs"]
+mod log_selection_state;
+#[path = "console/virtual_log_viewer_state.rs"]
+mod virtual_log_viewer_state;
+#[path = "console/visible_log_row_hit.rs"]
+mod visible_log_row_hit;
+
+use self::cached_console_line_layout::CachedConsoleLineLayout;
+use self::cached_console_log_parse::CachedConsoleLogParse;
+use self::console_line_layout_cache_state::ConsoleLineLayoutCacheState;
+use self::console_log_parse_cache_state::ConsoleLogParseCacheState;
+use self::log_level::LogLevel;
+use self::log_parse_context::LogParseContext;
+use self::log_selection_cursor::LogSelectionCursor;
+use self::log_selection_state::LogSelectionState;
+use self::virtual_log_viewer_state::VirtualLogViewerState;
+use self::visible_log_row_hit::VisibleLogRowHit;
+
 const ACTION_COPY_SELECTION: &str = "copy_selection";
 const FORCE_CONSOLE_TAB_FOCUS_KEY: &str = "console_force_tab_focus";
 const CONSOLE_LOG_SCROLL_ID_KEY: &str = "console_log_scroll_area_id";
@@ -148,86 +180,7 @@ pub(crate) fn render_log_buffer(
     );
 }
 
-#[derive(Clone, Debug, Default)]
-struct VirtualLogViewerState {
-    initialized: bool,
-    max_line_width: f32,
-    follow_bottom: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-struct LogSelectionCursor {
-    line: usize,
-    char_index: usize,
-}
-
-#[derive(Clone, Debug, Default)]
-struct LogSelectionState {
-    anchor: Option<LogSelectionCursor>,
-    head: Option<LogSelectionCursor>,
-    dragging: bool,
-}
-
-impl LogSelectionState {
-    fn normalized(&self) -> Option<(LogSelectionCursor, LogSelectionCursor)> {
-        let anchor = self.anchor?;
-        let head = self.head.unwrap_or(anchor);
-        if anchor <= head {
-            Some((anchor, head))
-        } else {
-            Some((head, anchor))
-        }
-    }
-
-    fn has_selection(&self) -> bool {
-        matches!(self.normalized(), Some((start, end)) if start != end)
-    }
-
-    fn clear(&mut self) {
-        self.anchor = None;
-        self.head = None;
-        self.dragging = false;
-    }
-}
-
-#[derive(Clone)]
-struct VisibleLogRowHit {
-    line_index: usize,
-    rect: egui::Rect,
-    text_rect: egui::Rect,
-    galley: Arc<egui::Galley>,
-    line_len_chars: usize,
-}
-
-#[derive(Clone)]
-struct CachedConsoleLineLayout {
-    fingerprint: u64,
-    galley: Arc<egui::Galley>,
-    line_len_chars: usize,
-    last_used_frame: u64,
-}
-
-#[derive(Default)]
-struct ConsoleLineLayoutCacheState {
-    entries: HashMap<egui::Id, CachedConsoleLineLayout>,
-    last_eviction_frame: u64,
-}
-
 type ConsoleLineLayoutCache = Arc<Mutex<ConsoleLineLayoutCacheState>>;
-
-#[derive(Clone)]
-struct CachedConsoleLogParse {
-    fingerprint: u64,
-    level: Option<LogLevel>,
-    in_error_trace_after: bool,
-    last_used_frame: u64,
-}
-
-#[derive(Default)]
-struct ConsoleLogParseCacheState {
-    entries: HashMap<egui::Id, CachedConsoleLogParse>,
-    last_eviction_frame: u64,
-}
 
 type ConsoleLogParseCache = Arc<Mutex<ConsoleLogParseCacheState>>;
 
@@ -1056,21 +1009,6 @@ fn color_for_level(ui: &Ui, level: Option<LogLevel>) -> egui::Color32 {
         Some(LogLevel::Debug | LogLevel::Trace) => ui.visuals().weak_text_color(),
         None => ui.visuals().text_color(),
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LogLevel {
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Fatal,
-}
-
-#[derive(Clone, Debug, Default)]
-struct LogParseContext {
-    in_error_trace: bool,
 }
 
 fn resolve_log_level(line: &str, context: &mut LogParseContext) -> Option<LogLevel> {

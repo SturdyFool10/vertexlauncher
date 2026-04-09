@@ -376,25 +376,13 @@ pub(super) fn poll_identify_results(state: &mut ContentBrowserState) {
     }
 }
 
-#[derive(Clone, Debug)]
-struct ProviderSearchEntry {
-    name: String,
-    summary: String,
-    content_type: BrowserContentType,
-    source: ContentSource,
-    modrinth_project_id: Option<String>,
-    curseforge_project_id: Option<u64>,
-    icon_url: Option<String>,
-    popularity_score: Option<u64>,
-    updated_at: Option<String>,
-    relevance_rank: u32,
-}
+#[path = "content_browser_workers/provider_search_entry.rs"]
+mod provider_search_entry;
+#[path = "content_browser_workers/search_task_outcome.rs"]
+mod search_task_outcome;
 
-#[derive(Default)]
-struct SearchTaskOutcome {
-    entries: Vec<ProviderSearchEntry>,
-    warnings: Vec<String>,
-}
+use self::provider_search_entry::ProviderSearchEntry;
+use self::search_task_outcome::SearchTaskOutcome;
 
 pub(super) fn request_search(state: &mut ContentBrowserState, request: BrowserSearchRequest) {
     if state.search_in_flight {

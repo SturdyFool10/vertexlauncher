@@ -19,12 +19,10 @@ const RESERVED_SYSTEM_MEMORY_MIB: u128 = 4 * 1024;
 const FALLBACK_TOTAL_MEMORY_MIB: u128 = 20 * 1024;
 const FORCE_THEME_FOCUS_ID: &str = "settings_force_theme_focus";
 
-#[derive(Default)]
-struct MemorySliderMaxState {
-    detected_total_mib: Option<u128>,
-    load_complete: bool,
-    rx: Option<mpsc::Receiver<Option<u128>>>,
-}
+#[path = "settings/memory_slider_max_state.rs"]
+mod memory_slider_max_state;
+
+use self::memory_slider_max_state::MemorySliderMaxState;
 
 pub fn render(
     ui: &mut Ui,

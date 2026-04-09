@@ -1,21 +1,12 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(super) enum DependencyRef {
-    ModrinthProject(String),
-    CurseForgeProject(u64),
-}
+#[path = "content_browser_install/dependency_ref.rs"]
+mod dependency_ref;
+#[path = "content_browser_install/resolved_download.rs"]
+mod resolved_download;
 
-#[derive(Clone, Debug)]
-pub(super) struct ResolvedDownload {
-    pub(super) source: ManagedContentSource,
-    pub(super) version_id: String,
-    version_name: String,
-    pub(super) file_url: String,
-    file_name: String,
-    published_at: String,
-    pub(super) dependencies: Vec<DependencyRef>,
-}
+pub(super) use self::dependency_ref::DependencyRef;
+pub(super) use self::resolved_download::ResolvedDownload;
 
 pub(super) fn active_download_from_request(
     request: &ContentInstallRequest,

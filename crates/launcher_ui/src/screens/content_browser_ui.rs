@@ -1,52 +1,21 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug)]
-struct ContentBrowserUiMetrics {
-    action_button_width: f32,
-    action_button_height: f32,
-    download_progress_width: f32,
-    result_thumbnail_size: f32,
-}
+#[path = "content_browser_ui/content_browser_ui_metrics.rs"]
+mod content_browser_ui_metrics;
+#[path = "content_browser_ui/icon_button_outcome.rs"]
+mod icon_button_outcome;
+#[path = "content_browser_ui/render_results_outcome.rs"]
+mod render_results_outcome;
+#[path = "content_browser_ui/result_tile_inner_outcome.rs"]
+mod result_tile_inner_outcome;
+#[path = "content_browser_ui/result_tile_outcome.rs"]
+mod result_tile_outcome;
 
-impl ContentBrowserUiMetrics {
-    fn from_ui(ui: &Ui) -> Self {
-        let metrics = UiMetrics::from_ui(ui, 860.0);
-        Self {
-            action_button_width: metrics.scaled_width(0.02, TILE_ACTION_BUTTON_WIDTH, 34.0),
-            action_button_height: metrics.scaled_height(0.036, TILE_ACTION_BUTTON_HEIGHT, 34.0),
-            download_progress_width: metrics.scaled_width(
-                0.08,
-                TILE_DOWNLOAD_PROGRESS_WIDTH,
-                124.0,
-            ),
-            result_thumbnail_size: metrics.scaled_width(0.075, 84.0, 108.0),
-        }
-    }
-}
-
-#[derive(Default)]
-pub(super) struct RenderResultsOutcome {
-    pub(super) requested_page: Option<u32>,
-    pub(super) open_entry: Option<BrowserProjectEntry>,
-}
-
-#[derive(Default)]
-struct ResultTileOutcome {
-    open_clicked: bool,
-    download_clicked: bool,
-}
-
-struct IconButtonOutcome {
-    clicked: bool,
-    rect: egui::Rect,
-}
-
-struct ResultTileInnerOutcome {
-    open_clicked: bool,
-    download_clicked: bool,
-    download_button_rect: egui::Rect,
-    info_button_rect: egui::Rect,
-}
+use self::content_browser_ui_metrics::ContentBrowserUiMetrics;
+use self::icon_button_outcome::IconButtonOutcome;
+pub(super) use self::render_results_outcome::RenderResultsOutcome;
+use self::result_tile_inner_outcome::ResultTileInnerOutcome;
+use self::result_tile_outcome::ResultTileOutcome;
 
 pub(super) fn render_controls(
     ui: &mut Ui,

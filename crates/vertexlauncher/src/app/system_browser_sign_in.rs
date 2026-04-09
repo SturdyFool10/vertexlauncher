@@ -10,31 +10,16 @@ use vertex_constants::launcher::system_browser_sign_in::{
 };
 const CALLBACK_PAGE_TEMPLATE: &str = include_str!("callback_page_template.html");
 
-pub struct CallbackPageColors {
-    pub bg: String,
-    pub panel: String,
-    pub border: String,
-    pub text: String,
-    pub muted: String,
-    pub success: String,
-    pub danger: String,
-    pub primary_tint: String,
-}
+#[path = "system_browser_sign_in/callback_page_colors.rs"]
+mod callback_page_colors;
+#[path = "system_browser_sign_in/callback_page_tone.rs"]
+mod callback_page_tone;
+#[path = "system_browser_sign_in/loopback_callback_listener.rs"]
+mod loopback_callback_listener;
 
-impl CallbackPageColors {
-    pub fn from_theme(theme: &Theme) -> Self {
-        Self {
-            bg: fmt_oklch(theme.bg_dark),
-            panel: fmt_oklch(theme.bg),
-            border: fmt_oklch(theme.border_muted),
-            text: fmt_oklch(theme.text),
-            muted: fmt_oklch(theme.text_muted),
-            success: fmt_oklch(theme.success),
-            danger: fmt_oklch(theme.danger),
-            primary_tint: fmt_oklch_alpha(theme.primary, 0.09),
-        }
-    }
-}
+pub use self::callback_page_colors::CallbackPageColors;
+use self::callback_page_tone::CallbackPageTone;
+pub use self::loopback_callback_listener::LoopbackCallbackListener;
 
 fn fmt_oklch(c: Oklch) -> String {
     format!("oklch({:.3} {:.3} {:.1})", c.l, c.c, c.h)
@@ -42,17 +27,6 @@ fn fmt_oklch(c: Oklch) -> String {
 
 fn fmt_oklch_alpha(c: Oklch, alpha: f32) -> String {
     format!("oklch({:.3} {:.3} {:.1} / {:.2})", c.l, c.c, c.h, alpha)
-}
-
-pub struct LoopbackCallbackListener {
-    listener: TcpListener,
-    redirect_uri: String,
-}
-
-impl LoopbackCallbackListener {
-    pub fn redirect_uri(&self) -> &str {
-        &self.redirect_uri
-    }
 }
 
 pub fn prepare_loopback_callback_listener() -> Result<LoopbackCallbackListener, String> {
@@ -233,12 +207,6 @@ fn write_http_response(stream: &mut TcpStream, status: &str, body: &str) -> Resu
         body
     )
     .map_err(|err| format!("Failed writing localhost callback response: {err}"))
-}
-
-#[derive(Clone, Copy)]
-enum CallbackPageTone {
-    Success,
-    Error,
 }
 
 fn render_callback_page(

@@ -1,37 +1,19 @@
 use super::skins_preview_expressions::{add_expression_triangles, compute_expression_pose};
 use super::*;
 
-pub(super) struct BuiltCharacterScene {
-    pub(super) triangles: Vec<RenderTriangle>,
-    pub(super) cape_render_sample: Option<Arc<RgbaImage>>,
-}
+#[path = "skins_preview_scene/built_character_scene.rs"]
+mod built_character_scene;
+#[path = "skins_preview_scene/overlay_part_spec.rs"]
+mod overlay_part_spec;
+#[path = "skins_preview_scene/overlay_region_spec.rs"]
+mod overlay_region_spec;
+#[path = "skins_preview_scene/overlay_voxel_face.rs"]
+mod overlay_voxel_face;
 
-#[derive(Clone, Copy)]
-enum OverlayVoxelFace {
-    Top,
-    Bottom,
-    Left,
-    Right,
-    Front,
-    Back,
-}
-
-#[derive(Clone, Copy)]
-struct OverlayRegionSpec {
-    face: OverlayVoxelFace,
-    tex_x: u32,
-    tex_y: u32,
-    width: u32,
-    height: u32,
-}
-
-#[derive(Clone, Copy)]
-struct OverlayPartSpec {
-    size: Vec3,
-    pivot_top_center: Vec3,
-    rotate_x: f32,
-    rotate_z: f32,
-}
+use self::built_character_scene::BuiltCharacterScene;
+use self::overlay_part_spec::OverlayPartSpec;
+use self::overlay_region_spec::OverlayRegionSpec;
+use self::overlay_voxel_face::OverlayVoxelFace;
 
 fn add_voxel_overlay_layer(
     out: &mut Vec<RenderTriangle>,

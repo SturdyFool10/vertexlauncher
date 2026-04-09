@@ -1,12 +1,10 @@
 use super::*;
 use std::sync::{Mutex, OnceLock, mpsc};
 
-#[derive(Default)]
-struct MemorySliderMaxState {
-    detected_total_mib: Option<u128>,
-    load_complete: bool,
-    rx: Option<mpsc::Receiver<Option<u128>>>,
-}
+#[path = "instance_settings_modal/memory_slider_max_state.rs"]
+mod memory_slider_max_state;
+
+use self::memory_slider_max_state::MemorySliderMaxState;
 
 pub(super) fn render_instance_settings_modal(
     ctx: &egui::Context,

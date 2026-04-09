@@ -1,108 +1,42 @@
 use super::*;
 
-#[derive(Default)]
-pub struct ImportInstanceState {
-    pub source_mode_index: usize,
-    pub package_path: PathBuf,
-    pub launcher_path: PathBuf,
-    pub launcher_kind_index: usize,
-    pub instance_name: String,
-    pub error: Option<String>,
-    pub(super) preview_in_flight: bool,
-    pub(super) preview_request_serial: u64,
-    pub(super) preview_results_tx: Option<mpsc::Sender<(u64, Result<ImportPreview, String>)>>,
-    pub(super) preview_results_rx:
-        Option<Arc<Mutex<mpsc::Receiver<(u64, Result<ImportPreview, String>)>>>>,
-    pub import_in_flight: bool,
-    pub import_latest_progress: Option<ImportProgress>,
-    pub import_progress_tx: Option<mpsc::Sender<ImportProgress>>,
-    pub import_progress_rx: Option<Arc<Mutex<mpsc::Receiver<ImportProgress>>>>,
-    pub import_results_tx: Option<mpsc::Sender<ImportTaskResult>>,
-    pub import_results_rx: Option<Arc<Mutex<mpsc::Receiver<ImportTaskResult>>>>,
-    pub(super) preview: Option<ImportPreview>,
-}
+#[path = "state/import_instance_state.rs"]
+mod import_instance_state;
+#[path = "state/import_mode.rs"]
+mod import_mode;
+#[path = "state/import_package_error.rs"]
+mod import_package_error;
+#[path = "state/import_package_kind.rs"]
+mod import_package_kind;
+#[path = "state/import_preview.rs"]
+mod import_preview;
+#[path = "state/import_preview_kind.rs"]
+mod import_preview_kind;
+#[path = "state/import_progress.rs"]
+mod import_progress;
+#[path = "state/import_request.rs"]
+mod import_request;
+#[path = "state/import_source.rs"]
+mod import_source;
+#[path = "state/import_task_result.rs"]
+mod import_task_result;
+#[path = "state/launcher_kind.rs"]
+mod launcher_kind;
+#[path = "state/modal_action.rs"]
+mod modal_action;
 
-impl ImportInstanceState {
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ImportRequest {
-    pub source: ImportSource,
-    pub instance_name: String,
-    pub manual_curseforge_files: HashMap<u64, PathBuf>,
-    pub manual_curseforge_staging_dir: Option<PathBuf>,
-    pub max_concurrent_downloads: u32,
-}
-
-#[derive(Clone, Debug)]
-pub enum ImportSource {
-    ManifestFile(PathBuf),
-    LauncherDirectory {
-        path: PathBuf,
-        launcher: Option<LauncherKind>,
-    },
-}
-
-#[derive(Clone, Debug)]
-pub enum ModalAction {
-    None,
-    Cancel,
-    Import(ImportRequest),
-}
-
-pub type ImportTaskResult = Result<(InstanceStore, InstanceRecord), ImportPackageError>;
-
-#[derive(Clone, Debug)]
-pub enum ImportPackageError {
-    Message(String),
-    ManualCurseForgeDownloads {
-        requirements: Vec<CurseForgeManualDownloadRequirement>,
-        staged_files: HashMap<u64, PathBuf>,
-    },
-}
-
-impl ImportPackageError {
-    pub(super) fn message(message: impl Into<String>) -> Self {
-        Self::Message(message.into())
-    }
-}
-
-impl std::fmt::Display for ImportPackageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Message(message) => f.write_str(message),
-            Self::ManualCurseForgeDownloads { requirements, .. } => write!(
-                f,
-                "{} CurseForge files require manual download",
-                requirements.len()
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ImportPackageError {}
-
-impl From<String> for ImportPackageError {
-    fn from(value: String) -> Self {
-        Self::Message(value)
-    }
-}
-
-impl From<&str> for ImportPackageError {
-    fn from(value: &str) -> Self {
-        Self::Message(value.to_owned())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ImportProgress {
-    pub message: String,
-    pub completed_steps: usize,
-    pub total_steps: usize,
-}
+pub use self::import_instance_state::ImportInstanceState;
+pub use self::import_package_error::ImportPackageError;
+pub use self::import_progress::ImportProgress;
+pub use self::import_request::ImportRequest;
+pub use self::import_source::ImportSource;
+pub use self::import_task_result::ImportTaskResult;
+pub use self::modal_action::ModalAction;
+pub(super) use self::import_mode::ImportMode;
+pub(super) use self::import_package_kind::ImportPackageKind;
+pub(super) use self::import_preview::ImportPreview;
+pub(super) use self::import_preview_kind::ImportPreviewKind;
+pub(super) use self::launcher_kind::LauncherKind;
 
 pub(super) fn ensure_preview_channel(state: &mut ImportInstanceState) {
     if state.preview_results_tx.is_some() && state.preview_results_rx.is_some() {
@@ -181,88 +115,6 @@ pub(super) fn poll_preview_results(state: &mut ImportInstanceState) {
                 state.preview_results_rx = None;
                 break;
             }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct ImportPreview {
-    pub(super) kind: ImportPreviewKind,
-    pub(super) detected_name: String,
-    pub(super) game_version: String,
-    pub(super) modloader: String,
-    pub(super) modloader_version: String,
-    pub(super) summary: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ImportPreviewKind {
-    Manifest(ImportPackageKind),
-    Launcher(LauncherKind),
-}
-
-impl ImportPreviewKind {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            ImportPreviewKind::Manifest(kind) => kind.label(),
-            ImportPreviewKind::Launcher(kind) => kind.label(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ImportPackageKind {
-    VertexPack,
-    ModrinthPack,
-    CurseForgePack,
-}
-
-impl ImportPackageKind {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            ImportPackageKind::VertexPack => "Vertex .vtmpack",
-            ImportPackageKind::ModrinthPack => "Modrinth .mrpack",
-            ImportPackageKind::CurseForgePack => "CurseForge modpack zip",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ImportMode {
-    ManifestFile,
-    LauncherDirectory,
-}
-
-impl ImportMode {
-    pub(super) fn from_index(index: usize) -> Self {
-        match index {
-            1 => Self::LauncherDirectory,
-            _ => Self::ManifestFile,
-        }
-    }
-
-    pub(super) fn options() -> [&'static str; 2] {
-        ["From manifest file", "Import from another launcher"]
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LauncherKind {
-    Modrinth,
-    CurseForge,
-    Prism,
-    ATLauncher,
-    Unknown,
-}
-
-impl LauncherKind {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::Modrinth => "Modrinth launcher instance",
-            Self::CurseForge => "CurseForge instance",
-            Self::Prism => "Prism / MultiMC / PolyMC instance",
-            Self::ATLauncher => "ATLauncher instance",
-            Self::Unknown => "Generic launcher instance",
         }
     }
 }

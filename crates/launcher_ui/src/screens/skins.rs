@@ -26,6 +26,10 @@ use crate::{
 mod skins_cape_grid;
 #[path = "skins_expressions.rs"]
 mod skins_expressions;
+#[path = "skins/preview_motion_mode.rs"]
+mod preview_motion_mode;
+#[path = "skins/preview_pose.rs"]
+mod preview_pose;
 #[path = "skins_preview.rs"]
 mod skins_preview;
 #[path = "skins_preview_gpu.rs"]
@@ -37,6 +41,7 @@ use self::skins_expressions::*;
 use self::skins_preview::*;
 use self::skins_preview_gpu::*;
 use self::skins_state::*;
+use self::{preview_motion_mode::PreviewMotionMode, preview_pose::PreviewPose};
 
 const PREVIEW_ORBIT_SECONDS: f64 = 45.0;
 const PREVIEW_TARGET_FPS: f32 = 60.0;
@@ -844,20 +849,6 @@ fn paint_preview_background(ui: &Ui, painter: &egui::Painter, rect: Rect) {
         ui.visuals().widgets.noninteractive.bg_stroke,
         egui::StrokeKind::Outside,
     );
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PreviewMotionMode {
-    Idle,
-    Walk,
-}
-
-#[derive(Clone, Copy)]
-struct PreviewPose {
-    time_seconds: f32,
-    idle_cycle: f32,
-    walk_cycle: f32,
-    locomotion_blend: f32,
 }
 
 fn fetch_and_cache_profile(

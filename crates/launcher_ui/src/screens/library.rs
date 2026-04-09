@@ -8,6 +8,16 @@ use std::{
 
 #[path = "library_runtime.rs"]
 mod library_runtime;
+#[path = "library/library_output.rs"]
+mod library_output;
+#[path = "library/library_state.rs"]
+mod library_state;
+#[path = "library/library_tile_metrics.rs"]
+mod library_tile_metrics;
+#[path = "library/runtime_action.rs"]
+mod runtime_action;
+#[path = "library/thumbnail_cache_entry.rs"]
+mod thumbnail_cache_entry;
 
 use config::Config;
 use egui::{TextureOptions, Ui};
@@ -25,6 +35,11 @@ use ui_foundation::{
 use crate::app::tokio_runtime;
 use crate::ui::components::{image_memory::load_image_path_for_memory, image_textures};
 use crate::{assets, desktop, install_activity, notification, ui::style};
+use self::library_output::LibraryOutput;
+use self::library_state::LibraryState;
+use self::library_tile_metrics::LibraryTileMetrics;
+use self::runtime_action::RuntimeAction;
+use self::thumbnail_cache_entry::ThumbnailCacheEntry;
 use library_runtime::{
     LibraryLaunchIdentity, LibraryRuntimeState as RuntimeWorkflowState,
     poll_delete_instance_results, poll_runtime_actions, request_instance_delete,
@@ -42,56 +57,6 @@ const LIBRARY_RUNTIME_LAUNCH_TASK_KIND: &str = "library runtime launch";
 const LIBRARY_GRID_COMPACT_THRESHOLD: f32 = 760.0;
 const LIBRARY_THUMBNAIL_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const LIBRARY_THUMBNAIL_CACHE_STALE_FRAMES: u64 = 900;
-
-#[derive(Clone, Copy, Debug)]
-struct LibraryTileMetrics {
-    tile_width: f32,
-    tile_height: f32,
-    thumbnail_height: f32,
-    centered_thumbnail_width: f32,
-    name_scroll_height: f32,
-    description_scroll_height: f32,
-}
-
-impl LibraryTileMetrics {
-    fn from_ui(ui: &Ui) -> (UiMetrics, usize, Self) {
-        let metrics = UiMetrics::from_ui(ui, LIBRARY_GRID_COMPACT_THRESHOLD);
-        let available_width = ui.available_width().max(1.0);
-        let gap = style::SPACE_XL;
-        let min_tile_width = if metrics.compact { 220.0 } else { 260.0 };
-        let max_columns = if metrics.compact { 2 } else { 4 };
-        let (columns, tile_width) =
-            metrics.columns(available_width, min_tile_width, gap, max_columns);
-        let thumbnail_height = (tile_width * 0.5).clamp(120.0, 170.0);
-        let tile_height = (thumbnail_height
-            + (tile_width * 0.56)
-            + style::CONTROL_HEIGHT_LG
-            + TILE_DELETE_BUTTON_HEIGHT
-            + style::SPACE_XL * 3.0)
-            .clamp(340.0, 470.0);
-        let name_scroll_height = (tile_height * 0.14).clamp(44.0, 72.0);
-        let description_scroll_height = (tile_height * 0.22).clamp(68.0, 120.0);
-        (
-            metrics,
-            columns,
-            Self {
-                tile_width,
-                tile_height,
-                thumbnail_height,
-                centered_thumbnail_width: (tile_width * 0.74).min(220.0),
-                name_scroll_height,
-                description_scroll_height,
-            },
-        )
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-/// Actions emitted by the library screen for the app shell to process.
-pub struct LibraryOutput {
-    pub selected_instance_id: Option<String>,
-    pub requested_screen: Option<AppScreen>,
-}
 
 fn library_runtime_state_id() -> egui::Id {
     egui::Id::new("library_runtime_state")
@@ -1071,35 +1036,6 @@ fn copy_instance_steam_launch_options(
         "library/quick_launch",
         "Copied Steam launch options to clipboard."
     );
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeAction {
-    None,
-    LaunchRequested,
-    StopRequested,
-    DeleteRequested,
-    OpenFolderRequested,
-    CopyCommandRequested,
-    CopySteamOptionsRequested,
-    OpenInstanceRequested,
-}
-
-#[derive(Debug, Clone, Default)]
-struct LibraryState {
-    runtime: RuntimeWorkflowState,
-    thumbnail_cache_frame_index: u64,
-    thumbnail_results_tx: Option<mpsc::Sender<(String, Option<Arc<[u8]>>)>>,
-    thumbnail_results_rx: Option<Arc<Mutex<mpsc::Receiver<(String, Option<Arc<[u8]>>)>>>>,
-    thumbnail_cache: HashMap<String, ThumbnailCacheEntry>,
-    thumbnail_in_flight: HashSet<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ThumbnailCacheEntry {
-    bytes: Option<Arc<[u8]>>,
-    approx_bytes: usize,
-    last_touched_frame: u64,
 }
 
 fn ensure_thumbnail_channel(state: &mut LibraryState) {

@@ -39,7 +39,6 @@ use unicode_segmentation::UnicodeSegmentation;
 use wgpu::util::DeviceExt as _;
 
 mod advanced_text;
-mod async_raster;
 mod atlas;
 mod button_options;
 mod clipboard;
@@ -51,18 +50,27 @@ mod font_features;
 mod geometry;
 mod gpu;
 mod input_options;
-mod input_runtime;
-mod input_widget;
 mod label_options;
-mod label_scene;
 mod markdown_options;
 mod markdown_parser;
 mod path_layout;
-mod path_text;
 mod prepared_layout;
-mod scene_builder;
 mod text_helpers;
 mod tooltip_options;
+#[path = "text_ui.rs"]
+mod text_ui;
+#[path = "text_ui_async_raster.rs"]
+mod async_raster;
+#[path = "text_ui_input_runtime.rs"]
+mod input_runtime;
+#[path = "text_ui_input_widget.rs"]
+mod input_widget;
+#[path = "text_ui_label_scene.rs"]
+mod label_scene;
+#[path = "text_ui_path_text.rs"]
+mod path_text;
+#[path = "text_ui_scene_builder.rs"]
+mod scene_builder;
 
 use crate::async_raster::{AsyncRasterState, AsyncRasterWorkerMessage, new_async_raster_state};
 pub(crate) use crate::atlas::{
@@ -115,6 +123,7 @@ use crate::{
     input_options::InputOptions, label_options::LabelOptions, markdown_options::MarkdownOptions,
     markdown_parser::parse_markdown_blocks, tooltip_options::TooltipOptions,
 };
+pub use self::text_ui::TextUi;
 
 pub use advanced_text::DEFAULT_ELLIPSIS;
 pub use advanced_text::{
@@ -184,95 +193,7 @@ fn new_fingerprint_hasher() -> FxHasher {
 type SpanStyle = RichTextStyle;
 type RichSpan = RichTextSpan;
 
-pub struct TextUi {
-    font_system: FontSystem,
-    scale_context: ScaleContext,
-    syntax_set: SyntaxSet,
-    code_theme: Theme,
-    prepared_texts: ThreadSafeLru<Id, PreparedTextCacheEntry>,
-    glyph_atlas: GlyphAtlas,
-    input_states: FxHashMap<Id, InputState>,
-    ui_font_family: Option<String>,
-    ui_font_size_scale: f32,
-    ui_font_weight: i32,
-    open_type_features_enabled: bool,
-    open_type_features_to_enable: String,
-    open_type_feature_tags: Vec<[u8; 4]>,
-    open_type_features: Option<FontFeatures>,
-    async_raster: AsyncRasterState,
-    graphics_config: TextGraphicsConfig,
-    current_frame: u64,
-    max_texture_side_px: usize,
-    frame_events: Vec<TextInputEvent>,
-    /// Cache for parsed markdown blocks: Id → (fingerprint, last_used_frame, blocks).
-    /// Prevents re-parsing unchanged markdown every frame.
-    markdown_cache: FxHashMap<Id, (u64, u64, Arc<[TextMarkdownBlock]>)>,
-    /// Cache for built GPU scenes: fingerprint → scene.
-    /// Avoids re-rasterizing glyphs via Swash every frame for unchanged text.
-    gpu_scene_cache: ThreadSafeLru<u64, Arc<TextGpuScene>>,
-    /// Cache for CPU-side glyph bitmaps used while assembling retained GPU scenes.
-    /// This keeps repeated scene rebuilds from paying Swash raster cost for glyphs we just saw.
-    gpu_scene_glyph_cache: ThreadSafeLru<GlyphRasterKey, Arc<PreparedAtlasGlyph>>,
-}
-
-impl Default for TextUi {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl TextUi {
-    /// Creates a new text renderer and background async raster worker.
-    pub fn new() -> Self {
-        Self::new_with_graphics_config(TextGraphicsConfig::default())
-    }
-
-    /// Creates a new text renderer with an explicit graphics configuration.
-    pub fn new_with_graphics_config(graphics_config: TextGraphicsConfig) -> Self {
-        let syntax_set = SyntaxSet::load_defaults_newlines();
-        let theme_set = ThemeSet::load_defaults();
-        let code_theme = theme_set
-            .themes
-            .get("base16-ocean.dark")
-            .or_else(|| theme_set.themes.values().next())
-            .cloned()
-            .unwrap_or_else(|| {
-                warn!(
-                    target: "vertexlauncher/textui",
-                    "syntect theme set was unexpectedly empty; using default code theme"
-                );
-                Theme::default()
-            });
-
-        let glyph_atlas = GlyphAtlas::new();
-        let mut font_system = FontSystem::new();
-        configure_text_font_defaults(&mut font_system);
-        Self {
-            font_system,
-            scale_context: ScaleContext::new(),
-            syntax_set,
-            code_theme,
-            prepared_texts: ThreadSafeLru::new(PREPARED_TEXT_CACHE_MAX_BYTES),
-            glyph_atlas,
-            input_states: FxHashMap::default(),
-            ui_font_family: None,
-            ui_font_size_scale: 1.0,
-            ui_font_weight: 400,
-            open_type_features_enabled: false,
-            open_type_features_to_enable: String::new(),
-            open_type_feature_tags: Vec::new(),
-            open_type_features: None,
-            async_raster: new_async_raster_state(),
-            graphics_config,
-            current_frame: 0,
-            max_texture_side_px: usize::MAX,
-            frame_events: Vec::new(),
-            markdown_cache: FxHashMap::default(),
-            gpu_scene_cache: ThreadSafeLru::new(GPU_SCENE_CACHE_MAX_BYTES),
-            gpu_scene_glyph_cache: ThreadSafeLru::new(GPU_SCENE_GLYPH_CACHE_MAX_BYTES),
-        }
-    }
-
     /// Advances the engine-side frame state without requiring an [`egui::Context`].
     ///
     /// Consumers that use the context-free scene/export APIs can drive frame maintenance

@@ -5,46 +5,22 @@ use base64::Engine;
 
 use super::*;
 
-#[derive(Debug, Clone)]
-pub(super) struct ServerEntry {
-    pub(super) instance_id: String,
-    pub(super) instance_name: String,
-    pub(super) server_name: String,
-    pub(super) address: String,
-    pub(super) favorite_id: String,
-    pub(super) host: String,
-    pub(super) port: u16,
-    pub(super) icon_png: Option<Arc<[u8]>>,
-    pub(super) last_used_at_ms: Option<u64>,
-    pub(super) favorite: bool,
-}
+#[path = "home_server_ping/server_entry.rs"]
+mod server_entry;
+#[path = "home_server_ping/server_ping_result.rs"]
+mod server_ping_result;
+#[path = "home_server_ping/server_ping_result_channel.rs"]
+mod server_ping_result_channel;
+#[path = "home_server_ping/server_ping_snapshot.rs"]
+mod server_ping_snapshot;
+#[path = "home_server_ping/server_ping_status.rs"]
+mod server_ping_status;
 
-#[derive(Debug, Clone, Copy)]
-pub(super) enum ServerPingStatus {
-    Unknown,
-    Offline,
-    Online { latency_ms: u64 },
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ServerPingSnapshot {
-    pub(super) status: ServerPingStatus,
-    pub(super) motd: Option<String>,
-    pub(super) players_online: Option<u32>,
-    pub(super) players_max: Option<u32>,
-    pub(super) checked_at: Instant,
-}
-
-#[derive(Debug, Clone)]
-struct ServerPingResult {
-    address: String,
-    snapshot: ServerPingSnapshot,
-}
-
-struct ServerPingResultChannel {
-    tx: mpsc::Sender<ServerPingResult>,
-    rx: mpsc::Receiver<ServerPingResult>,
-}
+pub(super) use self::server_entry::ServerEntry;
+use self::server_ping_result::ServerPingResult;
+use self::server_ping_result_channel::ServerPingResultChannel;
+pub(super) use self::server_ping_snapshot::ServerPingSnapshot;
+pub(super) use self::server_ping_status::ServerPingStatus;
 
 static SERVER_PING_RESULTS: OnceLock<Mutex<ServerPingResultChannel>> = OnceLock::new();
 

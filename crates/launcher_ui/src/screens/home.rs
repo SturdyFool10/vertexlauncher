@@ -48,6 +48,29 @@ use super::{AppScreen, PendingLaunchIntent, queue_launch_intent};
 mod home_nbt;
 use home_nbt::{parse_servers_dat, parse_world_metadata};
 
+#[path = "home/home_activity_result_channel.rs"]
+mod home_activity_result_channel;
+#[path = "home/home_activity_scan_instance.rs"]
+mod home_activity_scan_instance;
+#[path = "home/home_activity_scan_request.rs"]
+mod home_activity_scan_request;
+#[path = "home/home_activity_scan_result.rs"]
+mod home_activity_scan_result;
+#[path = "home/home_entry_ref.rs"]
+mod home_entry_ref;
+#[path = "home/home_output.rs"]
+mod home_output;
+#[path = "home/home_presence_section.rs"]
+mod home_presence_section;
+#[path = "home/home_state.rs"]
+mod home_state;
+#[path = "home/home_tab.rs"]
+mod home_tab;
+#[path = "home/home_ui_metrics.rs"]
+mod home_ui_metrics;
+#[path = "home/world_entry.rs"]
+mod world_entry;
+
 const HOME_SCAN_INTERVAL: Duration = Duration::from_secs(3);
 const SERVER_PING_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
 const SERVER_PING_CONNECT_TIMEOUT: Duration = Duration::from_millis(350);
@@ -102,224 +125,19 @@ use self::home_thumbnails::{
     purge_activity_image_state as purge_home_activity_thumbnail_state, request_instance_thumbnail,
     trim_home_thumbnail_cache,
 };
-
-#[derive(Clone, Copy, Debug)]
-struct HomeUiMetrics {
-    tab_height: f32,
-    instance_row_height: f32,
-    activity_row_height: f32,
-    screenshot_overlay_button_size: f32,
-    screenshot_min_column_width: f32,
-    action_button_width: f32,
-}
-
-impl HomeUiMetrics {
-    fn from_ui(ui: &Ui) -> Self {
-        let metrics = UiMetrics::from_ui(ui, 820.0);
-        Self {
-            tab_height: metrics.scaled_height(0.045, 34.0, 40.0),
-            instance_row_height: metrics.scaled_height(0.04, 34.0, 42.0),
-            activity_row_height: metrics.scaled_height(0.062, 50.0, 62.0),
-            screenshot_overlay_button_size: metrics.scaled_width(0.022, 24.0, 30.0),
-            screenshot_min_column_width: metrics.scaled_width(0.24, 180.0, 320.0),
-            action_button_width: metrics.scaled_width(0.075, 92.0, 120.0),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct HomeOutput {
-    pub requested_screen: Option<AppScreen>,
-    pub selected_instance_id: Option<String>,
-    pub delete_requested_instance_id: Option<String>,
-    pub presence_section: HomePresenceSection,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum HomeTab {
-    #[default]
-    InstancesAndWorlds,
-    Screenshots,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HomePresenceSection {
-    Activity,
-    Screenshots,
-}
-
-impl Default for HomePresenceSection {
-    fn default() -> Self {
-        Self::Activity
-    }
-}
-
-impl HomeTab {
-    fn label(self) -> &'static str {
-        match self {
-            Self::InstancesAndWorlds => "Instances & Worlds",
-            Self::Screenshots => "Screenshots",
-        }
-    }
-}
-
-impl HomeTab {
-    fn presence_section(self) -> HomePresenceSection {
-        match self {
-            Self::InstancesAndWorlds => HomePresenceSection::Activity,
-            Self::Screenshots => HomePresenceSection::Screenshots,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct HomeState {
-    active_tab: HomeTab,
-    worlds: Vec<WorldEntry>,
-    servers: Vec<ServerEntry>,
-    server_pings: HashMap<String, ServerPingSnapshot>,
-    last_scan_at: Option<Instant>,
-    scanned_instance_count: usize,
-    activity_scan_pending: bool,
-    latest_requested_activity_scan_id: u64,
-    server_ping_in_flight: HashSet<String>,
-    screenshots: Vec<ScreenshotEntry>,
-    last_screenshot_scan_at: Option<Instant>,
-    scanned_screenshot_instance_count: usize,
-    screenshot_scan_pending: bool,
-    screenshot_scan_ready: bool,
-    screenshot_tasks_total: usize,
-    screenshot_tasks_done: usize,
-    screenshot_candidates: Vec<ScreenshotCandidate>,
-    screenshot_loaded_count: usize,
-    latest_requested_screenshot_scan_id: u64,
-    screenshot_images: LazyImageBytes,
-    screenshot_layout_revision: u64,
-    screenshot_masonry_layout_cache: Option<CachedVirtualMasonryLayout>,
-    thumbnails: HomeThumbnailState,
-    screenshot_viewer: Option<ScreenshotViewerState>,
-    pending_delete_screenshot_key: Option<String>,
-    delete_screenshot_in_flight: bool,
-    delete_screenshot_results_tx: Option<mpsc::Sender<(String, String, Result<(), String>)>>,
-    delete_screenshot_results_rx:
-        Option<Arc<Mutex<mpsc::Receiver<(String, String, Result<(), String>)>>>>,
-}
-
-#[derive(Debug, Clone)]
-struct WorldEntry {
-    instance_id: String,
-    instance_name: String,
-    world_id: String,
-    world_name: String,
-    game_mode: Option<String>,
-    hardcore: Option<bool>,
-    cheats_enabled: Option<bool>,
-    difficulty: Option<String>,
-    version_name: Option<String>,
-    thumbnail_png: Option<Arc<[u8]>>,
-    last_used_at_ms: Option<u64>,
-    favorite: bool,
-}
-
-#[derive(Debug, Clone)]
-struct HomeActivityScanRequest {
-    scanned_instance_count: usize,
-    instances: Vec<HomeActivityScanInstance>,
-}
-
-#[derive(Debug, Clone)]
-struct HomeActivityScanInstance {
-    instance_id: String,
-    instance_name: String,
-    instance_root: PathBuf,
-    favorite_world_ids: Vec<String>,
-    favorite_server_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct HomeActivityScanResult {
-    request_id: u64,
-    scanned_instance_count: usize,
-    worlds: Vec<WorldEntry>,
-    servers: Vec<ServerEntry>,
-}
-
-impl HomeState {
-    fn mark_screenshot_layout_dirty(&mut self) {
-        self.screenshot_layout_revision = self.screenshot_layout_revision.saturating_add(1);
-        self.screenshot_masonry_layout_cache = None;
-    }
-
-    fn purge_screenshot_state(&mut self, ctx: &egui::Context) {
-        self.latest_requested_screenshot_scan_id =
-            self.latest_requested_screenshot_scan_id.saturating_add(1);
-        self.screenshots.clear();
-        self.last_screenshot_scan_at = None;
-        self.scanned_screenshot_instance_count = 0;
-        self.screenshot_scan_pending = false;
-        self.screenshot_scan_ready = false;
-        self.screenshot_tasks_total = 0;
-        self.screenshot_tasks_done = 0;
-        self.screenshot_candidates.clear();
-        self.screenshot_loaded_count = 0;
-        self.screenshot_images.clear(ctx);
-        self.screenshot_viewer = None;
-        self.pending_delete_screenshot_key = None;
-        self.delete_screenshot_in_flight = false;
-        self.delete_screenshot_results_tx = None;
-        self.delete_screenshot_results_rx = None;
-        self.mark_screenshot_layout_dirty();
-    }
-
-    fn purge_activity_image_state(&mut self, ctx: &egui::Context) {
-        for world in &mut self.worlds {
-            if world.thumbnail_png.take().is_some() {
-                image_textures::evict_source_key(&home_world_thumbnail_uri(
-                    world.instance_id.as_str(),
-                    world.world_id.as_str(),
-                ));
-            }
-        }
-        for server in &mut self.servers {
-            if server.icon_png.take().is_some() {
-                image_textures::evict_source_key(&home_server_icon_uri(
-                    server.instance_id.as_str(),
-                    server.favorite_id.as_str(),
-                ));
-            }
-        }
-        purge_home_activity_thumbnail_state(ctx, &mut self.thumbnails);
-        self.last_scan_at = None;
-    }
-}
-
-struct HomeActivityResultChannel {
-    tx: mpsc::Sender<HomeActivityScanResult>,
-    rx: mpsc::Receiver<HomeActivityScanResult>,
-}
+use self::home_activity_result_channel::HomeActivityResultChannel;
+use self::home_activity_scan_instance::HomeActivityScanInstance;
+use self::home_activity_scan_request::HomeActivityScanRequest;
+use self::home_activity_scan_result::HomeActivityScanResult;
+use self::home_entry_ref::HomeEntryRef;
+pub use self::home_output::HomeOutput;
+pub use self::home_presence_section::HomePresenceSection;
+use self::home_state::HomeState;
+use self::home_tab::HomeTab;
+use self::home_ui_metrics::HomeUiMetrics;
+use self::world_entry::WorldEntry;
 
 static HOME_ACTIVITY_RESULTS: OnceLock<Mutex<HomeActivityResultChannel>> = OnceLock::new();
-
-enum HomeEntryRef<'a> {
-    World(&'a WorldEntry),
-    Server(&'a ServerEntry),
-}
-
-impl HomeEntryRef<'_> {
-    fn last_used_at_ms(&self) -> Option<u64> {
-        match self {
-            Self::World(world) => world.last_used_at_ms,
-            Self::Server(server) => server.last_used_at_ms,
-        }
-    }
-
-    fn primary_label(&self) -> &str {
-        match self {
-            Self::World(world) => world.world_name.as_str(),
-            Self::Server(server) => server.server_name.as_str(),
-        }
-    }
-}
 
 fn home_state_id() -> egui::Id {
     egui::Id::new("home_screen_state")

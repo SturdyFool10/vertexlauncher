@@ -12,101 +12,27 @@ use std::time::{Duration, Instant};
 
 use super::{system_browser_sign_in, webview_sign_in};
 
+#[path = "auth_state/account_ui_entry.rs"]
+mod account_ui_entry;
+#[path = "auth_state/auth_flow_event.rs"]
+mod auth_flow_event;
+#[path = "auth_state/auth_ui_status.rs"]
+mod auth_ui_status;
+#[path = "auth_state/avatar_load_result.rs"]
+mod avatar_load_result;
+#[path = "auth_state/launch_auth_context.rs"]
+mod launch_auth_context;
+#[path = "auth_state/renewal_result.rs"]
+mod renewal_result;
+
+pub use self::account_ui_entry::AccountUiEntry;
+pub use self::launch_auth_context::LaunchAuthContext;
+use self::auth_flow_event::AuthFlowEvent;
+use self::auth_ui_status::AuthUiStatus;
+use self::avatar_load_result::AvatarLoadResult;
+use self::renewal_result::RenewalResult;
+
 pub const REPAINT_INTERVAL: Duration = Duration::from_millis(200);
-
-#[derive(Clone, Debug)]
-pub enum AuthUiStatus {
-    Idle,
-    RefreshingCachedSession,
-    RefreshingActiveSession,
-    Starting,
-    AwaitingBrowser,
-    AwaitingExternalBrowser,
-    AwaitingDeviceCode(String),
-    WaitingForAuthorization,
-    Error(String),
-}
-
-impl AuthUiStatus {
-    fn status_message(&self) -> Option<&str> {
-        match self {
-            AuthUiStatus::Idle => None,
-            AuthUiStatus::RefreshingCachedSession => Some("Refreshing cached account session..."),
-            AuthUiStatus::RefreshingActiveSession => Some("Refreshing account token..."),
-            AuthUiStatus::Starting => Some("Preparing Microsoft sign-in..."),
-            AuthUiStatus::AwaitingBrowser => {
-                Some("Complete sign-in in the Microsoft webview window...")
-            }
-            AuthUiStatus::AwaitingExternalBrowser => {
-                Some("Complete sign-in in your default browser...")
-            }
-            AuthUiStatus::AwaitingDeviceCode(message) => Some(message.as_str()),
-            AuthUiStatus::WaitingForAuthorization => Some("Finalizing sign-in..."),
-            AuthUiStatus::Error(message) => Some(message.as_str()),
-        }
-    }
-}
-
-enum AuthFlowEvent {
-    AwaitingBrowser,
-    AwaitingExternalBrowser,
-    WaitingForAuthorization,
-    Completed(CachedAccount),
-    Failed(String),
-}
-
-enum RenewalResult {
-    Bulk {
-        result: Result<CachedAccountsState, String>,
-        failed_account_errors: HashMap<String, String>,
-        succeeded_profile_ids: HashSet<String>,
-    },
-    Single {
-        profile_id: String,
-        result: Result<CachedAccountsState, String>,
-    },
-}
-
-struct AvatarLoadResult {
-    profile_id: String,
-    avatar_png: Option<Vec<u8>>,
-    error: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct AccountUiEntry {
-    pub profile_id: String,
-    pub display_name: String,
-    pub is_active: bool,
-    pub is_failed: bool,
-    pub avatar_png: Option<Vec<u8>>,
-}
-
-#[derive(Clone)]
-pub struct LaunchAuthContext {
-    pub account_key: String,
-    pub player_name: String,
-    pub player_uuid: String,
-    pub access_token: Option<String>,
-    pub xuid: Option<String>,
-    pub user_type: String,
-}
-
-impl std::fmt::Debug for LaunchAuthContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LaunchAuthContext")
-            .field("account_key", &self.account_key)
-            .field("player_name", &self.player_name)
-            .field("player_uuid", &self.player_uuid)
-            .field(
-                "access_token",
-                &self.access_token.as_ref().map(|_| "[redacted]"),
-            )
-            .field("xuid", &self.xuid)
-            .field("user_type", &self.user_type)
-            .finish()
-    }
-}
 
 pub struct AuthState {
     accounts_state: CachedAccountsState,

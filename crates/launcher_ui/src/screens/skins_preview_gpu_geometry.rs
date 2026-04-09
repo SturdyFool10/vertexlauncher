@@ -1,23 +1,17 @@
 use super::*;
 
+#[path = "skins_preview_gpu_geometry/elytra_pose.rs"]
+mod elytra_pose;
+#[path = "skins_preview_gpu_geometry/elytra_wing_pose.rs"]
+mod elytra_wing_pose;
+
+use self::elytra_pose::ElytraPose;
+use self::elytra_wing_pose::ElytraWingPose;
+
 #[derive(Clone, Copy)]
 pub(in super::super) struct ElytraWingUvs {
     pub(in super::super) left: FaceUvs,
     pub(in super::super) right: FaceUvs,
-}
-
-#[derive(Clone, Copy)]
-struct ElytraWingPose {
-    rotate_x: f32,
-    rotate_y: f32,
-    rotate_z: f32,
-    pivot_y_offset: f32,
-}
-
-#[derive(Clone, Copy)]
-struct ElytraPose {
-    left: ElytraWingPose,
-    right: ElytraWingPose,
 }
 
 const VANILLA_ELYTRA_POSE_STANDING: ElytraPose = ElytraPose {

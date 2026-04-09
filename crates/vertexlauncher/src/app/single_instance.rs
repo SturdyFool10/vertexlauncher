@@ -10,27 +10,13 @@ use vertex_constants::launcher::single_instance::{
     RETRY_DELAY,
 };
 
-#[derive(Debug)]
-pub enum SingleInstanceError {
-    AlreadyRunning,
-    Unavailable(String),
-}
+#[path = "single_instance/single_instance_error.rs"]
+mod single_instance_error;
+#[path = "single_instance/single_instance_guard.rs"]
+mod single_instance_guard;
 
-pub struct SingleInstanceGuard {
-    endpoint: SocketAddrV4,
-    stop_requested: Arc<AtomicBool>,
-    completion_rx: Option<mpsc::Receiver<()>>,
-}
-
-impl Drop for SingleInstanceGuard {
-    fn drop(&mut self) {
-        self.stop_requested.store(true, Ordering::SeqCst);
-        let _ = send_probe(self.endpoint, HELLO_MESSAGE);
-        if let Some(completion_rx) = self.completion_rx.take() {
-            let _ = completion_rx.recv_timeout(PROBE_TIMEOUT);
-        }
-    }
-}
+pub use self::single_instance_error::SingleInstanceError;
+pub use self::single_instance_guard::SingleInstanceGuard;
 
 pub fn acquire_single_instance() -> Result<SingleInstanceGuard, SingleInstanceError> {
     let endpoint = SocketAddrV4::new(Ipv4Addr::LOCALHOST, SINGLE_INSTANCE_PORT);

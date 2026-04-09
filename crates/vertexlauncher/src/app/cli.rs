@@ -15,49 +15,19 @@ use instances::{
     save_store,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum QuickLaunchMode {
-    Pack,
-    World,
-    Server,
-}
+#[path = "cli/cli_command.rs"]
+mod cli_command;
+#[path = "cli/quick_launch_mode.rs"]
+mod quick_launch_mode;
+#[path = "cli/quick_launch_spec.rs"]
+mod quick_launch_spec;
+#[path = "cli/server_dat_entry.rs"]
+mod server_dat_entry;
 
-#[derive(Debug, Clone)]
-enum CliCommand {
-    Launch {
-        mode: QuickLaunchMode,
-        instance: String,
-        user: String,
-        world: Option<String>,
-        server: Option<String>,
-    },
-    BuildArgs {
-        mode: QuickLaunchMode,
-        instance: String,
-        user: String,
-        world: Option<String>,
-        server: Option<String>,
-    },
-    ListTargets {
-        instance: String,
-    },
-    Help,
-}
-
-#[derive(Debug)]
-struct QuickLaunchSpec {
-    mode: QuickLaunchMode,
-    instance: String,
-    user: String,
-    world: Option<String>,
-    server: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ServerDatEntry {
-    name: String,
-    ip: String,
-}
+use self::cli_command::CliCommand;
+use self::quick_launch_mode::QuickLaunchMode;
+use self::quick_launch_spec::QuickLaunchSpec;
+use self::server_dat_entry::ServerDatEntry;
 
 pub fn maybe_run_from_args() -> Result<bool, String> {
     let args: Vec<String> = env::args().skip(1).collect();

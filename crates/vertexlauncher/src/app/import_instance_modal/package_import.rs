@@ -1,7 +1,21 @@
 use super::*;
 
+#[path = "package_import/managed_source.rs"]
+mod managed_source;
+#[path = "package_import/mrpack_dependency_info.rs"]
+mod mrpack_dependency_info;
+#[path = "package_import/mrpack_file.rs"]
+mod mrpack_file;
+#[path = "package_import/mrpack_file_env.rs"]
+mod mrpack_file_env;
+#[path = "package_import/mrpack_manifest.rs"]
+mod mrpack_manifest;
 #[path = "package_import_curseforge.rs"]
 mod package_import_curseforge;
+#[path = "package_import/resolved_modrinth_download_source.rs"]
+mod resolved_modrinth_download_source;
+#[path = "package_import/resolved_mrpack_source.rs"]
+mod resolved_mrpack_source;
 
 use self::package_import_curseforge::find_curseforge_file;
 pub use self::package_import_curseforge::{
@@ -10,6 +24,12 @@ pub use self::package_import_curseforge::{
     prepare_curseforge_manual_downloads,
 };
 use self::package_import_curseforge::{CurseForgePackManifest, CurseForgePackMinecraft};
+use self::managed_source::ManagedSource;
+use self::mrpack_dependency_info::MrpackDependencyInfo;
+use self::mrpack_file::MrpackFile;
+use self::mrpack_manifest::MrpackManifest;
+use self::resolved_modrinth_download_source::ResolvedModrinthDownloadSource;
+use self::resolved_mrpack_source::ResolvedMrpackSource;
 #[cfg(test)]
 use self::package_import_curseforge::{
     curseforge_file_has_api_download, modrinth_fallback_queries, select_modrinth_backup_file,
@@ -259,19 +279,6 @@ pub(super) fn build_mrpack_install_state(
         source: resolved.map(|_| ManagedContentSource::Modrinth),
         base_manifest,
     }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct ResolvedMrpackSource {
-    pub(super) project_id: String,
-    pub(super) version_id: String,
-    pub(super) version_name: String,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ResolvedModrinthDownloadSource {
-    pub(super) project_id: String,
-    pub(super) version_id: String,
 }
 
 pub(super) fn resolve_mrpack_modpack_source(package_path: &Path) -> Option<ResolvedMrpackSource> {
@@ -1120,47 +1127,6 @@ pub(super) fn format_loader_label(modloader: &str, version: &str) -> String {
     } else {
         format!("{} {}", modloader.trim(), version)
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ManagedSource {
-    Modrinth,
-    CurseForge,
-}
-
-#[derive(Debug)]
-pub(super) struct MrpackDependencyInfo {
-    pub(super) game_version: String,
-    pub(super) modloader: String,
-    pub(super) modloader_version: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct MrpackManifest {
-    #[serde(default)]
-    pub(super) name: String,
-    #[serde(rename = "versionId", default)]
-    pub(super) version_id: String,
-    #[serde(default)]
-    pub(super) summary: Option<String>,
-    pub(super) dependencies: HashMap<String, String>,
-    #[serde(default)]
-    pub(super) files: Vec<MrpackFile>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct MrpackFile {
-    pub(super) path: PathBuf,
-    #[serde(default)]
-    pub(super) downloads: Vec<String>,
-    #[serde(default)]
-    pub(super) env: Option<MrpackFileEnv>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct MrpackFileEnv {
-    #[serde(default)]
-    pub(super) client: Option<String>,
 }
 
 #[cfg(test)]

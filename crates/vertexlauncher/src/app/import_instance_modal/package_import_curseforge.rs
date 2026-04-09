@@ -1,5 +1,33 @@
 use super::*;
 
+#[path = "package_import_curseforge/curseforge_concurrent_download_result.rs"]
+mod curseforge_concurrent_download_result;
+#[path = "package_import_curseforge/curseforge_download_plan.rs"]
+mod curseforge_download_plan;
+#[path = "package_import_curseforge/curseforge_manual_download_requirement.rs"]
+mod curseforge_manual_download_requirement;
+#[path = "package_import_curseforge/curseforge_pack_file.rs"]
+mod curseforge_pack_file;
+#[path = "package_import_curseforge/curseforge_pack_manifest.rs"]
+mod curseforge_pack_manifest;
+#[path = "package_import_curseforge/curseforge_pack_minecraft.rs"]
+mod curseforge_pack_minecraft;
+#[path = "package_import_curseforge/curseforge_pack_mod_loader.rs"]
+mod curseforge_pack_mod_loader;
+#[path = "package_import_curseforge/modloader_family.rs"]
+mod modloader_family;
+#[path = "package_import_curseforge/resolved_curseforge_pack_data.rs"]
+mod resolved_curseforge_pack_data;
+
+pub use self::curseforge_manual_download_requirement::CurseForgeManualDownloadRequirement;
+pub(crate) use self::curseforge_pack_manifest::CurseForgePackManifest;
+pub(crate) use self::curseforge_pack_minecraft::CurseForgePackMinecraft;
+use self::curseforge_concurrent_download_result::CurseForgeConcurrentDownloadResult;
+use self::curseforge_download_plan::CurseForgeDownloadPlan;
+use self::curseforge_pack_file::CurseForgePackFile;
+use self::modloader_family::ModloaderFamily;
+use self::resolved_curseforge_pack_data::ResolvedCurseForgePackData;
+
 pub(super) fn import_curseforge_pack(
     store: &mut InstanceStore,
     installations_root: &Path,
@@ -179,13 +207,6 @@ pub(super) fn build_curseforge_base_manifest_from_resolved(
     content_manifest
 }
 
-#[derive(Debug)]
-pub(super) struct ResolvedCurseForgePackData {
-    pub(super) dependency_info: MrpackDependencyInfo,
-    pub(super) files: HashMap<u64, curseforge::File>,
-    pub(super) projects: HashMap<u64, curseforge::Project>,
-}
-
 pub(super) fn resolve_curseforge_pack_data(
     manifest: &CurseForgePackManifest,
 ) -> Result<ResolvedCurseForgePackData, String> {
@@ -229,13 +250,6 @@ pub(super) fn resolve_curseforge_pack_data(
         files,
         projects,
     })
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct CurseForgeDownloadPlan {
-    pub(super) requirement: CurseForgeManualDownloadRequirement,
-    pub(super) download_url: String,
-    pub(super) source_label: &'static str,
 }
 
 pub(super) fn predownload_curseforge_pack_files(
@@ -360,11 +374,6 @@ pub(super) fn resolve_curseforge_download_plan(
         modloader,
     )?
     .map(|url| (url, "Modrinth backup")))
-}
-
-pub(super) struct CurseForgeConcurrentDownloadResult {
-    pub(super) staged_files: HashMap<u64, PathBuf>,
-    pub(super) failed_requirements: Vec<CurseForgeManualDownloadRequirement>,
 }
 
 pub(super) fn download_curseforge_plans_concurrently(
@@ -843,16 +852,6 @@ pub(super) fn resolve_modrinth_backup_download_url_for_curseforge_file(
     Ok(None)
 }
 
-#[derive(Clone, Debug)]
-pub struct CurseForgeManualDownloadRequirement {
-    pub project_id: u64,
-    pub file_id: u64,
-    pub project_name: String,
-    pub file_name: String,
-    pub display_name: String,
-    pub download_page_url: String,
-}
-
 pub fn prepare_curseforge_manual_downloads(
     request: &ImportRequest,
 ) -> Result<Option<Vec<CurseForgeManualDownloadRequirement>>, String> {
@@ -1087,14 +1086,6 @@ pub(super) fn modrinth_backup_filename_looks_compatible(
     true
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ModloaderFamily {
-    Fabric,
-    Forge,
-    NeoForge,
-    Quilt,
-}
-
 pub(super) fn modloader_loader_family(value: &str) -> Option<ModloaderFamily> {
     let lower = value.trim().to_ascii_lowercase();
     if lower.contains("neoforge") || lower.contains("-neo-") {
@@ -1127,43 +1118,4 @@ pub(super) fn normalized_name(value: &str) -> String {
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
         .collect()
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct CurseForgePackManifest {
-    #[serde(default)]
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) version: String,
-    #[serde(default)]
-    pub(crate) author: String,
-    pub(crate) minecraft: CurseForgePackMinecraft,
-    #[serde(default)]
-    pub(crate) files: Vec<CurseForgePackFile>,
-    #[serde(default)]
-    pub(crate) overrides: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct CurseForgePackMinecraft {
-    pub(crate) version: String,
-    #[serde(rename = "modLoaders", default)]
-    pub(crate) mod_loaders: Vec<CurseForgePackModLoader>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct CurseForgePackModLoader {
-    pub(crate) id: String,
-    #[serde(default)]
-    pub(crate) primary: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct CurseForgePackFile {
-    #[serde(rename = "projectID")]
-    pub(crate) project_id: u64,
-    #[serde(rename = "fileID")]
-    pub(crate) file_id: u64,
-    #[serde(default)]
-    pub(crate) required: bool,
 }

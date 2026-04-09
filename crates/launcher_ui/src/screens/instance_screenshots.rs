@@ -1,28 +1,18 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Default)]
-struct InstanceScreenshotTileAction {
-    open_viewer: bool,
-    request_delete: bool,
-}
+#[path = "instance_screenshots/instance_screenshot_overlay_action.rs"]
+mod instance_screenshot_overlay_action;
+#[path = "instance_screenshots/instance_screenshot_overlay_button_result.rs"]
+mod instance_screenshot_overlay_button_result;
+#[path = "instance_screenshots/instance_screenshot_overlay_result.rs"]
+mod instance_screenshot_overlay_result;
+#[path = "instance_screenshots/instance_screenshot_tile_action.rs"]
+mod instance_screenshot_tile_action;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InstanceScreenshotOverlayAction {
-    Copy,
-    Delete,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct InstanceScreenshotOverlayResult {
-    action: Option<InstanceScreenshotOverlayAction>,
-    contains_pointer: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct InstanceScreenshotOverlayButtonResult {
-    clicked: bool,
-    contains_pointer: bool,
-}
+use self::instance_screenshot_overlay_action::InstanceScreenshotOverlayAction;
+use self::instance_screenshot_overlay_button_result::InstanceScreenshotOverlayButtonResult;
+use self::instance_screenshot_overlay_result::InstanceScreenshotOverlayResult;
+use self::instance_screenshot_tile_action::InstanceScreenshotTileAction;
 
 pub(super) fn render_instance_screenshot_gallery(
     ui: &mut Ui,
