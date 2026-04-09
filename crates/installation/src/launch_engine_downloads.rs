@@ -451,8 +451,8 @@ impl DownloadTelemetry {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProgressEtaPoint {
-    fraction: f64,
-    at_millis: u64,
+    pub(crate) fraction: f64,
+    pub(crate) at_millis: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -462,7 +462,7 @@ pub(crate) struct ProgressEtaState {
 }
 
 impl ProgressEtaState {
-    fn observe(&mut self, point: ProgressEtaPoint) -> Option<u64> {
+    pub(crate) fn observe(&mut self, point: ProgressEtaPoint) -> Option<u64> {
         let fraction = point.fraction.clamp(0.0, 1.0);
         if fraction >= 1.0 {
             self.last_point = Some(point);

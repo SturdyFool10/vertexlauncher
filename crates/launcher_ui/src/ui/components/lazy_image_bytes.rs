@@ -241,15 +241,14 @@ impl LazyImageBytes {
     }
 
     pub fn retain_loaded(&mut self, _ctx: &egui::Context, keep: &HashSet<String>) {
-        let evicted = self.states.write(|state| {
-            state.retain(|key, entry| {
-                keep.contains(key.as_str())
-                    || matches!(entry.value.state, LazyImageBytesState::Loading)
-            })
+        let frame_index = self.frame_index;
+        let _ = self.states.write(|state| {
+            for key in keep {
+                if let Some(entry) = state.touch(key) {
+                    entry.value.last_touched_frame = frame_index;
+                }
+            }
         });
-        for (key, _) in evicted {
-            image_textures::evict_source_key(key.as_str());
-        }
     }
 
     pub fn clear(&mut self, _ctx: &egui::Context) {
