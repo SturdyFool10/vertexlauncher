@@ -4,16 +4,16 @@ use super::*;
 mod package_import_curseforge;
 
 use self::package_import_curseforge::find_curseforge_file;
-#[cfg(test)]
-use self::package_import_curseforge::{
-    curseforge_file_has_api_download, modrinth_fallback_queries, select_modrinth_backup_file,
-};
 pub use self::package_import_curseforge::{
     CurseForgeManualDownloadRequirement, attach_curseforge_modpack_install_state,
     format_curseforge_download_url_error, prepare_curseforge_manual_download_for_file,
     prepare_curseforge_manual_downloads,
 };
 use self::package_import_curseforge::{CurseForgePackManifest, CurseForgePackMinecraft};
+#[cfg(test)]
+use self::package_import_curseforge::{
+    curseforge_file_has_api_download, modrinth_fallback_queries, select_modrinth_backup_file,
+};
 
 pub(super) fn import_vtmpack(
     store: &mut InstanceStore,
