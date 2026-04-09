@@ -22,6 +22,8 @@ use crate::{
     ui::{components::image_textures, style},
 };
 
+#[path = "skins_cape_grid.rs"]
+mod skins_cape_grid;
 #[path = "skins_expressions.rs"]
 mod skins_expressions;
 #[path = "skins_preview.rs"]
@@ -30,6 +32,7 @@ mod skins_preview;
 mod skins_preview_gpu;
 #[path = "skins_state.rs"]
 mod skins_state;
+use self::skins_cape_grid::*;
 use self::skins_expressions::*;
 use self::skins_preview::*;
 use self::skins_preview_gpu::*;
