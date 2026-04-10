@@ -12,32 +12,37 @@ impl SkinPreviewPostProcessWgpuResources {
         let scene_shader = create_post_process_shader_module(
             device,
             "skins-preview-post-scene-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/skin_preview_post_scene.wgsl")),
+            include_str!("../shaders/skin_preview_post_scene.wgsl"),
         );
         let accumulate_shader = create_post_process_shader_module(
             device,
             "skins-preview-accumulate-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/skin_preview_accumulate.wgsl")),
+            include_str!("../shaders/skin_preview_accumulate.wgsl"),
         );
         let fxaa_shader = create_post_process_shader_module(
             device,
             "skins-preview-fxaa-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/skin_preview_fxaa.wgsl")),
+            include_str!("../shaders/skin_preview_fxaa.wgsl"),
+        );
+        let ssao_shader = create_post_process_shader_module(
+            device,
+            "skins-preview-ssao-shader",
+            include_str!("../shaders/skin_preview_ssao.wgsl"),
         );
         let smaa_shader = create_post_process_shader_module(
             device,
             "skins-preview-smaa-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/skin_preview_smaa.wgsl")),
+            include_str!("../shaders/skin_preview_smaa.wgsl"),
         );
         let taa_shader = create_post_process_shader_module(
             device,
             "skins-preview-taa-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/skin_preview_taa.wgsl")),
+            include_str!("../shaders/skin_preview_taa.wgsl"),
         );
         let present_shader = create_post_process_shader_module(
             device,
             "skins-preview-present-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/skin_preview_present.wgsl")),
+            include_str!("../shaders/skin_preview_present.wgsl"),
         );
 
         let texture_bind_group_layout =
@@ -64,6 +69,20 @@ impl SkinPreviewPostProcessWgpuResources {
             });
         let texture_sampler =
             create_skin_preview_sampler(device, "skins-preview-post-texture-sampler");
+        let depth_texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("skins-preview-post-depth-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    count: None,
+                }],
+            });
         let scene_uniform_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("skins-preview-post-scene-uniform-layout"),
@@ -187,7 +206,10 @@ impl SkinPreviewPostProcessWgpuResources {
 
         let accumulate_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("skins-preview-accumulate-layout"),
-            bind_group_layouts: &[Some(&texture_bind_group_layout), Some(&scalar_uniform_layout)],
+            bind_group_layouts: &[
+                Some(&texture_bind_group_layout),
+                Some(&scalar_uniform_layout),
+            ],
             immediate_size: 0,
         });
         let accumulate_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -269,6 +291,40 @@ impl SkinPreviewPostProcessWgpuResources {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fxaa_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: OFFSCREEN_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let ssao_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("skins-preview-ssao-layout"),
+            bind_group_layouts: &[
+                Some(&texture_bind_group_layout),
+                Some(&depth_texture_bind_group_layout),
+            ],
+            immediate_size: 0,
+        });
+        let ssao_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("skins-preview-ssao-pipeline"),
+            layout: Some(&ssao_layout),
+            vertex: wgpu::VertexState {
+                module: &ssao_shader,
+                entry_point: Some("vs_fullscreen"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ssao_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -417,6 +473,14 @@ impl SkinPreviewPostProcessWgpuResources {
             scene_msaa_samples.max(1),
             "skins-preview-scene-depth",
         );
+        let scene_depth_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("skins-preview-scene-depth"),
+            layout: &depth_texture_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&scene_depth_view),
+            }],
+        });
         let (scene_msaa_texture, scene_msaa_view) = if scene_msaa_samples > 1 {
             let (texture, view) = create_preview_color_texture(
                 device,
@@ -434,11 +498,13 @@ impl SkinPreviewPostProcessWgpuResources {
             shader_modules: SkinPreviewPostProcessShaderModules {
                 scene_pipeline,
                 accumulate_pipeline,
+                ssao_pipeline,
                 smaa_pipeline,
                 fxaa_pipeline,
                 taa_pipeline,
                 present_pipeline,
                 texture_bind_group_layout,
+                depth_texture_bind_group_layout,
                 texture_sampler,
             },
             uniforms: SkinPreviewPostProcessUniformResources {
@@ -460,6 +526,7 @@ impl SkinPreviewPostProcessWgpuResources {
                 scene_msaa_view,
                 scene_depth_texture,
                 scene_depth_view,
+                scene_depth_bind_group,
                 post_process_texture,
                 post_process_view,
                 post_process_bind_group,
@@ -470,6 +537,11 @@ impl SkinPreviewPostProcessWgpuResources {
                 render_target_size: [1, 1],
                 present_source: PresentSource::Accumulation,
             },
+            vertex3d_runtime: SkinPreviewVertex3dRuntime::new(
+                device,
+                target_format,
+                scene_msaa_samples.max(1),
+            ),
             target_format,
             scene_msaa_samples: scene_msaa_samples.max(1),
             present_msaa_samples: present_msaa_samples.max(1),

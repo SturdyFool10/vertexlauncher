@@ -61,7 +61,11 @@ impl Camera {
     /// Transform a point from world space to camera/view space.
     pub fn world_to_view(self, world: Vec3) -> Vec3 {
         let rel = world - self.position;
-        Vec3::new(rel.dot(self.right), rel.dot(self.up), -rel.dot(self.forward))
+        Vec3::new(
+            rel.dot(self.right),
+            rel.dot(self.up),
+            -rel.dot(self.forward),
+        )
     }
 
     /// Transform a point from camera/view space to world space.
@@ -195,7 +199,14 @@ impl Projection {
     }
 
     /// Create an orthographic projection.
-    pub fn orthographic(_left: f32, _right: f32, _top: f32, _bottom: f32, near: f32, _far: f32) -> Self {
+    pub fn orthographic(
+        _left: f32,
+        _right: f32,
+        _top: f32,
+        _bottom: f32,
+        near: f32,
+        _far: f32,
+    ) -> Self {
         // For now, we'll use perspective - orthographic would need a different struct or enum
         Self::perspective(std::f32::consts::FRAC_PI_4, near)
     }

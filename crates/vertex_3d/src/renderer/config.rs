@@ -97,16 +97,7 @@ impl RenderTargetScale {
 }
 
 /// Lifecycle hint for attachments the graph may want to keep across frames.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentLifecycle {
     #[default]
@@ -158,7 +149,10 @@ impl ShaderGraphDescriptor {
         self
     }
 
-    pub fn inferred_from_program(program: &ShaderProgram, default_scale: RenderTargetScale) -> Self {
+    pub fn inferred_from_program(
+        program: &ShaderProgram,
+        default_scale: RenderTargetScale,
+    ) -> Self {
         let mut graph = Self::new();
         for target in &program.render_targets {
             graph = graph.with_attachment(GraphAttachment::from_render_target_config(
@@ -203,10 +197,7 @@ impl GraphAttachment {
         }
     }
 
-    pub fn from_render_target_config(
-        target: RenderTargetConfig,
-        scale: RenderTargetScale,
-    ) -> Self {
+    pub fn from_render_target_config(target: RenderTargetConfig, scale: RenderTargetScale) -> Self {
         Self {
             handle: RenderTargetHandle::new(target.r#type.name()),
             target,
@@ -411,7 +402,8 @@ impl RendererRuntime {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) -> RendererRebuildFlags {
-        if self.config.surface.width == width.max(1) && self.config.surface.height == height.max(1) {
+        if self.config.surface.width == width.max(1) && self.config.surface.height == height.max(1)
+        {
             return RendererRebuildFlags::NONE;
         }
         self.config.set_resolution(width, height);
@@ -561,8 +553,8 @@ pub fn format_for_precision(
 mod tests {
     use super::*;
     use crate::shader::{
-        ReflectionSnapshot, ReflectedRenderTarget, ReflectedResource, ReflectedResourceType,
-        ReflectedStage, RenderTargetConfig, RenderTargetType, ShaderKind, ShaderProgram,
+        ReflectedRenderTarget, ReflectedResource, ReflectedResourceType, ReflectedStage,
+        ReflectionSnapshot, RenderTargetConfig, RenderTargetType, ShaderKind, ShaderProgram,
     };
 
     #[test]
@@ -582,14 +574,18 @@ mod tests {
         ]);
         let config = RendererConfig::for_program(SurfaceConfig::default(), &program);
         let runtime = RendererRuntime::new(config);
-        assert!(runtime
-            .derived()
-            .attachment(&RenderTargetHandle::new("albedo"))
-            .is_some());
-        assert!(runtime
-            .derived()
-            .attachment(&RenderTargetHandle::new("depth"))
-            .is_some());
+        assert!(
+            runtime
+                .derived()
+                .attachment(&RenderTargetHandle::new("albedo"))
+                .is_some()
+        );
+        assert!(
+            runtime
+                .derived()
+                .attachment(&RenderTargetHandle::new("depth"))
+                .is_some()
+        );
     }
 
     #[test]

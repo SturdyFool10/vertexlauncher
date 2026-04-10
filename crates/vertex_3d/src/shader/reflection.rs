@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     PipelineFlags, RenderTargetConfig, RenderTargetType, ResourceBinding, ResourceType, ShaderKind,
 };
-use crate::renderer::{AttachmentLifecycle, GraphAttachment, RenderTargetHandle, RenderTargetScale};
+use crate::renderer::{
+    AttachmentLifecycle, GraphAttachment, RenderTargetHandle, RenderTargetScale,
+};
 
 /// Serializable snapshot of a compiled shader program's reflection data.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -32,6 +34,23 @@ impl ReflectionSnapshot {
         serde_json::to_string_pretty(self)
     }
 
+    pub fn from_slang_source(source: &str) -> Self {
+        let stages = parse_stages(source);
+        let stage_bodies = parse_stage_bodies(source, &stages);
+        let mut resources = parse_resources(source);
+        for resource in &mut resources {
+            resource.stages = stage_bodies
+                .iter()
+                .filter_map(|(kind, body)| body.contains(resource.name.as_str()).then_some(*kind))
+                .collect();
+        }
+        Self {
+            stages,
+            resources,
+            render_targets: parse_target_annotations(source),
+        }
+    }
+
     pub fn stage(&self, kind: ShaderKind) -> Option<&ReflectedStage> {
         self.stages.iter().find(|stage| stage.kind == kind)
     }
@@ -40,15 +59,12 @@ impl ReflectionSnapshot {
         &self,
         kind: ShaderKind,
     ) -> impl Iterator<Item = &ReflectedResource> + '_ {
-        self.resources.iter().filter(move |resource| {
-            resource.stages.is_empty() || resource.stages.contains(&kind)
-        })
+        self.resources
+            .iter()
+            .filter(move |resource| resource.stages.is_empty() || resource.stages.contains(&kind))
     }
 
-    pub fn inferred_render_targets(
-        &self,
-        fallback_size: (u32, u32),
-    ) -> Vec<RenderTargetConfig> {
+    pub fn inferred_render_targets(&self, fallback_size: (u32, u32)) -> Vec<RenderTargetConfig> {
         self.render_targets
             .iter()
             .map(|target| target.to_render_target_config(fallback_size))
@@ -109,11 +125,7 @@ pub struct ReflectedResource {
 }
 
 impl ReflectedResource {
-    pub fn new(
-        name: impl Into<String>,
-        slot: u32,
-        resource_type: ReflectedResourceType,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, slot: u32, resource_type: ReflectedResourceType) -> Self {
         Self {
             name: name.into(),
             slot,
@@ -241,4 +253,205 @@ impl ReflectedRenderTarget {
 
 fn default_pipeline_flags() -> u32 {
     PipelineFlags::default().bits()
+}
+
+fn parse_stages(source: &str) -> Vec<ReflectedStage> {
+    let mut stages = Vec::new();
+    let lines: Vec<&str> = source.lines().collect();
+    for index in 0..lines.len() {
+        let line = lines[index].trim();
+        let Some(kind) = parse_shader_attribute(line) else {
+            continue;
+        };
+        for candidate in lines.iter().skip(index + 1) {
+            let candidate = candidate.trim();
+            if candidate.is_empty() || candidate.starts_with("//") {
+                continue;
+            }
+            if let Some(entry_point) = parse_function_name(candidate) {
+                stages.push(ReflectedStage::new(kind, entry_point));
+                break;
+            }
+        }
+    }
+    stages
+}
+
+fn parse_stage_bodies(source: &str, stages: &[ReflectedStage]) -> Vec<(ShaderKind, String)> {
+    stages
+        .iter()
+        .filter_map(|stage| {
+            let function_marker = format!("{}(", stage.entry_point);
+            let start = source.find(&function_marker)?;
+            let brace_start = source[start..].find('{')? + start;
+            let brace_end = find_matching_brace(source, brace_start)?;
+            Some((stage.kind, source[brace_start..=brace_end].to_string()))
+        })
+        .collect()
+}
+
+fn parse_resources(source: &str) -> Vec<ReflectedResource> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if !line.starts_with("[[vk::binding(") {
+                return None;
+            }
+            let binding_end = line.find(")]]")?;
+            let binding_spec = &line["[[vk::binding(".len()..binding_end];
+            let mut binding_parts = binding_spec.split(',').map(str::trim);
+            let slot = binding_parts.next()?.parse().ok()?;
+            let space = binding_parts.next()?.parse().ok()?;
+
+            let declaration = line[binding_end + 3..].trim();
+            let declaration = declaration.strip_suffix(';').unwrap_or(declaration);
+            let mut tokens = declaration.split_whitespace();
+            let type_token = tokens.next()?;
+            let name = tokens.next()?.trim().to_string();
+            let (resource_type, texture_dimension) = classify_resource_type(type_token);
+
+            Some(ReflectedResource {
+                name,
+                slot,
+                space,
+                resource_type,
+                stages: Vec::new(),
+                texture_dimension,
+            })
+        })
+        .collect()
+}
+
+fn parse_target_annotations(source: &str) -> Vec<ReflectedRenderTarget> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let annotation = line.strip_prefix("// @vertex3d.target ")?;
+            let mut target = ReflectedRenderTarget::new("");
+            for pair in annotation.split_whitespace() {
+                let Some((key, value)) = pair.split_once('=') else {
+                    continue;
+                };
+                match key {
+                    "handle" => target.handle = value.to_string(),
+                    "type" => target.target_type = Some(value.to_string()),
+                    "width" => target.width = value.parse().ok(),
+                    "height" => target.height = value.parse().ok(),
+                    "mips" => target.mip_levels = value.parse().ok(),
+                    "samples" => target.samples = value.parse().ok(),
+                    "scale" => target.scale = value.parse().ok(),
+                    "lifecycle" => {
+                        target.lifecycle = match value {
+                            "persistent" => Some(AttachmentLifecycle::Persistent),
+                            "transient" => Some(AttachmentLifecycle::Transient),
+                            "history" => Some(AttachmentLifecycle::History),
+                            _ => None,
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (!target.handle.is_empty()).then_some(target)
+        })
+        .collect()
+}
+
+fn parse_shader_attribute(line: &str) -> Option<ShaderKind> {
+    let value = line.strip_prefix("[shader(\"")?;
+    let value = value.strip_suffix("\")]")?;
+    match value {
+        "vertex" => Some(ShaderKind::Vertex),
+        "fragment" => Some(ShaderKind::Fragment),
+        "compute" => Some(ShaderKind::Compute),
+        _ => None,
+    }
+}
+
+fn parse_function_name(line: &str) -> Option<String> {
+    let open = line.find('(')?;
+    let prefix = &line[..open];
+    prefix.split_whitespace().last().map(str::to_string)
+}
+
+fn find_matching_brace(source: &str, brace_start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, ch) in source[brace_start..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(brace_start + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn classify_resource_type(
+    type_token: &str,
+) -> (ReflectedResourceType, Option<ReflectedTextureDimension>) {
+    if type_token.starts_with("ConstantBuffer<") {
+        (ReflectedResourceType::UniformBuffer, None)
+    } else if type_token.starts_with("StructuredBuffer<")
+        || type_token.starts_with("RWStructuredBuffer<")
+    {
+        (ReflectedResourceType::StorageBuffer, None)
+    } else if type_token.starts_with("SamplerState") {
+        (ReflectedResourceType::Sampler, None)
+    } else if type_token.starts_with("Texture1D") {
+        (
+            ReflectedResourceType::Texture,
+            Some(ReflectedTextureDimension::D1),
+        )
+    } else if type_token.starts_with("Texture2DArray") {
+        (
+            ReflectedResourceType::Texture,
+            Some(ReflectedTextureDimension::D2Array),
+        )
+    } else if type_token.starts_with("Texture2D") {
+        (
+            ReflectedResourceType::Texture,
+            Some(ReflectedTextureDimension::D2),
+        )
+    } else if type_token.starts_with("TextureCube") {
+        (
+            ReflectedResourceType::Texture,
+            Some(ReflectedTextureDimension::Cube),
+        )
+    } else if type_token.starts_with("Texture3D") {
+        (
+            ReflectedResourceType::Texture,
+            Some(ReflectedTextureDimension::D3),
+        )
+    } else {
+        (ReflectedResourceType::Texture, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_slang_source_in_memory() {
+        let source = r#"
+// @vertex3d.target handle=accumulation type=lighting lifecycle=transient
+[[vk::binding(0, 0)]] Texture2D<float4> source_tex;
+[[vk::binding(1, 0)]] SamplerState source_sampler;
+[shader("vertex")]
+FullscreenOut vs_main(uint vertex_index : SV_VertexID) { return (FullscreenOut)0; }
+[shader("fragment")]
+float4 fs_main(float4 pos : SV_Position) : SV_Target { return source_tex.Load(int3(0,0,0)); }
+"#;
+        let snapshot = ReflectionSnapshot::from_slang_source(source);
+        assert_eq!(snapshot.stages.len(), 2);
+        assert_eq!(snapshot.resources.len(), 2);
+        assert_eq!(snapshot.render_targets.len(), 1);
+        assert_eq!(snapshot.render_targets[0].handle, "accumulation");
+    }
 }

@@ -48,7 +48,7 @@ pub use pipeline::{
 };
 pub use program::ShaderProgram;
 pub use reflection::{
-    ReflectionSnapshot, ReflectedRenderTarget, ReflectedResource, ReflectedResourceType,
-    ReflectedStage, ReflectedTextureDimension,
+    ReflectedRenderTarget, ReflectedResource, ReflectedResourceType, ReflectedStage,
+    ReflectedTextureDimension, ReflectionSnapshot,
 };
 pub use stage::ShaderStage;

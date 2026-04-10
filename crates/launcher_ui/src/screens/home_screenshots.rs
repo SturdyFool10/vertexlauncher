@@ -1076,7 +1076,7 @@ pub(super) fn render_delete_screenshot_modal(
         return;
     };
 
-    let danger = ctx.style().visuals.error_fg_color;
+    let danger = ctx.global_style().visuals.error_fg_color;
     let mut cancel_requested = false;
     let mut delete_requested = false;
     let request_cancel_focus = modal_default_focus_requested(

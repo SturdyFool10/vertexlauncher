@@ -11,6 +11,7 @@ pub(super) struct SkinPreviewPostProcessRenderTargets {
     pub(super) scene_msaa_view: Option<wgpu::TextureView>,
     pub(super) scene_depth_texture: wgpu::Texture,
     pub(super) scene_depth_view: wgpu::TextureView,
+    pub(super) scene_depth_bind_group: wgpu::BindGroup,
     pub(super) post_process_texture: wgpu::Texture,
     pub(super) post_process_view: wgpu::TextureView,
     pub(super) post_process_bind_group: wgpu::BindGroup,

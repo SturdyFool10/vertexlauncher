@@ -1343,7 +1343,7 @@ fn dropdown(
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             let mut clip_rect = ui.clip_rect();
-            clip_rect.min.y = clip_rect.min.y.max(ui.ctx().available_rect().top());
+            clip_rect.min.y = clip_rect.min.y.max(ui.ctx().content_rect().top());
             ui.set_clip_rect(clip_rect);
             ui.set_width(popup_width);
 
@@ -1363,7 +1363,7 @@ fn dropdown(
                 ..ButtonOptions::default()
             };
 
-            let max_popup_height = (ui.ctx().available_rect().height() * 0.58)
+            let max_popup_height = (ui.ctx().content_rect().height() * 0.58)
                 .clamp(metrics.control_height * 4.0, metrics.control_height * 14.0);
             let row_height = metrics.control_height + ui.spacing().item_spacing.y;
             let scroll_output = egui::ScrollArea::vertical()
@@ -1549,7 +1549,7 @@ fn searchable_dropdown(
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             let mut clip_rect = ui.clip_rect();
-            clip_rect.min.y = clip_rect.min.y.max(ui.ctx().available_rect().top());
+            clip_rect.min.y = clip_rect.min.y.max(ui.ctx().content_rect().top());
             ui.set_clip_rect(clip_rect);
             ui.set_width(popup_width);
 
@@ -1604,7 +1604,7 @@ fn searchable_dropdown(
                 ..ButtonOptions::default()
             };
 
-            let max_popup_height = (ui.ctx().available_rect().height() * 0.58)
+            let max_popup_height = (ui.ctx().content_rect().height() * 0.58)
                 .clamp(metrics.control_height * 4.0, metrics.control_height * 14.0);
             let row_height = metrics.control_height + ui.spacing().item_spacing.y;
 

@@ -22,11 +22,12 @@ pub use glam::{Mat4, Quat, Vec2, Vec3};
 pub use camera::Camera;
 pub use mesh::{Mesh, Vertex};
 pub use renderer::{
-    AdapterPreference, AttachmentLifecycle, DerivedRendererState, GraphAttachment,
+    AdapterPreference, AttachmentLifecycle, AttachmentPool, AttachmentTexture, BindGroupBuildError,
     DeferredPassRuntime, DeferredRenderPipelineTemplate, DeferredRenderer, DeferredRendererError,
-    FrameGraph, FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPlan, FrameGraphUsage,
-    RenderTargetHandle, RenderTargetScale, RendererConfig, RendererRebuildFlags, RendererRuntime,
-    ShaderGraphDescriptor, SurfaceConfig,
+    DerivedRendererState, FrameGraph, FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPlan,
+    FrameGraphUsage, GraphAttachment, NamedBindGroup, ReflectionBindGroupSet, RenderTargetHandle,
+    RenderTargetScale, RendererConfig, RendererRebuildFlags, RendererRuntime,
+    ShaderBindingResource, ShaderGraphDescriptor, ShaderResourceTable, SurfaceConfig,
 };
 
 // Re-export shader system types
@@ -34,9 +35,10 @@ pub use shader::{
     BindGroupLayoutPlan, BindingTypePlan, BufferPrecision, BuiltPipelineLayout, Colorspace,
     CompiledShaderProgram, CompiledShaderStage, GBufferType, HdrConfig, PipelineFlags,
     PipelineLayoutPlan, PipelineLayoutPlanError, PipelineResourceBindingPlan,
-    ReflectionPassthroughCompiler, ReflectionSnapshot, ReflectedRenderTarget, ReflectedResource,
-    ReflectedResourceType, ReflectedStage, ReflectedTextureDimension, RenderTargetConfig,
-    RenderTargetType, ResourceBinding, ResourceType, ShaderBackendTarget, ShaderCompileError,
-    ShaderCompileRequest, ShaderCompileSource, ShaderCompiler, ShaderKind, ShaderProgram,
-    ShaderSourceLanguage, ShaderStage, ShaderStageConfig, SlangCompiler, StageSource,
+    ReflectedRenderTarget, ReflectedResource, ReflectedResourceType, ReflectedStage,
+    ReflectedTextureDimension, ReflectionPassthroughCompiler, ReflectionSnapshot,
+    RenderTargetConfig, RenderTargetType, ResourceBinding, ResourceType, ShaderBackendTarget,
+    ShaderCompileError, ShaderCompileRequest, ShaderCompileSource, ShaderCompiler, ShaderKind,
+    ShaderProgram, ShaderSourceLanguage, ShaderStage, ShaderStageConfig, SlangCompiler,
+    StageSource,
 };

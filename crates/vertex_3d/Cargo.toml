@@ -5,6 +5,10 @@ edition = "2024"
 description = "A reusable 3D rendering framework with shaders, meshes, and configurable post-processing pipeline"
 license = "MIT"
 
+[features]
+default = []
+slang-api = ["dep:slang"]
+
 [dependencies]
 egui.workspace = true
 image.workspace = true
@@ -14,3 +18,4 @@ serde_json.workspace = true
 bytemuck = { version = "1.23", features = ["derive"] }
 glam = "0.29"
 thiserror = "2.0"
+slang = { package = "shader-slang", version = "0.1.0", optional = true }

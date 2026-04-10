@@ -283,7 +283,7 @@ pub mod egui_integration {
 
         ctx.set_fonts(defs);
 
-        ctx.style_mut(|s| {
+        ctx.global_style_mut(|s| {
             s.text_styles.insert(
                 TextStyle::Body,
                 FontId::new(size_pt, FontFamily::Proportional),

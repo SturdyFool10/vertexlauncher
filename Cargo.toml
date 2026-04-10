@@ -86,6 +86,7 @@ textui_egui = { path = "crates/textui_egui" }
 vtmpack = { path = "crates/vtmpack" }
 vertex_constants = { path = "crates/vertex_constants" }
 vertex_3d_build = { path = "crates/vertex_3d_build" }
+vertex_3d = { path = "crates/vertex_3d" }
 
 [profile.dev]
 # Your crates (workspace members): keep normal dev behavior

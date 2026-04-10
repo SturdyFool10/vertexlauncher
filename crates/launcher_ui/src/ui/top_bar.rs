@@ -3,8 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
 use egui::{
-    self, Align, Context, CursorIcon, Layout, ResizeDirection, Sense, TopBottomPanel,
-    ViewportCommand,
+    self, Align, Context, CursorIcon, Layout, Panel, ResizeDirection, Sense, ViewportCommand,
 };
 use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 use shared_lru::ThreadSafeLru;
@@ -72,6 +71,7 @@ pub struct ProfileUiModel<'a> {
     pub device_code_prompt: Option<&'a auth::DeviceCodePrompt>,
 }
 
+#[allow(deprecated)]
 pub fn render(
     ctx: &Context,
     section_label: &str,
@@ -80,17 +80,22 @@ pub fn render(
 ) -> TopBarOutput {
     let mut output = TopBarOutput::default();
 
-    TopBottomPanel::top("window_top_bar")
-        .exact_height(TOP_BAR_HEIGHT)
+    Panel::top("window_top_bar")
+        .exact_size(TOP_BAR_HEIGHT)
         .resizable(false)
         .frame(
             egui::Frame::new()
-                .fill(ctx.style().visuals.panel_fill)
+                .fill(ctx.global_style().visuals.panel_fill)
                 .inner_margin(egui::Margin::ZERO)
                 .outer_margin(egui::Margin::ZERO)
                 .stroke(egui::Stroke::new(
                     1.0,
-                    ctx.style().visuals.widgets.noninteractive.bg_stroke.color,
+                    ctx.global_style()
+                        .visuals
+                        .widgets
+                        .noninteractive
+                        .bg_stroke
+                        .color,
                 )),
         )
         .show(ctx, |ui| {

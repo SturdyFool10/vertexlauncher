@@ -1,4 +1,4 @@
-use egui::{Context, ScrollArea, SidePanel, Ui};
+use egui::{Context, Panel, ScrollArea, Ui};
 use std::path::PathBuf;
 use textui::TextUi;
 use textui_egui::prelude::*;
@@ -46,6 +46,7 @@ pub struct SidebarOutput {
     pub instance_context_actions: Vec<(String, InstanceContextAction)>,
 }
 
+#[allow(deprecated)]
 pub fn render(
     ctx: &Context,
     active_screen: AppScreen,
@@ -60,17 +61,22 @@ pub fn render(
     let content_width = (sidebar_width - (horizontal_padding * 2.0)).max(1.0);
     let layout = SidebarLayout { nav_icon_width };
 
-    SidePanel::left("task_bar_left")
+    Panel::left("task_bar_left")
         .resizable(false)
-        .exact_width(sidebar_width)
+        .exact_size(sidebar_width)
         .frame(
             egui::Frame::new()
-                .fill(ctx.style().visuals.panel_fill)
+                .fill(ctx.global_style().visuals.panel_fill)
                 .inner_margin(egui::Margin::ZERO)
                 .outer_margin(egui::Margin::ZERO)
                 .stroke(egui::Stroke::new(
                     1.0,
-                    ctx.style().visuals.widgets.noninteractive.bg_stroke.color,
+                    ctx.global_style()
+                        .visuals
+                        .widgets
+                        .noninteractive
+                        .bg_stroke
+                        .color,
                 )),
         )
         .show_separator_line(false)

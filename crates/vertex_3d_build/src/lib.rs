@@ -106,7 +106,10 @@ fn parse_slang_reflection(source: &str) -> ReflectionSnapshot {
     for resource in &mut resources {
         resource.stages = stage_bodies
             .iter()
-            .filter_map(|(kind, body)| body.contains(resource.name.as_str()).then_some(kind.clone()))
+            .filter_map(|(kind, body)| {
+                body.contains(resource.name.as_str())
+                    .then_some(kind.clone())
+            })
             .collect();
     }
 
@@ -261,7 +264,9 @@ fn find_matching_brace(source: &str, brace_start: usize) -> Option<usize> {
 fn classify_resource_type(type_token: &str) -> (&'static str, Option<&'static str>) {
     if type_token.starts_with("ConstantBuffer<") {
         ("uniform_buffer", None)
-    } else if type_token.starts_with("StructuredBuffer<") || type_token.starts_with("RWStructuredBuffer<") {
+    } else if type_token.starts_with("StructuredBuffer<")
+        || type_token.starts_with("RWStructuredBuffer<")
+    {
         ("storage_buffer", None)
     } else if type_token.starts_with("SamplerState") {
         ("sampler", None)
@@ -299,6 +304,11 @@ float4 fs_main(float4 pos : SV_Position) : SV_Target { return source_tex.Load(in
         assert_eq!(snapshot.stages.len(), 2);
         assert_eq!(snapshot.resources.len(), 2);
         assert_eq!(snapshot.render_targets[0].handle, "accumulation");
-        assert!(snapshot.resources.iter().any(|resource| resource.name == "source_tex"));
+        assert!(
+            snapshot
+                .resources
+                .iter()
+                .any(|resource| resource.name == "source_tex")
+        );
     }
 }

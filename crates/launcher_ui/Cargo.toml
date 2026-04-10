@@ -43,6 +43,7 @@ qrcode.workspace = true
 tar = "*"
 xz2 = "*"
 vtmpack.workspace = true
+vertex_3d.workspace = true
 zip = { version = "*", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
@@ -60,6 +61,3 @@ wayland-protocols-plasma = { version = "*", default-features = false, features =
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "*"
-
-[build-dependencies]
-vertex_3d_build.workspace = true

@@ -28,7 +28,9 @@ impl PipelineLayoutPlan {
                     resource: resource.name.clone(),
                 });
             }
-            group.push(PipelineResourceBindingPlan::from_reflected_resource(resource));
+            group.push(PipelineResourceBindingPlan::from_reflected_resource(
+                resource,
+            ));
         }
 
         let bind_groups = groups
@@ -109,9 +111,12 @@ pub struct PipelineResourceBindingPlan {
 
 impl PipelineResourceBindingPlan {
     pub fn from_reflected_resource(resource: &ReflectedResource) -> Self {
-        let visibility = resource.stages.iter().fold(wgpu::ShaderStages::NONE, |acc, stage| {
-            acc | wgpu::ShaderStages::from_bits_retain(stage.wgpu_stage_flags())
-        });
+        let visibility = resource
+            .stages
+            .iter()
+            .fold(wgpu::ShaderStages::NONE, |acc, stage| {
+                acc | wgpu::ShaderStages::from_bits_retain(stage.wgpu_stage_flags())
+            });
         Self {
             name: resource.name.clone(),
             space: resource.space,
@@ -134,7 +139,9 @@ impl PipelineResourceBindingPlan {
         Ok(wgpu::BindGroupLayoutEntry {
             binding: self.binding,
             visibility: self.visibility,
-            ty: self.binding_type.to_wgpu_binding_type(self.texture_dimension)?,
+            ty: self
+                .binding_type
+                .to_wgpu_binding_type(self.texture_dimension)?,
             count: None,
         })
     }
@@ -197,7 +204,7 @@ impl BindingTypePlan {
                 wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)
             }
             BindingTypePlan::CombinedTextureSampler => {
-                return Err(PipelineLayoutPlanError::UnsupportedCombinedSampler)
+                return Err(PipelineLayoutPlanError::UnsupportedCombinedSampler);
             }
         })
     }
@@ -224,7 +231,9 @@ pub enum PipelineLayoutPlanError {
         resource: String,
     },
 
-    #[error("combined texture samplers require target-specific lowering before wgpu layout creation")]
+    #[error(
+        "combined texture samplers require target-specific lowering before wgpu layout creation"
+    )]
     UnsupportedCombinedSampler,
 }
 

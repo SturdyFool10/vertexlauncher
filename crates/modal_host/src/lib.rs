@@ -353,7 +353,7 @@ pub fn show_scrim_with_order(
 }
 
 pub fn window_frame(ctx: &Context) -> Frame {
-    let base = ctx.style().visuals.window_fill;
+    let base = ctx.global_style().visuals.window_fill;
     Frame::new()
         .fill(Color32::from_rgba_premultiplied(
             base.r(),
@@ -363,7 +363,7 @@ pub fn window_frame(ctx: &Context) -> Frame {
         ))
         .stroke(Stroke::new(
             1.0,
-            ctx.style().visuals.widgets.hovered.bg_stroke.color,
+            ctx.global_style().visuals.widgets.hovered.bg_stroke.color,
         ))
         .corner_radius(CornerRadius::same(MODAL_CORNER_RADIUS))
         .inner_margin(Margin::same(MODAL_INNER_MARGIN))

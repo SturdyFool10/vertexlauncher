@@ -57,93 +57,27 @@ impl egui_wgpu::CallbackTrait for SkinPreviewPostProcessWgpuCallback {
             label: Some("skins-preview-post-process-encoder"),
         });
 
-        let use_smaa = self.aa_mode == SkinPreviewAaMode::Smaa;
-        let use_fxaa = matches!(
-            self.aa_mode,
-            SkinPreviewAaMode::Fxaa | SkinPreviewAaMode::FxaaTaa
-        );
-        let use_taa = matches!(
-            self.aa_mode,
-            SkinPreviewAaMode::Taa | SkinPreviewAaMode::FxaaTaa
-        );
-        let use_fxaa_after_taa = self.aa_mode == SkinPreviewAaMode::FxaaTaa;
         resources.render_targets.present_source = PresentSource::Accumulation;
 
-        for (index, batch) in self.scene_batches.iter().enumerate() {
-            let prepared_batch = prepare_preview_scene_batch_buffers(
-                device,
-                &resources.uniforms.scalar_uniform_bind_group_layout,
-                batch,
-            );
+        let prepared_batches = self
+            .scene_batches
+            .iter()
+            .map(|batch| {
+                prepare_preview_scene_batch_buffers(
+                    device,
+                    &resources.uniforms.scalar_uniform_bind_group_layout,
+                    batch,
+                )
+            })
+            .collect::<Vec<_>>();
+        let scene_plan = Vertex3dScenePlan::build(prepared_batches.len());
+        resources.execute_vertex3d_scene_plan(&mut encoder, &prepared_batches, &scene_plan);
 
-            {
-                let color_attachment =
-                    resources.scene_color_attachment(index == 0 || self.scene_batches.len() == 1);
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("skins-preview-scene-pass"),
-                    color_attachments: &[Some(color_attachment)],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: resources.scene_depth_view(),
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                resources.paint_scene(&mut pass, &prepared_batch);
-            }
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("skins-preview-accumulation-pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &resources.render_targets.accumulation_view,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations {
-                            load: if index == 0 {
-                                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                            } else {
-                                wgpu::LoadOp::Load
-                            },
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_pipeline(&resources.shader_modules.accumulate_pipeline);
-                pass.set_bind_group(0, &resources.render_targets.scene_resolve_bind_group, &[]);
-                pass.set_bind_group(1, &prepared_batch.weight_bind_group, &[]);
-                pass.draw(0..3, 0..1);
-            }
-        }
-
-        if use_smaa {
-            resources.apply_smaa(&mut encoder);
-        } else if use_fxaa && !use_taa {
-            resources.apply_fxaa(&mut encoder, PresentSource::Accumulation);
-            resources.render_targets.present_source = PresentSource::PostProcess;
-        } else if use_taa {
-            let taa_source = resources.apply_taa(
-                &mut encoder,
-                queue,
-                if use_fxaa_after_taa { 0.22 } else { 0.35 },
-            );
-            if use_fxaa_after_taa {
-                resources.render_targets.present_source =
-                    resources.apply_fxaa(&mut encoder, taa_source);
-            } else {
-                resources.render_targets.present_source = taa_source;
-            }
-        } else {
-            resources.render_targets.taa_history_valid = false;
-        }
+        let post_plan = Vertex3dPostProcessPlan::build(
+            self.aa_mode,
+            resources.render_targets.taa_history_valid,
+        );
+        resources.execute_vertex3d_post_process_plan(&mut encoder, queue, &post_plan);
 
         vec![encoder.finish()]
     }

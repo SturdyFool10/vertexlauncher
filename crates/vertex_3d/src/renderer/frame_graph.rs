@@ -2,7 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{AttachmentLifecycle, GraphAttachment, RenderTargetHandle, RenderTargetScale, ShaderGraphDescriptor};
+use super::{
+    AttachmentLifecycle, GraphAttachment, RenderTargetHandle, RenderTargetScale,
+    ShaderGraphDescriptor,
+};
 use crate::shader::{ReflectionSnapshot, RenderTargetConfig, RenderTargetType};
 
 /// A renderer pass with explicit attachment reads and writes.
@@ -43,10 +46,7 @@ pub struct FrameGraphUsage {
 }
 
 impl FrameGraphUsage {
-    pub fn new(
-        handle: impl Into<RenderTargetHandle>,
-        target_type: RenderTargetType,
-    ) -> Self {
+    pub fn new(handle: impl Into<RenderTargetHandle>, target_type: RenderTargetType) -> Self {
         Self {
             handle: handle.into(),
             target_type,
@@ -83,7 +83,8 @@ impl FrameGraph {
     }
 
     pub fn plan(&self) -> FrameGraphPlan {
-        let mut attachments: BTreeMap<RenderTargetHandle, FrameGraphAttachmentPlan> = BTreeMap::new();
+        let mut attachments: BTreeMap<RenderTargetHandle, FrameGraphAttachmentPlan> =
+            BTreeMap::new();
         for (pass_index, pass) in self.passes.iter().enumerate() {
             for read in &pass.reads {
                 attachments
@@ -108,17 +109,13 @@ impl FrameGraph {
         }
     }
 
-    pub fn infer_shader_graph(
-        &self,
-        fallback_size: (u32, u32),
-    ) -> ShaderGraphDescriptor {
+    pub fn infer_shader_graph(&self, fallback_size: (u32, u32)) -> ShaderGraphDescriptor {
         let plan = self.plan();
         let mut graph = ShaderGraphDescriptor::new();
         for attachment in plan.attachments.values() {
-            let target_type = attachment
-                .target_type
-                .clone()
-                .unwrap_or_else(|| RenderTargetType::Custom(attachment.handle.as_str().to_string()));
+            let target_type = attachment.target_type.clone().unwrap_or_else(|| {
+                RenderTargetType::Custom(attachment.handle.as_str().to_string())
+            });
             let target = RenderTargetConfig::new(target_type, fallback_size.0, fallback_size.1);
             graph = graph.with_attachment(
                 GraphAttachment::new(attachment.handle.clone(), target)

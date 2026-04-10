@@ -123,7 +123,7 @@ impl Default for Theme {
 
 impl Theme {
     pub fn apply(&self, ctx: &Context, ui_opacity_percent: u8) {
-        let mut style: Style = (*ctx.style()).clone();
+        let mut style: Style = (*ctx.global_style()).clone();
         let mut visuals = Visuals::dark();
 
         let bg_dark = self.bg_dark.to_color32();
@@ -192,7 +192,7 @@ impl Theme {
             self.motion.animation_time_seconds.clamp(0.0, 1.0)
         };
         style.visuals = visuals;
-        ctx.set_style(style);
+        ctx.set_global_style(style);
     }
 
     fn matrix_oled() -> Self {

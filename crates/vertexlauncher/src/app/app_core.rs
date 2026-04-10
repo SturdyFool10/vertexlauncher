@@ -301,6 +301,7 @@ impl VertexApp {
         app
     }
 
+    #[allow(deprecated)]
     pub(super) fn update_inner(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let calibrations = self.config.gamepad_calibrations().clone();
         let gamepad_update = if let Some(gamepad) = &mut self.gamepad {
@@ -681,12 +682,17 @@ impl VertexApp {
         CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(ctx.style().visuals.panel_fill)
+                    .fill(ctx.global_style().visuals.panel_fill)
                     .inner_margin(egui::Margin::ZERO)
                     .outer_margin(egui::Margin::ZERO)
                     .stroke(egui::Stroke::new(
                         1.0,
-                        ctx.style().visuals.widgets.noninteractive.bg_stroke.color,
+                        ctx.global_style()
+                            .visuals
+                            .widgets
+                            .noninteractive
+                            .bg_stroke
+                            .color,
                     )),
             )
             .show(ctx, |ui| {

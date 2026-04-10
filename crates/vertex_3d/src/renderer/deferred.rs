@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use super::{FrameGraph, FrameGraphPlan, RendererConfig, SurfaceConfig};
+use super::{
+    AttachmentPool, FrameGraph, FrameGraphPlan, ReflectionBindGroupSet, RendererConfig,
+    ShaderResourceTable, SurfaceConfig,
+};
 use crate::shader::{
     BuiltPipelineLayout, CompiledShaderProgram, PipelineLayoutPlan, ShaderCompileError, ShaderKind,
 };
@@ -40,6 +43,7 @@ pub struct DeferredRenderer {
     pub config: RendererConfig,
     pub frame_graph: FrameGraphPlan,
     pub pipeline_layout: BuiltPipelineLayout,
+    pub attachments: AttachmentPool,
     pub passes: Vec<DeferredPassRuntime>,
 }
 
@@ -57,6 +61,8 @@ impl DeferredRenderer {
         let shader_modules = compiled.create_shader_modules(device)?;
         let config = RendererConfig::for_reflection(surface.clone(), &compiled.reflection);
         let frame_graph = frame_graph.plan();
+        let mut attachments = AttachmentPool::default();
+        attachments.rebuild(device, &config);
 
         let passes = pass_templates
             .into_iter()
@@ -82,13 +88,12 @@ impl DeferredRenderer {
             config,
             frame_graph,
             pipeline_layout,
+            attachments,
             passes,
         })
     }
 
-    pub fn shader_modules_by_stage(
-        &self,
-    ) -> BTreeMap<&str, (bool, bool)> {
+    pub fn shader_modules_by_stage(&self) -> BTreeMap<&str, (bool, bool)> {
         self.passes
             .iter()
             .map(|pass| {
@@ -99,6 +104,22 @@ impl DeferredRenderer {
             })
             .collect()
     }
+
+    pub fn build_bind_groups(
+        &self,
+        device: &wgpu::Device,
+        compiled: &CompiledShaderProgram,
+        resources: &ShaderResourceTable<'_>,
+    ) -> Result<ReflectionBindGroupSet, DeferredRendererError> {
+        let layout_plan = PipelineLayoutPlan::from_reflection(&compiled.reflection)?;
+        Ok(ReflectionBindGroupSet::build(
+            device,
+            &compiled.reflection,
+            &layout_plan,
+            &self.pipeline_layout,
+            resources,
+        )?)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -108,15 +129,18 @@ pub enum DeferredRendererError {
 
     #[error(transparent)]
     Compile(#[from] ShaderCompileError),
+
+    #[error(transparent)]
+    BindGroups(#[from] super::resources::BindGroupBuildError),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::shader::{
-        ReflectionPassthroughCompiler, ReflectedRenderTarget, ReflectedResource,
-        ReflectedResourceType, ReflectedStage, ShaderBackendTarget, ShaderCompileRequest,
-        ShaderCompiler, ShaderSourceLanguage, StageSource,
+        ReflectedRenderTarget, ReflectedResource, ReflectedResourceType, ReflectedStage,
+        ReflectionPassthroughCompiler, ShaderBackendTarget, ShaderCompileRequest, ShaderCompiler,
+        ShaderSourceLanguage, StageSource,
     };
 
     #[test]

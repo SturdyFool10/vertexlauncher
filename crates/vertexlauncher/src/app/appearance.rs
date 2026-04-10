@@ -18,10 +18,7 @@ pub(super) fn build_text_graphics_config(
     startup_graphics: platform::StartupGraphicsConfig,
 ) -> textui::TextGraphicsConfig {
     let mut graphics_config = textui::TextGraphicsConfig {
-        renderer_backend: match startup_graphics.renderer {
-            eframe::Renderer::Wgpu => textui::TextRendererBackend::Auto,
-            _ => textui::TextRendererBackend::EguiMesh,
-        },
+        renderer_backend: textui::TextRendererBackend::Auto,
         graphics_api: preferred_text_graphics_api(startup_graphics.backends),
         gpu_power_preference: if config.low_power_gpu_preferred() {
             textui::TextGpuPowerPreference::LowPower

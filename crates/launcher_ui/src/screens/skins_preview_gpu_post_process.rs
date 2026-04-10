@@ -24,6 +24,12 @@ mod skin_preview_post_process_wgpu_resources;
 mod source_textures;
 #[path = "skins_preview_gpu_post_process/uniform_resources.rs"]
 mod uniform_resources;
+#[path = "skins_preview_gpu_post_process/vertex3d_post_process.rs"]
+mod vertex3d_post_process;
+#[path = "skins_preview_gpu_post_process/vertex3d_runtime.rs"]
+mod vertex3d_runtime;
+#[path = "skins_preview_gpu_post_process/vertex3d_scene.rs"]
+mod vertex3d_scene;
 
 pub(super) use self::callback::SkinPreviewPostProcessWgpuCallback;
 use self::present_source::PresentSource;
@@ -32,3 +38,8 @@ use self::shader_modules::SkinPreviewPostProcessShaderModules;
 use self::skin_preview_post_process_wgpu_resources::SkinPreviewPostProcessWgpuResources;
 use self::source_textures::SkinPreviewPostProcessSourceTextures;
 use self::uniform_resources::SkinPreviewPostProcessUniformResources;
+use self::vertex3d_post_process::{
+    Vertex3dPostProcessOp, Vertex3dPostProcessPipeline, Vertex3dPostProcessPlan,
+};
+use self::vertex3d_runtime::SkinPreviewVertex3dRuntime;
+use self::vertex3d_scene::{Vertex3dSceneOp, Vertex3dScenePlan};

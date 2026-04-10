@@ -859,7 +859,7 @@ fn render_delete_instance_modal(
 
     let instance_root = instance_root_path(installations_root, &instance);
     let instance_running = is_instance_running(instance_root.as_path());
-    let danger = ctx.style().visuals.error_fg_color;
+    let danger = ctx.global_style().visuals.error_fg_color;
     let request_cancel_focus =
         modal_default_focus_requested(ctx, ("library_delete_instance_modal", instance.id.as_str()));
     let response = show_dialog(

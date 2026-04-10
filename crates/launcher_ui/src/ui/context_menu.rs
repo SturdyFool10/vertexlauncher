@@ -212,7 +212,7 @@ pub fn show(ctx: &Context) {
     let screen_rect = ctx.content_rect();
     let anchor_pos = resolved_anchor_pos(ctx, request.anchor_pos);
     let label_font = FontId::proportional(14.0);
-    let visuals = ctx.style().visuals.clone();
+    let visuals = ctx.global_style().visuals.clone();
     let normal_label_color = visuals.text_color();
     let danger_color = visuals.error_fg_color;
 
