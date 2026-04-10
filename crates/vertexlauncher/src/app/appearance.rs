@@ -37,12 +37,12 @@ fn text_graphics_api_for_startup_config(
     startup_graphics: platform::StartupGraphicsConfig,
 ) -> textui::TextGraphicsApi {
     match startup_graphics.graphics_api_preference {
-        config::GraphicsApiPreference::Auto => {
-            preferred_text_graphics_api(startup_graphics.backends)
-        }
         config::GraphicsApiPreference::Vulkan => textui::TextGraphicsApi::Vulkan,
         config::GraphicsApiPreference::Metal => textui::TextGraphicsApi::Metal,
         config::GraphicsApiPreference::Dx12 => textui::TextGraphicsApi::Dx12,
+        config::GraphicsApiPreference::Auto => {
+            preferred_text_graphics_api(startup_graphics.backends)
+        }
     }
 }
 

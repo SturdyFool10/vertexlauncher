@@ -1,5 +1,7 @@
 use config::GraphicsApiPreference;
 use eframe::{self, egui_wgpu::wgpu};
+#[cfg(target_os = "macos")]
+use std::path::Path;
 
 #[derive(Clone, Copy)]
 pub(crate) struct StartupGraphicsConfig {
@@ -13,13 +15,17 @@ pub(crate) fn startup_graphics_config(
     transparent_viewport: bool,
     graphics_api_preference: GraphicsApiPreference,
 ) -> StartupGraphicsConfig {
-    let graphics_api_preference =
+    let resolved_graphics_api_preference =
         resolve_graphics_api_preference(graphics_api_preference, transparent_viewport);
     StartupGraphicsConfig {
         renderer: eframe::Renderer::Wgpu,
         hardware_acceleration: eframe::HardwareAcceleration::Required,
-        backends: startup_backends(transparent_viewport, graphics_api_preference),
-        graphics_api_preference,
+        backends: startup_backends(
+            transparent_viewport,
+            graphics_api_preference,
+            resolved_graphics_api_preference,
+        ),
+        graphics_api_preference: resolved_graphics_api_preference,
     }
 }
 
@@ -144,12 +150,12 @@ pub(crate) fn resolve_graphics_api_preference(
     transparent_viewport: bool,
 ) -> GraphicsApiPreference {
     match preference {
-        GraphicsApiPreference::Auto => GraphicsApiPreference::Auto,
+        GraphicsApiPreference::Auto => auto_graphics_api_preference(transparent_viewport),
         GraphicsApiPreference::Metal if cfg!(target_os = "macos") => GraphicsApiPreference::Metal,
         GraphicsApiPreference::Dx12 if cfg!(target_os = "windows") => GraphicsApiPreference::Dx12,
         GraphicsApiPreference::Vulkan if cfg!(target_os = "windows") => {
             if transparent_viewport {
-                GraphicsApiPreference::Auto
+                auto_graphics_api_preference(transparent_viewport)
             } else {
                 GraphicsApiPreference::Vulkan
             }
@@ -157,15 +163,20 @@ pub(crate) fn resolve_graphics_api_preference(
         GraphicsApiPreference::Vulkan if !cfg!(target_os = "macos") => {
             GraphicsApiPreference::Vulkan
         }
-        _ => GraphicsApiPreference::Auto,
+        _ => auto_graphics_api_preference(transparent_viewport),
     }
 }
 
 fn startup_backends(
     transparent_viewport: bool,
     graphics_api_preference: GraphicsApiPreference,
+    resolved_graphics_api_preference: GraphicsApiPreference,
 ) -> wgpu::Backends {
-    match graphics_api_preference {
+    if graphics_api_preference == GraphicsApiPreference::Auto {
+        return auto_graphics_api_backends(transparent_viewport, resolved_graphics_api_preference);
+    }
+
+    match resolved_graphics_api_preference {
         GraphicsApiPreference::Vulkan => return wgpu::Backends::VULKAN,
         GraphicsApiPreference::Metal => return wgpu::Backends::METAL,
         GraphicsApiPreference::Dx12 => return wgpu::Backends::DX12,
@@ -190,8 +201,80 @@ fn startup_backends(
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
         let _ = transparent_viewport;
-        return wgpu::Backends::VULKAN | wgpu::Backends::METAL | wgpu::Backends::DX12;
+        return wgpu::Backends::VULKAN;
     }
+}
+
+fn auto_graphics_api_preference(transparent_viewport: bool) -> GraphicsApiPreference {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = transparent_viewport;
+        return GraphicsApiPreference::Dx12;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = transparent_viewport;
+        return if moltenvk_present() {
+            GraphicsApiPreference::Vulkan
+        } else {
+            GraphicsApiPreference::Metal
+        };
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let _ = transparent_viewport;
+        GraphicsApiPreference::Vulkan
+    }
+}
+
+fn auto_graphics_api_backends(
+    transparent_viewport: bool,
+    resolved_graphics_api_preference: GraphicsApiPreference,
+) -> wgpu::Backends {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = transparent_viewport;
+        let _ = resolved_graphics_api_preference;
+        return wgpu::Backends::DX12 | wgpu::Backends::VULKAN;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = transparent_viewport;
+        return match resolved_graphics_api_preference {
+            GraphicsApiPreference::Vulkan => wgpu::Backends::VULKAN | wgpu::Backends::METAL,
+            GraphicsApiPreference::Metal => wgpu::Backends::METAL,
+            GraphicsApiPreference::Dx12 | GraphicsApiPreference::Auto => wgpu::Backends::METAL,
+        };
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        let _ = transparent_viewport;
+        let _ = resolved_graphics_api_preference;
+        wgpu::Backends::VULKAN
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn moltenvk_present() -> bool {
+    if std::env::var_os("VK_ICD_FILENAMES").is_some()
+        || std::env::var_os("VK_DRIVER_FILES").is_some()
+    {
+        return true;
+    }
+
+    [
+        "/usr/local/lib/libMoltenVK.dylib",
+        "/opt/homebrew/lib/libMoltenVK.dylib",
+        "/Library/Frameworks/MoltenVK.framework/MoltenVK",
+        "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json",
+        "/opt/homebrew/share/vulkan/icd.d/MoltenVK_icd.json",
+    ]
+    .into_iter()
+    .any(|path| Path::new(path).exists())
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
