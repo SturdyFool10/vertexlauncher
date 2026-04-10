@@ -2,7 +2,8 @@ use super::*;
 
 impl SkinPreviewPostProcessWgpuResources {
     pub(super) fn execute_vertex3d_scene_plan(
-        &self,
+        &mut self,
+        device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         prepared_batches: &[PreparedGpuPreviewSceneBatch],
         plan: &Vertex3dScenePlan,
@@ -34,6 +35,12 @@ impl SkinPreviewPostProcessWgpuResources {
                         multiview_mask: None,
                     });
                     self.paint_scene(&mut pass, batch);
+                }
+                Vertex3dSceneOp::DepthResolve { .. } => {
+                    // Auto-resolve any MSAA attachments that have a `{name}_resolve` partner.
+                    // Detects scene_depth → scene_depth_resolve (and any future pairs).
+                    self.msaa_resolver
+                        .auto_resolve(encoder, device, self.vertex3d_runtime.pool());
                 }
                 Vertex3dSceneOp::Accumulate {
                     batch_index,
@@ -107,7 +114,7 @@ impl SkinPreviewPostProcessWgpuResources {
     }
 
     pub(super) fn scene_depth_view(&self) -> &wgpu::TextureView {
-        &self.render_targets.scene_depth_view
+        &self.render_targets.scene_depth.render_view
     }
 
     pub(super) fn paint_scene(

@@ -40,6 +40,7 @@ impl AttachmentPool {
                     )
                 });
 
+            let sample_count = attachment.target.samples.max(config.msaa_samples).max(1);
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(handle.as_str()),
                 size: wgpu::Extent3d {
@@ -48,10 +49,10 @@ impl AttachmentPool {
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: attachment.target.mip_levels.max(1),
-                sample_count: attachment.target.samples.max(config.msaa_samples).max(1),
+                sample_count,
                 dimension: wgpu::TextureDimension::D2,
                 format,
-                usage: usage_for_format(format),
+                usage: usage_for_format(format, sample_count),
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -72,6 +73,10 @@ impl AttachmentPool {
 
     pub fn get(&self, handle: &RenderTargetHandle) -> Option<&AttachmentTexture> {
         self.attachments.get(handle)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AttachmentTexture> {
+        self.attachments.values()
     }
 }
 
@@ -243,8 +248,11 @@ pub enum BindGroupBuildError {
     UnsupportedCombinedSampler { name: String },
 }
 
-fn usage_for_format(format: wgpu::TextureFormat) -> wgpu::TextureUsages {
+fn usage_for_format(format: wgpu::TextureFormat, sample_count: u32) -> wgpu::TextureUsages {
     if format.is_depth_stencil_format() {
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+    } else if sample_count > 1 {
+        // Multisampled textures cannot have COPY_SRC or COPY_DST per WebGPU spec.
         wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
     } else {
         wgpu::TextureUsages::RENDER_ATTACHMENT

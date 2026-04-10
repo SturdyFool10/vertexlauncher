@@ -25,8 +25,8 @@ pub use renderer::{
     AdapterPreference, AttachmentLifecycle, AttachmentPool, AttachmentTexture, BindGroupBuildError,
     DeferredPassRuntime, DeferredRenderPipelineTemplate, DeferredRenderer, DeferredRendererError,
     DerivedRendererState, FrameGraph, FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPlan,
-    FrameGraphUsage, GraphAttachment, NamedBindGroup, ReflectionBindGroupSet, RenderTargetHandle,
-    RenderTargetScale, RendererConfig, RendererRebuildFlags, RendererRuntime,
+    FrameGraphUsage, GraphAttachment, MsaaResolvePool, NamedBindGroup, ReflectionBindGroupSet,
+    RenderTargetHandle, RenderTargetScale, RendererConfig, RendererRebuildFlags, RendererRuntime,
     ShaderBindingResource, ShaderGraphDescriptor, ShaderResourceTable, SurfaceConfig,
 };
 

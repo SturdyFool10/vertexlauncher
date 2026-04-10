@@ -33,7 +33,7 @@ mod vertex3d_scene;
 
 pub(super) use self::callback::SkinPreviewPostProcessWgpuCallback;
 use self::present_source::PresentSource;
-use self::render_targets::SkinPreviewPostProcessRenderTargets;
+use self::render_targets::{DepthAttachmentSet, SkinPreviewPostProcessRenderTargets};
 use self::shader_modules::SkinPreviewPostProcessShaderModules;
 use self::skin_preview_post_process_wgpu_resources::SkinPreviewPostProcessWgpuResources;
 use self::source_textures::SkinPreviewPostProcessSourceTextures;

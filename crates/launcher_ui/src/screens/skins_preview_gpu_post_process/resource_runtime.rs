@@ -74,20 +74,16 @@ impl SkinPreviewPostProcessWgpuResources {
         self.render_targets.taa_history_view = taa_history_view;
         self.render_targets.taa_history_bind_group = taa_history_bind_group;
 
-        let scene_depth_attachment = attachment("scene_depth");
-        let scene_depth_texture = scene_depth_attachment.texture.clone();
-        let scene_depth_view = scene_depth_attachment.view.clone();
-        let scene_depth_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("skins-preview-scene-depth"),
-            layout: &self.shader_modules.depth_texture_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&scene_depth_view),
-            }],
-        });
-        self.render_targets.scene_depth_texture = scene_depth_texture;
-        self.render_targets.scene_depth_view = scene_depth_view;
-        self.render_targets.scene_depth_bind_group = scene_depth_bind_group;
+        let scene_depth_render_att = attachment("scene_depth");
+        let scene_depth_resolve_att = attachment("scene_depth_resolve");
+        self.render_targets.scene_depth = DepthAttachmentSet::new(
+            device,
+            &self.shader_modules.depth_texture_bind_group_layout,
+            scene_depth_render_att.texture.clone(),
+            scene_depth_render_att.view.clone(),
+            scene_depth_resolve_att.texture.clone(),
+            scene_depth_resolve_att.view.clone(),
+        );
 
         let scene_msaa_attachment = self.vertex3d_runtime.attachment("scene_msaa");
         self.render_targets.scene_msaa_texture =

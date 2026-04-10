@@ -84,6 +84,10 @@ impl SkinPreviewVertex3dRuntime {
     pub(super) fn attachment(&self, handle: &str) -> Option<&AttachmentTexture> {
         self.attachments.get(&handle.into())
     }
+
+    pub(super) fn pool(&self) -> &AttachmentPool {
+        &self.attachments
+    }
 }
 
 fn build_renderer_config(
@@ -100,6 +104,18 @@ fn build_renderer_config(
                 "scene_depth",
                 RenderTargetConfig::new(RenderTargetType::Depth, size[0], size[1])
                     .with_samples(scene_msaa_samples),
+            )
+            .with_lifecycle(AttachmentLifecycle::Transient),
+        );
+    }
+    if !graph
+        .attachments
+        .contains_key(&"scene_depth_resolve".into())
+    {
+        graph = graph.with_attachment(
+            GraphAttachment::new(
+                "scene_depth_resolve",
+                RenderTargetConfig::new(RenderTargetType::Depth, size[0], size[1]),
             )
             .with_lifecycle(AttachmentLifecycle::Transient),
         );
@@ -139,6 +155,7 @@ fn build_renderer_config(
         }
     }
     config.set_format_override("scene_depth", SKIN_PREVIEW_DEPTH_FORMAT);
+    config.set_format_override("scene_depth_resolve", SKIN_PREVIEW_DEPTH_FORMAT);
     config
 }
 

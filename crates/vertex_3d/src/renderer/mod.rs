@@ -7,6 +7,7 @@
 pub mod config;
 pub mod deferred;
 pub mod frame_graph;
+pub mod msaa_resolve;
 pub mod resources;
 
 pub use config::{
@@ -20,6 +21,7 @@ pub use deferred::{
 pub use frame_graph::{
     FrameGraph, FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPlan, FrameGraphUsage,
 };
+pub use msaa_resolve::MsaaResolvePool;
 pub use resources::{
     AttachmentPool, AttachmentTexture, BindGroupBuildError, NamedBindGroup, ReflectionBindGroupSet,
     ShaderBindingResource, ShaderResourceTable,

@@ -1,5 +1,61 @@
 use super::*;
 
+/// Couples an MSAA (or single-sample) depth render texture with its resolved 1× counterpart.
+///
+/// The `sample_bind_group` is **always** built from the 1× resolve view at construction time.
+/// There is no separate assignment path, so it is structurally impossible to accidentally bind
+/// the MSAA view to a non-multisampled bind-group layout.
+pub(super) struct DepthAttachmentSet {
+    /// Depth texture used as a render attachment. May be MSAA (samples > 1).
+    pub(super) render_texture: wgpu::Texture,
+    pub(super) render_view: wgpu::TextureView,
+    /// Always 1× depth texture. Populated by [`MsaaResolvePool::auto_resolve`] each frame
+    /// when MSAA is active, or rendered to directly when samples == 1.
+    resolve_texture: wgpu::Texture,
+    resolve_view: wgpu::TextureView,
+    /// Bind group that always references `resolve_view`. Safe to pass to any shader layout
+    /// with `multisampled = false`, regardless of whether MSAA is enabled.
+    pub(super) sample_bind_group: wgpu::BindGroup,
+}
+
+impl DepthAttachmentSet {
+    pub(super) fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        render_texture: wgpu::Texture,
+        render_view: wgpu::TextureView,
+        resolve_texture: wgpu::Texture,
+        resolve_view: wgpu::TextureView,
+    ) -> Self {
+        // Bind group is built here — the only place — ensuring it always uses the resolve view.
+        let sample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("skins-preview-depth-sample"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&resolve_view),
+            }],
+        });
+        Self {
+            render_texture,
+            render_view,
+            resolve_texture,
+            resolve_view,
+            sample_bind_group,
+        }
+    }
+
+    /// View of the 1× resolve texture. Pass this to [`MsaaResolvePool::resolve_depth`] as `dst_view`.
+    pub(super) fn resolve_view(&self) -> &wgpu::TextureView {
+        &self.resolve_view
+    }
+
+    /// The 1× resolve texture itself.
+    pub(super) fn resolve_texture(&self) -> &wgpu::Texture {
+        &self.resolve_texture
+    }
+}
+
 pub(super) struct SkinPreviewPostProcessRenderTargets {
     pub(super) accumulation_texture: wgpu::Texture,
     pub(super) accumulation_view: wgpu::TextureView,
@@ -9,9 +65,7 @@ pub(super) struct SkinPreviewPostProcessRenderTargets {
     pub(super) scene_resolve_bind_group: wgpu::BindGroup,
     pub(super) scene_msaa_texture: Option<wgpu::Texture>,
     pub(super) scene_msaa_view: Option<wgpu::TextureView>,
-    pub(super) scene_depth_texture: wgpu::Texture,
-    pub(super) scene_depth_view: wgpu::TextureView,
-    pub(super) scene_depth_bind_group: wgpu::BindGroup,
+    pub(super) scene_depth: DepthAttachmentSet,
     pub(super) post_process_texture: wgpu::Texture,
     pub(super) post_process_view: wgpu::TextureView,
     pub(super) post_process_bind_group: wgpu::BindGroup,

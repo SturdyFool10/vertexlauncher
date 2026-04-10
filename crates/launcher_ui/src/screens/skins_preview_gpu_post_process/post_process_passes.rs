@@ -122,7 +122,7 @@ impl SkinPreviewPostProcessWgpuResources {
             "accumulation" => &self.render_targets.accumulation_bind_group,
             "post_process" => &self.render_targets.post_process_bind_group,
             "taa_history" => &self.render_targets.taa_history_bind_group,
-            "scene_depth" => &self.render_targets.scene_depth_bind_group,
+            "scene_depth" => &self.render_targets.scene_depth.sample_bind_group,
             _ => panic!("unsupported post-process attachment bind group: {handle}"),
         }
     }

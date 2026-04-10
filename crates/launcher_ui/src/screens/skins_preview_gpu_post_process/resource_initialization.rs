@@ -467,20 +467,22 @@ impl SkinPreviewPostProcessWgpuResources {
                 1,
                 "skins-preview-taa-history",
             );
-        let (scene_depth_texture, scene_depth_view) = create_preview_depth_texture(
+        let (scene_depth_render_texture, scene_depth_render_view) = create_preview_depth_texture(
             device,
             [1, 1],
             scene_msaa_samples.max(1),
             "skins-preview-scene-depth",
         );
-        let scene_depth_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("skins-preview-scene-depth"),
-            layout: &depth_texture_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&scene_depth_view),
-            }],
-        });
+        let (scene_depth_resolve_texture, scene_depth_resolve_view) =
+            create_preview_depth_texture(device, [1, 1], 1, "skins-preview-scene-depth-resolve");
+        let scene_depth = DepthAttachmentSet::new(
+            device,
+            &depth_texture_bind_group_layout,
+            scene_depth_render_texture,
+            scene_depth_render_view,
+            scene_depth_resolve_texture,
+            scene_depth_resolve_view,
+        );
         let (scene_msaa_texture, scene_msaa_view) = if scene_msaa_samples > 1 {
             let (texture, view) = create_preview_color_texture(
                 device,
@@ -495,6 +497,7 @@ impl SkinPreviewPostProcessWgpuResources {
         };
 
         Self {
+            msaa_resolver: vertex_3d::MsaaResolvePool::new(device),
             shader_modules: SkinPreviewPostProcessShaderModules {
                 scene_pipeline,
                 accumulate_pipeline,
@@ -524,9 +527,7 @@ impl SkinPreviewPostProcessWgpuResources {
                 scene_resolve_bind_group,
                 scene_msaa_texture,
                 scene_msaa_view,
-                scene_depth_texture,
-                scene_depth_view,
-                scene_depth_bind_group,
+                scene_depth,
                 post_process_texture,
                 post_process_view,
                 post_process_bind_group,
