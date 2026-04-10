@@ -122,6 +122,8 @@ pub struct ReflectedResource {
     pub stages: Vec<ShaderKind>,
     #[serde(default)]
     pub texture_dimension: Option<ReflectedTextureDimension>,
+    #[serde(default)]
+    pub role: Option<ReflectedResourceRole>,
 }
 
 impl ReflectedResource {
@@ -133,6 +135,7 @@ impl ReflectedResource {
             resource_type,
             stages: Vec::new(),
             texture_dimension: None,
+            role: None,
         }
     }
 
@@ -143,6 +146,11 @@ impl ReflectedResource {
             self.resource_type.to_resource_type(),
         )
         .with_space(self.space)
+    }
+
+    pub fn with_role(mut self, role: ReflectedResourceRole) -> Self {
+        self.role = Some(role);
+        self
     }
 }
 
@@ -178,6 +186,58 @@ pub enum ReflectedTextureDimension {
     D2Array,
     Cube,
     D3,
+}
+
+/// Semantic role for a reflected resource so the renderer can bind standard
+/// material/global inputs without relying on resource names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectedResourceRole {
+    MaterialUniform,
+    MaterialBaseColorTexture,
+    MaterialMetallicRoughnessTexture,
+    MaterialNormalTexture,
+    MaterialEmissiveTexture,
+    MaterialOcclusionTexture,
+    MaterialSampler,
+}
+
+impl ReflectedResourceRole {
+    pub fn is_material_role(self) -> bool {
+        matches!(
+            self,
+            Self::MaterialUniform
+                | Self::MaterialBaseColorTexture
+                | Self::MaterialMetallicRoughnessTexture
+                | Self::MaterialNormalTexture
+                | Self::MaterialEmissiveTexture
+                | Self::MaterialOcclusionTexture
+                | Self::MaterialSampler
+        )
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "material_uniform" | "material.uniform" => Some(Self::MaterialUniform),
+            "material_base_color_texture" | "material.base_color_texture" => {
+                Some(Self::MaterialBaseColorTexture)
+            }
+            "material_metallic_roughness_texture" | "material.metallic_roughness_texture" => {
+                Some(Self::MaterialMetallicRoughnessTexture)
+            }
+            "material_normal_texture" | "material.normal_texture" => {
+                Some(Self::MaterialNormalTexture)
+            }
+            "material_emissive_texture" | "material.emissive_texture" => {
+                Some(Self::MaterialEmissiveTexture)
+            }
+            "material_occlusion_texture" | "material.occlusion_texture" => {
+                Some(Self::MaterialOcclusionTexture)
+            }
+            "material_sampler" | "material.sampler" => Some(Self::MaterialSampler),
+            _ => None,
+        }
+    }
 }
 
 /// Render target / output attachment reflected from the shader graph.
@@ -291,36 +351,61 @@ fn parse_stage_bodies(source: &str, stages: &[ReflectedStage]) -> Vec<(ShaderKin
 }
 
 fn parse_resources(source: &str) -> Vec<ReflectedResource> {
-    source
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if !line.starts_with("[[vk::binding(") {
-                return None;
-            }
-            let binding_end = line.find(")]]")?;
-            let binding_spec = &line["[[vk::binding(".len()..binding_end];
-            let mut binding_parts = binding_spec.split(',').map(str::trim);
-            let slot = binding_parts.next()?.parse().ok()?;
-            let space = binding_parts.next()?.parse().ok()?;
+    let mut resources = Vec::new();
+    let mut pending_role = None;
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(annotation) = line.strip_prefix("// @vertex3d.resource ") {
+            pending_role = parse_resource_annotation(annotation);
+            continue;
+        }
+        let Some(mut resource) = parse_binding_resource_line(line) else {
+            continue;
+        };
+        resource.role = pending_role.take();
+        resources.push(resource);
+    }
+    resources
+}
 
-            let declaration = line[binding_end + 3..].trim();
-            let declaration = declaration.strip_suffix(';').unwrap_or(declaration);
-            let mut tokens = declaration.split_whitespace();
-            let type_token = tokens.next()?;
-            let name = tokens.next()?.trim().to_string();
-            let (resource_type, texture_dimension) = classify_resource_type(type_token);
+fn parse_binding_resource_line(line: &str) -> Option<ReflectedResource> {
+    if !line.starts_with("[[vk::binding(") {
+        return None;
+    }
+    let binding_end = line.find(")]]")?;
+    let binding_spec = &line["[[vk::binding(".len()..binding_end];
+    let mut binding_parts = binding_spec.split(',').map(str::trim);
+    let slot = binding_parts.next()?.parse().ok()?;
+    let space = binding_parts.next()?.parse().ok()?;
 
-            Some(ReflectedResource {
-                name,
-                slot,
-                space,
-                resource_type,
-                stages: Vec::new(),
-                texture_dimension,
-            })
-        })
-        .collect()
+    let declaration = line[binding_end + 3..].trim();
+    let declaration = declaration.strip_suffix(';').unwrap_or(declaration);
+    let mut tokens = declaration.split_whitespace();
+    let type_token = tokens.next()?;
+    let name = tokens.next()?.trim().to_string();
+    let (resource_type, texture_dimension) = classify_resource_type(type_token);
+
+    Some(ReflectedResource {
+        name,
+        slot,
+        space,
+        resource_type,
+        stages: Vec::new(),
+        texture_dimension,
+        role: None,
+    })
+}
+
+fn parse_resource_annotation(annotation: &str) -> Option<ReflectedResourceRole> {
+    for pair in annotation.split_whitespace() {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == "role" {
+            return ReflectedResourceRole::parse(value);
+        }
+    }
+    None
 }
 
 fn parse_target_annotations(source: &str) -> Vec<ReflectedRenderTarget> {
@@ -441,7 +526,9 @@ mod tests {
     fn parses_slang_source_in_memory() {
         let source = r#"
 // @vertex3d.target handle=accumulation type=lighting lifecycle=transient
+// @vertex3d.resource role=material.base_color_texture
 [[vk::binding(0, 0)]] Texture2D<float4> source_tex;
+// @vertex3d.resource role=material.sampler
 [[vk::binding(1, 0)]] SamplerState source_sampler;
 [shader("vertex")]
 FullscreenOut vs_main(uint vertex_index : SV_VertexID) { return (FullscreenOut)0; }
@@ -453,5 +540,13 @@ float4 fs_main(float4 pos : SV_Position) : SV_Target { return source_tex.Load(in
         assert_eq!(snapshot.resources.len(), 2);
         assert_eq!(snapshot.render_targets.len(), 1);
         assert_eq!(snapshot.render_targets[0].handle, "accumulation");
+        assert_eq!(
+            snapshot.resources[0].role,
+            Some(ReflectedResourceRole::MaterialBaseColorTexture)
+        );
+        assert_eq!(
+            snapshot.resources[1].role,
+            Some(ReflectedResourceRole::MaterialSampler)
+        );
     }
 }

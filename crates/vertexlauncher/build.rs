@@ -226,10 +226,10 @@ fn compile_windows_resources() -> Result<(), String> {
         .map_err(|error| format!("OUT_DIR is not set: {error}"))?;
     let icon_path = out_dir.join("vertex.ico");
     let decoded = ImageReader::new(Cursor::new(include_bytes!("../../Vertex.webp")))
-    .with_guessed_format()
-    .map_err(|error| format!("failed to detect vertex icon format: {error}"))?
-    .decode()
-    .map_err(|error| format!("failed to decode vertex icon source image: {error}"))?;
+        .with_guessed_format()
+        .map_err(|error| format!("failed to detect vertex icon format: {error}"))?
+        .decode()
+        .map_err(|error| format!("failed to decode vertex icon source image: {error}"))?;
     let resized = decoded.resize(256, 256, FilterType::Lanczos3).to_rgba8();
     let mut icon_file = File::create(&icon_path)
         .map_err(|error| format!("failed to create generated .ico icon: {error}"))?;

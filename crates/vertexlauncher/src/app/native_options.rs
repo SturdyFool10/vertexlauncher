@@ -3,20 +3,34 @@ use eframe::{self, egui, egui_wgpu::wgpu};
 use launcher_ui::window_effects;
 use std::fmt::Write as _;
 use std::sync::Arc;
+use vertex_3d::{
+    AdapterPreference, AdapterSelector, describe_adapter_slice, select_adapter_from_slice,
+};
 use vertex_constants::branding::DESKTOP_APP_ID;
 
 use super::{app_icon, app_metadata, platform};
 
+fn adapter_preference_for_profile(profile: config::GraphicsAdapterProfile) -> AdapterPreference {
+    match profile {
+        config::GraphicsAdapterProfile::Default => AdapterPreference::Default,
+        config::GraphicsAdapterProfile::HighPerformance => AdapterPreference::HighPerformance,
+        config::GraphicsAdapterProfile::LowPower => AdapterPreference::LowPower,
+        config::GraphicsAdapterProfile::DiscreteOnly => AdapterPreference::DiscreteOnly,
+        config::GraphicsAdapterProfile::IntegratedOnly => AdapterPreference::IntegratedOnly,
+    }
+}
+
 pub fn build(startup_config: &Config) -> eframe::NativeOptions {
-    let startup_power_preference = if startup_config.low_power_gpu_preferred() {
-        wgpu::PowerPreference::LowPower
-    } else {
-        wgpu::PowerPreference::HighPerformance
-    };
+    let startup_power_preference = startup_config.graphics_adapter_profile();
+    let startup_power_preference =
+        adapter_preference_for_profile(startup_power_preference).power_preference();
     let blur_enabled =
         startup_config.window_blur_enabled() && window_effects::platform_supports_blur();
     let transparent_viewport = blur_enabled;
-    let startup_graphics = platform::startup_graphics_config(transparent_viewport);
+    let startup_graphics = platform::startup_graphics_config(
+        transparent_viewport,
+        startup_config.graphics_api_preference(),
+    );
     let renderer = startup_graphics.renderer;
     let hardware_acceleration = startup_graphics.hardware_acceleration;
 
@@ -27,7 +41,20 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
     wgpu_setup.instance_descriptor.backend_options =
         transparent_backend_options(transparent_viewport);
     wgpu_setup.power_preference = startup_power_preference;
-    wgpu_setup.native_adapter_selector = Some(Arc::new(select_adapter_or_diagnose));
+    let startup_adapter_selector = match startup_config.graphics_adapter_preference_type() {
+        config::GraphicsAdapterPreferenceType::PerformanceProfile => AdapterSelector::Preference(
+            adapter_preference_for_profile(startup_config.graphics_adapter_profile()),
+        ),
+        config::GraphicsAdapterPreferenceType::ExplicitAdapter => startup_config
+            .graphics_adapter_explicit_hash()
+            .map(AdapterSelector::Hashed)
+            .unwrap_or(AdapterSelector::Preference(
+                AdapterPreference::HighPerformance,
+            )),
+    };
+    wgpu_setup.native_adapter_selector = Some(Arc::new(move |adapters, surface| {
+        select_adapter_or_diagnose(adapters, surface, startup_adapter_selector)
+    }));
     wgpu_setup.device_descriptor = Arc::new(|adapter| {
         let info = adapter.get_info();
         let graphics_api = graphics_api_label(&format!("{:?}", info.backend));
@@ -109,6 +136,7 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
 fn select_adapter_or_diagnose(
     adapters: &[wgpu::Adapter],
     surface: Option<&wgpu::Surface<'_>>,
+    selector: AdapterSelector,
 ) -> Result<wgpu::Adapter, String> {
     tracing::info!(
         target: "vertexlauncher/app/graphics",
@@ -116,43 +144,49 @@ fn select_adapter_or_diagnose(
         adapters.len()
     );
 
-    let mut surface_capable: Vec<usize> = Vec::new();
+    let described = describe_adapter_slice(adapters, surface);
+    app_metadata::record_available_graphics_adapters(&described);
 
-    for (i, adapter) in adapters.iter().enumerate() {
-        let info = adapter.get_info();
-        let is_software = matches!(info.device_type, wgpu::DeviceType::Cpu);
-        let surface_ok = surface.map_or(true, |s| adapter.is_surface_supported(s));
+    for adapter in &described {
+        let info = &adapters[adapter.slot].get_info();
 
         tracing::info!(
             target: "vertexlauncher/app/graphics",
             "  [{i}] {:?} | backend={:?} | type={:?} | vendor=0x{:04x} | device=0x{:04x} | driver={:?} | surface_ok={}",
             info.name, info.backend, info.device_type,
-            info.vendor, info.device, info.driver, surface_ok
+            info.vendor, info.device, info.driver, adapter.surface_supported,
+            i = adapter.slot
         );
-
-        if !is_software && surface_ok {
-            surface_capable.push(i);
-        }
     }
 
-    // Prefer discrete > integrated > virtual GPU.
-    let chosen = surface_capable
-        .iter()
-        .max_by_key(|&&i| match adapters[i].get_info().device_type {
-            wgpu::DeviceType::DiscreteGpu => 2,
-            wgpu::DeviceType::IntegratedGpu => 1,
-            _ => 0,
-        })
-        .copied();
+    let fallback_selector = AdapterSelector::Preference(AdapterPreference::HighPerformance);
+    let selected = select_adapter_from_slice(adapters, surface, selector)
+        .or_else(|| matches!(selector, AdapterSelector::Hashed(_)).then(|| {
+            tracing::warn!(
+                target: "vertexlauncher/app/graphics",
+                "Explicit graphics adapter selection could not be resolved; falling back to High Performance profile."
+            );
+            select_adapter_from_slice(adapters, surface, fallback_selector)
+        }).flatten());
 
-    if let Some(i) = chosen {
-        let info = adapters[i].get_info();
+    if let Some(adapter) = selected {
+        let info = adapter.get_info();
+        let i = described
+            .iter()
+            .find(|candidate| {
+                candidate.name == info.name
+                    && candidate.backend == info.backend
+                    && candidate.vendor == info.vendor
+                    && candidate.device == info.device
+            })
+            .map(|candidate| candidate.slot)
+            .unwrap_or_default();
         tracing::info!(
             target: "vertexlauncher/app/graphics",
             "Chose adapter [{i}] {:?} (backend={:?} type={:?})",
             info.name, info.backend, info.device_type
         );
-        return Ok(adapters[i].clone());
+        return Ok(adapter);
     }
 
     // Nothing usable — build and emit the diagnostic before returning the error.

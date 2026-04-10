@@ -6,9 +6,7 @@ pub(super) enum Vertex3dSceneOp {
         batch_index: usize,
         clear_depth: bool,
     },
-    DepthResolve {
-        batch_index: usize,
-    },
+    DepthResolve,
     Accumulate {
         batch_index: usize,
         clear_target: bool,
@@ -58,7 +56,7 @@ impl Vertex3dScenePlan {
                             RenderTargetType::Depth,
                         )),
                 );
-                operations.push(Vertex3dSceneOp::DepthResolve { batch_index });
+                operations.push(Vertex3dSceneOp::DepthResolve);
             }
 
             graph = graph.with_pass(

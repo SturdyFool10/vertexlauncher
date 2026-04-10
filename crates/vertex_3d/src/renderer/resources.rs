@@ -105,10 +105,20 @@ impl<'a> ShaderResourceTable<'a> {
         self
     }
 
+    pub fn insert_buffer_ref(&mut self, name: &'a str, buffer: &'a wgpu::Buffer) {
+        self.resources
+            .insert(name, ShaderBindingResource::UniformBuffer(buffer));
+    }
+
     pub fn insert_storage_buffer(mut self, name: &'a str, buffer: &'a wgpu::Buffer) -> Self {
         self.resources
             .insert(name, ShaderBindingResource::StorageBuffer(buffer));
         self
+    }
+
+    pub fn insert_storage_buffer_ref(&mut self, name: &'a str, buffer: &'a wgpu::Buffer) {
+        self.resources
+            .insert(name, ShaderBindingResource::StorageBuffer(buffer));
     }
 
     pub fn insert_texture_view(mut self, name: &'a str, view: &'a wgpu::TextureView) -> Self {
@@ -117,10 +127,39 @@ impl<'a> ShaderResourceTable<'a> {
         self
     }
 
+    pub fn insert_texture_view_ref(&mut self, name: &'a str, view: &'a wgpu::TextureView) {
+        self.resources
+            .insert(name, ShaderBindingResource::TextureView(view));
+    }
+
     pub fn insert_sampler(mut self, name: &'a str, sampler: &'a wgpu::Sampler) -> Self {
         self.resources
             .insert(name, ShaderBindingResource::Sampler(sampler));
         self
+    }
+
+    pub fn insert_sampler_ref(&mut self, name: &'a str, sampler: &'a wgpu::Sampler) {
+        self.resources
+            .insert(name, ShaderBindingResource::Sampler(sampler));
+    }
+
+    pub fn extend(&mut self, other: &'a ShaderResourceTable<'a>) {
+        for (&name, resource) in &other.resources {
+            match resource {
+                ShaderBindingResource::UniformBuffer(buffer) => {
+                    self.insert_buffer_ref(name, buffer);
+                }
+                ShaderBindingResource::StorageBuffer(buffer) => {
+                    self.insert_storage_buffer_ref(name, buffer);
+                }
+                ShaderBindingResource::TextureView(view) => {
+                    self.insert_texture_view_ref(name, view);
+                }
+                ShaderBindingResource::Sampler(sampler) => {
+                    self.insert_sampler_ref(name, sampler);
+                }
+            }
+        }
     }
 
     pub fn get(&self, name: &str) -> Option<&ShaderBindingResource<'a>> {
@@ -149,9 +188,30 @@ impl ReflectionBindGroupSet {
         built_layout: &BuiltPipelineLayout,
         resources: &ShaderResourceTable<'_>,
     ) -> Result<Self, BindGroupBuildError> {
+        Self::build_with_filter(
+            device,
+            reflection,
+            layout_plan,
+            built_layout,
+            resources,
+            |_| true,
+        )
+    }
+
+    pub fn build_with_filter(
+        device: &wgpu::Device,
+        reflection: &ReflectionSnapshot,
+        layout_plan: &PipelineLayoutPlan,
+        built_layout: &BuiltPipelineLayout,
+        resources: &ShaderResourceTable<'_>,
+        mut include_space: impl FnMut(u32) -> bool,
+    ) -> Result<Self, BindGroupBuildError> {
         let mut bind_groups = Vec::new();
 
         for (group_index, group_plan) in layout_plan.bind_groups.iter().enumerate() {
+            if !include_space(group_plan.space) {
+                continue;
+            }
             let layout = built_layout.bind_group_layouts.get(group_index).ok_or(
                 BindGroupBuildError::MissingLayout {
                     space: group_plan.space,

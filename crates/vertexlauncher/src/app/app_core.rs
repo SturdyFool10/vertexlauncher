@@ -209,8 +209,10 @@ impl VertexApp {
             config.set_theme_id(theme_catalog.default_theme_id().to_owned());
         }
         let theme = theme_catalog.resolve(config.theme_id()).clone();
-        let startup_graphics =
-            platform::startup_graphics_config(effective_window_blur_enabled(&config));
+        let startup_graphics = platform::startup_graphics_config(
+            effective_window_blur_enabled(&config),
+            config.graphics_api_preference(),
+        );
 
         let mut text_ui =
             TextUi::new_with_graphics_config(build_text_graphics_config(&config, startup_graphics));

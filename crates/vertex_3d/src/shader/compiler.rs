@@ -1,10 +1,12 @@
 //! Compiler-facing shader abstractions for detached renderer workflows.
 
 use std::collections::BTreeMap;
-#[cfg(feature = "slang-api")]
-use std::fs;
 use std::path::PathBuf;
+#[cfg(feature = "slang-api")]
+use std::{collections::BTreeSet, fs};
 
+#[cfg(feature = "slang-api")]
+use super::standard_library::{resolve_standard_import_path, standard_library_dir};
 use super::{ReflectionSnapshot, ShaderKind, ShaderProgram};
 #[cfg(feature = "slang-api")]
 use slang::Downcast;
@@ -239,6 +241,7 @@ fn compile_with_slang_api(
     let mut stages = BTreeMap::new();
     let mut all_slang_sources = String::new();
     let mut file_stages = Vec::new();
+    let mut visited_reflection_paths = BTreeSet::new();
 
     for stage in &request.stages {
         let source = match &stage.source {
@@ -250,8 +253,11 @@ fn compile_with_slang_api(
                 })?
             }
         };
-        all_slang_sources.push_str(&source);
-        all_slang_sources.push('\n');
+        append_reflection_source(
+            &source,
+            &mut all_slang_sources,
+            &mut visited_reflection_paths,
+        );
         let mut program_stage = super::ShaderStage::new(stage.kind, source.clone());
         if let Some(entry_point) = &stage.entry_point {
             program_stage = program_stage.with_entry_point(entry_point.clone());
@@ -284,6 +290,7 @@ fn compile_with_slang_api(
             search_paths_owned.push(parent.to_path_buf());
         }
     }
+    search_paths_owned.push(standard_library_dir());
     search_paths_owned.sort();
     search_paths_owned.dedup();
     if search_paths_owned.is_empty() {
@@ -407,6 +414,55 @@ fn compile_with_slang_api(
     };
     compiled.program.apply_reflection(&compiled.reflection);
     Ok(compiled)
+}
+
+#[cfg(feature = "slang-api")]
+fn append_reflection_source(
+    source: &str,
+    output: &mut String,
+    visited_paths: &mut BTreeSet<PathBuf>,
+) {
+    output.push_str(source);
+    output.push('\n');
+
+    for import in parse_standard_imports(source) {
+        if !visited_paths.insert(import.clone()) {
+            continue;
+        }
+        if let Ok(import_source) = fs::read_to_string(&import) {
+            append_reflection_source(&import_source, output, visited_paths);
+        }
+    }
+}
+
+#[cfg(feature = "slang-api")]
+fn parse_standard_imports(source: &str) -> Vec<PathBuf> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if let Some(module_name) = parse_import_module_name(line) {
+                return resolve_standard_import_path(module_name);
+            }
+            if let Some(include_name) = parse_include_file_name(line) {
+                let module_name = include_name.strip_suffix(".slang").unwrap_or(include_name);
+                return resolve_standard_import_path(module_name);
+            }
+            None
+        })
+        .collect()
+}
+
+#[cfg(feature = "slang-api")]
+fn parse_import_module_name(line: &str) -> Option<&str> {
+    let line = line.strip_prefix("import ")?;
+    line.strip_suffix(';').map(str::trim)
+}
+
+#[cfg(feature = "slang-api")]
+fn parse_include_file_name(line: &str) -> Option<&str> {
+    let line = line.strip_prefix("#include \"")?;
+    line.strip_suffix('"')
 }
 
 /// Basic compiler useful for tests and early integration. It forwards sources and reflection

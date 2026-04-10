@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use super::adapter_selection::AdapterSelector;
 use crate::shader::{
     BufferPrecision, HdrConfig, ReflectionSnapshot, RenderTargetConfig, RenderTargetType,
     ShaderProgram,
@@ -226,6 +227,7 @@ pub struct RendererConfig {
     pub msaa_samples: u32,
     pub depth_format: wgpu::TextureFormat,
     pub adapter_preference: AdapterPreference,
+    pub adapter_selector: AdapterSelector,
     pub fallback_backends: wgpu::Backends,
     pub default_target_scale: RenderTargetScale,
     pub graph: ShaderGraphDescriptor,
@@ -240,6 +242,7 @@ impl RendererConfig {
             msaa_samples: 1,
             depth_format: wgpu::TextureFormat::Depth32Float,
             adapter_preference: AdapterPreference::Default,
+            adapter_selector: AdapterSelector::Preference(AdapterPreference::Default),
             fallback_backends: wgpu::Backends::all(),
             default_target_scale: RenderTargetScale::Full,
             graph: ShaderGraphDescriptor::default(),
@@ -272,6 +275,15 @@ impl RendererConfig {
 
     pub fn with_adapter_preference(mut self, preference: AdapterPreference) -> Self {
         self.adapter_preference = preference;
+        self.adapter_selector = AdapterSelector::Preference(preference);
+        self
+    }
+
+    pub fn with_adapter_selector(mut self, selector: AdapterSelector) -> Self {
+        if let AdapterSelector::Preference(preference) = selector {
+            self.adapter_preference = preference;
+        }
+        self.adapter_selector = selector;
         self
     }
 
@@ -442,6 +454,21 @@ impl RendererRuntime {
             return RendererRebuildFlags::NONE;
         }
         self.config.adapter_preference = preference;
+        self.config.adapter_selector = AdapterSelector::Preference(preference);
+        self.pending_rebuild |= RendererRebuildFlags::DEVICE
+            | RendererRebuildFlags::ATTACHMENTS
+            | RendererRebuildFlags::PIPELINES;
+        self.pending_rebuild
+    }
+
+    pub fn set_adapter_selector(&mut self, selector: AdapterSelector) -> RendererRebuildFlags {
+        if self.config.adapter_selector == selector {
+            return RendererRebuildFlags::NONE;
+        }
+        if let AdapterSelector::Preference(preference) = selector {
+            self.config.adapter_preference = preference;
+        }
+        self.config.adapter_selector = selector;
         self.pending_rebuild |= RendererRebuildFlags::DEVICE
             | RendererRebuildFlags::ATTACHMENTS
             | RendererRebuildFlags::PIPELINES;

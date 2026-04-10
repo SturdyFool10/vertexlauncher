@@ -1,3 +1,4 @@
+use config::GraphicsApiPreference;
 use eframe::{self, egui_wgpu::wgpu};
 
 #[derive(Clone, Copy)]
@@ -5,13 +6,20 @@ pub(crate) struct StartupGraphicsConfig {
     pub renderer: eframe::Renderer,
     pub hardware_acceleration: eframe::HardwareAcceleration,
     pub backends: wgpu::Backends,
+    pub graphics_api_preference: GraphicsApiPreference,
 }
 
-pub(crate) fn startup_graphics_config(transparent_viewport: bool) -> StartupGraphicsConfig {
+pub(crate) fn startup_graphics_config(
+    transparent_viewport: bool,
+    graphics_api_preference: GraphicsApiPreference,
+) -> StartupGraphicsConfig {
+    let graphics_api_preference =
+        resolve_graphics_api_preference(graphics_api_preference, transparent_viewport);
     StartupGraphicsConfig {
         renderer: eframe::Renderer::Wgpu,
         hardware_acceleration: eframe::HardwareAcceleration::Required,
-        backends: startup_backends(transparent_viewport),
+        backends: startup_backends(transparent_viewport, graphics_api_preference),
+        graphics_api_preference,
     }
 }
 
@@ -21,6 +29,7 @@ pub(crate) fn log_startup_graphics_choice(config: StartupGraphicsConfig) {
         renderer = ?config.renderer,
         hardware_acceleration = ?config.hardware_acceleration,
         backends = ?config.backends,
+        graphics_api_preference = ?config.graphics_api_preference,
         "Startup graphics configuration selected."
     );
 }
@@ -130,7 +139,39 @@ pub(crate) fn detect_total_memory() -> String {
     "Unknown".to_owned()
 }
 
-fn startup_backends(transparent_viewport: bool) -> wgpu::Backends {
+pub(crate) fn resolve_graphics_api_preference(
+    preference: GraphicsApiPreference,
+    transparent_viewport: bool,
+) -> GraphicsApiPreference {
+    match preference {
+        GraphicsApiPreference::Auto => GraphicsApiPreference::Auto,
+        GraphicsApiPreference::Metal if cfg!(target_os = "macos") => GraphicsApiPreference::Metal,
+        GraphicsApiPreference::Dx12 if cfg!(target_os = "windows") => GraphicsApiPreference::Dx12,
+        GraphicsApiPreference::Vulkan if cfg!(target_os = "windows") => {
+            if transparent_viewport {
+                GraphicsApiPreference::Auto
+            } else {
+                GraphicsApiPreference::Vulkan
+            }
+        }
+        GraphicsApiPreference::Vulkan if !cfg!(target_os = "macos") => {
+            GraphicsApiPreference::Vulkan
+        }
+        _ => GraphicsApiPreference::Auto,
+    }
+}
+
+fn startup_backends(
+    transparent_viewport: bool,
+    graphics_api_preference: GraphicsApiPreference,
+) -> wgpu::Backends {
+    match graphics_api_preference {
+        GraphicsApiPreference::Vulkan => return wgpu::Backends::VULKAN,
+        GraphicsApiPreference::Metal => return wgpu::Backends::METAL,
+        GraphicsApiPreference::Dx12 => return wgpu::Backends::DX12,
+        GraphicsApiPreference::Auto => {}
+    }
+
     #[cfg(target_os = "macos")]
     {
         let _ = transparent_viewport;

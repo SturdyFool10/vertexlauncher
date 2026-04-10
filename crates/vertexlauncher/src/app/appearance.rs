@@ -19,12 +19,8 @@ pub(super) fn build_text_graphics_config(
 ) -> textui::TextGraphicsConfig {
     let mut graphics_config = textui::TextGraphicsConfig {
         renderer_backend: textui::TextRendererBackend::Auto,
-        graphics_api: preferred_text_graphics_api(startup_graphics.backends),
-        gpu_power_preference: if config.low_power_gpu_preferred() {
-            textui::TextGpuPowerPreference::LowPower
-        } else {
-            textui::TextGpuPowerPreference::HighPerformance
-        },
+        graphics_api: text_graphics_api_for_startup_config(startup_graphics),
+        gpu_power_preference: text_gpu_power_preference_for_config(config),
         ..textui::TextGraphicsConfig::default()
     };
     graphics_config.rasterization.glyph_raster_mode = match config.text_rendering_path() {
@@ -35,6 +31,44 @@ pub(super) fn build_text_graphics_config(
     };
 
     graphics_config
+}
+
+fn text_graphics_api_for_startup_config(
+    startup_graphics: platform::StartupGraphicsConfig,
+) -> textui::TextGraphicsApi {
+    match startup_graphics.graphics_api_preference {
+        config::GraphicsApiPreference::Auto => {
+            preferred_text_graphics_api(startup_graphics.backends)
+        }
+        config::GraphicsApiPreference::Vulkan => textui::TextGraphicsApi::Vulkan,
+        config::GraphicsApiPreference::Metal => textui::TextGraphicsApi::Metal,
+        config::GraphicsApiPreference::Dx12 => textui::TextGraphicsApi::Dx12,
+    }
+}
+
+fn text_gpu_power_preference_for_config(config: &Config) -> textui::TextGpuPowerPreference {
+    match config.graphics_adapter_preference_type() {
+        config::GraphicsAdapterPreferenceType::PerformanceProfile => {
+            match config.graphics_adapter_profile() {
+                config::GraphicsAdapterProfile::Default => textui::TextGpuPowerPreference::Auto,
+                config::GraphicsAdapterProfile::HighPerformance => {
+                    textui::TextGpuPowerPreference::HighPerformance
+                }
+                config::GraphicsAdapterProfile::LowPower => {
+                    textui::TextGpuPowerPreference::LowPower
+                }
+                config::GraphicsAdapterProfile::DiscreteOnly => {
+                    textui::TextGpuPowerPreference::HighPerformance
+                }
+                config::GraphicsAdapterProfile::IntegratedOnly => {
+                    textui::TextGpuPowerPreference::LowPower
+                }
+            }
+        }
+        config::GraphicsAdapterPreferenceType::ExplicitAdapter => {
+            textui::TextGpuPowerPreference::Auto
+        }
+    }
 }
 
 pub(super) fn preferred_text_graphics_api(backends: wgpu::Backends) -> textui::TextGraphicsApi {

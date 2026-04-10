@@ -1366,9 +1366,11 @@ fn dropdown(
             let max_popup_height = (ui.ctx().content_rect().height() * 0.58)
                 .clamp(metrics.control_height * 4.0, metrics.control_height * 14.0);
             let row_height = metrics.control_height + ui.spacing().item_spacing.y;
+            let popup_height =
+                dropdown_popup_height_limit(max_popup_height, row_height, options.len());
             let scroll_output = egui::ScrollArea::vertical()
                 .id_salt(("settings_dropdown_scroll", open_id))
-                .max_height(max_popup_height)
+                .max_height(popup_height)
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                 .show_rows(ui, row_height, options.len(), |ui, row_range| {
@@ -1622,7 +1624,11 @@ fn searchable_dropdown(
             } else {
                 let scroll_output = egui::ScrollArea::vertical()
                     .id_salt(("settings_searchable_dropdown_scroll", open_id))
-                    .max_height(max_popup_height)
+                    .max_height(dropdown_popup_height_limit(
+                        max_popup_height,
+                        row_height,
+                        filtered_indices.len(),
+                    ))
                     .auto_shrink([false, false])
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                     .show_rows(ui, row_height, filtered_indices.len(), |ui, row_range| {
@@ -1745,6 +1751,16 @@ fn searchable_dropdown(
 
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
     response
+}
+
+fn dropdown_popup_height_limit(max_popup_height: f32, row_height: f32, row_count: usize) -> f32 {
+    if row_count == 0 {
+        return max_popup_height;
+    }
+
+    let content_height = row_height * row_count as f32;
+    let fit_allowance = row_height * 0.35;
+    (content_height + fit_allowance).min(max_popup_height)
 }
 
 fn response_will_open(ui: &Ui) -> bool {

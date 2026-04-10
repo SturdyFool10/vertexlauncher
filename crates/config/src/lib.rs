@@ -1,6 +1,8 @@
 use app_paths as launcher_paths;
 mod config_format;
 mod gamepad_calibration;
+mod graphics_adapter_preference;
+mod graphics_api_preference;
 mod java_runtime_version;
 mod setting_specs;
 mod skin_preview_aa_mode;
@@ -13,6 +15,8 @@ mod windows_transparency_level;
 
 pub use config_format::ConfigFormat;
 pub use gamepad_calibration::GamepadCalibration;
+pub use graphics_adapter_preference::{GraphicsAdapterPreferenceType, GraphicsAdapterProfile};
+pub use graphics_api_preference::GraphicsApiPreference;
 pub use java_runtime_version::JavaRuntimeVersion;
 pub use setting_specs::{
     DropdownSettingId, DropdownSettingSpec, FloatSettingId, FloatSettingSpec, IntSettingId,
@@ -157,6 +161,10 @@ where
 #[serde(default)]
 pub struct Config {
     low_power_gpu_preferred: bool,
+    graphics_adapter_preference_type: GraphicsAdapterPreferenceType,
+    graphics_adapter_profile: GraphicsAdapterProfile,
+    graphics_adapter_explicit_hash: Option<u64>,
+    graphics_api_preference: GraphicsApiPreference,
     streamer_mode_enabled: bool,
     window_blur_enabled: bool,
     #[serde(default = "default_windows_backdrop_type")]
@@ -215,6 +223,39 @@ impl Config {
     /// Returns whether integrated GPU preference is enabled.
     pub fn low_power_gpu_preferred(&self) -> bool {
         self.low_power_gpu_preferred
+    }
+
+    pub fn graphics_adapter_preference_type(&self) -> GraphicsAdapterPreferenceType {
+        self.graphics_adapter_preference_type
+    }
+
+    pub fn set_graphics_adapter_preference_type(&mut self, value: GraphicsAdapterPreferenceType) {
+        self.graphics_adapter_preference_type = value;
+    }
+
+    pub fn graphics_adapter_profile(&self) -> GraphicsAdapterProfile {
+        self.graphics_adapter_profile
+    }
+
+    pub fn set_graphics_adapter_profile(&mut self, value: GraphicsAdapterProfile) {
+        self.graphics_adapter_profile = value;
+        self.low_power_gpu_preferred = matches!(value, GraphicsAdapterProfile::LowPower);
+    }
+
+    pub fn graphics_adapter_explicit_hash(&self) -> Option<u64> {
+        self.graphics_adapter_explicit_hash
+    }
+
+    pub fn set_graphics_adapter_explicit_hash(&mut self, value: Option<u64>) {
+        self.graphics_adapter_explicit_hash = value;
+    }
+
+    pub fn graphics_api_preference(&self) -> GraphicsApiPreference {
+        self.graphics_api_preference
+    }
+
+    pub fn set_graphics_api_preference(&mut self, value: GraphicsApiPreference) {
+        self.graphics_api_preference = value;
     }
 
     pub fn streamer_mode_enabled(&self) -> bool {
@@ -678,6 +719,23 @@ impl Config {
         if self.theme_id.trim().is_empty() {
             self.theme_id = "matrix_oled".to_owned();
         }
+        if !GraphicsAdapterPreferenceType::ALL.contains(&self.graphics_adapter_preference_type) {
+            self.graphics_adapter_preference_type =
+                GraphicsAdapterPreferenceType::PerformanceProfile;
+        }
+        if !GraphicsAdapterProfile::ALL.contains(&self.graphics_adapter_profile) {
+            self.graphics_adapter_profile = if self.low_power_gpu_preferred {
+                GraphicsAdapterProfile::LowPower
+            } else {
+                GraphicsAdapterProfile::HighPerformance
+            };
+        }
+        if self.graphics_adapter_explicit_hash == Some(0) {
+            self.graphics_adapter_explicit_hash = None;
+        }
+        if !GraphicsApiPreference::ALL.contains(&self.graphics_api_preference) {
+            self.graphics_api_preference = GraphicsApiPreference::Auto;
+        }
     }
 
     /// Visits each toggle setting with mutable access to its backing value.
@@ -685,6 +743,10 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred,
+            graphics_adapter_preference_type: _,
+            graphics_adapter_profile: _,
+            graphics_adapter_explicit_hash: _,
+            graphics_api_preference: _,
             streamer_mode_enabled,
             window_blur_enabled,
             windows_backdrop_type: _,
@@ -785,6 +847,10 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            graphics_adapter_preference_type: _,
+            graphics_adapter_profile: _,
+            graphics_adapter_explicit_hash: _,
+            graphics_api_preference: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
             windows_backdrop_type: _,
@@ -839,6 +905,10 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            graphics_adapter_preference_type: _,
+            graphics_adapter_profile: _,
+            graphics_adapter_explicit_hash: _,
+            graphics_api_preference: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
             windows_backdrop_type: _,
@@ -901,6 +971,10 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            graphics_adapter_preference_type: _,
+            graphics_adapter_profile: _,
+            graphics_adapter_explicit_hash: _,
+            graphics_api_preference: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
             windows_backdrop_type: _,
@@ -964,6 +1038,10 @@ impl Config {
         // Intentionally destructure all fields to force updates here when Config changes.
         let Self {
             low_power_gpu_preferred: _,
+            graphics_adapter_preference_type: _,
+            graphics_adapter_profile: _,
+            graphics_adapter_explicit_hash: _,
+            graphics_api_preference: _,
             streamer_mode_enabled: _,
             window_blur_enabled: _,
             windows_backdrop_type: _,
@@ -1038,6 +1116,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             low_power_gpu_preferred: true,
+            graphics_adapter_preference_type: GraphicsAdapterPreferenceType::PerformanceProfile,
+            graphics_adapter_profile: GraphicsAdapterProfile::LowPower,
+            graphics_adapter_explicit_hash: None,
+            graphics_api_preference: GraphicsApiPreference::Auto,
             streamer_mode_enabled: false,
             window_blur_enabled: !cfg!(target_os = "macos"),
             windows_backdrop_type: default_windows_backdrop_type(),

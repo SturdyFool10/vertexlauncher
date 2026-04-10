@@ -1,5 +1,6 @@
 use config::{
     Config, DOWNLOAD_CONCURRENCY_MAX, DOWNLOAD_CONCURRENCY_MIN, DropdownSettingId, FloatSettingId,
+    GraphicsAdapterPreferenceType, GraphicsAdapterProfile, GraphicsApiPreference,
     INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN, INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP, IntSettingId,
     JavaRuntimeVersion, SkinPreviewAaMode, SkinPreviewTexelAaMode, SvgAaMode, TextRenderingPath,
     UiEmojiFontFamily, UiFontFamily, parse_bitrate_to_bps,
@@ -13,7 +14,10 @@ use textui::TextUi;
 use textui_egui::{gamepad_scroll, prelude::*};
 
 use super::{SettingsInfo, platform};
-use crate::ui::{components::settings_widgets, style, theme::Theme};
+use crate::{
+    ui::{components::settings_widgets, style, theme::Theme},
+    window_effects,
+};
 
 const RESERVED_SYSTEM_MEMORY_MIB: u128 = 4 * 1024;
 const FALLBACK_TOTAL_MEMORY_MIB: u128 = 20 * 1024;
@@ -137,14 +141,13 @@ fn render_settings_contents(
         "GPU, skin preview rendering, frame pacing, and download throughput behavior.",
         |ui, text_ui| {
             render_skin_preview_motion_blur_settings(ui, text_ui, config);
+            render_graphics_adapter_settings(ui, text_ui, config, settings_info);
+            render_graphics_api_setting(ui, text_ui, config);
             render_selected_toggles(
                 ui,
                 text_ui,
                 config,
-                &[
-                    config::ToggleSettingId::LowPowerGpuPreferred,
-                    config::ToggleSettingId::FrameLimiterEnabled,
-                ],
+                &[config::ToggleSettingId::FrameLimiterEnabled],
             );
             render_download_settings(ui, text_ui, config);
         },
@@ -427,6 +430,169 @@ fn render_ui_font_settings(
     });
 
     render_selected_int_settings(ui, text_ui, config, &[IntSettingId::UiFontWeight]);
+}
+
+fn render_graphics_adapter_settings(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    config: &mut Config,
+    settings_info: &SettingsInfo,
+) {
+    let type_setting = DropdownSettingId::GraphicsAdapterPreferenceType.spec();
+    let type_options = GraphicsAdapterPreferenceType::ALL
+        .iter()
+        .map(|option| option.settings_label())
+        .collect::<Vec<_>>();
+    let mut selected_type_index = GraphicsAdapterPreferenceType::ALL
+        .iter()
+        .position(|option| *option == config.graphics_adapter_preference_type())
+        .unwrap_or(0);
+    let type_response = settings_widgets::dropdown_row(
+        text_ui,
+        ui,
+        "graphics_adapter_preference_type",
+        type_setting.label,
+        type_setting.info_tooltip,
+        &mut selected_type_index,
+        &type_options,
+    );
+    if type_response.changed() {
+        if let Some(next_type) = GraphicsAdapterPreferenceType::ALL.get(selected_type_index) {
+            config.set_graphics_adapter_preference_type(*next_type);
+        }
+    }
+    ui.add_space(style::SPACE_MD);
+
+    let preference_setting = DropdownSettingId::GraphicsAdapterPreference.spec();
+    match config.graphics_adapter_preference_type() {
+        GraphicsAdapterPreferenceType::PerformanceProfile => {
+            let profile_options = GraphicsAdapterProfile::ALL
+                .iter()
+                .map(|option| option.settings_label())
+                .collect::<Vec<_>>();
+            let mut selected_profile_index = GraphicsAdapterProfile::ALL
+                .iter()
+                .position(|option| *option == config.graphics_adapter_profile())
+                .unwrap_or(0);
+            let response = settings_widgets::dropdown_row(
+                text_ui,
+                ui,
+                "graphics_adapter_profile",
+                preference_setting.label,
+                preference_setting.info_tooltip,
+                &mut selected_profile_index,
+                &profile_options,
+            );
+            if response.changed() {
+                if let Some(next_profile) = GraphicsAdapterProfile::ALL.get(selected_profile_index)
+                {
+                    config.set_graphics_adapter_profile(*next_profile);
+                }
+            }
+        }
+        GraphicsAdapterPreferenceType::ExplicitAdapter => {
+            let mut labels = settings_info
+                .available_graphics_adapters
+                .iter()
+                .map(|adapter| adapter.label.as_str())
+                .collect::<Vec<_>>();
+            let explicit_hash = config.graphics_adapter_explicit_hash();
+            let mut missing_label = None::<String>;
+            let mut selected_index = settings_info
+                .available_graphics_adapters
+                .iter()
+                .position(|adapter| Some(adapter.hash) == explicit_hash)
+                .unwrap_or_else(|| {
+                    if let Some(hash) = explicit_hash {
+                        let _ = hash;
+                        missing_label =
+                            Some("Missing adapter (falls back to High Performance)".to_owned());
+                        labels.insert(0, missing_label.as_ref().unwrap().as_str());
+                        0
+                    } else {
+                        0
+                    }
+                });
+
+            if labels.is_empty() {
+                labels.push("No graphics adapters detected");
+                selected_index = 0;
+            }
+
+            let response = settings_widgets::dropdown_row(
+                text_ui,
+                ui,
+                "graphics_adapter_explicit",
+                preference_setting.label,
+                preference_setting.info_tooltip,
+                &mut selected_index,
+                &labels,
+            );
+            if response.changed() {
+                if missing_label.is_some() && selected_index == 0 {
+                    config.set_graphics_adapter_explicit_hash(explicit_hash);
+                } else {
+                    let actual_index =
+                        selected_index.saturating_sub(usize::from(missing_label.is_some()));
+                    let selected_hash = settings_info
+                        .available_graphics_adapters
+                        .get(actual_index)
+                        .map(|adapter| adapter.hash);
+                    config.set_graphics_adapter_explicit_hash(selected_hash);
+                }
+            }
+        }
+    }
+    ui.add_space(style::SPACE_MD);
+}
+
+fn supported_graphics_api_preferences(config: &Config) -> Vec<GraphicsApiPreference> {
+    let transparent_viewport =
+        config.window_blur_enabled() && window_effects::platform_supports_blur();
+
+    GraphicsApiPreference::ALL
+        .into_iter()
+        .filter(|preference| match preference {
+            GraphicsApiPreference::Auto => true,
+            GraphicsApiPreference::Metal => cfg!(target_os = "macos"),
+            GraphicsApiPreference::Dx12 => cfg!(target_os = "windows"),
+            GraphicsApiPreference::Vulkan => {
+                if cfg!(target_os = "windows") {
+                    !transparent_viewport
+                } else {
+                    !cfg!(target_os = "macos")
+                }
+            }
+        })
+        .collect()
+}
+
+fn render_graphics_api_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
+    let setting = DropdownSettingId::GraphicsApiPreference.spec();
+    let options = supported_graphics_api_preferences(config);
+    let labels = options
+        .iter()
+        .map(|option| option.settings_label())
+        .collect::<Vec<_>>();
+    let mut selected_index = options
+        .iter()
+        .position(|option| *option == config.graphics_api_preference())
+        .unwrap_or(0);
+    let response = settings_widgets::dropdown_row(
+        text_ui,
+        ui,
+        "graphics_api_preference",
+        setting.label,
+        setting.info_tooltip,
+        &mut selected_index,
+        &labels,
+    );
+    if response.changed() {
+        if let Some(next_preference) = options.get(selected_index) {
+            config.set_graphics_api_preference(*next_preference);
+        }
+    }
+    ui.add_space(style::SPACE_MD);
 }
 
 fn render_emoji_font_settings(

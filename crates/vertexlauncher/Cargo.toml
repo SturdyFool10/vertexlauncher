@@ -41,6 +41,7 @@ tar = "*"
 xz2 = "*"
 vtmpack.workspace = true
 vertex_constants.workspace = true
+vertex_3d.workspace = true
 zip = { version = "*", default-features = false, features = ["deflate"] }
 discord-rich-presence = "1.1.0"
 gilrs.workspace = true

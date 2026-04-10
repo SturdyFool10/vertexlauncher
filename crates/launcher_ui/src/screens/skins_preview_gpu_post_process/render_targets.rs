@@ -7,12 +7,12 @@ use super::*;
 /// the MSAA view to a non-multisampled bind-group layout.
 pub(super) struct DepthAttachmentSet {
     /// Depth texture used as a render attachment. May be MSAA (samples > 1).
-    pub(super) render_texture: wgpu::Texture,
+    pub(super) _render_texture: wgpu::Texture,
     pub(super) render_view: wgpu::TextureView,
     /// Always 1× depth texture. Populated by [`MsaaResolvePool::auto_resolve`] each frame
     /// when MSAA is active, or rendered to directly when samples == 1.
-    resolve_texture: wgpu::Texture,
-    resolve_view: wgpu::TextureView,
+    _resolve_texture: wgpu::Texture,
+    _resolve_view: wgpu::TextureView,
     /// Bind group that always references `resolve_view`. Safe to pass to any shader layout
     /// with `multisampled = false`, regardless of whether MSAA is enabled.
     pub(super) sample_bind_group: wgpu::BindGroup,
@@ -37,22 +37,12 @@ impl DepthAttachmentSet {
             }],
         });
         Self {
-            render_texture,
+            _render_texture: render_texture,
             render_view,
-            resolve_texture,
-            resolve_view,
+            _resolve_texture: resolve_texture,
+            _resolve_view: resolve_view,
             sample_bind_group,
         }
-    }
-
-    /// View of the 1× resolve texture. Pass this to [`MsaaResolvePool::resolve_depth`] as `dst_view`.
-    pub(super) fn resolve_view(&self) -> &wgpu::TextureView {
-        &self.resolve_view
-    }
-
-    /// The 1× resolve texture itself.
-    pub(super) fn resolve_texture(&self) -> &wgpu::Texture {
-        &self.resolve_texture
     }
 }
 

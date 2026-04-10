@@ -119,6 +119,9 @@ impl ToggleSettingId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DropdownSettingId {
     UiFontFamily,
+    GraphicsAdapterPreferenceType,
+    GraphicsAdapterPreference,
+    GraphicsApiPreference,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -136,6 +139,27 @@ impl DropdownSettingId {
                 id: DropdownSettingId::UiFontFamily,
                 label: "UI Font",
                 info_tooltip: Some("Select the primary font used by the launcher UI."),
+            },
+            DropdownSettingId::GraphicsAdapterPreferenceType => DropdownSettingSpec {
+                id: DropdownSettingId::GraphicsAdapterPreferenceType,
+                label: "Graphics Adapter Preference Type",
+                info_tooltip: Some(
+                    "Choose whether the launcher picks a GPU by performance profile or by a specific detected adapter.",
+                ),
+            },
+            DropdownSettingId::GraphicsAdapterPreference => DropdownSettingSpec {
+                id: DropdownSettingId::GraphicsAdapterPreference,
+                label: "Graphics Adapter Preference",
+                info_tooltip: Some(
+                    "When Explicit Adapter is selected and the saved GPU is unavailable, Vertex falls back to the High Performance profile.",
+                ),
+            },
+            DropdownSettingId::GraphicsApiPreference => DropdownSettingSpec {
+                id: DropdownSettingId::GraphicsApiPreference,
+                label: "Graphics API Preference",
+                info_tooltip: Some(
+                    "Selects which graphics API backend the launcher uses. Adapter selection is applied separately.",
+                ),
             },
         }
     }

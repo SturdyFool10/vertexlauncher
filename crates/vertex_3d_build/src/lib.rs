@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReflectionExportError {
@@ -51,6 +51,8 @@ struct ReflectedResource {
     stages: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     texture_dimension: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -80,7 +82,8 @@ pub fn export_reflection_snapshot_from_slang(
         path: source_path.display().to_string(),
         error,
     })?;
-    let snapshot = parse_slang_reflection(&source);
+    let expanded = expand_standard_imports(&source);
+    let snapshot = parse_slang_reflection(&expanded);
     let json = serde_json::to_string_pretty(&snapshot).map_err(|error| {
         ReflectionExportError::Serialize {
             path: output_path.display().to_string(),
@@ -163,36 +166,124 @@ fn parse_stage_bodies(source: &str, stages: &[ReflectedStage]) -> Vec<(String, S
 }
 
 fn parse_resources(source: &str) -> Vec<ReflectedResource> {
+    let mut resources = Vec::new();
+    let mut pending_role = None;
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(annotation) = line.strip_prefix("// @vertex3d.resource ") {
+            pending_role = parse_resource_annotation(annotation);
+            continue;
+        }
+        let Some(mut resource) = parse_binding_resource_line(line) else {
+            continue;
+        };
+        resource.role = pending_role.take();
+        resources.push(resource);
+    }
+    resources
+}
+
+fn parse_binding_resource_line(line: &str) -> Option<ReflectedResource> {
+    if !line.starts_with("[[vk::binding(") {
+        return None;
+    }
+    let binding_end = line.find(")]]")?;
+    let binding_spec = &line["[[vk::binding(".len()..binding_end];
+    let mut binding_parts = binding_spec.split(',').map(str::trim);
+    let slot = binding_parts.next()?.parse().ok()?;
+    let space = binding_parts.next()?.parse().ok()?;
+
+    let declaration = line[binding_end + 3..].trim();
+    let declaration = declaration.strip_suffix(';').unwrap_or(declaration);
+    let mut tokens = declaration.split_whitespace();
+    let type_token = tokens.next()?;
+    let name = tokens.next()?.trim().to_string();
+    let (resource_type, texture_dimension) = classify_resource_type(type_token);
+
+    Some(ReflectedResource {
+        name,
+        slot,
+        space,
+        resource_type: resource_type.to_string(),
+        stages: Vec::new(),
+        texture_dimension: texture_dimension.map(str::to_string),
+        role: None,
+    })
+}
+
+fn parse_resource_annotation(annotation: &str) -> Option<String> {
+    for pair in annotation.split_whitespace() {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == "role" {
+            return Some(value.replace('.', "_"));
+        }
+    }
+    None
+}
+
+fn expand_standard_imports(source: &str) -> String {
+    let mut output = String::new();
+    let mut visited = std::collections::BTreeSet::new();
+    append_standard_imports(source, &mut output, &mut visited);
+    output
+}
+
+fn append_standard_imports(
+    source: &str,
+    output: &mut String,
+    visited: &mut std::collections::BTreeSet<PathBuf>,
+) {
+    output.push_str(source);
+    output.push('\n');
+    for import in parse_standard_imports(source) {
+        if !visited.insert(import.clone()) {
+            continue;
+        }
+        if let Ok(import_source) = fs::read_to_string(&import) {
+            append_standard_imports(&import_source, output, visited);
+        }
+    }
+}
+
+fn parse_standard_imports(source: &str) -> Vec<PathBuf> {
     source
         .lines()
         .filter_map(|line| {
             let line = line.trim();
-            if !line.starts_with("[[vk::binding(") {
-                return None;
+            if let Some(module) = line
+                .strip_prefix("import ")
+                .and_then(|line| line.strip_suffix(';'))
+                .map(str::trim)
+            {
+                return resolve_standard_import_path(module);
             }
-            let binding_end = line.find(")]]")?;
-            let binding_spec = &line["[[vk::binding(".len()..binding_end];
-            let mut binding_parts = binding_spec.split(',').map(str::trim);
-            let slot = binding_parts.next()?.parse().ok()?;
-            let space = binding_parts.next()?.parse().ok()?;
-
-            let declaration = line[binding_end + 3..].trim();
-            let declaration = declaration.strip_suffix(';').unwrap_or(declaration);
-            let mut tokens = declaration.split_whitespace();
-            let type_token = tokens.next()?;
-            let name = tokens.next()?.trim().to_string();
-            let (resource_type, texture_dimension) = classify_resource_type(type_token);
-
-            Some(ReflectedResource {
-                name,
-                slot,
-                space,
-                resource_type: resource_type.to_string(),
-                stages: Vec::new(),
-                texture_dimension: texture_dimension.map(str::to_string),
-            })
+            if let Some(file_name) = line
+                .strip_prefix("#include \"")
+                .and_then(|line| line.strip_suffix('"'))
+            {
+                return resolve_standard_import_path(
+                    file_name.strip_suffix(".slang").unwrap_or(file_name),
+                );
+            }
+            None
         })
         .collect()
+}
+
+fn resolve_standard_import_path(module_name: &str) -> Option<PathBuf> {
+    let file_name = match module_name {
+        "vertex3d_globals" => "vertex3d_globals.slang",
+        "vertex3d_material" => "vertex3d_material.slang",
+        "vertex3d_scene" => "vertex3d_scene.slang",
+        _ => return None,
+    };
+    Some(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../vertex_3d/shaders")
+            .join(file_name),
+    )
 }
 
 fn parse_target_annotations(source: &str) -> Vec<ReflectedRenderTarget> {
@@ -310,5 +401,27 @@ float4 fs_main(float4 pos : SV_Position) : SV_Target { return source_tex.Load(in
                 .iter()
                 .any(|resource| resource.name == "source_tex")
         );
+    }
+
+    #[test]
+    fn expands_standard_material_imports_for_reflection() {
+        let source = r#"
+import vertex3d_material;
+[shader("fragment")]
+float4 fs_main(float2 uv : TEXCOORD0) : SV_Target
+{
+    return vertex3d_sample_base_color(uv);
+}
+"#;
+        let expanded = expand_standard_imports(source);
+        let snapshot = parse_slang_reflection(&expanded);
+        assert!(snapshot.resources.iter().any(|resource| {
+            resource.name == "vertex3d_material"
+                && resource.role.as_deref() == Some("material_uniform")
+        }));
+        assert!(snapshot.resources.iter().any(|resource| {
+            resource.name == "vertex3d_base_color_texture"
+                && resource.role.as_deref() == Some("material_base_color_texture")
+        }));
     }
 }

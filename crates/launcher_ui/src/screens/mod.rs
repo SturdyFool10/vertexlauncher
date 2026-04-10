@@ -63,7 +63,7 @@ pub use menu_presence_context::MenuPresenceContext;
 pub use quick_launch_command_mode::QuickLaunchCommandMode;
 pub use screen_output::ScreenOutput;
 pub use settings::request_theme_focus as request_settings_theme_focus;
-pub use settings_info::SettingsInfo;
+pub use settings_info::{SettingsGraphicsAdapterInfo, SettingsInfo};
 pub use skins::classic_model_button_id as skins_classic_model_button_id;
 pub use skins::purge_inactive_state as purge_inactive_skins_state;
 pub use skins::request_model_focus as request_skins_model_focus;

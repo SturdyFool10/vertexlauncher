@@ -17,6 +17,7 @@ pub mod pipeline;
 pub mod program;
 pub mod reflection;
 pub mod stage;
+pub mod standard_library;
 
 // ============================================================================
 // Re-exports for convenient access
@@ -48,7 +49,10 @@ pub use pipeline::{
 };
 pub use program::ShaderProgram;
 pub use reflection::{
-    ReflectedRenderTarget, ReflectedResource, ReflectedResourceType, ReflectedStage,
-    ReflectedTextureDimension, ReflectionSnapshot,
+    ReflectedRenderTarget, ReflectedResource, ReflectedResourceRole, ReflectedResourceType,
+    ReflectedStage, ReflectedTextureDimension, ReflectionSnapshot,
 };
 pub use stage::ShaderStage;
+pub use standard_library::{
+    StandardShaderImport, resolve_standard_import_path, standard_library_dir, standard_module_path,
+};

@@ -114,7 +114,14 @@ impl MsaaResolvePool {
             let dst = pool.get(&dst_handle).unwrap();
 
             if src.format.is_depth_stencil_format() {
-                self.resolve_depth(encoder, device, &src.texture, &src.view, &dst.view, src.format);
+                self.resolve_depth(
+                    encoder,
+                    device,
+                    &src.texture,
+                    &src.view,
+                    &dst.view,
+                    src.format,
+                );
             } else {
                 Self::resolve_color(encoder, &src.view, &dst.view, src.samples, src.format);
             }

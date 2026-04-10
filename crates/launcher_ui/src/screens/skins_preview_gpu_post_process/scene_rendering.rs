@@ -36,7 +36,7 @@ impl SkinPreviewPostProcessWgpuResources {
                     });
                     self.paint_scene(&mut pass, batch);
                 }
-                Vertex3dSceneOp::DepthResolve { .. } => {
+                Vertex3dSceneOp::DepthResolve => {
                     // Auto-resolve any MSAA attachments that have a `{name}_resolve` partner.
                     // Detects scene_depth → scene_depth_resolve (and any future pairs).
                     self.msaa_resolver
