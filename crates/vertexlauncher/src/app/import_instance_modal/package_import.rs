@@ -17,6 +17,10 @@ mod resolved_modrinth_download_source;
 #[path = "package_import/resolved_mrpack_source.rs"]
 mod resolved_mrpack_source;
 
+use self::managed_source::ManagedSource;
+use self::mrpack_dependency_info::MrpackDependencyInfo;
+use self::mrpack_file::MrpackFile;
+use self::mrpack_manifest::MrpackManifest;
 use self::package_import_curseforge::find_curseforge_file;
 pub use self::package_import_curseforge::{
     CurseForgeManualDownloadRequirement, attach_curseforge_modpack_install_state,
@@ -24,16 +28,12 @@ pub use self::package_import_curseforge::{
     prepare_curseforge_manual_downloads,
 };
 use self::package_import_curseforge::{CurseForgePackManifest, CurseForgePackMinecraft};
-use self::managed_source::ManagedSource;
-use self::mrpack_dependency_info::MrpackDependencyInfo;
-use self::mrpack_file::MrpackFile;
-use self::mrpack_manifest::MrpackManifest;
-use self::resolved_modrinth_download_source::ResolvedModrinthDownloadSource;
-use self::resolved_mrpack_source::ResolvedMrpackSource;
 #[cfg(test)]
 use self::package_import_curseforge::{
     curseforge_file_has_api_download, modrinth_fallback_queries, select_modrinth_backup_file,
 };
+use self::resolved_modrinth_download_source::ResolvedModrinthDownloadSource;
+use self::resolved_mrpack_source::ResolvedMrpackSource;
 
 pub(super) fn import_vtmpack(
     store: &mut InstanceStore,

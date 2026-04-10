@@ -103,6 +103,13 @@ mod home_support;
 #[path = "home_thumbnails.rs"]
 mod home_thumbnails;
 
+use self::home_activity_result_channel::HomeActivityResultChannel;
+use self::home_activity_scan_instance::HomeActivityScanInstance;
+use self::home_activity_scan_request::HomeActivityScanRequest;
+use self::home_activity_scan_result::HomeActivityScanResult;
+use self::home_entry_ref::HomeEntryRef;
+pub use self::home_output::HomeOutput;
+pub use self::home_presence_section::HomePresenceSection;
 use self::home_screenshots::{
     ScreenshotCandidate, ScreenshotEntry, ScreenshotViewerState,
     handle_escape as handle_screenshot_escape, poll_delete_screenshot_results,
@@ -115,25 +122,18 @@ use self::home_server_ping::{
     normalize_server_address, poll_server_ping_results, queue_server_pings,
     render_server_ping_icon, retain_known_server_pings, server_meta_line,
 };
+use self::home_state::HomeState;
 use self::home_support::{
     current_time_millis, format_time_ago, modified_millis, open_home_instance,
     open_home_instance_folder,
 };
+use self::home_tab::HomeTab;
 use self::home_thumbnails::{
     HomeThumbnailState, home_instance_thumbnail_uri, home_world_thumbnail_uri,
     instance_thumbnail_cache_key, poll_instance_thumbnail_results,
     purge_activity_image_state as purge_home_activity_thumbnail_state, request_instance_thumbnail,
     trim_home_thumbnail_cache,
 };
-use self::home_activity_result_channel::HomeActivityResultChannel;
-use self::home_activity_scan_instance::HomeActivityScanInstance;
-use self::home_activity_scan_request::HomeActivityScanRequest;
-use self::home_activity_scan_result::HomeActivityScanResult;
-use self::home_entry_ref::HomeEntryRef;
-pub use self::home_output::HomeOutput;
-pub use self::home_presence_section::HomePresenceSection;
-use self::home_state::HomeState;
-use self::home_tab::HomeTab;
 use self::home_ui_metrics::HomeUiMetrics;
 use self::world_entry::WorldEntry;
 

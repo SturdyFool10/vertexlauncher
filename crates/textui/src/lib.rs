@@ -39,6 +39,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use wgpu::util::DeviceExt as _;
 
 mod advanced_text;
+#[path = "text_ui_async_raster.rs"]
+mod async_raster;
 mod atlas;
 mod button_options;
 mod clipboard;
@@ -50,28 +52,27 @@ mod font_features;
 mod geometry;
 mod gpu;
 mod input_options;
-mod label_options;
-mod markdown_options;
-mod markdown_parser;
-mod path_layout;
-mod prepared_layout;
-mod text_helpers;
-mod tooltip_options;
-#[path = "text_ui.rs"]
-mod text_ui;
-#[path = "text_ui_async_raster.rs"]
-mod async_raster;
 #[path = "text_ui_input_runtime.rs"]
 mod input_runtime;
 #[path = "text_ui_input_widget.rs"]
 mod input_widget;
+mod label_options;
 #[path = "text_ui_label_scene.rs"]
 mod label_scene;
+mod markdown_options;
+mod markdown_parser;
+mod path_layout;
 #[path = "text_ui_path_text.rs"]
 mod path_text;
+mod prepared_layout;
 #[path = "text_ui_scene_builder.rs"]
 mod scene_builder;
+mod text_helpers;
+#[path = "text_ui.rs"]
+mod text_ui;
+mod tooltip_options;
 
+pub use self::text_ui::TextUi;
 use crate::async_raster::{AsyncRasterState, AsyncRasterWorkerMessage, new_async_raster_state};
 pub(crate) use crate::atlas::{
     GlyphAtlas, GlyphContentMode, GlyphRasterKey, PaintTextQuad, PreparedAtlasGlyph,
@@ -123,7 +124,6 @@ use crate::{
     input_options::InputOptions, label_options::LabelOptions, markdown_options::MarkdownOptions,
     markdown_parser::parse_markdown_blocks, tooltip_options::TooltipOptions,
 };
-pub use self::text_ui::TextUi;
 
 pub use advanced_text::DEFAULT_ELLIPSIS;
 pub use advanced_text::{

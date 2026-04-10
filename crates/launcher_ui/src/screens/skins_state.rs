@@ -1,13 +1,5 @@
 use super::*;
 
-#[derive(Clone, Debug, Default)]
-pub(super) struct CapeChoice {
-    pub(super) id: String,
-    pub(super) label: String,
-    pub(super) texture_bytes: Option<Vec<u8>>,
-    pub(super) texture_size: Option<[u32; 2]>,
-}
-
 #[derive(Clone)]
 pub(super) struct SkinManagerState {
     pub(super) active_profile_id: Option<String>,
@@ -59,8 +51,6 @@ pub(super) struct SkinManagerState {
     pub(super) cape_sample: Option<Arc<RgbaImage>>,
     pub(super) default_elytra_texture: Option<TextureHandle>,
     pub(super) default_elytra_sample: Option<Arc<RgbaImage>>,
-    pub(super) preview_texture: Option<TextureHandle>,
-    pub(super) preview_history: Option<PreviewHistory>,
     pub(super) cape_uv: FaceUvs,
     pub(super) camera_yaw_offset: f32,
     pub(super) camera_inertial_velocity: f32,
@@ -123,8 +113,6 @@ impl Default for SkinManagerState {
             cape_sample: None,
             default_elytra_texture: None,
             default_elytra_sample: None,
-            preview_texture: None,
-            preview_history: None,
             cape_uv: default_cape_uv_layout(),
             camera_yaw_offset: 0.0,
             camera_inertial_velocity: 0.0,
@@ -194,8 +182,6 @@ impl SkinManagerState {
         self.cape_texture_hash = None;
         self.cape_texture = None;
         self.cape_sample = None;
-        self.preview_texture = None;
-        self.preview_history = None;
         self.cached_expression_layout_hash = None;
         self.cached_expression_layout = None;
         self.cape_uv = default_cape_uv_layout();
@@ -246,8 +232,6 @@ impl SkinManagerState {
         self.cape_texture_hash = None;
         self.cape_texture = None;
         self.cape_sample = None;
-        self.preview_texture = None;
-        self.preview_history = None;
         self.cached_expression_layout_hash = None;
         self.cached_expression_layout = None;
         self.cape_uv = default_cape_uv_layout();
@@ -405,8 +389,6 @@ impl SkinManagerState {
                 self.pending_skin_path = Some(path);
                 self.skin_texture_hash = None;
                 self.skin_sample = None;
-                self.preview_texture = None;
-                self.preview_history = None;
             }
             Err(err) => {
                 tracing::warn!(
@@ -842,8 +824,6 @@ impl SkinManagerState {
         self.skin_sample = None;
         self.cape_texture_hash = None;
         self.cape_sample = None;
-        self.preview_texture = None;
-        self.preview_history = None;
         self.cached_expression_layout_hash = None;
         self.cached_expression_layout = None;
         self.cape_uv = default_cape_uv_layout();
@@ -889,7 +869,7 @@ impl SkinManagerState {
             self.cached_expression_layout = None;
             return;
         };
-        let hash = hash_rgba_image(sample);
+        let hash = hash_preview_image(sample);
         if self.cached_expression_layout_hash == Some(hash) {
             return;
         }
@@ -934,215 +914,4 @@ impl SkinManagerState {
             );
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct LoadedProfile {
-    pub(super) player_name: String,
-    pub(super) active_skin_png: Option<Vec<u8>>,
-    pub(super) skin_variant: MinecraftSkinVariant,
-    pub(super) capes: Vec<CapeChoice>,
-    pub(super) active_cape_id: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) enum WorkerEvent {
-    Refreshed(Result<(String, LoadedProfile), String>),
-    Saved(Result<(String, LoadedProfile), String>),
-}
-
-pub(super) fn format_auth_error(operation: &str, err: &auth::AuthError) -> String {
-    let message = err.to_string();
-    if message.contains("HTTP status 401") {
-        return format!(
-            "Failed to {operation}: {message}. Minecraft auth token may be expired. Sign out and sign back in, then retry."
-        );
-    }
-    format!("Failed to {operation}: {message}")
-}
-
-impl LoadedProfile {
-    pub(super) fn from_profile(profile: MinecraftProfileState) -> Self {
-        let active_skin = profile
-            .skins
-            .iter()
-            .find(|skin| skin.state.eq_ignore_ascii_case("active"))
-            .or_else(|| profile.skins.first());
-
-        let active_skin_png = active_skin.and_then(|skin| skin.texture_png_bytes());
-        let skin_variant = active_skin
-            .and_then(|skin| skin.variant.as_deref())
-            .map(parse_variant)
-            .unwrap_or(MinecraftSkinVariant::Classic);
-
-        let mut active_cape_id = None;
-        let mut capes = Vec::with_capacity(profile.capes.len());
-        for cape in profile.capes {
-            let texture_bytes = cape.texture_png_bytes();
-            let texture_size = texture_bytes.as_deref().and_then(decode_image_dimensions);
-            if cape.state.eq_ignore_ascii_case("active") {
-                active_cape_id = Some(cape.id.clone());
-            }
-            capes.push(CapeChoice {
-                label: cape
-                    .alias
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or(cape.id.as_str())
-                    .to_owned(),
-                id: cape.id,
-                texture_bytes,
-                texture_size,
-            });
-        }
-
-        Self {
-            player_name: profile.name,
-            active_skin_png,
-            skin_variant,
-            capes,
-            active_cape_id,
-        }
-    }
-}
-
-pub(super) fn parse_variant(raw: &str) -> MinecraftSkinVariant {
-    if raw.eq_ignore_ascii_case("slim") {
-        MinecraftSkinVariant::Slim
-    } else {
-        MinecraftSkinVariant::Classic
-    }
-}
-
-pub(super) fn decode_skin_rgba(bytes: &[u8]) -> Option<RgbaImage> {
-    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let (w, h) = image.dimensions();
-    if w == 64 && (h == 64 || h == 32) {
-        Some(image)
-    } else {
-        None
-    }
-}
-
-pub(super) fn decode_generic_rgba(bytes: &[u8]) -> Option<RgbaImage> {
-    image::load_from_memory(bytes)
-        .ok()
-        .map(|image| image.to_rgba8())
-}
-
-pub(super) fn decode_image_dimensions(bytes: &[u8]) -> Option<[u32; 2]> {
-    let image = image::load_from_memory(bytes).ok()?;
-    Some([image.width(), image.height()])
-}
-
-pub(super) fn full_uv_rect() -> Rect {
-    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0))
-}
-
-pub(super) fn full_face_uvs() -> FaceUvs {
-    let full = full_uv_rect();
-    FaceUvs {
-        top: full,
-        bottom: full,
-        left: full,
-        right: full,
-        front: full,
-        back: full,
-    }
-}
-
-pub(super) fn default_cape_uv_layout() -> FaceUvs {
-    cape_uv_layout([64, 32]).unwrap_or_else(full_face_uvs)
-}
-
-pub(super) fn default_elytra_wing_uvs() -> ElytraWingUvs {
-    elytra_wing_uvs([64, 32]).unwrap_or(ElytraWingUvs {
-        left: full_face_uvs(),
-        right: full_face_uvs(),
-    })
-}
-
-pub(super) fn elytra_wing_uvs(texture_size: [u32; 2]) -> Option<ElytraWingUvs> {
-    if texture_size[0] < 46 || texture_size[1] < 22 {
-        return None;
-    }
-    let inset = 0.0;
-    let left = FaceUvs {
-        top: flip_uv_rect_x(uv_rect_with_inset(texture_size, 24, 0, 10, 2, inset)),
-        bottom: flip_uv_rect_x(uv_rect_with_inset(texture_size, 34, 1, 10, 2, inset)),
-        left: flip_uv_rect_x(uv_rect_with_inset(texture_size, 34, 2, 2, 20, inset)),
-        right: flip_uv_rect_x(uv_rect_with_inset(texture_size, 22, 2, 2, 20, inset)),
-        front: flip_uv_rect_x(uv_rect_with_inset(texture_size, 24, 2, 10, 20, inset)),
-        back: flip_uv_rect_x(uv_rect_with_inset(texture_size, 36, 2, 10, 20, inset)),
-    };
-    let right = FaceUvs {
-        top: uv_rect_with_inset(texture_size, 24, 0, 10, 2, inset),
-        bottom: uv_rect_with_inset(texture_size, 34, 1, 10, 2, inset),
-        left: uv_rect_with_inset(texture_size, 22, 2, 2, 20, inset),
-        right: uv_rect_with_inset(texture_size, 34, 2, 2, 20, inset),
-        front: uv_rect_with_inset(texture_size, 24, 2, 10, 20, inset),
-        back: uv_rect_with_inset(texture_size, 36, 2, 10, 20, inset),
-    };
-    Some(ElytraWingUvs { left, right })
-}
-
-pub(super) fn default_elytra_texture_image() -> RgbaImage {
-    const DEFAULT_ELYTRA_TEXTURE_PNG: &[u8] = include_bytes!("../assets/default_elytra.png");
-    if let Some(image) = decode_generic_rgba(DEFAULT_ELYTRA_TEXTURE_PNG) {
-        return image;
-    }
-    let mut image = RgbaImage::from_pixel(64, 32, image::Rgba([0, 0, 0, 0]));
-    let base = image::Rgba([141, 141, 141, 255]);
-    let edge = image::Rgba([112, 112, 112, 255]);
-    fill_rect_rgba(&mut image, 22, 0, 24, 22, base);
-    fill_rect_rgba(&mut image, 22, 0, 24, 1, edge);
-    fill_rect_rgba(&mut image, 22, 21, 24, 1, edge);
-    fill_rect_rgba(&mut image, 22, 0, 1, 22, edge);
-    fill_rect_rgba(&mut image, 45, 0, 1, 22, edge);
-    image
-}
-
-pub(super) fn fill_rect_rgba(
-    image: &mut RgbaImage,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    color: image::Rgba<u8>,
-) {
-    let max_x = image.width();
-    let max_y = image.height();
-    for py in y..y.saturating_add(height).min(max_y) {
-        for px in x..x.saturating_add(width).min(max_x) {
-            image.put_pixel(px, py, color);
-        }
-    }
-}
-
-pub(super) fn cape_outer_face_uv(texture_size: [u32; 2]) -> Option<Rect> {
-    if texture_size[0] < 22 || texture_size[1] < 17 {
-        return None;
-    }
-    Some(uv_rect_with_inset(
-        texture_size,
-        1,
-        1,
-        10,
-        16,
-        UV_EDGE_INSET_BASE_TEXELS,
-    ))
-}
-
-pub(super) fn cape_uv_layout(texture_size: [u32; 2]) -> Option<FaceUvs> {
-    let outer = cape_outer_face_uv(texture_size)?;
-    let inner = uv_rect_with_inset(texture_size, 12, 1, 10, 16, UV_EDGE_INSET_BASE_TEXELS);
-    Some(FaceUvs {
-        top: uv_rect_with_inset(texture_size, 1, 0, 10, 1, UV_EDGE_INSET_BASE_TEXELS),
-        bottom: uv_rect_with_inset(texture_size, 11, 0, 10, 1, UV_EDGE_INSET_BASE_TEXELS),
-        left: uv_rect_with_inset(texture_size, 0, 1, 1, 16, UV_EDGE_INSET_BASE_TEXELS),
-        right: uv_rect_with_inset(texture_size, 11, 1, 1, 16, UV_EDGE_INSET_BASE_TEXELS),
-        front: inner,
-        back: outer,
-    })
 }

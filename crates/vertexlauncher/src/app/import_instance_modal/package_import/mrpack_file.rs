@@ -1,5 +1,5 @@
-use super::*;
 use super::mrpack_file_env::MrpackFileEnv;
+use super::*;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct MrpackFile {

@@ -35,7 +35,8 @@ pub struct DiscoverState {
     pub(crate) detail_versions_in_flight: bool,
     pub(crate) detail_version_request_serial: u64,
     pub(crate) detail_version_results_tx: Option<mpsc::Sender<DiscoverVersionsResult>>,
-    pub(crate) detail_version_results_rx: Option<Arc<Mutex<mpsc::Receiver<DiscoverVersionsResult>>>>,
+    pub(crate) detail_version_results_rx:
+        Option<Arc<Mutex<mpsc::Receiver<DiscoverVersionsResult>>>>,
     pub(crate) install_in_flight: bool,
     pub(crate) install_message: Option<String>,
     pub(crate) install_completed_steps: usize,

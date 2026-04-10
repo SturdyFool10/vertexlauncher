@@ -1,5 +1,5 @@
-use super::*;
 use super::curseforge_pack_mod_loader::CurseForgePackModLoader;
+use super::*;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct CurseForgePackMinecraft {

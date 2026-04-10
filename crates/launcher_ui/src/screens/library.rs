@@ -6,10 +6,10 @@ use std::{
     time::Duration,
 };
 
-#[path = "library_runtime.rs"]
-mod library_runtime;
 #[path = "library/library_output.rs"]
 mod library_output;
+#[path = "library_runtime.rs"]
+mod library_runtime;
 #[path = "library/library_state.rs"]
 mod library_state;
 #[path = "library/library_tile_metrics.rs"]
@@ -32,14 +32,14 @@ use ui_foundation::{
     DialogPreset, UiMetrics, danger_button, dialog_options, secondary_button, show_dialog,
 };
 
-use crate::app::tokio_runtime;
-use crate::ui::components::{image_memory::load_image_path_for_memory, image_textures};
-use crate::{assets, desktop, install_activity, notification, ui::style};
 use self::library_output::LibraryOutput;
 use self::library_state::LibraryState;
 use self::library_tile_metrics::LibraryTileMetrics;
 use self::runtime_action::RuntimeAction;
 use self::thumbnail_cache_entry::ThumbnailCacheEntry;
+use crate::app::tokio_runtime;
+use crate::ui::components::{image_memory::load_image_path_for_memory, image_textures};
+use crate::{assets, desktop, install_activity, notification, ui::style};
 use library_runtime::{
     LibraryLaunchIdentity, LibraryRuntimeState as RuntimeWorkflowState,
     poll_delete_instance_results, poll_runtime_actions, request_instance_delete,

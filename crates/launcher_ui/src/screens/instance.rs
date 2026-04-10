@@ -67,14 +67,14 @@ mod instance_exports;
 mod instance_logs;
 #[path = "instance_move_modal.rs"]
 mod instance_move_modal;
+#[path = "instance/instance_presence_section.rs"]
+mod instance_presence_section;
 mod instance_screen_output;
 mod instance_screen_state;
 #[path = "instance_screenshots.rs"]
 mod instance_screenshots;
 #[path = "instance_settings_modal.rs"]
 mod instance_settings_modal;
-#[path = "instance/instance_presence_section.rs"]
-mod instance_presence_section;
 mod move_instance;
 mod platform;
 mod runtime;

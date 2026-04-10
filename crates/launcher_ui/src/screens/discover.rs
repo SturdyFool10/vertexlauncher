@@ -29,14 +29,18 @@ const VERSION_CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(75);
 const DETAIL_VERSIONS_FETCH_TIMEOUT: Duration = Duration::from_secs(45);
 const DISCOVER_SEARCH_CACHE_MAX_ENTRIES: usize = 10;
 
+#[path = "discover/cached_discover_masonry_layout.rs"]
+mod cached_discover_masonry_layout;
+#[path = "discover_detail.rs"]
+mod discover_detail;
+#[path = "discover/discover_entry.rs"]
+mod discover_entry;
 #[path = "discover/discover_install_request.rs"]
 mod discover_install_request;
 #[path = "discover/discover_install_source.rs"]
 mod discover_install_source;
 #[path = "discover/discover_loader_filter.rs"]
 mod discover_loader_filter;
-#[path = "discover/discover_entry.rs"]
-mod discover_entry;
 #[path = "discover/discover_masonry_column.rs"]
 mod discover_masonry_column;
 #[path = "discover/discover_masonry_item.rs"]
@@ -69,21 +73,17 @@ mod discover_state;
 mod discover_tile_render_result;
 #[path = "discover/discover_ui_metrics.rs"]
 mod discover_ui_metrics;
-#[path = "discover/cached_discover_masonry_layout.rs"]
-mod cached_discover_masonry_layout;
 #[path = "discover/search_mode.rs"]
 mod search_mode;
-#[path = "discover_detail.rs"]
-mod discover_detail;
 
 use self::cached_discover_masonry_layout::CachedDiscoverMasonryLayout;
 use self::discover_detail::{
     DiscoverVersionEntry, DiscoverVersionsResult, format_compact_number, format_short_date,
     open_detail_page, render_discover_detail_content,
 };
+use self::discover_entry::DiscoverEntry;
 pub use self::discover_install_request::DiscoverInstallRequest;
 pub use self::discover_install_source::DiscoverInstallSource;
-use self::discover_entry::DiscoverEntry;
 use self::discover_loader_filter::DiscoverLoaderFilter;
 use self::discover_masonry_column::DiscoverMasonryColumn;
 use self::discover_masonry_item::DiscoverMasonryItem;
@@ -102,7 +102,6 @@ pub use self::discover_state::DiscoverState;
 use self::discover_tile_render_result::DiscoverTileRenderResult;
 use self::discover_ui_metrics::DiscoverUiMetrics;
 use self::search_mode::SearchMode;
-
 
 pub fn render(
     ui: &mut Ui,
@@ -726,7 +725,6 @@ fn render_discover_tile(
         measured_height: response.response.rect.height(),
     }
 }
-
 
 fn ensure_search_channel(state: &mut DiscoverState) {
     if state.search_results_tx.is_some() && state.search_results_rx.is_some() {

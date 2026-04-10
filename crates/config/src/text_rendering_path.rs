@@ -1,16 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-/// Rendering path selection for text rendering backend.
+/// Rendering path selection for text rendering pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TextRenderingPath {
-    /// Automatically select best rendering path based on context.
+    /// Automatically select the best rendering path based on context.
     Auto,
-    /// Simple alpha mask rendering without distance fields.
+    /// Use alpha mask rendering for text glyphs.
     AlphaMask,
-    /// Signed distance field rendering for scalable text.
+    /// Use signed distance field (SDF) rendering for scalable text.
     Sdf,
-    /// Modified signed distance field with improved edge quality.
+    /// Use modified signed distance field (MSDF) for high-quality scaling.
     Msdf,
 }
 

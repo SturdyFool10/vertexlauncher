@@ -2,10 +2,10 @@ use std::ffi::OsStr;
 
 use super::*;
 
-#[path = "home_screenshots/screenshot_entry.rs"]
-mod screenshot_entry;
 #[path = "home_screenshots/screenshot_candidate.rs"]
 mod screenshot_candidate;
+#[path = "home_screenshots/screenshot_entry.rs"]
+mod screenshot_entry;
 #[path = "home_screenshots/screenshot_overlay_action.rs"]
 mod screenshot_overlay_action;
 #[path = "home_screenshots/screenshot_overlay_button_result.rs"]

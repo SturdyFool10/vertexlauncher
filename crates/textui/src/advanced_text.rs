@@ -1,52 +1,28 @@
 use egui::{Color32, Pos2, Rect, Vec2};
 use std::fmt::Write as _;
 
-#[path = "advanced_text/text_color.rs"]
-mod text_color;
-#[path = "advanced_text/text_feature_setting.rs"]
-mod text_feature_setting;
-#[path = "advanced_text/text_fundamentals.rs"]
-mod text_fundamentals;
-#[path = "advanced_text/text_kerning.rs"]
-mod text_kerning;
-#[path = "advanced_text/text_label_options.rs"]
-mod text_label_options;
-#[path = "advanced_text/text_path.rs"]
-mod text_path;
-#[path = "advanced_text/text_path_error.rs"]
-mod text_path_error;
-#[path = "advanced_text/text_path_glyph.rs"]
-mod text_path_glyph;
-#[path = "advanced_text/text_path_layout.rs"]
-mod text_path_layout;
-#[path = "advanced_text/text_path_options.rs"]
-mod text_path_options;
-#[path = "advanced_text/text_point.rs"]
-mod text_point;
-#[path = "advanced_text/text_rect.rs"]
-mod text_rect;
-#[path = "advanced_text/text_rendering_policy.rs"]
-mod text_rendering_policy;
-#[path = "advanced_text/text_variation_setting.rs"]
-mod text_variation_setting;
-#[path = "advanced_text/text_vector.rs"]
-mod text_vector;
-#[path = "advanced_text/text_atlas_page_snapshot.rs"]
-mod text_atlas_page_snapshot;
 #[path = "advanced_text/rich_text_span.rs"]
 mod rich_text_span;
 #[path = "advanced_text/rich_text_style.rs"]
 mod rich_text_style;
 #[path = "advanced_text/text_atlas_page_data.rs"]
 mod text_atlas_page_data;
+#[path = "advanced_text/text_atlas_page_snapshot.rs"]
+mod text_atlas_page_snapshot;
 #[path = "advanced_text/text_atlas_quad.rs"]
 mod text_atlas_quad;
 #[path = "advanced_text/text_atlas_sampling.rs"]
 mod text_atlas_sampling;
+#[path = "advanced_text/text_color.rs"]
+mod text_color;
+#[path = "advanced_text/text_feature_setting.rs"]
+mod text_feature_setting;
 #[path = "advanced_text/text_frame_info.rs"]
 mod text_frame_info;
 #[path = "advanced_text/text_frame_output.rs"]
 mod text_frame_output;
+#[path = "advanced_text/text_fundamentals.rs"]
+mod text_fundamentals;
 #[path = "advanced_text/text_glyph_raster_mode.rs"]
 mod text_glyph_raster_mode;
 #[path = "advanced_text/text_gpu_power_preference.rs"]
@@ -63,8 +39,12 @@ mod text_graphics_config;
 mod text_hinting_mode;
 #[path = "advanced_text/text_input_event.rs"]
 mod text_input_event;
+#[path = "advanced_text/text_kerning.rs"]
+mod text_kerning;
 #[path = "advanced_text/text_key.rs"]
 mod text_key;
+#[path = "advanced_text/text_label_options.rs"]
+mod text_label_options;
 #[path = "advanced_text/text_markdown_block.rs"]
 mod text_markdown_block;
 #[path = "advanced_text/text_markdown_heading_level.rs"]
@@ -73,16 +53,36 @@ mod text_markdown_heading_level;
 mod text_modifiers;
 #[path = "advanced_text/text_optical_sizing_mode.rs"]
 mod text_optical_sizing_mode;
+#[path = "advanced_text/text_path.rs"]
+mod text_path;
+#[path = "advanced_text/text_path_error.rs"]
+mod text_path_error;
+#[path = "advanced_text/text_path_glyph.rs"]
+mod text_path_glyph;
+#[path = "advanced_text/text_path_layout.rs"]
+mod text_path_layout;
+#[path = "advanced_text/text_path_options.rs"]
+mod text_path_options;
+#[path = "advanced_text/text_point.rs"]
+mod text_point;
 #[path = "advanced_text/text_pointer_button.rs"]
 mod text_pointer_button;
 #[path = "advanced_text/text_rasterization_config.rs"]
 mod text_rasterization_config;
+#[path = "advanced_text/text_rect.rs"]
+mod text_rect;
 #[path = "advanced_text/text_render_scene.rs"]
 mod text_render_scene;
 #[path = "advanced_text/text_renderer_backend.rs"]
 mod text_renderer_backend;
+#[path = "advanced_text/text_rendering_policy.rs"]
+mod text_rendering_policy;
 #[path = "advanced_text/text_stem_darkening_mode.rs"]
 mod text_stem_darkening_mode;
+#[path = "advanced_text/text_variation_setting.rs"]
+mod text_variation_setting;
+#[path = "advanced_text/text_vector.rs"]
+mod text_vector;
 #[path = "advanced_text/vector_glyph_shape.rs"]
 mod vector_glyph_shape;
 #[path = "advanced_text/vector_path_command.rs"]
@@ -121,13 +121,13 @@ pub use self::text_path_error::TextPathError;
 pub use self::text_path_glyph::TextPathGlyph;
 pub use self::text_path_layout::TextPathLayout;
 pub use self::text_path_options::TextPathOptions;
-pub use self::text_pointer_button::TextPointerButton;
 pub use self::text_point::TextPoint;
+pub use self::text_pointer_button::TextPointerButton;
 pub use self::text_rasterization_config::TextRasterizationConfig;
 pub use self::text_rect::TextRect;
 pub use self::text_render_scene::TextRenderScene;
-pub use self::text_rendering_policy::TextRenderingPolicy;
 pub use self::text_renderer_backend::TextRendererBackend;
+pub use self::text_rendering_policy::TextRenderingPolicy;
 pub use self::text_stem_darkening_mode::TextStemDarkeningMode;
 pub use self::text_variation_setting::TextVariationSetting;
 pub use self::text_vector::TextVector;

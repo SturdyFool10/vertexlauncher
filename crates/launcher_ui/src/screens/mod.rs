@@ -9,28 +9,28 @@ use textui::TextUi;
 
 use crate::ui::{context_menu, modal, theme::Theme};
 
+#[path = "screens/app_screen.rs"]
+mod app_screen;
 mod console;
 mod content_browser;
 mod discover;
 mod home;
 mod instance;
-mod legal;
-mod library;
-mod platform;
-mod settings;
-mod skins;
-#[path = "screens/app_screen.rs"]
-mod app_screen;
 #[path = "screens/launch_auth_context.rs"]
 mod launch_auth_context;
+mod legal;
+mod library;
 #[path = "screens/menu_presence_context.rs"]
 mod menu_presence_context;
+mod platform;
 #[path = "screens/quick_launch_command_mode.rs"]
 mod quick_launch_command_mode;
 #[path = "screens/screen_output.rs"]
 mod screen_output;
+mod settings;
 #[path = "screens/settings_info.rs"]
 mod settings_info;
+mod skins;
 
 pub use app_screen::AppScreen;
 pub use console::console_log_scroll_id;
@@ -54,11 +54,11 @@ pub use instance::instance_top_screenshots_tab_id;
 pub use instance::purge_inactive_state as purge_inactive_instance_state;
 pub use instance::purge_screenshot_state as purge_instance_screenshot_state;
 pub use instance::set_gamepad_screenshot_viewer_input as set_instance_screenshot_viewer_gamepad_input;
+pub use launch_auth_context::LaunchAuthContext;
 pub use library::{
     purge_inactive_state as purge_inactive_library_state, render_global_overlays,
     request_delete_instance,
 };
-pub use launch_auth_context::LaunchAuthContext;
 pub use menu_presence_context::MenuPresenceContext;
 pub use quick_launch_command_mode::QuickLaunchCommandMode;
 pub use screen_output::ScreenOutput;

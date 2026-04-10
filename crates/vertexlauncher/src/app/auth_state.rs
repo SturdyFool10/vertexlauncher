@@ -26,10 +26,10 @@ mod launch_auth_context;
 mod renewal_result;
 
 pub use self::account_ui_entry::AccountUiEntry;
-pub use self::launch_auth_context::LaunchAuthContext;
 use self::auth_flow_event::AuthFlowEvent;
 use self::auth_ui_status::AuthUiStatus;
 use self::avatar_load_result::AvatarLoadResult;
+pub use self::launch_auth_context::LaunchAuthContext;
 use self::renewal_result::RenewalResult;
 
 pub const REPAINT_INTERVAL: Duration = Duration::from_millis(200);
