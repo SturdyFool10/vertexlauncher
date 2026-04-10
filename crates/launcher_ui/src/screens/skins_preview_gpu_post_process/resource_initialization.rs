@@ -127,11 +127,11 @@ impl SkinPreviewPostProcessWgpuResources {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("skins-preview-post-scene-layout"),
                 bind_group_layouts: &[
-                    &texture_bind_group_layout,
-                    &scene_uniform_layout,
-                    &scalar_uniform_layout,
+                    Some(&texture_bind_group_layout),
+                    Some(&scene_uniform_layout),
+                    Some(&scalar_uniform_layout),
                 ],
-                push_constant_ranges: &[],
+                immediate_size: 0,
             });
         let scene_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skins-preview-post-scene-pipeline"),
@@ -164,8 +164,8 @@ impl SkinPreviewPostProcessWgpuResources {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: SKIN_PREVIEW_DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -174,7 +174,7 @@ impl SkinPreviewPostProcessWgpuResources {
                 mask: !0,
                 alpha_to_coverage_enabled: scene_msaa_samples > 1,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -187,8 +187,8 @@ impl SkinPreviewPostProcessWgpuResources {
 
         let accumulate_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("skins-preview-accumulate-layout"),
-            bind_group_layouts: &[&texture_bind_group_layout, &scalar_uniform_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&texture_bind_group_layout), Some(&scalar_uniform_layout)],
+            immediate_size: 0,
         });
         let accumulate_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skins-preview-accumulate-pipeline"),
@@ -218,14 +218,14 @@ impl SkinPreviewPostProcessWgpuResources {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
         let smaa_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("skins-preview-smaa-layout"),
-            bind_group_layouts: &[&texture_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&texture_bind_group_layout)],
+            immediate_size: 0,
         });
         let smaa_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skins-preview-smaa-pipeline"),
@@ -249,14 +249,14 @@ impl SkinPreviewPostProcessWgpuResources {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
         let fxaa_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("skins-preview-fxaa-layout"),
-            bind_group_layouts: &[&texture_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&texture_bind_group_layout)],
+            immediate_size: 0,
         });
         let fxaa_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skins-preview-fxaa-pipeline"),
@@ -280,18 +280,18 @@ impl SkinPreviewPostProcessWgpuResources {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
         let taa_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("skins-preview-taa-layout"),
             bind_group_layouts: &[
-                &texture_bind_group_layout,
-                &texture_bind_group_layout,
-                &scalar_uniform_layout,
+                Some(&texture_bind_group_layout),
+                Some(&texture_bind_group_layout),
+                Some(&scalar_uniform_layout),
             ],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
         let taa_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skins-preview-taa-pipeline"),
@@ -315,14 +315,14 @@ impl SkinPreviewPostProcessWgpuResources {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
         let present_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("skins-preview-present-layout"),
-            bind_group_layouts: &[&texture_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&texture_bind_group_layout)],
+            immediate_size: 0,
         });
         let present_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skins-preview-present-pipeline"),
@@ -357,8 +357,8 @@ impl SkinPreviewPostProcessWgpuResources {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: SKIN_PREVIEW_DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -367,7 +367,7 @@ impl SkinPreviewPostProcessWgpuResources {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 

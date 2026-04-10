@@ -1,3 +1,4 @@
+// @vertex3d.target handle=post_process type=lighting lifecycle=transient
 struct Scalar
 {
     float4 value;

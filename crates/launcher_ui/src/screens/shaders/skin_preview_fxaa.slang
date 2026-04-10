@@ -1,3 +1,4 @@
+// @vertex3d.target handle=post_process type=lighting lifecycle=transient
 struct FullscreenOut
 {
     float4 pos : SV_Position;

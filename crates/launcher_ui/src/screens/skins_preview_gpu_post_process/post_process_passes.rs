@@ -16,6 +16,7 @@ impl SkinPreviewPostProcessWgpuResources {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         pass.set_pipeline(&self.shader_modules.smaa_pipeline);
         pass.set_bind_group(0, &self.render_targets.accumulation_bind_group, &[]);
@@ -57,6 +58,7 @@ impl SkinPreviewPostProcessWgpuResources {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         pass.set_pipeline(&self.shader_modules.fxaa_pipeline);
         pass.set_bind_group(0, source_bind_group, &[]);
@@ -94,6 +96,7 @@ impl SkinPreviewPostProcessWgpuResources {
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
                 pass.set_pipeline(&self.shader_modules.taa_pipeline);
                 pass.set_bind_group(0, &self.render_targets.accumulation_bind_group, &[]);

@@ -60,3 +60,6 @@ wayland-protocols-plasma = { version = "*", default-features = false, features =
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "*"
+
+[build-dependencies]
+vertex_3d_build.workspace = true

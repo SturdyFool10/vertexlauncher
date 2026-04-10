@@ -1,8 +1,10 @@
 use super::*;
 
 impl eframe::App for VertexApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.update_inner(ctx, frame))) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Err(payload) =
+            catch_unwind(AssertUnwindSafe(|| self.update_inner(ui.ctx(), frame)))
+        {
             log_unexpected_panic("ui update", payload.as_ref());
             resume_unwind(payload);
         }

@@ -85,7 +85,7 @@ impl TextWgpuPipelineResources {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu_filter_mode_for_sampling(atlas_sampling),
             min_filter: wgpu_filter_mode_for_sampling(atlas_sampling),
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
         let uniform = TextWgpuScreenUniform {
@@ -107,8 +107,11 @@ impl TextWgpuPipelineResources {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("textui_instanced_pipeline_layout"),
-            bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[
+                Some(&uniform_bind_group_layout),
+                Some(&texture_bind_group_layout),
+            ],
+            immediate_size: 0,
         });
         let premultiplied_alpha = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -160,8 +163,8 @@ impl TextWgpuPipelineResources {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: TEXT_WGPU_PASS_DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -170,7 +173,7 @@ impl TextWgpuPipelineResources {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         Self {

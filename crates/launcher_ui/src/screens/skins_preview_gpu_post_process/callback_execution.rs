@@ -92,6 +92,7 @@ impl egui_wgpu::CallbackTrait for SkinPreviewPostProcessWgpuCallback {
                     }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
                 resources.paint_scene(&mut pass, &prepared_batch);
             }
@@ -114,6 +115,7 @@ impl egui_wgpu::CallbackTrait for SkinPreviewPostProcessWgpuCallback {
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
                 pass.set_pipeline(&resources.shader_modules.accumulate_pipeline);
                 pass.set_bind_group(0, &resources.render_targets.scene_resolve_bind_group, &[]);

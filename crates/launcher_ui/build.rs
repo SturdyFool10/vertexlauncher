@@ -1,6 +1,8 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use vertex_3d_build::export_reflection_snapshot_from_slang;
 
 fn main() {
     let shader_dir = PathBuf::from("src/screens/shaders");
@@ -17,8 +19,11 @@ fn main() {
 fn compile_slang_shader(shader_dir: &Path, out_dir: &Path, shader_stem: &str) {
     let source_path = shader_dir.join(format!("{shader_stem}.slang"));
     let output_path = out_dir.join(format!("{shader_stem}.wgsl"));
+    let reflection_path = shader_dir.join(format!("{shader_stem}.slang.reflection.json"));
+    let out_reflection_path = out_dir.join(format!("{shader_stem}.reflection.json"));
 
     println!("cargo:rerun-if-changed={}", source_path.display());
+    println!("cargo:rerun-if-changed={}", reflection_path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
     let status = Command::new("slangc")
@@ -27,6 +32,10 @@ fn compile_slang_shader(shader_dir: &Path, out_dir: &Path, shader_stem: &str) {
             "wgsl",
             "-profile",
             "sm_6_5",
+            "-reflection-json",
+            out_reflection_path
+                .to_str()
+                .expect("reflection output path must be valid UTF-8"),
             "-o",
             output_path
                 .to_str()
@@ -45,5 +54,24 @@ fn compile_slang_shader(shader_dir: &Path, out_dir: &Path, shader_stem: &str) {
 
     if !status.success() {
         panic!("slangc failed while compiling {}", source_path.display());
+    }
+
+    if reflection_path.exists() {
+        fs::copy(&reflection_path, &out_reflection_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to copy reflection sidecar {} to {}: {err}",
+                reflection_path.display(),
+                out_reflection_path.display()
+            )
+        });
+    } else if !out_reflection_path.exists() {
+        export_reflection_snapshot_from_slang(&source_path, &out_reflection_path).unwrap_or_else(
+            |err| {
+                panic!(
+                    "failed to generate reflection sidecar for {}: {err}",
+                    source_path.display()
+                )
+            },
+        );
     }
 }

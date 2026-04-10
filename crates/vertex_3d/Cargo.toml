@@ -1,0 +1,16 @@
+[package]
+name = "vertex_3d"
+version = "0.1.0"
+edition = "2024"
+description = "A reusable 3D rendering framework with shaders, meshes, and configurable post-processing pipeline"
+license = "MIT"
+
+[dependencies]
+egui.workspace = true
+image.workspace = true
+wgpu.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytemuck = { version = "1.23", features = ["derive"] }
+glam = "0.29"
+thiserror = "2.0"

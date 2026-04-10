@@ -1,3 +1,4 @@
+// @vertex3d.target handle=scene_color type=lighting lifecycle=transient
 struct VertexIn
 {
     float2 pos_points : LOC0;

@@ -22,6 +22,45 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
 
     platform::log_startup_graphics_choice(startup_graphics);
 
+    let mut wgpu_setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    wgpu_setup.instance_descriptor.backends = startup_graphics.backends;
+    wgpu_setup.instance_descriptor.backend_options =
+        transparent_backend_options(transparent_viewport);
+    wgpu_setup.power_preference = startup_power_preference;
+    wgpu_setup.native_adapter_selector = Some(Arc::new(select_adapter_or_diagnose));
+    wgpu_setup.device_descriptor = Arc::new(|adapter| {
+        let info = adapter.get_info();
+        let graphics_api = graphics_api_label(&format!("{:?}", info.backend));
+        app_metadata::record_graphics_adapter(
+            &info.name,
+            &graphics_api,
+            &info.driver,
+            &info.driver_info,
+        );
+        tracing::info!(
+            target: "vertexlauncher/app/graphics",
+            "Selected graphics adapter: {} backend={:?} type={:?} vendor=0x{:04x} device=0x{:04x}",
+            info.name,
+            info.backend,
+            info.device_type,
+            info.vendor,
+            info.device
+        );
+
+        let base_limits = if info.backend == wgpu::Backend::Gl {
+            wgpu::Limits::downlevel_webgl2_defaults()
+        } else {
+            wgpu::Limits::default()
+        };
+        let adapter_limits = adapter.limits();
+
+        wgpu::DeviceDescriptor {
+            label: Some("egui wgpu device"),
+            required_limits: base_limits.using_resolution(adapter_limits),
+            ..Default::default()
+        }
+    });
+
     eframe::NativeOptions {
         viewport: egui::ViewportBuilder {
             title: Some("Vertex Launcher".into()),
@@ -45,55 +84,12 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
         persist_window: false,
         event_loop_builder: None,
         window_builder: None,
-        shader_version: None,
         run_and_return: false,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             present_mode: wgpu::PresentMode::AutoNoVsync,
             desired_maximum_frame_latency: Some(1),
-            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(
-                eframe::egui_wgpu::WgpuSetupCreateNew {
-                    instance_descriptor: wgpu::InstanceDescriptor {
-                        backends: startup_graphics.backends,
-                        backend_options: transparent_backend_options(transparent_viewport),
-                        ..Default::default()
-                    },
-                    power_preference: startup_power_preference,
-                    native_adapter_selector: Some(Arc::new(select_adapter_or_diagnose)),
-                    device_descriptor: Arc::new(|adapter| {
-                        let info = adapter.get_info();
-                        let graphics_api = graphics_api_label(&format!("{:?}", info.backend));
-                        app_metadata::record_graphics_adapter(
-                            &info.name,
-                            &graphics_api,
-                            &info.driver,
-                            &info.driver_info,
-                        );
-                        tracing::info!(
-                            target: "vertexlauncher/app/graphics",
-                            "Selected graphics adapter: {} backend={:?} type={:?} vendor=0x{:04x} device=0x{:04x}",
-                            info.name,
-                            info.backend,
-                            info.device_type,
-                            info.vendor,
-                            info.device
-                        );
-
-                        let base_limits = if info.backend == wgpu::Backend::Gl {
-                            wgpu::Limits::downlevel_webgl2_defaults()
-                        } else {
-                            wgpu::Limits::default()
-                        };
-                        let adapter_limits = adapter.limits();
-
-                        wgpu::DeviceDescriptor {
-                            label: Some("egui wgpu device"),
-                            required_limits: base_limits.using_resolution(adapter_limits),
-                            ..Default::default()
-                        }
-                    }),
-                },
-            ),
-            on_surface_error: std::sync::Arc::new(|_| {
+            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(wgpu_setup),
+            on_surface_status: std::sync::Arc::new(|_| {
                 eframe::egui_wgpu::SurfaceErrorAction::RecreateSurface
             }),
         },

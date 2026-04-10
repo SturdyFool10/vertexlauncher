@@ -22,6 +22,8 @@ members = [
     "crates/skin_preview",
     "crates/textui",
     "crates/textui_egui",
+    "crates/vertex_3d",
+    "crates/vertex_3d_build",
     "crates/vertex_constants",
     "crates/vtmpack",
 ]
@@ -30,12 +32,12 @@ default-members = [
 ]
 
 [workspace.dependencies]
-eframe = { version = "0.33.3", features = ["wgpu", "serde"] }
-egui = { version = "0.33.3", features = ["serde"] }
-egui-wgpu = "0.33.3"
-egui_extras = { version = "0.33.3", features = ["http", "image", "gif", "svg", "chrono", "datepicker", "syntect", "serde"] }
+eframe = { version = "0.34.1", features = ["wgpu", "serde"] }
+egui = { version = "0.34.1", features = ["serde"] }
+egui-wgpu = "0.34.1"
+egui_extras = { version = "0.34.1", features = ["http", "image", "gif", "svg", "datepicker", "syntect", "serde"] }
 serde = { version = "1.0.228", features = ["derive", "serde_derive"] }
-wgpu = "27.0.1"
+wgpu = "29.0.0"
 fontdb = "0.23.0"
 thiserror = "1.0.69"
 toml = "0.8.23"
@@ -83,6 +85,7 @@ textui = { path = "crates/textui" }
 textui_egui = { path = "crates/textui_egui" }
 vtmpack = { path = "crates/vtmpack" }
 vertex_constants = { path = "crates/vertex_constants" }
+vertex_3d_build = { path = "crates/vertex_3d_build" }
 
 [profile.dev]
 # Your crates (workspace members): keep normal dev behavior
