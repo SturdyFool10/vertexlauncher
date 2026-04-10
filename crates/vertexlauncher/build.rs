@@ -9,7 +9,7 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     {
-        println!("cargo:rerun-if-changed=../launcher_ui/src/assets/vertex.webp");
+        println!("cargo:rerun-if-changed=../../Vertex.webp");
         if let Err(error) = compile_windows_resources() {
             println!("cargo:warning=failed to configure Windows resources: {error}");
         }
@@ -225,9 +225,7 @@ fn compile_windows_resources() -> Result<(), String> {
         .map(PathBuf::from)
         .map_err(|error| format!("OUT_DIR is not set: {error}"))?;
     let icon_path = out_dir.join("vertex.ico");
-    let decoded = ImageReader::new(Cursor::new(include_bytes!(
-        "../launcher_ui/src/assets/vertex.webp"
-    )))
+    let decoded = ImageReader::new(Cursor::new(include_bytes!("../../Vertex.webp")))
     .with_guessed_format()
     .map_err(|error| format!("failed to detect vertex icon format: {error}"))?
     .decode()

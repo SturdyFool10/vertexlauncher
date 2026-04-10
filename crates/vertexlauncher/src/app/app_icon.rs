@@ -4,7 +4,7 @@ use eframe::egui;
 use image::ImageFormat;
 use std::sync::Arc;
 
-const APP_ICON_WEBP: &[u8] = include_bytes!("../../../launcher_ui/src/assets/vertex.webp");
+const APP_ICON_WEBP: &[u8] = include_bytes!("../../../../Vertex.webp");
 
 pub(crate) fn egui_icon() -> Option<Arc<egui::IconData>> {
     let decoded = image::load_from_memory_with_format(APP_ICON_WEBP, ImageFormat::WebP)

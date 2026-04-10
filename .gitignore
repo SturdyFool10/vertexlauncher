@@ -23,3 +23,6 @@ instances.json
 build-dir/
 data/
 cargo-sources.json
+
+# Keep the launcher icon asset tracked even if a broader image ignore is added later.
+!/Vertex.webp
