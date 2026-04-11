@@ -9,6 +9,10 @@ use egui::Ui;
 use installation::purge_cache as purge_installation_cache;
 use launcher_runtime as tokio_runtime;
 use std::sync::{Mutex, OnceLock, mpsc};
+
+struct PurgeCacheState {
+    rx: Option<mpsc::Receiver<String>>,
+}
 use std::time::Duration;
 use textui::TextUi;
 use textui_egui::{gamepad_scroll, prelude::*};
@@ -1140,23 +1144,63 @@ fn render_instance_defaults_section(ui: &mut Ui, text_ui: &mut TextUi, config: &
         stroke: ui.visuals().widgets.inactive.bg_stroke,
         ..ButtonOptions::default()
     };
+    static PURGE_CACHE_STATE: OnceLock<Mutex<PurgeCacheState>> = OnceLock::new();
+    let purge_state = PURGE_CACHE_STATE.get_or_init(|| Mutex::new(PurgeCacheState { rx: None }));
+
     let cache_status_id = ui.make_persistent_id("settings_cache_status_message");
     let mut cache_status = ui.ctx().data_mut(|d| d.get_temp::<String>(cache_status_id));
-    if text_ui
-        .button(
-            ui,
-            "instance_defaults_purge_cache",
-            "Purge metadata cache",
-            &cache_button_style,
-        )
+
+    if let Ok(mut state) = purge_state.lock() {
+        if let Some(rx) = state.rx.as_ref() {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    cache_status = Some(msg);
+                    state.rx = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ui.ctx().request_repaint_after(Duration::from_millis(50));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    state.rx = None;
+                }
+            }
+        }
+    }
+
+    let purge_in_flight = purge_state
+        .lock()
+        .is_ok_and(|state| state.rx.is_some());
+    let purge_button_enabled = !purge_in_flight;
+    let purge_button_label = if purge_in_flight {
+        "Purging..."
+    } else {
+        "Purge metadata cache"
+    };
+    if ui
+        .add_enabled_ui(purge_button_enabled, |ui| {
+            text_ui.button(
+                ui,
+                "instance_defaults_purge_cache",
+                purge_button_label,
+                &cache_button_style,
+            )
+        })
+        .inner
         .clicked()
     {
-        cache_status = Some(match purge_installation_cache() {
-            Ok(()) => {
-                "Purged local metadata cache. Version lists will be re-fetched on next refresh."
-                    .to_owned()
-            }
-            Err(err) => format!("Failed to purge metadata cache: {err}"),
+        let (tx, rx) = mpsc::channel::<String>();
+        if let Ok(mut state) = purge_state.lock() {
+            state.rx = Some(rx);
+        }
+        let _ = tokio_runtime::spawn_blocking_detached(move || {
+            let msg = match purge_installation_cache() {
+                Ok(()) => {
+                    "Purged local metadata cache. Version lists will be re-fetched on next refresh."
+                        .to_owned()
+                }
+                Err(err) => format!("Failed to purge metadata cache: {err}"),
+            };
+            let _ = tx.send(msg);
         });
     }
     if let Some(message) = cache_status.as_deref() {
@@ -1351,7 +1395,7 @@ fn memory_slider_max_mib() -> (u128, bool) {
                 let (tx, rx) = mpsc::channel::<Option<u128>>();
                 state.rx = Some(rx);
                 pending = true;
-                let _ = tokio_runtime::spawn_detached(async move {
+                let _ = tokio_runtime::spawn_blocking_detached(move || {
                     let result = platform::detect_total_memory_mib();
                     if let Err(err) = tx.send(result) {
                         tracing::error!(

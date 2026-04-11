@@ -859,7 +859,7 @@ fn memory_slider_max_mib() -> (u128, bool) {
                 let (tx, rx) = mpsc::channel::<Option<u128>>();
                 state.rx = Some(rx);
                 pending = true;
-                let _ = tokio_runtime::spawn_detached(async move {
+                let _ = tokio_runtime::spawn_blocking_detached(move || {
                     let result = screen_platform::detect_total_memory_mib();
                     if let Err(err) = tx.send(result) {
                         tracing::error!(
