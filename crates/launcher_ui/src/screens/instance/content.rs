@@ -63,6 +63,7 @@ pub(super) fn render_installed_content_section(
     ui.add_space(12.0);
     ui.separator();
     ui.add_space(10.0);
+    poll_content_hash_cache_save_results(state);
     poll_content_apply_results(state, instance_root);
     ensure_content_hash_cache_loaded(state, instance_root);
 
@@ -435,7 +436,57 @@ pub(super) fn render_installed_content_section(
             .unwrap_or(CONTENT_HASH_CACHE_FLUSH_DEBOUNCE);
         ui.ctx().request_repaint_after(repaint_after);
     }
+    if state.content_hash_cache_save_in_flight {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
     flush_content_hash_cache(state, instance_root);
+}
+
+fn ensure_content_hash_cache_save_channel(state: &mut InstanceScreenState) {
+    if state.content_hash_cache_save_results_tx.is_some()
+        && state.content_hash_cache_save_results_rx.is_some()
+    {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<(u64, Result<(), String>)>();
+    state.content_hash_cache_save_results_tx = Some(tx);
+    state.content_hash_cache_save_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_content_hash_cache_save_results(state: &mut InstanceScreenState) {
+    let Some(rx) = state.content_hash_cache_save_results_rx.as_ref() else {
+        return;
+    };
+    let Ok(guard) = rx.lock() else {
+        tracing::error!(
+            target: "vertexlauncher/instance_content",
+            "Content hash-cache save receiver mutex was poisoned while polling save results."
+        );
+        return;
+    };
+
+    while let Ok((saved_serial, result)) = guard.try_recv() {
+        state.content_hash_cache_save_in_flight = false;
+        match result {
+            Ok(()) => {
+                if saved_serial == state.content_hash_cache_serial {
+                    state.content_hash_cache_dirty = false;
+                    state.content_hash_cache_dirty_since = None;
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/instance_content",
+                    serial = saved_serial,
+                    error = %err,
+                    "Failed to save installed-content hash cache."
+                );
+                if state.content_hash_cache_dirty_since.is_none() {
+                    state.content_hash_cache_dirty_since = Some(Instant::now());
+                }
+            }
+        }
+    }
 }
 
 fn render_installed_content_tab_row(
@@ -1002,7 +1053,7 @@ fn ensure_content_hash_cache_loaded(state: &mut InstanceScreenState, instance_ro
 }
 
 fn flush_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Path) {
-    if !state.content_hash_cache_dirty {
+    if !state.content_hash_cache_dirty || state.content_hash_cache_save_in_flight {
         return;
     }
     let Some(dirty_since) = state.content_hash_cache_dirty_since else {
@@ -1013,18 +1064,36 @@ fn flush_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Pat
         return;
     }
 
-    if let Some(cache) = state.content_hash_cache.as_ref()
-        && InstalledContentResolver::save_hash_cache(instance_root, cache).is_ok()
-    {
-        state.content_hash_cache_dirty = false;
-        state.content_hash_cache_dirty_since = None;
-    }
+    let Some(cache) = state.content_hash_cache.clone() else {
+        return;
+    };
+    ensure_content_hash_cache_save_channel(state);
+    let Some(tx) = state.content_hash_cache_save_results_tx.as_ref().cloned() else {
+        return;
+    };
+    let instance_root = instance_root.to_path_buf();
+    let serial = state.content_hash_cache_serial;
+    state.content_hash_cache_save_in_flight = true;
+    let _ = tokio_runtime::spawn_detached(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            InstalledContentResolver::save_hash_cache(instance_root.as_path(), &cache)
+                .map_err(|err| err.to_string())
+        })
+        .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(err) => Err(err.to_string()),
+        };
+        let _ = tx.send((serial, result));
+    });
 }
 
 fn clear_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Path) {
     state.content_hash_cache = Some(InstalledContentHashCache::default());
     state.content_hash_cache_dirty = false;
     state.content_hash_cache_dirty_since = None;
+    state.content_hash_cache_serial = state.content_hash_cache_serial.saturating_add(1);
+    state.content_hash_cache_save_in_flight = false;
     let _ = InstalledContentResolver::clear_hash_cache(instance_root);
 }
 
@@ -1207,6 +1276,7 @@ pub(super) fn poll_content_lookup_results(state: &mut InstanceScreenState) {
             .content_hash_cache
             .get_or_insert_with(InstalledContentHashCache::default);
         if cache.apply_updates(result.hash_cache_updates) {
+            state.content_hash_cache_serial = state.content_hash_cache_serial.saturating_add(1);
             state.content_hash_cache_dirty = true;
             state.content_hash_cache_dirty_since = Some(Instant::now());
         }

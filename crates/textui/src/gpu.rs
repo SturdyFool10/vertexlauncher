@@ -27,7 +27,9 @@ pub(super) use self::resolved_text_renderer_backend::ResolvedTextRendererBackend
 pub(super) use self::text_wgpu_instance::TextWgpuInstance;
 use self::text_wgpu_pipeline_resources::TextWgpuPipelineResources;
 use self::text_wgpu_prepared_batch::TextWgpuPreparedBatch;
-pub(super) use self::text_wgpu_prepared_scene::TextWgpuPreparedScene;
+pub(super) use self::text_wgpu_prepared_scene::{
+    TextWgpuPreparedScene, TextWgpuReusableInstanceBuffer,
+};
 pub(super) use self::text_wgpu_scene_batch_source::TextWgpuSceneBatchSource;
 pub(super) use self::text_wgpu_scene_callback::TextWgpuSceneCallback;
 use self::text_wgpu_screen_uniform::TextWgpuScreenUniform;
@@ -146,11 +148,8 @@ impl TextWgpuPipelineResources {
                         3 => Float32x2,
                         4 => Float32x2,
                         5 => Float32x2,
-                        6 => Float32x2,
-                        7 => Float32x2,
-                        8 => Float32x4,
-                        9 => Float32,
-                        10 => Float32
+                        6 => Unorm8x4,
+                        7 => Uint32
                     ],
                 }],
             },
@@ -164,7 +163,10 @@ impl TextWgpuPipelineResources {
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState::default(),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: TEXT_WGPU_PASS_DEPTH_FORMAT,
                 depth_write_enabled: Some(false),
@@ -284,7 +286,6 @@ pub(super) fn map_scene_quads_to_rect(
             }),
             tint: multiply_color32(quad.tint.into(), tint),
             content_mode: GlyphContentMode::AlphaMask,
-            field_range_px: 0.0,
         })
         .collect()
 }

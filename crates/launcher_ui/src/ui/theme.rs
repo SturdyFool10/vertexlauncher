@@ -56,6 +56,7 @@ impl Default for ThemeMotion {
 #[derive(Debug, Clone)]
 pub struct ThemeCatalog {
     themes: Vec<Theme>,
+    theme_labels: Vec<String>,
     fallback: Theme,
 }
 
@@ -86,11 +87,20 @@ impl ThemeCatalog {
         }
 
         themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        Self { themes, fallback }
+        let theme_labels = themes.iter().map(|theme| theme.name.clone()).collect();
+        Self {
+            themes,
+            theme_labels,
+            fallback,
+        }
     }
 
     pub fn themes(&self) -> &[Theme] {
         &self.themes
+    }
+
+    pub fn theme_labels(&self) -> &[String] {
+        &self.theme_labels
     }
 
     pub fn contains(&self, id: &str) -> bool {

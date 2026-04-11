@@ -1,6 +1,6 @@
 //! Device-backed attachment and bind-group resources for renderer integration.
 
-use std::collections::BTreeMap;
+use rustc_hash::FxHashMap;
 
 use super::{AttachmentLifecycle, RenderTargetHandle, RendererConfig};
 use crate::shader::{BindingTypePlan, BuiltPipelineLayout, PipelineLayoutPlan, ReflectionSnapshot};
@@ -20,7 +20,7 @@ pub struct AttachmentImage {
 /// Runtime texture set derived from the renderer config.
 #[derive(Debug, Default)]
 pub struct AttachmentPool {
-    attachments: BTreeMap<RenderTargetHandle, AttachmentImage>,
+    attachments: FxHashMap<RenderTargetHandle, AttachmentImage>,
 }
 
 impl AttachmentPool {
@@ -91,7 +91,7 @@ pub enum ShaderBindingResource<'a> {
 /// Registry mapping reflected names to concrete `wgpu` resources.
 #[derive(Default)]
 pub struct ShaderResourceTable<'a> {
-    resources: BTreeMap<&'a str, ShaderBindingResource<'a>>,
+    resources: FxHashMap<&'a str, ShaderBindingResource<'a>>,
 }
 
 impl<'a> ShaderResourceTable<'a> {

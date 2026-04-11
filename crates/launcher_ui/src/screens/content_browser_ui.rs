@@ -815,13 +815,9 @@ pub(super) fn render_detail_page(
     };
 
     request_detail_versions(state);
-    if state.manifest_dirty || state.cached_manifest.is_none() {
-        state.cached_manifest = Some(load_content_manifest(instance_root));
-        state.manifest_dirty = false;
-    }
-    let manifest = state.cached_manifest.clone().expect("just populated");
+    let manifest = super::cached_manifest_for_instance(state, instance_root);
     let installed_project =
-        installed_project_for_entry(&manifest, &entry).map(|(_, project)| project);
+        installed_project_for_entry(manifest.as_ref(), &entry).map(|(_, project)| project);
 
     egui::Frame::new()
         .fill(ui.visuals().widgets.inactive.bg_fill)

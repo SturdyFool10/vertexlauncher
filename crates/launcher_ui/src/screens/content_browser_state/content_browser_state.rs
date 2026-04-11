@@ -51,7 +51,7 @@ pub struct ContentBrowserState {
     pub(crate) status_message: Option<String>,
     pub(crate) search_notification_active: bool,
     pub(crate) download_notification_active: bool,
-    pub(crate) cached_manifest: Option<ContentInstallManifest>,
+    pub(crate) cached_manifest: Option<Arc<ContentInstallManifest>>,
     pub(crate) manifest_dirty: bool,
 }
 

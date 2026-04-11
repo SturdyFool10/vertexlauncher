@@ -236,11 +236,7 @@ pub fn render(
     ui.add_space(style::SPACE_MD);
     match state.current_view {
         ContentBrowserPage::Browse => {
-            if state.manifest_dirty || state.cached_manifest.is_none() {
-                state.cached_manifest = Some(load_content_manifest(instance_root.as_path()));
-                state.manifest_dirty = false;
-            }
-            let manifest = state.cached_manifest.clone().expect("just populated");
+            let manifest = cached_manifest_for_instance(state, instance_root.as_path());
             render_controls(ui, text_ui, instance.id.as_str(), state);
 
             if state.auto_populated_instance_id.as_deref() != Some(instance.id.as_str())
@@ -268,7 +264,7 @@ pub fn render(
                 text_ui,
                 instance.id.as_str(),
                 state,
-                &manifest,
+                manifest.as_ref(),
                 results_height,
             );
             if let Some(page) = render_outcome.requested_page
@@ -322,6 +318,22 @@ pub fn render(
         }
     });
     output
+}
+
+fn cached_manifest_for_instance(
+    state: &mut ContentBrowserState,
+    instance_root: &Path,
+) -> Arc<ContentInstallManifest> {
+    if state.manifest_dirty || state.cached_manifest.is_none() {
+        state.cached_manifest = Some(Arc::new(load_content_manifest(instance_root)));
+        state.manifest_dirty = false;
+    }
+
+    state
+        .cached_manifest
+        .as_ref()
+        .cloned()
+        .expect("content browser manifest cache should be initialized")
 }
 
 fn request_search_for_current_filters(state: &mut ContentBrowserState, reset_page: bool) {

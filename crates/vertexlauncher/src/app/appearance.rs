@@ -1,24 +1,11 @@
 use super::*;
 
-pub(super) fn sleep_precise(duration: Duration) {
-    let coarse = Duration::from_millis(1);
-    let tail = Duration::from_micros(250);
-    if duration > coarse + tail {
-        std::thread::sleep(duration - tail);
-    }
-    let deadline = Instant::now() + tail.min(duration);
-    while Instant::now() < deadline {
-        std::hint::spin_loop();
-        std::thread::yield_now();
-    }
-}
-
 pub(super) fn build_text_graphics_config(
     config: &Config,
     startup_graphics: platform::StartupGraphicsConfig,
 ) -> textui::TextGraphicsConfig {
     let mut graphics_config = textui::TextGraphicsConfig {
-        renderer_backend: textui::TextRendererBackend::Auto,
+        renderer_backend: textui::TextRendererBackend::WgpuInstanced,
         graphics_api: text_graphics_api_for_startup_config(startup_graphics),
         gpu_power_preference: text_gpu_power_preference_for_config(config),
         linear_pipeline: false,

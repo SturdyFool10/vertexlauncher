@@ -22,35 +22,35 @@ var u_sampler: sampler;
 
 struct VertexInput {
     @builtin(vertex_index) vertex_index: u32,
-    @location(0) pos0: vec2<f32>,
-    @location(1) pos1: vec2<f32>,
-    @location(2) pos2: vec2<f32>,
-    @location(3) pos3: vec2<f32>,
-    @location(4) uv0: vec2<f32>,
-    @location(5) uv1: vec2<f32>,
-    @location(6) uv2: vec2<f32>,
-    @location(7) uv3: vec2<f32>,
-    @location(8) color: vec4<f32>,
-    @location(9) decode_mode: f32,
-    @location(10) field_range_px: f32,
+    @location(0) pos_origin: vec2<f32>,
+    @location(1) pos_u: vec2<f32>,
+    @location(2) pos_v: vec2<f32>,
+    @location(3) uv_origin: vec2<f32>,
+    @location(4) uv_u: vec2<f32>,
+    @location(5) uv_v: vec2<f32>,
+    @location(6) color: vec4<f32>,
+    @location(7) decode_mode: u32,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
-    @location(2) decode_mode: f32,
-    @location(3) field_range_px: f32,
+    @location(2) @interpolate(flat) decode_mode: u32,
 };
 
-const QUAD_INDICES: array<u32, 6> = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+const QUAD_CORNERS: array<vec2<f32>, 4> = array<vec2<f32>, 4>(
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(1.0, 1.0),
+);
 
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
-    let positions = array<vec2<f32>, 4>(input.pos0, input.pos1, input.pos2, input.pos3);
-    let uvs = array<vec2<f32>, 4>(input.uv0, input.uv1, input.uv2, input.uv3);
-    let idx = QUAD_INDICES[input.vertex_index];
-    let point = positions[idx];
+    let corner = QUAD_CORNERS[input.vertex_index];
+    let point = input.pos_origin + input.pos_u * corner.x + input.pos_v * corner.y;
+    let uv = input.uv_origin + input.uv_u * corner.x + input.uv_v * corner.y;
     let ndc = vec2<f32>(
         (point.x / u_screen.screen_size_points.x) * 2.0 - 1.0,
         1.0 - (point.y / u_screen.screen_size_points.y) * 2.0
@@ -58,10 +58,9 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
     var output: VertexOutput;
     output.position = vec4<f32>(ndc, 0.0, 1.0);
-    output.uv = uvs[idx];
+    output.uv = uv;
     output.color = input.color;
     output.decode_mode = input.decode_mode;
-    output.field_range_px = input.field_range_px;
     return output;
 }
 
@@ -147,12 +146,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let sample = textureSample(u_atlas, u_sampler, input.uv);
     var out_color: vec4<f32>;
 
-    if input.decode_mode < 0.5 {
+    if input.decode_mode == 0u {
         // Alpha mask mode (standard rasterized glyphs)
         out_color = sample * input.color;
     } else {
         // SDF/MSDF mode with field-based alpha reconstruction
-        let distance = select(sample.r, median3(sample.rgb), input.decode_mode > 1.5);
+        let distance = select(sample.r, median3(sample.rgb), input.decode_mode == 2u);
         let width = max(fwidth(distance), 1.0 / 255.0);
         let alpha = smoothstep(0.5 - width, 0.5 + width, distance);
         out_color = vec4<f32>(input.color.rgb * alpha, input.color.a * alpha);

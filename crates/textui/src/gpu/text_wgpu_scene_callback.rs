@@ -20,55 +20,89 @@ impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let resources = callback_resources
-                .entry::<TextWgpuPipelineResources>()
-                .or_insert_with(|| {
-                    TextWgpuPipelineResources::new(
+            let (texture_bind_group_layout, sampler) = {
+                let resources = callback_resources
+                    .entry::<TextWgpuPipelineResources>()
+                    .or_insert_with(|| {
+                        TextWgpuPipelineResources::new(
+                            device,
+                            self.target_format,
+                            self.atlas_sampling,
+                            self.linear_pipeline,
+                            self.output_is_hdr,
+                        )
+                    });
+                if resources.target_format != self.target_format
+                    || resources.atlas_sampling != self.atlas_sampling
+                    || resources.linear_pipeline != self.linear_pipeline
+                    || resources.output_is_hdr != self.output_is_hdr
+                {
+                    *resources = TextWgpuPipelineResources::new(
                         device,
                         self.target_format,
                         self.atlas_sampling,
                         self.linear_pipeline,
                         self.output_is_hdr,
-                    )
-                });
-            if resources.target_format != self.target_format
-                || resources.atlas_sampling != self.atlas_sampling
-                || resources.linear_pipeline != self.linear_pipeline
-                || resources.output_is_hdr != self.output_is_hdr
-            {
-                *resources = TextWgpuPipelineResources::new(
-                    device,
-                    self.target_format,
-                    self.atlas_sampling,
-                    self.linear_pipeline,
+                    );
+                }
+                resources.update_uniform(
+                    queue,
+                    [
+                        screen_descriptor.size_in_pixels[0] as f32
+                            / screen_descriptor.pixels_per_point,
+                        screen_descriptor.size_in_pixels[1] as f32
+                            / screen_descriptor.pixels_per_point,
+                    ],
                     self.output_is_hdr,
                 );
+                (
+                    resources.texture_bind_group_layout.clone(),
+                    resources.sampler.clone(),
+                )
+            };
+
+            let total_instance_bytes = self
+                .batches
+                .iter()
+                .map(|batch| {
+                    (batch.instances.len() * std::mem::size_of::<TextWgpuInstance>()) as u64
+                })
+                .sum::<u64>();
+            let shared_instance_buffer = callback_resources
+                .entry::<TextWgpuReusableInstanceBuffer>()
+                .or_insert_with(TextWgpuReusableInstanceBuffer::default);
+            if total_instance_bytes > shared_instance_buffer.capacity_bytes {
+                let new_capacity = total_instance_bytes.max(1).next_power_of_two().max(4096);
+                shared_instance_buffer.buffer =
+                    Some(device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("textui_instanced_instance_buffer"),
+                        size: new_capacity,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }));
+                shared_instance_buffer.capacity_bytes = new_capacity;
             }
-            resources.update_uniform(
-                queue,
-                [
-                    screen_descriptor.size_in_pixels[0] as f32 / screen_descriptor.pixels_per_point,
-                    screen_descriptor.size_in_pixels[1] as f32 / screen_descriptor.pixels_per_point,
-                ],
-                self.output_is_hdr,
-            );
+            let Some(shared_buffer) = shared_instance_buffer.buffer.as_ref().cloned() else {
+                if let Ok(mut prepared) = self.prepared.lock() {
+                    prepared.batches.clear();
+                }
+                return Vec::new();
+            };
 
             let mut prepared_batches = Vec::with_capacity(self.batches.len());
+            let mut instance_buffer_offset = 0_u64;
             for batch in self.batches.iter() {
                 if batch.instances.is_empty() {
                     continue;
                 }
-                let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("textui_instanced_instance_buffer"),
-                    contents: bytemuck::cast_slice(batch.instances.as_ref()),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+                let instance_bytes = bytemuck::cast_slice(batch.instances.as_ref());
+                queue.write_buffer(&shared_buffer, instance_buffer_offset, instance_bytes);
                 let view = batch
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("textui_instanced_texture_bg"),
-                    layout: &resources.texture_bind_group_layout,
+                    layout: &texture_bind_group_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -76,15 +110,17 @@ impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&resources.sampler),
+                            resource: wgpu::BindingResource::Sampler(&sampler),
                         },
                     ],
                 });
                 prepared_batches.push(TextWgpuPreparedBatch {
                     bind_group,
-                    instance_buffer,
+                    instance_buffer: shared_buffer.clone(),
+                    instance_buffer_offset,
                     instance_count: batch.instances.len() as u32,
                 });
+                instance_buffer_offset += instance_bytes.len() as u64;
             }
 
             if let Ok(mut prepared) = self.prepared.lock() {
@@ -133,8 +169,16 @@ impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
             render_pass.set_bind_group(0, &resources.uniform_bind_group, &[]);
             for batch in &prepared.batches {
                 render_pass.set_bind_group(1, &batch.bind_group, &[]);
-                render_pass.set_vertex_buffer(0, batch.instance_buffer.slice(..));
-                render_pass.draw(0..6, 0..batch.instance_count);
+                let instance_stride = std::mem::size_of::<TextWgpuInstance>() as u64;
+                let instance_byte_len = u64::from(batch.instance_count) * instance_stride;
+                render_pass.set_vertex_buffer(
+                    0,
+                    batch.instance_buffer.slice(
+                        batch.instance_buffer_offset
+                            ..batch.instance_buffer_offset + instance_byte_len,
+                    ),
+                );
+                render_pass.draw(0..4, 0..batch.instance_count);
             }
         }));
 

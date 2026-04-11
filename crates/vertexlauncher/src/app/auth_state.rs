@@ -654,6 +654,10 @@ impl AuthState {
         self.active_avatar_png.as_deref()
     }
 
+    pub fn account_avatars_by_key(&self) -> &HashMap<String, Vec<u8>> {
+        &self.account_avatars
+    }
+
     pub fn status_message(&self) -> Option<&str> {
         self.status.status_message()
     }
@@ -691,10 +695,6 @@ impl AuthState {
                 is_failed: self
                     .failed_account_errors
                     .contains_key(&account.minecraft_profile.id),
-                avatar_png: self
-                    .account_avatars
-                    .get(&account.minecraft_profile.id)
-                    .cloned(),
             })
             .collect::<Vec<_>>();
 
@@ -821,7 +821,7 @@ impl AuthState {
         for account in &self.accounts_state.accounts {
             if let Some(bytes) = account.avatar_png_bytes() {
                 self.account_avatars
-                    .insert(account.minecraft_profile.id.clone(), bytes);
+                    .insert(account.minecraft_profile.id.to_ascii_lowercase(), bytes);
             }
         }
     }
@@ -834,8 +834,9 @@ impl AuthState {
     fn schedule_missing_avatars(&mut self) {
         for account in &self.accounts_state.accounts {
             let profile_id = account.minecraft_profile.id.clone();
+            let profile_key = profile_id.to_ascii_lowercase();
             if profile_id.trim().is_empty()
-                || self.account_avatars.contains_key(&profile_id)
+                || self.account_avatars.contains_key(&profile_key)
                 || self.avatar_loads_in_flight.contains(&profile_id)
                 || account
                     .avatar_source_skin_url
@@ -903,7 +904,7 @@ impl AuthState {
 
                     if let Some(avatar_png) = result.avatar_png {
                         self.account_avatars
-                            .insert(result.profile_id.clone(), avatar_png);
+                            .insert(result.profile_id.to_ascii_lowercase(), avatar_png);
                     }
 
                     self.rebuild_active_avatar_png();
@@ -939,7 +940,7 @@ fn decoded_cached_avatars(state: &CachedAccountsState) -> HashMap<String, Vec<u8
         .filter_map(|account| {
             account
                 .avatar_png_bytes()
-                .map(|bytes| (account.minecraft_profile.id.clone(), bytes))
+                .map(|bytes| (account.minecraft_profile.id.to_ascii_lowercase(), bytes))
         })
         .collect()
 }
@@ -948,8 +949,12 @@ fn active_avatar_from_map(
     state: &CachedAccountsState,
     avatars: &HashMap<String, Vec<u8>>,
 ) -> Option<Vec<u8>> {
-    let profile_id = state.active_account()?.minecraft_profile.id.as_str();
-    avatars.get(profile_id).cloned()
+    let profile_id = state
+        .active_account()?
+        .minecraft_profile
+        .id
+        .to_ascii_lowercase();
+    avatars.get(&profile_id).cloned()
 }
 
 fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent, streamer_mode: bool) {

@@ -3,9 +3,8 @@
 use std::{borrow::Cow, collections::BTreeMap};
 
 use crate::{
-    FrameGraph, FrameGraphPass, FrameGraphPassKind, FrameGraphPlan, GpuImage,
-    GraphResourceHandle, GraphResourceUsage, ImageDesc, RenderTargetType,
-    renderer::FrameGraphUsage,
+    FrameGraph, FrameGraphPass, FrameGraphPassKind, FrameGraphPlan, GpuImage, GraphResourceHandle,
+    GraphResourceUsage, ImageDesc, RenderTargetType, renderer::FrameGraphUsage,
 };
 
 /// Ordered queue of GPU commands for a frame or offscreen workload.
@@ -98,7 +97,9 @@ impl CommandQueue {
     ) -> Result<(), CommandExecutionError> {
         for command in &self.commands {
             match command {
-                GpuCommand::Raster(raster) => callbacks.encode_raster(encoder, resources, raster)?,
+                GpuCommand::Raster(raster) => {
+                    callbacks.encode_raster(encoder, resources, raster)?
+                }
                 GpuCommand::Compute(compute) => {
                     callbacks.encode_compute(encoder, resources, compute)?
                 }
@@ -198,7 +199,13 @@ impl CommandImageRegistry {
         });
         self.insert_image(
             handle,
-            GpuImage::new(texture, view, sampler, [desc.size[0], desc.size[1]], desc.format),
+            GpuImage::new(
+                texture,
+                view,
+                sampler,
+                [desc.size[0], desc.size[1]],
+                desc.format,
+            ),
             desc,
         );
     }
@@ -247,21 +254,27 @@ pub enum CommandExecutionError {
     #[error("command references missing image resource '{handle}'")]
     MissingImageResource { handle: String },
 
-    #[error("image copy '{name}' requires matching 2D sizes, got {source_size:?} -> {target_size:?}")]
+    #[error(
+        "image copy '{name}' requires matching 2D sizes, got {source_size:?} -> {target_size:?}"
+    )]
     IncompatibleImageSize {
         name: String,
         source_size: [u32; 3],
         target_size: [u32; 3],
     },
 
-    #[error("image copy '{name}' requires matching formats, got {source_format:?} -> {target_format:?}")]
+    #[error(
+        "image copy '{name}' requires matching formats, got {source_format:?} -> {target_format:?}"
+    )]
     IncompatibleImageFormat {
         name: String,
         source_format: wgpu::TextureFormat,
         target_format: wgpu::TextureFormat,
     },
 
-    #[error("image copy '{name}' requires single-sampled images, got {source_samples} -> {target_samples}")]
+    #[error(
+        "image copy '{name}' requires single-sampled images, got {source_samples} -> {target_samples}"
+    )]
     UnsupportedMultisampledCopy {
         name: String,
         source_samples: u32,
@@ -408,7 +421,10 @@ impl RasterCommand {
         }
         if let Some(depth) = &self.depth_attachment {
             pass = pass
-                .writes(FrameGraphUsage::new(depth.as_str(), RenderTargetType::Depth))
+                .writes(FrameGraphUsage::new(
+                    depth.as_str(),
+                    RenderTargetType::Depth,
+                ))
                 .write_image(depth.clone(), GraphResourceUsage::DepthAttachmentWrite);
         }
         pass
@@ -562,16 +578,16 @@ fn encode_image_copy(
     source: &GraphResourceHandle,
     target: &GraphResourceHandle,
 ) -> Result<(), CommandExecutionError> {
-    let source_image = resources
-        .image(source.clone())
-        .ok_or_else(|| CommandExecutionError::MissingImageResource {
+    let source_image = resources.image(source.clone()).ok_or_else(|| {
+        CommandExecutionError::MissingImageResource {
             handle: source.as_str().to_string(),
-        })?;
-    let target_image = resources
-        .image(target.clone())
-        .ok_or_else(|| CommandExecutionError::MissingImageResource {
+        }
+    })?;
+    let target_image = resources.image(target.clone()).ok_or_else(|| {
+        CommandExecutionError::MissingImageResource {
             handle: target.as_str().to_string(),
-        })?;
+        }
+    })?;
 
     if source_image.desc.size != target_image.desc.size {
         return Err(CommandExecutionError::IncompatibleImageSize {

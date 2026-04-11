@@ -73,13 +73,12 @@ impl egui_wgpu::CallbackTrait for SkinPreviewPostProcessWgpuCallback {
                     )
                 })
                 .collect::<Vec<_>>();
-            let scene_plan =
-                Vertex3dScenePlan::build(prepared_batches.len(), self.scene_msaa_samples);
+            let scene_plan = resources.scene_plan(prepared_batches.len(), self.scene_msaa_samples);
             resources.execute_vertex3d_scene_plan(
                 device,
                 &mut encoder,
                 &prepared_batches,
-                &scene_plan,
+                scene_plan.as_ref(),
             );
 
             let post_plan = Vertex3dPostProcessPlan::build(

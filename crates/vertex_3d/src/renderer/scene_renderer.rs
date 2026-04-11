@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use bytemuck::{Pod, Zeroable};
+use rustc_hash::FxHashMap;
 use wgpu::util::DeviceExt;
 
 use super::{
@@ -11,8 +12,8 @@ use super::{
     QueuedSceneSubmission, ReflectionBindGroupSet, ShaderResourceTable, SubmissionError,
 };
 use crate::{
-    Material, MaterialHandle, MaterialParameters, MaterialValue, PbrMaterial, PipelineLayoutPlan,
-    ReflectedResourceRole, ShaderHandle, UnlitMaterial, Vertex,
+    BuiltPipelineLayout, Material, MaterialHandle, MaterialParameters, MaterialValue, PbrMaterial,
+    PipelineLayoutPlan, ReflectedResourceRole, ShaderHandle, UnlitMaterial, Vertex,
     asset::{RenderAssetLibrary, ShaderAsset},
 };
 
@@ -55,8 +56,12 @@ pub struct ExternalShaderBindGroup<'a> {
 /// Cached shader pipeline and descriptor-space metadata.
 pub struct PreparedSceneShader {
     pipeline: wgpu::RenderPipeline,
+    /// Cached pipeline layout — reused by material bind group creation.
+    pipeline_layout: BuiltPipelineLayout,
+    /// Cached reflection-derived plan — reused by material bind group creation.
+    layout_plan: PipelineLayoutPlan,
     material_bind_groups: Vec<u32>,
-    space_to_group_index: BTreeMap<u32, u32>,
+    space_to_group_index: FxHashMap<u32, u32>,
 }
 
 /// Cached GPU material bindings.
@@ -75,8 +80,8 @@ struct DefaultMaterialResources {
 pub struct SceneRenderer {
     pipeline: ScenePipelineConfig,
     default_materials: DefaultMaterialResources,
-    shaders: BTreeMap<ShaderHandle, PreparedSceneShader>,
-    materials: BTreeMap<MaterialHandle, PreparedMaterial>,
+    shaders: FxHashMap<ShaderHandle, PreparedSceneShader>,
+    materials: FxHashMap<MaterialHandle, PreparedMaterial>,
 }
 
 impl SceneRenderer {
@@ -84,8 +89,8 @@ impl SceneRenderer {
         Self {
             pipeline,
             default_materials: DefaultMaterialResources::new(device, queue),
-            shaders: BTreeMap::new(),
-            materials: BTreeMap::new(),
+            shaders: FxHashMap::default(),
+            materials: FxHashMap::default(),
         }
     }
 
@@ -193,11 +198,18 @@ impl SceneRenderer {
             .enumerate()
             .map(|(index, group)| (group.space, index as u32))
             .collect();
+        // Move pipeline_layout out of deferred so it can be reused by ensure_material
+        // without needing to reconstruct a full DeferredRenderer per material.
+        let DeferredRenderer {
+            pipeline_layout, ..
+        } = deferred;
 
         self.shaders.insert(
             handle,
             PreparedSceneShader {
                 pipeline,
+                pipeline_layout,
+                layout_plan,
                 material_bind_groups,
                 space_to_group_index,
             },
@@ -243,7 +255,6 @@ impl SceneRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let layout_plan = PipelineLayoutPlan::from_reflection(&shader_asset.compiled.reflection)?;
         let mut resources = ShaderResourceTable::new();
         insert_material_resources(
             &mut resources,
@@ -254,22 +265,13 @@ impl SceneRenderer {
             &uniform_buffer,
         );
 
+        // Reuse the already-built pipeline layout and plan from the prepared shader
+        // instead of recreating a DeferredRenderer (which compiles shader modules, etc.).
         let bind_groups = ReflectionBindGroupSet::build_with_filter(
             device,
             &shader_asset.compiled.reflection,
-            &layout_plan,
-            &DeferredRenderer::from_compiled_program(
-                device,
-                crate::SurfaceConfig::new(
-                    1,
-                    1,
-                    self.pipeline.color_formats[0].unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ),
-                &shader_asset.compiled,
-                shader_asset.frame_graph.clone(),
-                shader_asset.pass_templates.clone(),
-            )?
-            .pipeline_layout,
+            &prepared_shader.layout_plan,
+            &prepared_shader.pipeline_layout,
             &resources,
             |space| prepared_shader.material_bind_groups.contains(&space),
         )?;

@@ -4,14 +4,14 @@
 //! per-frame scene data into rotating upload buffers so the CPU can keep
 //! building future work without stalling after every draw setup step.
 
-use std::{borrow::Cow, collections::BTreeMap, mem};
+use std::{borrow::Cow, mem};
 
 use bytemuck::{Pod, Zeroable};
+use rustc_hash::FxHashMap;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    ImageDesc,
-    ShaderHandle,
+    ImageDesc, ShaderHandle,
     asset::{ImageHandle, MeshHandle, RenderAssetLibrary},
     material::MaterialHandle,
     scene::{DrawPacket, Scene},
@@ -110,8 +110,8 @@ impl GpuImage {
 /// Registry of resident GPU resources keyed by public asset handles.
 #[derive(Debug, Default)]
 pub struct GpuResourceRegistry {
-    meshes: BTreeMap<MeshHandle, GpuMesh>,
-    images: BTreeMap<ImageHandle, GpuImage>,
+    meshes: FxHashMap<MeshHandle, GpuMesh>,
+    images: FxHashMap<ImageHandle, GpuImage>,
 }
 
 impl GpuResourceRegistry {
@@ -151,22 +151,27 @@ impl GpuResourceRegistry {
 /// One rotating upload buffer used for a single frame-in-flight slot.
 #[derive(Debug)]
 struct FrameUploadSlot {
+    label: String,
+    usage: wgpu::BufferUsages,
     buffer: wgpu::Buffer,
     capacity: u64,
     cursor: u64,
 }
 
 impl FrameUploadSlot {
-    fn new(device: &wgpu::Device, label: &str, capacity: u64, usage: wgpu::BufferUsages) -> Self {
+    fn new(device: &wgpu::Device, label: String, capacity: u64, usage: wgpu::BufferUsages) -> Self {
+        let capacity = capacity.max(256);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: capacity.max(256),
+            label: Some(&label),
+            size: capacity,
             usage,
             mapped_at_creation: false,
         });
         Self {
+            label,
+            usage,
             buffer,
-            capacity: capacity.max(256),
+            capacity,
             cursor: 0,
         }
     }
@@ -175,21 +180,15 @@ impl FrameUploadSlot {
         self.cursor = 0;
     }
 
-    fn ensure_capacity(
-        &mut self,
-        device: &wgpu::Device,
-        label: &str,
-        usage: wgpu::BufferUsages,
-        required: u64,
-    ) {
+    fn ensure_capacity(&mut self, device: &wgpu::Device, required: u64) {
         if required <= self.capacity {
             return;
         }
         let next_capacity = required.next_power_of_two().max(self.capacity * 2);
         self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
+            label: Some(&self.label),
             size: next_capacity,
-            usage,
+            usage: self.usage,
             mapped_at_creation: false,
         });
         self.capacity = next_capacity;
@@ -200,8 +199,6 @@ impl FrameUploadSlot {
 /// Host-managed upload ring for frame-local scene buffers.
 #[derive(Debug)]
 pub struct FrameUploadArena {
-    label: Cow<'static, str>,
-    usage: wgpu::BufferUsages,
     alignment: u64,
     slots: Vec<FrameUploadSlot>,
     frame_index: usize,
@@ -222,14 +219,12 @@ impl FrameUploadArena {
         for slot_index in 0..frames_in_flight {
             slots.push(FrameUploadSlot::new(
                 device,
-                &format!("{label}-{slot_index}"),
+                format!("{label}-{slot_index}"),
                 initial_capacity,
                 usage,
             ));
         }
         Self {
-            label,
-            usage,
             alignment: alignment.max(1),
             slots,
             frame_index: 0,
@@ -249,11 +244,10 @@ impl FrameUploadArena {
     ) -> UploadAllocation {
         let size = mem::size_of_val(data) as u64;
         let aligned = align_up(size, self.alignment);
-        let label = format!("{}-{}", self.label, self.frame_index);
         let slot = &mut self.slots[self.frame_index];
         let offset = align_up(slot.cursor, self.alignment);
         let required = offset + aligned;
-        slot.ensure_capacity(device, &label, self.usage, required);
+        slot.ensure_capacity(device, required);
         queue.write_buffer(&slot.buffer, offset, bytemuck::cast_slice(data));
         slot.cursor = required;
 
@@ -460,6 +454,8 @@ pub enum SubmissionError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::{
         Mesh,

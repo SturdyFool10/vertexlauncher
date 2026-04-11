@@ -1,6 +1,29 @@
 use super::*;
 
 impl SkinPreviewPostProcessWgpuResources {
+    pub(super) fn scene_plan(
+        &mut self,
+        batch_count: usize,
+        scene_msaa_samples: u32,
+    ) -> std::sync::Arc<Vertex3dScenePlan> {
+        if self.cached_scene_plan.is_none()
+            || self.cached_scene_plan_batch_count != batch_count
+            || self.cached_scene_plan_msaa_samples != scene_msaa_samples
+        {
+            self.cached_scene_plan = Some(std::sync::Arc::new(Vertex3dScenePlan::build(
+                batch_count,
+                scene_msaa_samples,
+            )));
+            self.cached_scene_plan_batch_count = batch_count;
+            self.cached_scene_plan_msaa_samples = scene_msaa_samples;
+        }
+
+        self.cached_scene_plan
+            .as_ref()
+            .cloned()
+            .expect("scene plan cache should be initialized")
+    }
+
     pub(super) fn execute_vertex3d_scene_plan(
         &mut self,
         device: &wgpu::Device,

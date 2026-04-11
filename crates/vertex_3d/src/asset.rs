@@ -1,6 +1,8 @@
 //! High-level render asset management for consumer-facing renderer workflows.
 
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::marker::PhantomData;
+
+use rustc_hash::FxHashMap;
 
 use crate::{
     image::ImageAsset,
@@ -235,10 +237,10 @@ pub type ShaderHandle = AssetHandle<ShaderAsset>;
 #[derive(Default)]
 pub struct RenderAssetLibrary {
     next_id: u64,
-    meshes: BTreeMap<u64, MeshAsset>,
-    images: BTreeMap<u64, ImageAsset>,
-    shaders: BTreeMap<u64, ShaderAsset>,
-    materials: BTreeMap<u64, crate::material::Material>,
+    meshes: FxHashMap<u64, MeshAsset>,
+    images: FxHashMap<u64, ImageAsset>,
+    shaders: FxHashMap<u64, ShaderAsset>,
+    materials: FxHashMap<u64, crate::material::Material>,
 }
 
 impl RenderAssetLibrary {

@@ -37,8 +37,11 @@ pub fn render(
     text_ui: &mut TextUi,
     config: &mut Config,
     available_ui_fonts: &[UiFontFamily],
+    available_ui_font_labels: &[String],
     available_emoji_fonts: &[UiEmojiFontFamily],
+    available_emoji_font_labels: &[String],
     available_themes: &[Theme],
+    available_theme_labels: &[String],
     settings_info: &SettingsInfo,
 ) {
     gamepad_scroll(
@@ -52,12 +55,50 @@ pub fn render(
                 text_ui,
                 config,
                 available_ui_fonts,
+                available_ui_font_labels,
                 available_emoji_fonts,
+                available_emoji_font_labels,
                 available_themes,
+                available_theme_labels,
                 settings_info,
             );
         },
     );
+}
+
+pub fn prewarm(
+    ctx: &egui::Context,
+    text_ui: &mut TextUi,
+    config: &Config,
+    available_ui_fonts: &[UiFontFamily],
+    available_ui_font_labels: &[String],
+    available_emoji_fonts: &[UiEmojiFontFamily],
+    available_emoji_font_labels: &[String],
+    available_themes: &[Theme],
+    available_theme_labels: &[String],
+    settings_info: &SettingsInfo,
+) {
+    let mut prewarm_config = config.clone();
+    let width = ctx.content_rect().width().max(960.0);
+    egui::Area::new(egui::Id::new("settings_screen_prewarm"))
+        .fixed_pos(egui::pos2(-20_000.0, -20_000.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            ui.set_width(width);
+            ui.set_min_width(width);
+            render_settings_contents(
+                ui,
+                text_ui,
+                &mut prewarm_config,
+                available_ui_fonts,
+                available_ui_font_labels,
+                available_emoji_fonts,
+                available_emoji_font_labels,
+                available_themes,
+                available_theme_labels,
+                settings_info,
+            );
+        });
 }
 
 pub fn request_theme_focus(ctx: &egui::Context) {
@@ -70,8 +111,11 @@ fn render_settings_contents(
     text_ui: &mut TextUi,
     config: &mut Config,
     available_ui_fonts: &[UiFontFamily],
+    available_ui_font_labels: &[String],
     available_emoji_fonts: &[UiEmojiFontFamily],
+    available_emoji_font_labels: &[String],
     available_themes: &[Theme],
+    available_theme_labels: &[String],
     settings_info: &SettingsInfo,
 ) {
     render_settings_section(
@@ -80,7 +124,13 @@ fn render_settings_contents(
         "Appearance & Privacy",
         "Theme, launcher chrome, and on-stream safety settings.",
         |ui, text_ui| {
-            render_theme_setting(ui, text_ui, config, available_themes);
+            render_theme_setting(
+                ui,
+                text_ui,
+                config,
+                available_themes,
+                available_theme_labels,
+            );
             render_skin_preview_setting(ui, text_ui, config);
             render_svg_aa_setting(ui, text_ui, config);
             render_window_blur_setting(ui, text_ui, config);
@@ -105,8 +155,20 @@ fn render_settings_contents(
         "Text",
         "Font, shaping, and glyph rendering settings that affect launcher text.",
         |ui, text_ui| {
-            render_ui_font_settings(ui, text_ui, config, available_ui_fonts);
-            render_emoji_font_settings(ui, text_ui, config, available_emoji_fonts);
+            render_ui_font_settings(
+                ui,
+                text_ui,
+                config,
+                available_ui_fonts,
+                available_ui_font_labels,
+            );
+            render_emoji_font_settings(
+                ui,
+                text_ui,
+                config,
+                available_emoji_fonts,
+                available_emoji_font_labels,
+            );
             render_text_rendering_path_setting(ui, text_ui, config);
             render_selected_toggles(
                 ui,
@@ -320,6 +382,7 @@ fn render_theme_setting(
     text_ui: &mut TextUi,
     config: &mut Config,
     available_themes: &[Theme],
+    available_theme_labels: &[String],
 ) {
     if available_themes.is_empty() {
         return;
@@ -328,10 +391,7 @@ fn render_theme_setting(
         .iter()
         .position(|theme| theme.id == config.theme_id())
         .unwrap_or(0);
-    let theme_labels: Vec<&str> = available_themes
-        .iter()
-        .map(|theme| theme.name.as_str())
-        .collect();
+    let theme_labels: Vec<&str> = available_theme_labels.iter().map(String::as_str).collect();
     let theme_tooltip = format!(
         "Themes are loaded from {} at startup.",
         app_paths::themes_dir().display()
@@ -367,6 +427,7 @@ fn render_ui_font_settings(
     text_ui: &mut TextUi,
     config: &mut Config,
     available_ui_fonts: &[UiFontFamily],
+    available_ui_font_labels: &[String],
 ) {
     config.for_each_dropdown_mut(|setting, value| {
         if setting.id != DropdownSettingId::UiFontFamily {
@@ -384,12 +445,10 @@ fn render_ui_font_settings(
             if options[selected_option_index] != *value {
                 *value = options[selected_option_index].clone();
             }
-            let option_labels: Vec<String> = options
+            let option_label_refs: Vec<&str> = available_ui_font_labels
                 .iter()
-                .map(|option| option.settings_label())
+                .map(String::as_str)
                 .collect();
-            let option_label_refs: Vec<&str> =
-                option_labels.iter().map(|label| label.as_str()).collect();
             let mut selected_index = selected_option_index;
             let response = settings_widgets::searchable_dropdown_row(
                 text_ui,
@@ -604,6 +663,7 @@ fn render_emoji_font_settings(
     text_ui: &mut TextUi,
     config: &mut Config,
     available_emoji_fonts: &[UiEmojiFontFamily],
+    available_emoji_font_labels: &[String],
 ) {
     if available_emoji_fonts.is_empty() {
         return;
@@ -613,11 +673,10 @@ fn render_emoji_font_settings(
         .iter()
         .position(|option| option.matches(&current))
         .unwrap_or(0);
-    let option_labels: Vec<String> = available_emoji_fonts
+    let option_label_refs: Vec<&str> = available_emoji_font_labels
         .iter()
-        .map(|option| option.settings_label())
+        .map(String::as_str)
         .collect();
-    let option_label_refs: Vec<&str> = option_labels.iter().map(|s| s.as_str()).collect();
     let mut selected_index = selected_option_index;
     let response = settings_widgets::searchable_dropdown_row(
         text_ui,
@@ -1167,9 +1226,7 @@ fn render_instance_defaults_section(ui: &mut Ui, text_ui: &mut TextUi, config: &
         }
     }
 
-    let purge_in_flight = purge_state
-        .lock()
-        .is_ok_and(|state| state.rx.is_some());
+    let purge_in_flight = purge_state.lock().is_ok_and(|state| state.rx.is_some());
     let purge_button_enabled = !purge_in_flight;
     let purge_button_label = if purge_in_flight {
         "Purging..."

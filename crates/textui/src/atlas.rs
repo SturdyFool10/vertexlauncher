@@ -146,7 +146,6 @@ pub(super) struct GlyphAtlasEntry {
     placement_top_px: i32,
     is_color: bool,
     content_mode: GlyphContentMode,
-    field_range_px: f32,
     last_used_frame: u64,
     approx_bytes: usize,
 }
@@ -160,7 +159,6 @@ pub(super) struct ResolvedGlyphAtlasEntry {
     pub(super) placement_top_px: i32,
     pub(super) is_color: bool,
     pub(super) content_mode: GlyphContentMode,
-    pub(super) field_range_px: f32,
 }
 
 #[derive(Clone)]
@@ -171,7 +169,6 @@ pub(super) struct PreparedAtlasGlyph {
     pub(super) placement_top_px: i32,
     pub(super) is_color: bool,
     pub(super) content_mode: GlyphContentMode,
-    pub(super) field_range_px: f32,
     pub(super) approx_bytes: usize,
 }
 
@@ -182,7 +179,6 @@ pub(super) struct PaintTextQuad {
     pub(super) uvs: [Pos2; 4],
     pub(super) tint: Color32,
     pub(super) content_mode: GlyphContentMode,
-    pub(super) field_range_px: f32,
 }
 
 pub(super) fn hash_text_fundamentals<H: Hasher>(fundamentals: &TextFundamentals, state: &mut H) {
@@ -728,7 +724,6 @@ impl GlyphAtlas {
             placement_top_px: glyph.placement_top_px,
             is_color: glyph.is_color,
             content_mode: glyph.content_mode,
-            field_range_px: glyph.field_range_px,
             last_used_frame: current_frame,
             approx_bytes: glyph.approx_bytes,
         };
@@ -861,7 +856,6 @@ impl GlyphAtlas {
             placement_top_px: entry.placement_top_px,
             is_color: entry.is_color,
             content_mode: entry.content_mode,
-            field_range_px: entry.field_range_px,
         }
     }
 
@@ -1038,7 +1032,6 @@ pub(super) fn rasterize_atlas_glyph(
         placement_top_px: image.placement.top,
         is_color: matches!(image.content, SwashContent::Color),
         content_mode: GlyphContentMode::AlphaMask,
-        field_range_px: 0.0,
     })
 }
 
@@ -1415,7 +1408,6 @@ fn rasterize_field_glyph(
         placement_top_px: top,
         is_color: false,
         content_mode: cache_key.content_mode(),
-        field_range_px,
     })
 }
 

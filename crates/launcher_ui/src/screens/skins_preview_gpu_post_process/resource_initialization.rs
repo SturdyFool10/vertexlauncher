@@ -14,12 +14,18 @@ impl SkinPreviewPostProcessWgpuResources {
         let scene_shader = create_post_process_shader_module(
             device,
             "skins-preview-post-scene-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/shaders/skin_preview_post_scene.wgsl")),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/shaders/skin_preview_post_scene.wgsl"
+            )),
         );
         let accumulate_shader = create_post_process_shader_module(
             device,
             "skins-preview-accumulate-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/shaders/skin_preview_accumulate.wgsl")),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/shaders/skin_preview_accumulate.wgsl"
+            )),
         );
         let fxaa_shader = create_post_process_shader_module(
             device,
@@ -44,7 +50,10 @@ impl SkinPreviewPostProcessWgpuResources {
         let present_shader = create_post_process_shader_module(
             device,
             "skins-preview-present-shader",
-            include_str!(concat!(env!("OUT_DIR"), "/shaders/skin_preview_present.wgsl")),
+            include_str!(concat!(
+                env!("OUT_DIR"),
+                "/shaders/skin_preview_present.wgsl"
+            )),
         );
 
         let texture_bind_group_layout =
@@ -547,6 +556,9 @@ impl SkinPreviewPostProcessWgpuResources {
                 target_format,
                 scene_msaa_samples.max(1),
             ),
+            cached_scene_plan: None,
+            cached_scene_plan_batch_count: 0,
+            cached_scene_plan_msaa_samples: 0,
             target_format,
             scene_msaa_samples: scene_msaa_samples.max(1),
             present_msaa_samples: present_msaa_samples.max(1),

@@ -131,6 +131,11 @@ pub(super) struct InstanceScreenState {
     pub(super) content_hash_cache: Option<InstalledContentHashCache>,
     pub(super) content_hash_cache_dirty: bool,
     pub(super) content_hash_cache_dirty_since: Option<Instant>,
+    pub(super) content_hash_cache_serial: u64,
+    pub(super) content_hash_cache_save_in_flight: bool,
+    pub(super) content_hash_cache_save_results_tx: Option<mpsc::Sender<(u64, Result<(), String>)>>,
+    pub(super) content_hash_cache_save_results_rx:
+        Option<Arc<Mutex<mpsc::Receiver<(u64, Result<(), String>)>>>>,
     pub(super) content_apply_in_flight: bool,
     pub(super) content_apply_results_tx: Option<mpsc::Sender<ContentApplyResult>>,
     pub(super) content_apply_results_rx: Option<Arc<Mutex<mpsc::Receiver<ContentApplyResult>>>>,
@@ -310,6 +315,10 @@ impl InstanceScreenState {
             content_hash_cache: None,
             content_hash_cache_dirty: false,
             content_hash_cache_dirty_since: None,
+            content_hash_cache_serial: 0,
+            content_hash_cache_save_in_flight: false,
+            content_hash_cache_save_results_tx: None,
+            content_hash_cache_save_results_rx: None,
             content_apply_in_flight: false,
             content_apply_results_tx: None,
             content_apply_results_rx: None,
@@ -454,6 +463,10 @@ impl InstanceScreenState {
         self.content_hash_cache = None;
         self.content_hash_cache_dirty = false;
         self.content_hash_cache_dirty_since = None;
+        self.content_hash_cache_serial = 0;
+        self.content_hash_cache_save_in_flight = false;
+        self.content_hash_cache_save_results_tx = None;
+        self.content_hash_cache_save_results_rx = None;
         self.content_apply_in_flight = false;
         self.content_apply_results_tx = None;
         self.content_apply_results_rx = None;

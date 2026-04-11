@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use super::*;
 use vertex_3d::{
@@ -100,7 +100,7 @@ fn build_renderer_config(
     scene_msaa_samples: u32,
 ) -> RendererConfig {
     let surface = SurfaceConfig::new(size[0], size[1], surface_format);
-    let mut graph = collect_reflection_graph([size[0], size[1]]);
+    let mut graph = reflected_graph_template().clone();
 
     if !graph.attachments.contains_key(&"scene_depth".into()) {
         graph = graph.with_attachment(
@@ -171,6 +171,13 @@ fn build_renderer_config(
     config.set_format_override("scene_depth", SKIN_PREVIEW_DEPTH_FORMAT);
     config.set_format_override("scene_depth_resolve", SKIN_PREVIEW_DEPTH_FORMAT);
     config
+}
+
+fn reflected_graph_template() -> &'static ShaderGraphDescriptor {
+    static REFLECTED_GRAPH_TEMPLATE: OnceLock<ShaderGraphDescriptor> = OnceLock::new();
+    // Reflection only defines attachment topology here. Surface-relative sizing
+    // is resolved later from the live renderer config.
+    REFLECTED_GRAPH_TEMPLATE.get_or_init(|| collect_reflection_graph([1, 1]))
 }
 
 fn collect_reflection_graph(size: [u32; 2]) -> ShaderGraphDescriptor {

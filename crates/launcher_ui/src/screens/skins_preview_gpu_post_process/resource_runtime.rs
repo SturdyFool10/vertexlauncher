@@ -98,7 +98,8 @@ impl SkinPreviewPostProcessWgpuResources {
         self.render_targets.scene_msaa_view =
             scene_msaa_attachment.map(|attachment| attachment.view.clone());
 
-        let scene_depth_linear_msaa_att = self.vertex3d_runtime.attachment("scene_depth_linear_msaa");
+        let scene_depth_linear_msaa_att =
+            self.vertex3d_runtime.attachment("scene_depth_linear_msaa");
         self.render_targets.scene_depth_linear_msaa_view =
             scene_depth_linear_msaa_att.map(|attachment| attachment.view.clone());
     }

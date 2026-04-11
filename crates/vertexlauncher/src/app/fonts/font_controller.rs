@@ -3,7 +3,9 @@ use super::*;
 pub struct FontController {
     pub(super) font_catalog: FontCatalog,
     pub(super) available_ui_fonts: Vec<UiFontFamily>,
+    pub(super) available_ui_font_labels: Vec<String>,
     pub(super) available_emoji_fonts: Vec<UiEmojiFontFamily>,
+    pub(super) available_emoji_font_labels: Vec<String>,
     pub(super) applied_font_signature: Option<AppliedFontSignature>,
     pub(super) applied_text_signature: Option<AppliedTextSignature>,
     pub(super) applied_emoji_font: Option<UiEmojiFontFamily>,
@@ -14,10 +16,22 @@ impl FontController {
     pub fn new(initial_family: UiFontFamily) -> Self {
         let mut catalog = FontCatalog::new();
         catalog.load_system();
+        let available_ui_fonts = detect_available_ui_fonts(&catalog);
+        let available_ui_font_labels = available_ui_fonts
+            .iter()
+            .map(UiFontFamily::settings_label)
+            .collect();
+        let available_emoji_fonts = detect_available_emoji_fonts(&catalog);
+        let available_emoji_font_labels = available_emoji_fonts
+            .iter()
+            .map(UiEmojiFontFamily::settings_label)
+            .collect();
 
         Self {
-            available_ui_fonts: detect_available_ui_fonts(&catalog),
-            available_emoji_fonts: detect_available_emoji_fonts(&catalog),
+            available_ui_fonts,
+            available_ui_font_labels,
+            available_emoji_fonts,
+            available_emoji_font_labels,
             font_catalog: catalog,
             applied_font_signature: None,
             applied_text_signature: None,
@@ -35,8 +49,16 @@ impl FontController {
         &self.available_ui_fonts
     }
 
+    pub fn available_ui_font_labels(&self) -> &[String] {
+        &self.available_ui_font_labels
+    }
+
     pub fn available_emoji_fonts(&self) -> &[UiEmojiFontFamily] {
         &self.available_emoji_fonts
+    }
+
+    pub fn available_emoji_font_labels(&self) -> &[String] {
+        &self.available_emoji_font_labels
     }
 
     pub fn ensure_selected_font_is_available(&self, config: &mut Config) {

@@ -62,6 +62,7 @@ pub use library::{
 pub use menu_presence_context::MenuPresenceContext;
 pub use quick_launch_command_mode::QuickLaunchCommandMode;
 pub use screen_output::ScreenOutput;
+pub use settings::prewarm as prewarm_settings;
 pub use settings::request_theme_focus as request_settings_theme_focus;
 pub use settings_info::{SettingsGraphicsAdapterInfo, SettingsInfo};
 pub use skins::classic_model_button_id as skins_classic_model_button_id;
@@ -219,8 +220,11 @@ pub fn render(
     wgpu_target_format: Option<wgpu::TextureFormat>,
     skin_preview_msaa_samples: u32,
     available_ui_fonts: &[UiFontFamily],
+    available_ui_font_labels: &[String],
     available_emoji_fonts: &[UiEmojiFontFamily],
+    available_emoji_font_labels: &[String],
     available_themes: &[Theme],
+    available_theme_labels: &[String],
     settings_info: &SettingsInfo,
     content_browser_state: &mut ContentBrowserState,
     discover_state: &mut DiscoverState,
@@ -350,8 +354,11 @@ pub fn render(
                 text_ui,
                 config,
                 available_ui_fonts,
+                available_ui_font_labels,
                 available_emoji_fonts,
+                available_emoji_font_labels,
                 available_themes,
+                available_theme_labels,
                 settings_info,
             );
             ScreenOutput {

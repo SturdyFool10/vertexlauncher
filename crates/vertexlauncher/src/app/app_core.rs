@@ -135,8 +135,8 @@ pub(super) struct VertexApp {
     pub(super) initial_install_results_rx: Option<mpsc::Receiver<InitialInstanceInstallResult>>,
     pub(super) discord_presence: DiscordPresenceManager,
     pub(super) gamepad: Option<gamepad::GamepadNavigator>,
-    pub(super) last_frame_end: Option<Instant>,
     pub(super) last_rendered_screen: Option<screens::AppScreen>,
+    pub(super) settings_screen_prewarmed: bool,
 }
 
 #[derive(Debug)]
@@ -288,8 +288,8 @@ impl VertexApp {
             initial_install_results_rx: None,
             discord_presence: DiscordPresenceManager::default(),
             gamepad: gamepad::GamepadNavigator::new(),
-            last_frame_end: None,
             last_rendered_screen: None,
+            settings_screen_prewarmed: false,
         };
 
         app.refresh_instance_shortcuts();
@@ -351,7 +351,7 @@ impl VertexApp {
             self.show_gamepad_calibration_modal = true;
             self.gamepad_calibration_state.start(device);
         }
-        self.apply_frame_limiter();
+        self.apply_frame_limiter(ctx);
         self.text_ui.set_graphics_config(build_text_graphics_config(
             &self.config,
             self.startup_graphics,
@@ -401,14 +401,6 @@ impl VertexApp {
                 is_failed: entry.is_failed,
             })
             .collect::<Vec<_>>();
-        let account_avatars_by_key = account_entries
-            .into_iter()
-            .filter_map(|entry| {
-                entry
-                    .avatar_png
-                    .map(|avatar| (entry.profile_id.to_ascii_lowercase(), avatar))
-            })
-            .collect::<HashMap<_, _>>();
         let streamer_mode = self.config.streamer_mode_enabled();
         let active_launch_auth =
             self.auth
@@ -666,6 +658,21 @@ impl VertexApp {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         let settings_info = app_metadata::try_settings_info().unwrap_or_default();
+        if !self.settings_screen_prewarmed {
+            screens::prewarm_settings(
+                ctx,
+                &mut self.text_ui,
+                &self.config,
+                self.fonts.available_ui_fonts(),
+                self.fonts.available_ui_font_labels(),
+                self.fonts.available_emoji_fonts(),
+                self.fonts.available_emoji_font_labels(),
+                self.theme_catalog.themes(),
+                self.theme_catalog.theme_labels(),
+                &settings_info,
+            );
+            self.settings_screen_prewarmed = true;
+        }
         let skin_manager_opened = self.active_screen == screens::AppScreen::Skins
             && self.last_rendered_screen != Some(screens::AppScreen::Skins);
         let skin_manager_account_switched =
@@ -706,6 +713,7 @@ impl VertexApp {
                         .max_rect(content_rect)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                     |ui| {
+                        let account_avatars_by_key = self.auth.account_avatars_by_key();
                         screen_output = screens::render(
                             ui,
                             self.active_screen,
@@ -718,12 +726,15 @@ impl VertexApp {
                             streamer_mode,
                             &mut self.config,
                             &mut self.instance_store,
-                            &account_avatars_by_key,
+                            account_avatars_by_key,
                             wgpu_target_format,
                             skin_preview_msaa_samples,
                             self.fonts.available_ui_fonts(),
+                            self.fonts.available_ui_font_labels(),
                             self.fonts.available_emoji_fonts(),
+                            self.fonts.available_emoji_font_labels(),
                             self.theme_catalog.themes(),
+                            self.theme_catalog.theme_labels(),
                             &settings_info,
                             &mut self.content_browser_state,
                             &mut self.discover_state,
@@ -1098,23 +1109,14 @@ impl VertexApp {
         }
     }
 
-    pub(super) fn apply_frame_limiter(&mut self) {
+    pub(super) fn apply_frame_limiter(&mut self, ctx: &egui::Context) {
         if !self.config.frame_limiter_enabled() {
-            self.last_frame_end = None;
             return;
         }
 
         let fps = self.config.frame_limit_fps().clamp(30, 240) as u32;
         let frame_time = Duration::from_secs_f64(1.0 / fps as f64);
-        let now = Instant::now();
-        if let Some(last) = self.last_frame_end {
-            let elapsed = now.saturating_duration_since(last);
-            if elapsed < frame_time {
-                let remaining = frame_time - elapsed;
-                sleep_precise(remaining);
-            }
-        }
-        self.last_frame_end = Some(Instant::now());
+        ctx.request_repaint_after(frame_time);
     }
 
     pub(super) fn handle_escape(&mut self, ctx: &egui::Context) -> bool {

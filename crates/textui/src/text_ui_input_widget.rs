@@ -1298,7 +1298,6 @@ impl TextUi {
                 uvs: uv_quad_points(atlas_entry.uv),
                 tint,
                 content_mode: atlas_entry.content_mode,
-                field_range_px: atlas_entry.field_range_px,
             });
         }
 
