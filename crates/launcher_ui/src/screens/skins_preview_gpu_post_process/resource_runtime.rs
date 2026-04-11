@@ -75,21 +75,32 @@ impl SkinPreviewPostProcessWgpuResources {
         self.render_targets.taa_history_bind_group = taa_history_bind_group;
 
         let scene_depth_render_att = attachment("scene_depth");
-        let scene_depth_resolve_att = attachment("scene_depth_resolve");
         self.render_targets.scene_depth = DepthAttachmentSet::new(
-            device,
-            &self.shader_modules.depth_texture_bind_group_layout,
             scene_depth_render_att.texture.clone(),
             scene_depth_render_att.view.clone(),
-            scene_depth_resolve_att.texture.clone(),
-            scene_depth_resolve_att.view.clone(),
         );
+
+        let scene_depth_linear_att = attachment("scene_depth_linear");
+        let scene_depth_linear_bind_group = create_preview_texture_bind_group(
+            device,
+            &self.shader_modules.texture_bind_group_layout,
+            &self.shader_modules.texture_sampler,
+            &scene_depth_linear_att.view,
+            "skins-preview-scene-depth-linear",
+        );
+        self.render_targets.scene_depth_linear_texture = scene_depth_linear_att.texture.clone();
+        self.render_targets.scene_depth_linear_view = scene_depth_linear_att.view.clone();
+        self.render_targets.scene_depth_linear_bind_group = scene_depth_linear_bind_group;
 
         let scene_msaa_attachment = self.vertex3d_runtime.attachment("scene_msaa");
         self.render_targets.scene_msaa_texture =
             scene_msaa_attachment.map(|attachment| attachment.texture.clone());
         self.render_targets.scene_msaa_view =
             scene_msaa_attachment.map(|attachment| attachment.view.clone());
+
+        let scene_depth_linear_msaa_att = self.vertex3d_runtime.attachment("scene_depth_linear_msaa");
+        self.render_targets.scene_depth_linear_msaa_view =
+            scene_depth_linear_msaa_att.map(|attachment| attachment.view.clone());
     }
 
     pub(super) fn update_texture(
@@ -123,7 +134,9 @@ impl SkinPreviewPostProcessWgpuResources {
             mip_level_count: preview_mip_level_count(size),
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            // Srgb variant: GPU auto-decodes sRGB → linear on sample, so the
+            // linear Rgba16Float intermediate buffers receive correct values.
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });

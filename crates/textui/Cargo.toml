@@ -21,3 +21,4 @@ etagere.workspace = true
 rustc-hash.workspace = true
 wgpu.workspace = true
 bytemuck = { version = "*", features = ["derive"] }
+half = "2"

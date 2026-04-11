@@ -21,6 +21,9 @@ pub(super) fn build_text_graphics_config(
         renderer_backend: textui::TextRendererBackend::Auto,
         graphics_api: text_graphics_api_for_startup_config(startup_graphics),
         gpu_power_preference: text_gpu_power_preference_for_config(config),
+        linear_pipeline: false,
+        // The live WGPU target format decides whether output is actually HDR.
+        output_is_hdr: false,
         ..textui::TextGraphicsConfig::default()
     };
     graphics_config.rasterization.glyph_raster_mode = match config.text_rendering_path() {

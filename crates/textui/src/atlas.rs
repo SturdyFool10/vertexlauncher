@@ -116,6 +116,9 @@ pub(super) struct GlyphAtlas {
     padding_px: usize,
     sampling: TextAtlasSampling,
     rasterization: TextRasterizationConfig,
+    /// Kept to coordinate atlas recreation when the broader text rendering
+    /// pipeline switches modes. Atlas pages themselves stay FP16.
+    linear_pipeline: bool,
     pub(super) wgpu_render_state: Option<EguiWgpuRenderState>,
     pub(super) pending: FxHashSet<GlyphRasterKey>,
     ready: VecDeque<GlyphAtlasWorkerResponse>,
@@ -463,6 +466,7 @@ impl GlyphAtlas {
             padding_px: GLYPH_ATLAS_PADDING_PX.max(0) as usize,
             sampling: TextAtlasSampling::Linear,
             rasterization: TextRasterizationConfig::default(),
+            linear_pipeline: false,
             wgpu_render_state: None,
             pending: FxHashSet::default(),
             ready: VecDeque::new(),
@@ -505,6 +509,22 @@ impl GlyphAtlas {
 
     pub(super) fn set_rasterization(&mut self, rasterization: TextRasterizationConfig) {
         self.rasterization = rasterization;
+    }
+
+    /// Enables or disables the linear pipeline.
+    ///
+    /// When changed, all atlas pages are cleared so the atlas contents are
+    /// rebuilt against the current text pipeline assumptions.
+    pub(super) fn set_linear_pipeline(&mut self, linear_pipeline: bool) {
+        if self.linear_pipeline == linear_pipeline {
+            return;
+        }
+        self.linear_pipeline = linear_pipeline;
+        self.generation = self.generation.saturating_add(1);
+        self.pending.clear();
+        self.ready.clear();
+        let _ = self.entries.write(|state| state.clear());
+        self.free_all_pages();
     }
 
     pub(super) fn register_font(&self, bytes: Vec<u8>) {
@@ -767,6 +787,7 @@ impl GlyphAtlas {
 
     fn allocate_page_texture(&mut self, ctx: &Context, side: usize) -> GlyphAtlasTexture {
         if let Some(render_state) = self.wgpu_render_state.as_ref() {
+            let atlas_format = wgpu::TextureFormat::Rgba16Float;
             let texture = render_state
                 .device
                 .create_texture(&wgpu::TextureDescriptor {
@@ -779,9 +800,9 @@ impl GlyphAtlas {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    format: atlas_format,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+                    view_formats: &[atlas_format],
                 });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             let id = render_state.renderer.write().register_native_texture(
@@ -876,6 +897,9 @@ impl GlyphAtlas {
     }
 
     fn write_glyph(&mut self, page_index: usize, allocation: Allocation, glyph: &ColorImage) {
+        if glyph.size[0] == 0 || glyph.size[1] == 0 {
+            return;
+        }
         let Some(page) = self.pages.get_mut(page_index) else {
             return;
         };
@@ -1880,15 +1904,15 @@ fn write_color_image_to_wgpu_texture(
     pos: [usize; 2],
     image: &ColorImage,
 ) {
+    if image.size[0] == 0 || image.size[1] == 0 {
+        return;
+    }
+    let bytes = color_image_to_rgba16f_bytes(image);
     let size = wgpu::Extent3d {
         width: image.size[0] as u32,
         height: image.size[1] as u32,
         depth_or_array_layers: 1,
     };
-    let mut bytes = Vec::with_capacity(image.pixels.len().saturating_mul(4));
-    for pixel in &image.pixels {
-        bytes.extend_from_slice(&pixel.to_array());
-    }
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture,
@@ -1903,9 +1927,20 @@ fn write_color_image_to_wgpu_texture(
         &bytes,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(4 * image.size[0] as u32),
+            bytes_per_row: Some(8 * image.size[0] as u32),
             rows_per_image: Some(image.size[1] as u32),
         },
         size,
     );
+}
+
+fn color_image_to_rgba16f_bytes(image: &ColorImage) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(image.pixels.len().saturating_mul(8));
+    for pixel in &image.pixels {
+        for channel in pixel.to_array() {
+            let half = half::f16::from_f32(f32::from(channel) / 255.0);
+            bytes.extend_from_slice(&half.to_bits().to_le_bytes());
+        }
+    }
+    bytes
 }

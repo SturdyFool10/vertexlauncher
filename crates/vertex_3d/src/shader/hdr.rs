@@ -242,3 +242,51 @@ impl HdrConfig {
         s * max_nits as f64
     }
 }
+
+/// Returns true if `format` is a floating-point or wide-gamut format that can
+/// carry HDR signal (values outside the [0, 1] SDR range).
+pub fn surface_format_is_hdr(format: wgpu::TextureFormat) -> bool {
+    matches!(
+        format,
+        wgpu::TextureFormat::Rgba16Float | wgpu::TextureFormat::Rgb10a2Unorm
+    )
+}
+
+/// Pick the best surface format for the given mode from the list the adapter
+/// reports as supported.
+///
+/// When `prefer_hdr` is true, float16 and wide-gamut formats are preferred.
+/// Falls back to `Bgra8Unorm` / `Rgba8Unorm` if no HDR format is found, and
+/// ultimately to the first entry in the list if nothing common is available.
+pub fn select_surface_format(
+    supported: &[wgpu::TextureFormat],
+    prefer_hdr: bool,
+) -> Option<wgpu::TextureFormat> {
+    if prefer_hdr {
+        // Prefer scRGB (float16) for widest-gamut HDR, then HDR10 10-bit.
+        let hdr_preference = [
+            wgpu::TextureFormat::Rgba16Float,
+            wgpu::TextureFormat::Rgb10a2Unorm,
+        ];
+        for &candidate in &hdr_preference {
+            if supported.contains(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // SDR preference: sRGB first (automatic gamma on writes), then linear.
+    let sdr_preference = [
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Bgra8Unorm,
+        wgpu::TextureFormat::Rgba8Unorm,
+    ];
+    for &candidate in &sdr_preference {
+        if supported.contains(&candidate) {
+            return Some(candidate);
+        }
+    }
+
+    supported.first().copied()
+}

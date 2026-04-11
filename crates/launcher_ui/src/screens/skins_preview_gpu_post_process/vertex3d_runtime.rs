@@ -2,20 +2,24 @@ use std::collections::BTreeMap;
 
 use super::*;
 use vertex_3d::{
-    AttachmentLifecycle, AttachmentPool, AttachmentTexture, GraphAttachment, ReflectionSnapshot,
+    AttachmentImage, AttachmentLifecycle, AttachmentPool, GraphAttachment, ReflectionSnapshot,
     RenderTargetConfig, RenderTargetType, RendererConfig, RendererRuntime, ShaderGraphDescriptor,
     SurfaceConfig,
 };
 
-const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Linear FP16 for all intermediate render targets. Holds HDR values (> 1.0)
+/// without clamping and gives the tone-mapping present pass a wide working range.
+/// Blendable on all Vulkan/DX12/Metal desktop hardware.
+const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-const SLANG_SOURCES: [&str; 6] = [
+const SLANG_SOURCES: [&str; 7] = [
     include_str!("../shaders/skin_preview_post_scene.slang"),
     include_str!("../shaders/skin_preview_accumulate.slang"),
     include_str!("../shaders/skin_preview_fxaa.slang"),
     include_str!("../shaders/skin_preview_smaa.slang"),
     include_str!("../shaders/skin_preview_taa.slang"),
     include_str!("../shaders/skin_preview_present.slang"),
+    include_str!("../shaders/skin_preview_ssao.slang"),
 ];
 
 pub(super) struct SkinPreviewVertex3dRuntime {
@@ -81,7 +85,7 @@ impl SkinPreviewVertex3dRuntime {
         rebuild_attachments
     }
 
-    pub(super) fn attachment(&self, handle: &str) -> Option<&AttachmentTexture> {
+    pub(super) fn attachment(&self, handle: &str) -> Option<&AttachmentImage> {
         self.attachments.get(&handle.into())
     }
 
@@ -138,6 +142,14 @@ fn build_renderer_config(
             )
             .with_lifecycle(AttachmentLifecycle::Transient),
         );
+        graph = graph.with_attachment(
+            GraphAttachment::new(
+                "scene_depth_linear_msaa",
+                RenderTargetConfig::new(RenderTargetType::Lighting, size[0], size[1])
+                    .with_samples(scene_msaa_samples),
+            )
+            .with_lifecycle(AttachmentLifecycle::Transient),
+        );
     }
 
     let mut config = RendererConfig::new(surface)
@@ -146,6 +158,8 @@ fn build_renderer_config(
     for handle in [
         "scene_color",
         "scene_msaa",
+        "scene_depth_linear",
+        "scene_depth_linear_msaa",
         "accumulation",
         "post_process",
         "taa_history",

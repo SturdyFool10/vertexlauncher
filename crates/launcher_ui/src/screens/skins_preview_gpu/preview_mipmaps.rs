@@ -15,12 +15,12 @@ pub(super) fn upload_preview_texture_mips(
     texture: &wgpu::Texture,
     image: &RgbaImage,
 ) {
-    let mut mip_image = image.clone();
+    let mut mip_image = normalized_preview_image(image);
     let mip_level_count = preview_mip_level_count([image.width(), image.height()]);
 
     for mip_level in 0..mip_level_count {
-        let width = mip_image.width().max(1);
-        let height = mip_image.height().max(1);
+        let width = mip_image.width();
+        let height = mip_image.height();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -47,6 +47,14 @@ pub(super) fn upload_preview_texture_mips(
             mip_image = resize_preview_mip_image(&mip_image, next_width, next_height);
         }
     }
+}
+
+fn normalized_preview_image(image: &RgbaImage) -> RgbaImage {
+    if image.width() > 0 && image.height() > 0 {
+        return image.clone();
+    }
+
+    RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 0]))
 }
 
 fn resize_preview_mip_image(image: &RgbaImage, width: u32, height: u32) -> RgbaImage {

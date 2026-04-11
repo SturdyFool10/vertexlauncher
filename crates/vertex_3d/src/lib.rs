@@ -12,6 +12,8 @@
 
 pub mod asset;
 pub mod camera;
+pub mod command;
+pub mod image;
 pub mod material;
 pub mod mesh;
 pub mod renderer;
@@ -23,25 +25,33 @@ pub use glam::{Mat4, Quat, Vec2, Vec3};
 
 // Re-export main types for convenience
 pub use asset::{
-    AssetHandle, MeshAsset, MeshHandle, RenderAssetLibrary, ShaderAsset, ShaderAssetBuildError,
-    ShaderAssetDesc, ShaderHandle, TextureAsset, TextureHandle,
+    AssetHandle, ImageHandle, MeshAsset, MeshHandle, RenderAssetLibrary, ShaderAsset,
+    ShaderAssetBuildError, ShaderAssetDesc, ShaderHandle,
 };
 pub use camera::Camera;
+pub use command::{
+    CommandExecutionCallbacks, CommandExecutionError, CommandImageRegistry, CommandImageResource,
+    CommandQueue, ComputeCommand, CopyImageCommand, GpuCommand, GpuWorkHandle, PresentCommand,
+    RasterAttachment, RasterCommand,
+};
+pub use image::{ImageAsset, ImageDesc, ImageViewDesc};
 pub use material::{
-    AlphaMode, Material, MaterialHandle, MaterialModel, MaterialParameters, MaterialTextures,
+    AlphaMode, Material, MaterialHandle, MaterialImages, MaterialModel, MaterialParameters,
     MaterialValue, PbrMaterial, UnlitMaterial,
 };
 pub use mesh::{Mesh, Vertex};
 pub use renderer::{
-    AdapterPreference, AdapterSelector, AttachmentLifecycle, AttachmentPool, AttachmentTexture,
+    AdapterPreference, AdapterSelector, AttachmentImage, AttachmentLifecycle, AttachmentPool,
     AvailableAdapter, BindGroupBuildError, DeferredPassRuntime, DeferredRenderPipelineTemplate,
     DeferredRenderer, DeferredRendererError, DerivedRendererState, FrameGraph,
-    FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPlan, FrameGraphUsage, GraphAttachment,
-    MsaaResolvePool, NamedBindGroup, ReflectionBindGroupSet, RenderTargetHandle, RenderTargetScale,
-    RendererConfig, RendererRebuildFlags, RendererRuntime, ScenePipelineConfig, SceneRenderer,
-    SceneRendererError, SceneSubmissionQueue, ShaderBindingResource, ShaderGraphDescriptor,
-    ShaderResourceTable, SubmissionError, SurfaceConfig, describe_adapter_slice,
-    enumerate_adapters, select_adapter_from_slice, select_adapter_slot,
+    FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPassKind, FrameGraphPlan,
+    FrameGraphResourceAccess, FrameGraphResourcePlan, FrameGraphUsage, GpuImage, GraphAttachment,
+    GraphResourceHandle, GraphResourceKind, GraphResourceUsage, MsaaResolvePool, NamedBindGroup,
+    ReflectionBindGroupSet, RenderTargetHandle, RenderTargetScale, RendererConfig,
+    RendererRebuildFlags, RendererRuntime, ScenePipelineConfig, SceneRenderer, SceneRendererError,
+    SceneSubmissionQueue, ShaderBindingResource, ShaderGraphDescriptor, ShaderResourceTable,
+    SubmissionError, SurfaceConfig, describe_adapter_slice, enumerate_adapters,
+    select_adapter_from_slice, select_adapter_slot,
 };
 pub use scene::{DrawPacket, RenderObject, Scene, Transform};
 
@@ -55,6 +65,6 @@ pub use shader::{
     RenderTargetConfig, RenderTargetType, ResourceBinding, ResourceType, ShaderBackendTarget,
     ShaderCompileError, ShaderCompileRequest, ShaderCompileSource, ShaderCompiler, ShaderKind,
     ShaderProgram, ShaderSourceLanguage, ShaderStage, ShaderStageConfig, SlangCompiler,
-    StageSource, StandardShaderImport, resolve_standard_import_path, standard_library_dir,
-    standard_module_path,
+    StageSource, StandardShaderImport, resolve_standard_import_path, select_surface_format,
+    standard_library_dir, standard_module_path, surface_format_is_hdr,
 };

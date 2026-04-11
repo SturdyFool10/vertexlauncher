@@ -40,7 +40,7 @@ pub use compiler::{
 pub use gbuffer::{GBufferType, RenderTargetConfig, RenderTargetType};
 
 /// HDR configuration types.
-pub use hdr::{BufferPrecision, Colorspace, HdrConfig};
+pub use hdr::{BufferPrecision, Colorspace, HdrConfig, select_surface_format, surface_format_is_hdr};
 
 /// Main shader types.
 pub use pipeline::{

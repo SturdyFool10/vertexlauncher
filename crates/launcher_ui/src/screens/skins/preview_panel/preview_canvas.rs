@@ -110,9 +110,24 @@ pub(super) fn render_preview_canvas(
     let cape_uv = state.cape_uv;
     let variant = state.pending_variant;
     let show_elytra = state.show_elytra;
-    let wgpu_target_format = state
-        .wgpu_target_format
-        .expect("skins preview renderer requires a WGPU target format");
+    let Some(wgpu_target_format) = state.wgpu_target_format else {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.with_layout(
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    let mut muted = style::muted(ui);
+                    muted.wrap = true;
+                    let _ = text_ui.label(
+                        ui,
+                        "skins_preview_renderer_initializing",
+                        "Skin preview is waiting for the GPU renderer to become ready.",
+                        &muted,
+                    );
+                },
+            );
+        });
+        return (rect, true);
+    };
     let preview_msaa_samples = state.preview_msaa_samples;
     let preview_aa_mode = state.preview_aa_mode;
     let preview_motion_blur_enabled = state.preview_motion_blur_enabled;

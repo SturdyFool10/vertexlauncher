@@ -37,6 +37,8 @@ impl TextWgpuPipelineResources {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
         atlas_sampling: TextAtlasSampling,
+        linear_pipeline: bool,
+        output_is_hdr: bool,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("textui_instanced_shader"),
@@ -47,7 +49,7 @@ impl TextWgpuPipelineResources {
                 label: Some("textui_instanced_uniform_bgl"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -90,7 +92,9 @@ impl TextWgpuPipelineResources {
         });
         let uniform = TextWgpuScreenUniform {
             screen_size_points: [1.0, 1.0],
-            _padding: [0.0, 0.0],
+            output_is_hdr: if output_is_hdr { 1.0 } else { 0.0 },
+            _pad0: 0.0,
+            _pad1: [0.0; 2],
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("textui_instanced_uniform_buffer"),
@@ -179,6 +183,8 @@ impl TextWgpuPipelineResources {
         Self {
             target_format,
             atlas_sampling,
+            linear_pipeline,
+            output_is_hdr,
             pipeline,
             texture_bind_group_layout,
             sampler,
@@ -187,10 +193,17 @@ impl TextWgpuPipelineResources {
         }
     }
 
-    pub(super) fn update_uniform(&self, queue: &wgpu::Queue, screen_size_points: [f32; 2]) {
+    pub(super) fn update_uniform(
+        &self,
+        queue: &wgpu::Queue,
+        screen_size_points: [f32; 2],
+        output_is_hdr: bool,
+    ) {
         let uniform = TextWgpuScreenUniform {
             screen_size_points,
-            _padding: [0.0, 0.0],
+            output_is_hdr: if output_is_hdr { 1.0 } else { 0.0 },
+            _pad0: 0.0,
+            _pad1: [0.0; 2],
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniform));
     }

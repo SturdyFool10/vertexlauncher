@@ -212,6 +212,8 @@ impl TextUi {
             .set_padding(graphics_config.atlas_padding_px);
         self.glyph_atlas
             .set_rasterization(graphics_config.rasterization);
+        self.glyph_atlas
+            .set_linear_pipeline(self.graphics_config.linear_pipeline);
         if self.max_texture_side_px != max_texture_side_px {
             self.max_texture_side_px = max_texture_side_px;
             self.invalidate_text_caches(false);
@@ -310,6 +312,7 @@ impl TextUi {
                 .min(max_texture_side_px.max(1)),
             atlas_padding_px: self.graphics_config.atlas_padding_px,
             rasterization: self.graphics_config.rasterization,
+            output_is_hdr: self.graphics_config.output_is_hdr,
         }
     }
 

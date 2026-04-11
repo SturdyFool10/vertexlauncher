@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::asset::{AssetHandle, ShaderHandle, TextureHandle};
+use crate::asset::{AssetHandle, ImageHandle, ShaderHandle};
 
 /// Typed handle to a material asset.
 pub type MaterialHandle = AssetHandle<Material>;
@@ -34,38 +34,38 @@ pub enum MaterialValue {
     Bool(bool),
 }
 
-/// Texture slots used by the built-in unlit and PBR material models.
+/// Image slots used by the built-in unlit and PBR material models.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MaterialTextures {
-    pub base_color: Option<TextureHandle>,
-    pub metallic_roughness: Option<TextureHandle>,
-    pub normal: Option<TextureHandle>,
-    pub emissive: Option<TextureHandle>,
-    pub occlusion: Option<TextureHandle>,
+pub struct MaterialImages {
+    pub base_color: Option<ImageHandle>,
+    pub metallic_roughness: Option<ImageHandle>,
+    pub normal: Option<ImageHandle>,
+    pub emissive: Option<ImageHandle>,
+    pub occlusion: Option<ImageHandle>,
 }
 
-impl MaterialTextures {
-    pub fn with_base_color(mut self, handle: TextureHandle) -> Self {
+impl MaterialImages {
+    pub fn with_base_color(mut self, handle: ImageHandle) -> Self {
         self.base_color = Some(handle);
         self
     }
 
-    pub fn with_metallic_roughness(mut self, handle: TextureHandle) -> Self {
+    pub fn with_metallic_roughness(mut self, handle: ImageHandle) -> Self {
         self.metallic_roughness = Some(handle);
         self
     }
 
-    pub fn with_normal(mut self, handle: TextureHandle) -> Self {
+    pub fn with_normal(mut self, handle: ImageHandle) -> Self {
         self.normal = Some(handle);
         self
     }
 
-    pub fn with_emissive(mut self, handle: TextureHandle) -> Self {
+    pub fn with_emissive(mut self, handle: ImageHandle) -> Self {
         self.emissive = Some(handle);
         self
     }
 
-    pub fn with_occlusion(mut self, handle: TextureHandle) -> Self {
+    pub fn with_occlusion(mut self, handle: ImageHandle) -> Self {
         self.occlusion = Some(handle);
         self
     }
@@ -126,7 +126,7 @@ pub struct Material {
     pub shader: ShaderHandle,
     pub model: MaterialModel,
     pub alpha_mode: AlphaMode,
-    pub textures: MaterialTextures,
+    pub images: MaterialImages,
     pub parameters: MaterialParameters,
     pub casts_shadows: bool,
     pub receives_shadows: bool,
@@ -139,7 +139,7 @@ impl Material {
             shader,
             model: MaterialModel::Unlit,
             alpha_mode: AlphaMode::Opaque,
-            textures: MaterialTextures::default(),
+            images: MaterialImages::default(),
             parameters: MaterialParameters::Unlit(UnlitMaterial::default()),
             casts_shadows: true,
             receives_shadows: true,
@@ -152,7 +152,7 @@ impl Material {
             shader,
             model: MaterialModel::PbrMetallicRoughness,
             alpha_mode: AlphaMode::Opaque,
-            textures: MaterialTextures::default(),
+            images: MaterialImages::default(),
             parameters: MaterialParameters::Pbr(PbrMaterial::default()),
             casts_shadows: true,
             receives_shadows: true,
@@ -165,7 +165,7 @@ impl Material {
             shader,
             model: MaterialModel::Custom,
             alpha_mode: AlphaMode::Opaque,
-            textures: MaterialTextures::default(),
+            images: MaterialImages::default(),
             parameters: MaterialParameters::Custom(BTreeMap::new()),
             casts_shadows: true,
             receives_shadows: true,
@@ -177,8 +177,8 @@ impl Material {
         self
     }
 
-    pub fn with_textures(mut self, textures: MaterialTextures) -> Self {
-        self.textures = textures;
+    pub fn with_images(mut self, images: MaterialImages) -> Self {
+        self.images = images;
         self
     }
 

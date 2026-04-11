@@ -9,6 +9,5 @@ pub(super) struct SkinPreviewPostProcessShaderModules {
     pub(super) taa_pipeline: wgpu::RenderPipeline,
     pub(super) present_pipeline: wgpu::RenderPipeline,
     pub(super) texture_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) depth_texture_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) texture_sampler: wgpu::Sampler,
 }

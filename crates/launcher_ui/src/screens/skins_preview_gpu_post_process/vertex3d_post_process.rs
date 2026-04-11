@@ -54,7 +54,7 @@ impl Vertex3dPostProcessPlan {
             "ssao",
             Vertex3dPostProcessPipeline::Ssao,
             ACCUMULATION,
-            Some("scene_depth"),
+            Some("scene_depth_linear"),
             POST_PROCESS,
             None,
         );

@@ -15,11 +15,19 @@ pub(super) fn render_single_scene_preview_path(
     preview_aa_mode: SkinPreviewAaMode,
     preview_texel_aa_mode: SkinPreviewTexelAaMode,
 ) {
+    let Some(skin_sample) = skin_sample else {
+        tracing::warn!(
+            target: "vertexlauncher/skins",
+            "Skipping single-scene skin preview frame because no decoded skin sample was available."
+        );
+        return;
+    };
+
     render_preview_scene_with_depth_buffer(
         ui,
         rect,
         triangles,
-        skin_sample.expect("single-scene GPU preview requires a decoded skin sample"),
+        skin_sample,
         cape_sample,
         wgpu_target_format,
         preview_msaa_samples,

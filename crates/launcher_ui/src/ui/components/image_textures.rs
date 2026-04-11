@@ -312,8 +312,16 @@ fn decode_ready_texture(
     let image = image::load_from_memory(bytes)
         .map_err(|err| format!("failed to decode '{}': {err}", key.source_key))?
         .to_rgba8();
-    let size = [image.width() as usize, image.height() as usize];
-    let color_image = ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+    let normalized_image = if image.width() == 0 || image.height() == 0 {
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 0]))
+    } else {
+        image
+    };
+    let size = [
+        normalized_image.width() as usize,
+        normalized_image.height() as usize,
+    ];
+    let color_image = ColorImage::from_rgba_unmultiplied(size, normalized_image.as_raw());
     let approx_bytes = size[0]
         .saturating_mul(size[1])
         .saturating_mul(std::mem::size_of::<egui::Color32>());

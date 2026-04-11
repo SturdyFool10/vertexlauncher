@@ -10,8 +10,9 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::{
+    ImageDesc,
     ShaderHandle,
-    asset::{MeshHandle, RenderAssetLibrary, TextureHandle},
+    asset::{ImageHandle, MeshHandle, RenderAssetLibrary},
     material::MaterialHandle,
     scene::{DrawPacket, Scene},
 };
@@ -53,9 +54,9 @@ impl GpuMesh {
     }
 }
 
-/// Resident GPU texture resources.
+/// Resident GPU image resources.
 #[derive(Debug)]
-pub struct GpuTexture {
+pub struct GpuImage {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
@@ -63,7 +64,7 @@ pub struct GpuTexture {
     pub format: wgpu::TextureFormat,
 }
 
-impl GpuTexture {
+impl GpuImage {
     pub fn new(
         texture: wgpu::Texture,
         view: wgpu::TextureView,
@@ -79,13 +80,38 @@ impl GpuTexture {
             format,
         }
     }
+
+    pub fn from_desc(device: &wgpu::Device, label: &str, desc: &ImageDesc) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: desc.extent(),
+            mip_level_count: desc.mip_levels,
+            sample_count: desc.samples,
+            dimension: desc.dimension,
+            format: desc.format,
+            usage: desc.usage,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some(&format!("{label}-sampler")),
+            ..Default::default()
+        });
+        Self::new(
+            texture,
+            view,
+            sampler,
+            [desc.size[0], desc.size[1]],
+            desc.format,
+        )
+    }
 }
 
 /// Registry of resident GPU resources keyed by public asset handles.
 #[derive(Debug, Default)]
 pub struct GpuResourceRegistry {
     meshes: BTreeMap<MeshHandle, GpuMesh>,
-    textures: BTreeMap<TextureHandle, GpuTexture>,
+    images: BTreeMap<ImageHandle, GpuImage>,
 }
 
 impl GpuResourceRegistry {
@@ -109,16 +135,16 @@ impl GpuResourceRegistry {
         Ok(self.meshes.get(&handle).expect("mesh inserted"))
     }
 
-    pub fn insert_texture(&mut self, handle: TextureHandle, texture: GpuTexture) {
-        self.textures.insert(handle, texture);
+    pub fn insert_image(&mut self, handle: ImageHandle, image: GpuImage) {
+        self.images.insert(handle, image);
     }
 
     pub fn mesh(&self, handle: MeshHandle) -> Option<&GpuMesh> {
         self.meshes.get(&handle)
     }
 
-    pub fn texture(&self, handle: TextureHandle) -> Option<&GpuTexture> {
-        self.textures.get(&handle)
+    pub fn image(&self, handle: ImageHandle) -> Option<&GpuImage> {
+        self.images.get(&handle)
     }
 }
 

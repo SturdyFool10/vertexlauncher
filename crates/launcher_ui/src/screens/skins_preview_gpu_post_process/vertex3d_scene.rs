@@ -31,13 +31,22 @@ impl Vertex3dScenePlan {
                     "scene_color",
                     RenderTargetType::Lighting,
                 ))
+                .writes(FrameGraphUsage::new(
+                    "scene_depth_linear",
+                    RenderTargetType::Lighting,
+                ))
                 .writes(FrameGraphUsage::new("scene_depth", RenderTargetType::Depth));
 
             if scene_msaa_samples > 1 {
-                scene_pass = scene_pass.writes(FrameGraphUsage::new(
-                    "scene_depth_resolve",
-                    RenderTargetType::Depth,
-                ));
+                scene_pass = scene_pass
+                    .writes(FrameGraphUsage::new(
+                        "scene_depth_resolve",
+                        RenderTargetType::Depth,
+                    ))
+                    .writes(FrameGraphUsage::new(
+                        "scene_depth_linear_msaa",
+                        RenderTargetType::Lighting,
+                    ));
             }
 
             graph = graph.with_pass(scene_pass);

@@ -1,4 +1,5 @@
 // @vertex3d.target handle=scene_color type=lighting lifecycle=transient
+// @vertex3d.target handle=scene_depth_linear type=lighting lifecycle=transient
 struct VertexIn
 {
     float2 pos_points : LOC0;
@@ -97,8 +98,14 @@ VertexOut vs_main(VertexIn input)
     return output;
 }
 
+struct FragOut
+{
+    float4 color        : SV_Target0;
+    float4 depth_linear : SV_Target1;
+};
+
 [shader("fragment")]
-float4 fs_main(VertexOut input) : SV_Target
+FragOut fs_main(VertexOut input)
 {
     float4 sampled = (scalars.value.x > 0.5
             ? sample_preview_texel_border_aa(input.uv)
@@ -108,5 +115,8 @@ float4 fs_main(VertexOut input) : SV_Target
     {
         discard;
     }
-    return sampled;
+    FragOut output;
+    output.color        = sampled;
+    output.depth_linear = float4(input.pos.z, 0.0, 0.0, 1.0);
+    return output;
 }

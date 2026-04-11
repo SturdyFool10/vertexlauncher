@@ -192,6 +192,7 @@ pub struct Config {
     skin_preview_motion_blur_sample_count: i32,
     skin_preview_fresh_format_enabled: bool,
     skin_preview_3d_layers_enabled: bool,
+    hdr_when_available: bool,
     frame_limiter_enabled: bool,
     discord_rich_presence_enabled: bool,
     frame_limit_fps: i32,
@@ -382,6 +383,14 @@ impl Config {
 
     pub fn set_skin_preview_3d_layers_enabled(&mut self, enabled: bool) {
         self.skin_preview_3d_layers_enabled = enabled;
+    }
+
+    pub fn hdr_when_available(&self) -> bool {
+        self.hdr_when_available
+    }
+
+    pub fn set_hdr_when_available(&mut self, enabled: bool) {
+        self.hdr_when_available = enabled;
     }
 
     /// Returns whether frame limiter is enabled.
@@ -771,6 +780,7 @@ impl Config {
             skin_preview_motion_blur_sample_count: _,
             skin_preview_fresh_format_enabled,
             skin_preview_3d_layers_enabled,
+            hdr_when_available: _,
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas,
@@ -875,6 +885,7 @@ impl Config {
             skin_preview_motion_blur_sample_count: _,
             skin_preview_fresh_format_enabled: _,
             skin_preview_3d_layers_enabled: _,
+            hdr_when_available: _,
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
@@ -932,6 +943,7 @@ impl Config {
             skin_preview_motion_blur_shutter_frames,
             skin_preview_fresh_format_enabled: _,
             skin_preview_3d_layers_enabled: _,
+            hdr_when_available: _,
             ui_font_size,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
@@ -998,6 +1010,7 @@ impl Config {
             skin_preview_msaa_samples,
             skin_preview_fresh_format_enabled: _,
             skin_preview_3d_layers_enabled: _,
+            hdr_when_available: _,
             ui_font_size: _,
             ui_font_weight,
             frame_limiter_enabled: _,
@@ -1066,6 +1079,7 @@ impl Config {
             skin_preview_motion_blur_sample_count: _,
             skin_preview_fresh_format_enabled: _,
             skin_preview_3d_layers_enabled: _,
+            hdr_when_available: _,
             ui_font_size: _,
             ui_font_weight: _,
             frame_limiter_enabled: _,
@@ -1144,6 +1158,7 @@ impl Default for Config {
             skin_preview_motion_blur_sample_count: 5,
             skin_preview_fresh_format_enabled: false,
             skin_preview_3d_layers_enabled: false,
+            hdr_when_available: false,
             frame_limiter_enabled: false,
             discord_rich_presence_enabled: true,
             frame_limit_fps: 120,

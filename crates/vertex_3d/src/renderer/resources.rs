@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 use super::{AttachmentLifecycle, RenderTargetHandle, RendererConfig};
 use crate::shader::{BindingTypePlan, BuiltPipelineLayout, PipelineLayoutPlan, ReflectionSnapshot};
 
-/// One allocated render attachment and its default view.
+/// One allocated image used as a graph attachment and its default view.
 #[derive(Debug)]
-pub struct AttachmentTexture {
+pub struct AttachmentImage {
     pub handle: RenderTargetHandle,
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
@@ -20,7 +20,7 @@ pub struct AttachmentTexture {
 /// Runtime texture set derived from the renderer config.
 #[derive(Debug, Default)]
 pub struct AttachmentPool {
-    attachments: BTreeMap<RenderTargetHandle, AttachmentTexture>,
+    attachments: BTreeMap<RenderTargetHandle, AttachmentImage>,
 }
 
 impl AttachmentPool {
@@ -58,7 +58,7 @@ impl AttachmentPool {
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             self.attachments.insert(
                 handle.clone(),
-                AttachmentTexture {
+                AttachmentImage {
                     handle: handle.clone(),
                     texture,
                     view,
@@ -71,11 +71,11 @@ impl AttachmentPool {
         }
     }
 
-    pub fn get(&self, handle: &RenderTargetHandle) -> Option<&AttachmentTexture> {
+    pub fn get(&self, handle: &RenderTargetHandle) -> Option<&AttachmentImage> {
         self.attachments.get(handle)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &AttachmentTexture> {
+    pub fn iter(&self) -> impl Iterator<Item = &AttachmentImage> {
         self.attachments.values()
     }
 }

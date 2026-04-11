@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     Material, MaterialHandle, MaterialParameters, MaterialValue, PbrMaterial, PipelineLayoutPlan,
-    ReflectedResourceRole, ShaderHandle, TextureHandle, UnlitMaterial, Vertex,
+    ReflectedResourceRole, ShaderHandle, UnlitMaterial, Vertex,
     asset::{RenderAssetLibrary, ShaderAsset},
 };
 
@@ -66,9 +66,9 @@ pub struct PreparedMaterial {
 }
 
 struct DefaultMaterialResources {
-    white: super::GpuTexture,
-    black: super::GpuTexture,
-    normal: super::GpuTexture,
+    white: super::GpuImage,
+    black: super::GpuImage,
+    normal: super::GpuImage,
 }
 
 /// End-to-end scene renderer for queued submissions and reflected Slang shaders.
@@ -427,15 +427,15 @@ fn insert_material_resources<'a>(
     defaults: &'a DefaultMaterialResources,
     uniform_buffer: &'a wgpu::Buffer,
 ) {
-    let base_color = resolve_texture(material.textures.base_color, gpu_resources, &defaults.white);
-    let metallic_roughness = resolve_texture(
-        material.textures.metallic_roughness,
+    let base_color = resolve_image(material.images.base_color, gpu_resources, &defaults.white);
+    let metallic_roughness = resolve_image(
+        material.images.metallic_roughness,
         gpu_resources,
         &defaults.white,
     );
-    let normal = resolve_texture(material.textures.normal, gpu_resources, &defaults.normal);
-    let emissive = resolve_texture(material.textures.emissive, gpu_resources, &defaults.black);
-    let occlusion = resolve_texture(material.textures.occlusion, gpu_resources, &defaults.white);
+    let normal = resolve_image(material.images.normal, gpu_resources, &defaults.normal);
+    let emissive = resolve_image(material.images.emissive, gpu_resources, &defaults.black);
+    let occlusion = resolve_image(material.images.occlusion, gpu_resources, &defaults.white);
 
     for reflected in &reflection.resources {
         let Some(role) = reflected
@@ -471,13 +471,13 @@ fn insert_material_resources<'a>(
     }
 }
 
-fn resolve_texture<'a>(
-    handle: Option<TextureHandle>,
+fn resolve_image<'a>(
+    handle: Option<crate::ImageHandle>,
     gpu_resources: &'a GpuResourceRegistry,
-    fallback: &'a super::GpuTexture,
-) -> &'a super::GpuTexture {
+    fallback: &'a super::GpuImage,
+) -> &'a super::GpuImage {
     handle
-        .and_then(|handle| gpu_resources.texture(handle))
+        .and_then(|handle| gpu_resources.image(handle))
         .unwrap_or(fallback)
 }
 
@@ -609,14 +609,14 @@ fn custom_vec4(values: &BTreeMap<String, MaterialValue>, key: &str, default: [f3
 impl DefaultMaterialResources {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         Self {
-            white: create_solid_texture(
+            white: create_solid_image(
                 device,
                 queue,
                 "vertex3d-default-white",
                 [255, 255, 255, 255],
             ),
-            black: create_solid_texture(device, queue, "vertex3d-default-black", [0, 0, 0, 255]),
-            normal: create_solid_texture(
+            black: create_solid_image(device, queue, "vertex3d-default-black", [0, 0, 0, 255]),
+            normal: create_solid_image(
                 device,
                 queue,
                 "vertex3d-default-normal",
@@ -626,12 +626,12 @@ impl DefaultMaterialResources {
     }
 }
 
-fn create_solid_texture(
+fn create_solid_image(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     label: &str,
     rgba: [u8; 4],
-) -> super::GpuTexture {
+) -> super::GpuImage {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -673,7 +673,7 @@ fn create_solid_texture(
         mipmap_filter: wgpu::MipmapFilterMode::Linear,
         ..Default::default()
     });
-    super::GpuTexture::new(
+    super::GpuImage::new(
         texture,
         view,
         sampler,

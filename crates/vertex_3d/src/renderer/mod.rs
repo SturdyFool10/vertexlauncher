@@ -26,17 +26,19 @@ pub use deferred::{
     DeferredPassRuntime, DeferredRenderPipelineTemplate, DeferredRenderer, DeferredRendererError,
 };
 pub use frame_graph::{
-    FrameGraph, FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPlan, FrameGraphUsage,
+    FrameGraph, FrameGraphAttachmentPlan, FrameGraphPass, FrameGraphPassKind, FrameGraphPlan,
+    FrameGraphResourceAccess, FrameGraphResourcePlan, FrameGraphUsage, GraphResourceHandle,
+    GraphResourceKind, GraphResourceUsage,
 };
 pub use msaa_resolve::MsaaResolvePool;
 pub use resources::{
-    AttachmentPool, AttachmentTexture, BindGroupBuildError, NamedBindGroup, ReflectionBindGroupSet,
+    AttachmentImage, AttachmentPool, BindGroupBuildError, NamedBindGroup, ReflectionBindGroupSet,
     ShaderBindingResource, ShaderResourceTable,
 };
 pub use scene_renderer::{
     ExternalShaderBindGroup, ScenePipelineConfig, SceneRenderer, SceneRendererError,
 };
 pub use submission::{
-    DrawBatch, FrameUploadArena, GpuInstanceData, GpuMesh, GpuResourceRegistry, GpuTexture,
+    DrawBatch, FrameUploadArena, GpuImage, GpuInstanceData, GpuMesh, GpuResourceRegistry,
     QueuedSceneSubmission, SceneSubmissionQueue, SubmissionError, UploadAllocation,
 };

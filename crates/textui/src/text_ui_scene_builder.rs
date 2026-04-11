@@ -1,5 +1,12 @@
 use super::*;
 
+fn target_format_is_hdr(format: wgpu::TextureFormat) -> bool {
+    matches!(
+        format,
+        wgpu::TextureFormat::Rgba16Float | wgpu::TextureFormat::Rgb10a2Unorm
+    )
+}
+
 impl TextUi {
     pub(crate) fn get_cached_prepared_layout(
         &mut self,
@@ -566,6 +573,8 @@ impl TextUi {
         Some(TextWgpuSceneCallback {
             target_format,
             atlas_sampling: graphics_config.atlas_sampling,
+            linear_pipeline: self.graphics_config.linear_pipeline,
+            output_is_hdr: target_format_is_hdr(target_format),
             batches: Arc::from(batches.into_boxed_slice()),
             prepared: Arc::new(Mutex::new(TextWgpuPreparedScene::default())),
         })

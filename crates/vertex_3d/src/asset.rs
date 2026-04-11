@@ -3,6 +3,7 @@
 use std::{collections::BTreeMap, marker::PhantomData};
 
 use crate::{
+    image::ImageAsset,
     mesh::Mesh,
     renderer::{
         DeferredRenderPipelineTemplate, DeferredRenderer, DeferredRendererError, FrameGraph,
@@ -78,41 +79,6 @@ impl<T> std::hash::Hash for AssetHandle<T> {
 pub struct MeshAsset {
     pub label: String,
     pub mesh: Mesh,
-}
-
-/// Texture metadata and source path used by higher-level content systems.
-#[derive(Debug, Clone)]
-pub struct TextureAsset {
-    pub label: String,
-    pub source_path: Option<String>,
-    pub size: Option<[u32; 2]>,
-    pub format: Option<wgpu::TextureFormat>,
-}
-
-impl TextureAsset {
-    pub fn new(label: impl Into<String>) -> Self {
-        Self {
-            label: label.into(),
-            source_path: None,
-            size: None,
-            format: None,
-        }
-    }
-
-    pub fn with_source_path(mut self, source_path: impl Into<String>) -> Self {
-        self.source_path = Some(source_path.into());
-        self
-    }
-
-    pub fn with_size(mut self, width: u32, height: u32) -> Self {
-        self.size = Some([width.max(1), height.max(1)]);
-        self
-    }
-
-    pub fn with_format(mut self, format: wgpu::TextureFormat) -> Self {
-        self.format = Some(format);
-        self
-    }
 }
 
 /// A compiled shader asset backed by reflection and frame-graph metadata.
@@ -262,15 +228,15 @@ pub enum ShaderAssetBuildError {
 
 /// Typed asset handles used throughout the public scene/material API.
 pub type MeshHandle = AssetHandle<MeshAsset>;
-pub type TextureHandle = AssetHandle<TextureAsset>;
+pub type ImageHandle = AssetHandle<ImageAsset>;
 pub type ShaderHandle = AssetHandle<ShaderAsset>;
 
-/// In-memory asset registry for meshes, textures, shaders, and materials.
+/// In-memory asset registry for meshes, images, shaders, and materials.
 #[derive(Default)]
 pub struct RenderAssetLibrary {
     next_id: u64,
     meshes: BTreeMap<u64, MeshAsset>,
-    textures: BTreeMap<u64, TextureAsset>,
+    images: BTreeMap<u64, ImageAsset>,
     shaders: BTreeMap<u64, ShaderAsset>,
     materials: BTreeMap<u64, crate::material::Material>,
 }
@@ -295,9 +261,9 @@ impl RenderAssetLibrary {
         handle
     }
 
-    pub fn insert_texture(&mut self, texture: TextureAsset) -> TextureHandle {
+    pub fn insert_image(&mut self, image: ImageAsset) -> ImageHandle {
         let handle = AssetHandle::new(self.allocate_id());
-        self.textures.insert(handle.id(), texture);
+        self.images.insert(handle.id(), image);
         handle
     }
 
@@ -329,8 +295,8 @@ impl RenderAssetLibrary {
         self.meshes.get(&handle.id())
     }
 
-    pub fn texture(&self, handle: TextureHandle) -> Option<&TextureAsset> {
-        self.textures.get(&handle.id())
+    pub fn image(&self, handle: ImageHandle) -> Option<&ImageAsset> {
+        self.images.get(&handle.id())
     }
 
     pub fn shader(&self, handle: ShaderHandle) -> Option<&ShaderAsset> {
@@ -373,11 +339,16 @@ mod tests {
     fn asset_library_allocates_stable_typed_handles() {
         let mut library = RenderAssetLibrary::new();
         let mesh = library.insert_mesh("cube", Mesh::new());
-        let texture = library.insert_texture(TextureAsset::new("albedo"));
+        let image = library.insert_image(ImageAsset::new(
+            "albedo",
+            1,
+            1,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ));
 
-        assert_ne!(mesh.id(), texture.id());
+        assert_ne!(mesh.id(), image.id());
         assert_eq!(library.mesh(mesh).unwrap().label, "cube");
-        assert_eq!(library.texture(texture).unwrap().label, "albedo");
+        assert_eq!(library.image(image).unwrap().label, "albedo");
     }
 
     #[test]

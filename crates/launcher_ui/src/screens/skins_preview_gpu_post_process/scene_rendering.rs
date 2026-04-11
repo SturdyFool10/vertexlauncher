@@ -19,9 +19,10 @@ impl SkinPreviewPostProcessWgpuResources {
                         .get(batch_index)
                         .unwrap_or_else(|| panic!("missing prepared scene batch: {batch_index}"));
                     let color_attachment = self.scene_color_attachment(clear_depth);
+                    let depth_linear_attachment = self.scene_depth_linear_attachment(clear_depth);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("skins-preview-scene-pass"),
-                        color_attachments: &[Some(color_attachment)],
+                        color_attachments: &[Some(color_attachment), Some(depth_linear_attachment)],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: self.scene_depth_view(),
                             depth_ops: Some(wgpu::Operations {
@@ -104,6 +105,48 @@ impl SkinPreviewPostProcessWgpuResources {
                 ops: wgpu::Operations {
                     load: if clear {
                         wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
+                    store: wgpu::StoreOp::Store,
+                },
+            }
+        }
+    }
+
+    pub(super) fn scene_depth_linear_attachment(
+        &self,
+        clear: bool,
+    ) -> wgpu::RenderPassColorAttachment<'_> {
+        // Clear to (1.0, 0, 0, 1) — maximum depth (far plane).
+        let clear_color = wgpu::Color {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+        if let Some(view) = self.render_targets.scene_depth_linear_msaa_view.as_ref() {
+            wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: Some(&self.render_targets.scene_depth_linear_view),
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: if clear {
+                        wgpu::LoadOp::Clear(clear_color)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
+                    store: wgpu::StoreOp::Store,
+                },
+            }
+        } else {
+            wgpu::RenderPassColorAttachment {
+                view: &self.render_targets.scene_depth_linear_view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: if clear {
+                        wgpu::LoadOp::Clear(clear_color)
                     } else {
                         wgpu::LoadOp::Load
                     },
