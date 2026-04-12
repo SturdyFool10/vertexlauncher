@@ -561,6 +561,8 @@ impl TextUi {
                 continue;
             }
             batches.push(TextWgpuSceneBatchSource {
+                atlas_generation: self.glyph_atlas.generation(),
+                page_index,
                 texture,
                 instances: Arc::from(instances.into_boxed_slice()),
             });

@@ -60,7 +60,6 @@ impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
                     resources.sampler.clone(),
                 )
             };
-
             let total_instance_bytes = self
                 .batches
                 .iter()
@@ -68,27 +67,23 @@ impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
                     (batch.instances.len() * std::mem::size_of::<TextWgpuInstance>()) as u64
                 })
                 .sum::<u64>();
-            let shared_instance_buffer = callback_resources
-                .entry::<TextWgpuReusableInstanceBuffer>()
-                .or_insert_with(TextWgpuReusableInstanceBuffer::default);
-            if total_instance_bytes > shared_instance_buffer.capacity_bytes {
-                let new_capacity = total_instance_bytes.max(1).next_power_of_two().max(4096);
-                shared_instance_buffer.buffer =
-                    Some(device.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("textui_instanced_instance_buffer"),
-                        size: new_capacity,
-                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }));
-                shared_instance_buffer.capacity_bytes = new_capacity;
+            let texture_binding_cache = callback_resources
+                .entry::<TextWgpuTextureBindingCache>()
+                .or_insert_with(TextWgpuTextureBindingCache::default);
+            if let Some(current_generation) =
+                self.batches.first().map(|batch| batch.atlas_generation)
+            {
+                texture_binding_cache
+                    .entries
+                    .retain(|(generation, _), _| *generation == current_generation);
             }
-            let Some(shared_buffer) = shared_instance_buffer.buffer.as_ref().cloned() else {
-                if let Ok(mut prepared) = self.prepared.lock() {
-                    prepared.batches.clear();
-                }
-                return Vec::new();
-            };
 
+            let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("textui_instanced_instance_buffer"),
+                size: total_instance_bytes.max(1),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
             let mut prepared_batches = Vec::with_capacity(self.batches.len());
             let mut instance_buffer_offset = 0_u64;
             for batch in self.batches.iter() {
@@ -96,27 +91,36 @@ impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
                     continue;
                 }
                 let instance_bytes = bytemuck::cast_slice(batch.instances.as_ref());
-                queue.write_buffer(&shared_buffer, instance_buffer_offset, instance_bytes);
-                let view = batch
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("textui_instanced_texture_bg"),
-                    layout: &texture_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&sampler),
-                        },
-                    ],
-                });
+                queue.write_buffer(&instance_buffer, instance_buffer_offset, instance_bytes);
+                let cache_key = (batch.atlas_generation, batch.page_index);
+                let bind_group = texture_binding_cache
+                    .entries
+                    .entry(cache_key)
+                    .or_insert_with(|| {
+                        let view = batch
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+                        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("textui_instanced_texture_bg"),
+                            layout: &texture_bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(&sampler),
+                                },
+                            ],
+                        });
+                        TextWgpuCachedTextureBinding { bind_group }
+                    })
+                    .bind_group
+                    .clone();
                 prepared_batches.push(TextWgpuPreparedBatch {
                     bind_group,
-                    instance_buffer: shared_buffer.clone(),
+                    instance_buffer: instance_buffer.clone(),
                     instance_buffer_offset,
                     instance_count: batch.instances.len() as u32,
                 });
@@ -124,6 +128,7 @@ impl egui_wgpu::CallbackTrait for TextWgpuSceneCallback {
             }
 
             if let Ok(mut prepared) = self.prepared.lock() {
+                prepared.instance_buffer = Some(instance_buffer);
                 prepared.batches = prepared_batches;
             }
 

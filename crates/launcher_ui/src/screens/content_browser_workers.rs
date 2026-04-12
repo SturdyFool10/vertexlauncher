@@ -104,7 +104,7 @@ pub(super) fn request_version_catalog(state: &mut ContentBrowserState) {
         let result: Result<Vec<MinecraftVersionEntry>, String> = match tokio::time::timeout(
             VERSION_CATALOG_FETCH_TIMEOUT,
             tokio_runtime::spawn_blocking(move || {
-                fetch_version_catalog(false)
+                fetch_version_catalog(VersionCatalogFilter::default())
                     .map(|catalog| catalog.game_versions)
                     .map_err(|err| err.to_string())
             }),

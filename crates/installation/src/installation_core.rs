@@ -21,6 +21,13 @@ impl MinecraftVersionType {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionCatalogFilter {
+    pub include_snapshots_and_betas: bool,
+    pub include_alpha: bool,
+    pub include_experimental: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MinecraftVersionEntry {
     pub id: String,
@@ -290,7 +297,8 @@ pub enum InstallationError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct CachedVersionCatalog {
     pub(crate) fetched_at_unix_secs: u64,
-    pub(crate) include_snapshots_and_betas: bool,
+    #[serde(default)]
+    pub(crate) filter: VersionCatalogFilter,
     pub(crate) catalog: VersionCatalog,
 }
 
@@ -301,19 +309,18 @@ pub(crate) struct CachedLoaderVersions {
     pub(crate) versions_by_game_version: BTreeMap<String, Vec<String>>,
 }
 
-pub fn fetch_version_catalog(
-    include_snapshots_and_betas: bool,
-) -> Result<VersionCatalog, InstallationError> {
-    fetch_version_catalog_with_refresh(include_snapshots_and_betas, false)
+pub fn fetch_version_catalog(filter: VersionCatalogFilter) -> Result<VersionCatalog, InstallationError> {
+    fetch_version_catalog_with_refresh(filter, false)
 }
 
 pub fn fetch_version_catalog_with_refresh(
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     force_refresh: bool,
 ) -> Result<VersionCatalog, InstallationError> {
-    let cached = read_cached_version_catalog(include_snapshots_and_betas).ok();
+    let cached = read_cached_version_catalog(filter).ok();
     if !force_refresh
         && let Some(cached) = cached.as_ref()
+        && cached.filter == filter
         && !is_cache_expired(cached.fetched_at_unix_secs)
         && catalog_has_loader_version_data(&cached.catalog)
     {
@@ -322,13 +329,15 @@ pub fn fetch_version_catalog_with_refresh(
         return Ok(catalog);
     }
 
-    match fetch_version_catalog_uncached(include_snapshots_and_betas) {
+    match fetch_version_catalog_uncached(filter) {
         Ok(catalog) => {
-            let _ = write_cached_version_catalog(include_snapshots_and_betas, &catalog);
+            let _ = write_cached_version_catalog(filter, &catalog);
             Ok(catalog)
         }
         Err(err) => {
-            if let Some(cached) = cached {
+            if let Some(cached) = cached
+                && cached.filter == filter
+            {
                 let mut catalog = cached.catalog;
                 normalize_version_catalog_ordering(&mut catalog);
                 Ok(catalog)
@@ -445,7 +454,7 @@ pub fn fetch_loader_versions_for_game(
 }
 
 fn fetch_version_catalog_uncached(
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
 ) -> Result<VersionCatalog, InstallationError> {
     let (manifest, fabric, forge, neoforge, quilt) = thread::scope(|scope| {
         let manifest_task =
@@ -486,9 +495,9 @@ fn fetch_version_catalog_uncached(
             let include = match version_type {
                 MinecraftVersionType::Release => true,
                 MinecraftVersionType::Snapshot
-                | MinecraftVersionType::OldBeta
-                | MinecraftVersionType::OldAlpha => include_snapshots_and_betas,
-                MinecraftVersionType::Unknown => include_snapshots_and_betas,
+                | MinecraftVersionType::OldBeta => filter.include_snapshots_and_betas,
+                MinecraftVersionType::OldAlpha => filter.include_alpha,
+                MinecraftVersionType::Unknown => filter.include_experimental,
             };
             if include {
                 Some((

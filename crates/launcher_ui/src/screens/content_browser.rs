@@ -4,7 +4,8 @@ use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
 use installation::{
     DownloadBatchTask, DownloadPolicy, InstallProgressCallback, InstallStage,
-    MinecraftVersionEntry, download_batch_with_progress, fetch_version_catalog,
+    MinecraftVersionEntry, VersionCatalogFilter, download_batch_with_progress,
+    fetch_version_catalog,
 };
 use instances::{InstanceStore, instance_root_path};
 use managed_content::{

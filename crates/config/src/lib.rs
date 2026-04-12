@@ -199,6 +199,8 @@ pub struct Config {
     ui_font_size: f32,
     ui_font_weight: i32,
     include_snapshots_and_betas: bool,
+    include_alpha_versions: bool,
+    include_experimental_versions: bool,
     force_java_21_minimum: bool,
     #[serde(
         serialize_with = "serialize_toml_safe_u128",
@@ -493,6 +495,16 @@ impl Config {
         self.include_snapshots_and_betas
     }
 
+    /// Returns whether alpha versions are included in version pickers.
+    pub fn include_alpha_versions(&self) -> bool {
+        self.include_alpha_versions
+    }
+
+    /// Returns whether experimental versions are included in version pickers.
+    pub fn include_experimental_versions(&self) -> bool {
+        self.include_experimental_versions
+    }
+
     /// Returns whether Java requirements below 21 should be upgraded to 21.
     pub fn force_java_21_minimum(&self) -> bool {
         self.force_java_21_minimum
@@ -784,6 +796,8 @@ impl Config {
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas,
+            include_alpha_versions,
+            include_experimental_versions,
             force_java_21_minimum,
             frame_limiter_enabled,
             discord_rich_presence_enabled,
@@ -834,6 +848,11 @@ impl Config {
         visit(
             ToggleSettingId::SnapshotsAndBetasEnabled.spec(),
             include_snapshots_and_betas,
+        );
+        visit(ToggleSettingId::AlphaVersionsEnabled.spec(), include_alpha_versions);
+        visit(
+            ToggleSettingId::ExperimentalVersionsEnabled.spec(),
+            include_experimental_versions,
         );
         visit(
             ToggleSettingId::ForceJava21Minimum.spec(),
@@ -889,6 +908,8 @@ impl Config {
             ui_font_size: _,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
+            include_alpha_versions: _,
+            include_experimental_versions: _,
             force_java_21_minimum: _,
             frame_limiter_enabled: _,
             discord_rich_presence_enabled: _,
@@ -947,6 +968,8 @@ impl Config {
             ui_font_size,
             ui_font_weight: _,
             include_snapshots_and_betas: _,
+            include_alpha_versions: _,
+            include_experimental_versions: _,
             force_java_21_minimum: _,
             frame_limiter_enabled: _,
             discord_rich_presence_enabled: _,
@@ -1018,6 +1041,8 @@ impl Config {
             frame_limit_fps,
             skin_preview_motion_blur_sample_count,
             include_snapshots_and_betas: _,
+            include_alpha_versions: _,
+            include_experimental_versions: _,
             force_java_21_minimum: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
@@ -1086,6 +1111,8 @@ impl Config {
             discord_rich_presence_enabled: _,
             frame_limit_fps: _,
             include_snapshots_and_betas: _,
+            include_alpha_versions: _,
+            include_experimental_versions: _,
             force_java_21_minimum: _,
             default_instance_max_memory_mib: _,
             default_instance_cli_args: _,
@@ -1165,6 +1192,8 @@ impl Default for Config {
             ui_font_size: 18.0,
             ui_font_weight: 400,
             include_snapshots_and_betas: false,
+            include_alpha_versions: false,
+            include_experimental_versions: false,
             force_java_21_minimum: true,
             default_instance_max_memory_mib: 4096,
             default_instance_cli_args: String::new(),

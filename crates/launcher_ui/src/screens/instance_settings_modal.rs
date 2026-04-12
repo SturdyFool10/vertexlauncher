@@ -135,7 +135,15 @@ pub(super) fn render_instance_settings_modal(
                         )
                         .clicked()
                     {
-                        sync_version_catalog(state, config.include_snapshots_and_betas(), true);
+                        sync_version_catalog(
+                            state,
+                            installation::VersionCatalogFilter {
+                                include_snapshots_and_betas: config.include_snapshots_and_betas(),
+                                include_alpha: config.include_alpha_versions(),
+                                include_experimental: config.include_experimental_versions(),
+                            },
+                            true,
+                        );
                         state.modloader_versions_cache.clear();
                         state.modloader_versions_status = None;
                         state.modloader_versions_status_key = None;

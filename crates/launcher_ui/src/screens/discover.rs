@@ -7,7 +7,7 @@ use std::{
 
 use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use egui::Ui;
-use installation::{MinecraftVersionEntry, fetch_version_catalog};
+use installation::{MinecraftVersionEntry, VersionCatalogFilter, fetch_version_catalog};
 use modrinth::Client as ModrinthClient;
 use textui::TextUi;
 use textui_egui::{apply_gamepad_scroll_to_registered_id, make_gamepad_scrollable, prelude::*};
@@ -1322,7 +1322,7 @@ fn request_version_catalog(state: &mut DiscoverState) {
         let result: Result<Vec<MinecraftVersionEntry>, String> = match tokio::time::timeout(
             VERSION_CATALOG_FETCH_TIMEOUT,
             tokio_runtime::spawn_blocking(move || {
-                fetch_version_catalog(false)
+                fetch_version_catalog(VersionCatalogFilter::default())
                     .map(|catalog| catalog.game_versions)
                     .map_err(|err| err.to_string())
             }),

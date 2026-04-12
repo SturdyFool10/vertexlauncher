@@ -537,6 +537,10 @@ impl GlyphAtlas {
         self.free_all_pages();
     }
 
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub(super) fn poll_ready(&mut self, ctx: &Context, current_frame: u64) {
         let Some(rx) = self.rx.as_ref() else {
             return;

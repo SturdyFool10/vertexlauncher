@@ -31,6 +31,10 @@ mod text_gpu_power_preference;
 mod text_gpu_quad;
 #[path = "advanced_text/text_gpu_scene.rs"]
 mod text_gpu_scene;
+#[path = "advanced_text/text_gpu_scene_draw_options.rs"]
+mod text_gpu_scene_draw_options;
+#[path = "advanced_text/text_gpu_scene_page_batch.rs"]
+mod text_gpu_scene_page_batch;
 #[path = "advanced_text/text_graphics_api.rs"]
 mod text_graphics_api;
 #[path = "advanced_text/text_graphics_config.rs"]
@@ -105,6 +109,8 @@ pub use self::text_glyph_raster_mode::TextGlyphRasterMode;
 pub use self::text_gpu_power_preference::TextGpuPowerPreference;
 pub use self::text_gpu_quad::TextGpuQuad;
 pub use self::text_gpu_scene::TextGpuScene;
+pub use self::text_gpu_scene_draw_options::TextGpuSceneDrawOptions;
+pub use self::text_gpu_scene_page_batch::TextGpuScenePageBatch;
 pub use self::text_graphics_api::TextGraphicsApi;
 pub use self::text_graphics_config::TextGraphicsConfig;
 pub use self::text_hinting_mode::TextHintingMode;

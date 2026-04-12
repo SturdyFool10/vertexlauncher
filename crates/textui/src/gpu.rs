@@ -28,7 +28,7 @@ pub(super) use self::text_wgpu_instance::TextWgpuInstance;
 use self::text_wgpu_pipeline_resources::TextWgpuPipelineResources;
 use self::text_wgpu_prepared_batch::TextWgpuPreparedBatch;
 pub(super) use self::text_wgpu_prepared_scene::{
-    TextWgpuPreparedScene, TextWgpuReusableInstanceBuffer,
+    TextWgpuCachedTextureBinding, TextWgpuPreparedScene, TextWgpuTextureBindingCache,
 };
 pub(super) use self::text_wgpu_scene_batch_source::TextWgpuSceneBatchSource;
 pub(super) use self::text_wgpu_scene_callback::TextWgpuSceneCallback;
@@ -301,6 +301,15 @@ pub(super) fn gpu_scene_approx_bytes(scene: &TextGpuScene) -> usize {
         .map(|p| p.rgba8.len())
         .sum::<usize>()
         + scene.quads.len() * std::mem::size_of::<TextGpuQuad>()
+        + 64
+}
+
+pub(super) fn gpu_scene_page_batches_approx_bytes(batches: &[TextGpuScenePageBatch]) -> usize {
+    batches
+        .iter()
+        .map(|batch| batch.quads.len() * std::mem::size_of::<TextGpuQuad>())
+        .sum::<usize>()
+        + batches.len() * std::mem::size_of::<TextGpuScenePageBatch>()
         + 64
 }
 

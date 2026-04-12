@@ -225,14 +225,33 @@ fn render_settings_contents(
         "Minecraft & Java",
         "Version catalog behavior and shared runtime configuration.",
         |ui, text_ui| {
+            render_settings_subgroup(
+                ui,
+                text_ui,
+                "Minecraft Version Groups",
+                "Controls which non-default Minecraft version categories appear in version pickers.",
+            );
             render_selected_toggles(
                 ui,
                 text_ui,
                 config,
                 &[
                     config::ToggleSettingId::SnapshotsAndBetasEnabled,
-                    config::ToggleSettingId::ForceJava21Minimum,
+                    config::ToggleSettingId::AlphaVersionsEnabled,
+                    config::ToggleSettingId::ExperimentalVersionsEnabled,
                 ],
+            );
+            render_settings_subgroup(
+                ui,
+                text_ui,
+                "Java Runtime",
+                "Shared Java behavior for launches that use managed runtime selection.",
+            );
+            render_selected_toggles(
+                ui,
+                text_ui,
+                config,
+                &[config::ToggleSettingId::ForceJava21Minimum],
             );
             render_java_runtime_settings(ui, text_ui, config);
             render_curseforge_settings(ui, text_ui, config);
@@ -375,6 +394,24 @@ fn render_settings_section(
             ui.add_space(style::SPACE_MD);
             render_body(ui, text_ui);
         });
+}
+
+fn render_settings_subgroup(ui: &mut Ui, text_ui: &mut TextUi, heading: &str, description: &str) {
+    let mut heading_style = style::body(ui);
+    heading_style.weight = 700;
+    heading_style.wrap = false;
+
+    let mut description_style = style::muted(ui);
+    description_style.wrap = true;
+
+    let _ = text_ui.label(ui, ("settings_subgroup_heading", heading), heading, &heading_style);
+    let _ = text_ui.label(
+        ui,
+        ("settings_subgroup_description", heading),
+        description,
+        &description_style,
+    );
+    ui.add_space(style::SPACE_MD);
 }
 
 fn render_theme_setting(

@@ -30,6 +30,7 @@ use config::Config;
 use content_resolver::{InstalledContentHashCache, InstalledContentKind, ResolvedInstalledContent};
 use installation::{
     InstallProgress, LoaderSupportIndex, LoaderVersionIndex, MinecraftVersionEntry, VersionCatalog,
+    VersionCatalogFilter,
 };
 use vtmpack::{VtmpackExportOptions, VtmpackExportProgress, VtmpackExportStats};
 
@@ -159,13 +160,13 @@ pub(super) struct InstanceScreenState {
     pub(super) modloader_versions_status_key: Option<String>,
     pub(super) modloader_versions_status: Option<String>,
     pub(super) incompatible_modloader_version_warning_key: Option<String>,
-    pub(super) version_catalog_include_snapshots: Option<bool>,
+    pub(super) version_catalog_filter: Option<VersionCatalogFilter>,
     pub(super) version_catalog_error: Option<String>,
     pub(super) version_catalog_in_flight: bool,
     pub(super) version_catalog_results_tx:
-        Option<mpsc::Sender<(bool, Result<VersionCatalog, String>)>>,
+        Option<mpsc::Sender<(VersionCatalogFilter, Result<VersionCatalog, String>)>>,
     pub(super) version_catalog_results_rx:
-        Option<Arc<Mutex<mpsc::Receiver<(bool, Result<VersionCatalog, String>)>>>>,
+        Option<Arc<Mutex<mpsc::Receiver<(VersionCatalogFilter, Result<VersionCatalog, String>)>>>>,
     pub(super) runtime_prepare_in_flight: bool,
     pub(super) runtime_prepare_results_tx:
         Option<mpsc::Sender<(String, String, Result<RuntimePrepareOutcome, String>)>>,
@@ -340,7 +341,7 @@ impl InstanceScreenState {
             modloader_versions_status_key: None,
             modloader_versions_status: None,
             incompatible_modloader_version_warning_key: None,
-            version_catalog_include_snapshots: None,
+            version_catalog_filter: None,
             version_catalog_error: None,
             version_catalog_in_flight: false,
             version_catalog_results_tx: None,
@@ -488,7 +489,7 @@ impl InstanceScreenState {
         self.modloader_versions_status_key = None;
         self.modloader_versions_status = None;
         self.incompatible_modloader_version_warning_key = None;
-        self.version_catalog_include_snapshots = None;
+        self.version_catalog_filter = None;
         self.version_catalog_error = None;
         self.version_catalog_in_flight = false;
         self.version_catalog_results_tx = None;

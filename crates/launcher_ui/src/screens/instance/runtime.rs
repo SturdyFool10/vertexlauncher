@@ -638,11 +638,11 @@ pub(super) fn poll_background_tasks(
 
 pub(super) fn sync_version_catalog(
     state: &mut InstanceScreenState,
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     force_refresh: bool,
 ) {
     let should_refresh = force_refresh
-        || state.version_catalog_include_snapshots != Some(include_snapshots_and_betas)
+        || state.version_catalog_filter != Some(filter)
         || (state.available_game_versions.is_empty() && state.version_catalog_error.is_none());
     if !should_refresh || state.version_catalog_in_flight {
         return;
@@ -655,10 +655,10 @@ pub(super) fn sync_version_catalog(
 
     state.version_catalog_in_flight = true;
     state.version_catalog_error = None;
-    state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
+    state.version_catalog_filter = Some(filter);
     tracing::info!(
         target: "vertexlauncher/instance_runtime",
-        include_snapshots_and_betas,
+        ?filter,
         force_refresh,
         "Starting instance version catalog fetch."
     );
@@ -667,8 +667,7 @@ pub(super) fn sync_version_catalog(
         let result: Result<VersionCatalog, String> = match tokio::time::timeout(
             VERSION_CATALOG_FETCH_TIMEOUT,
             tokio_runtime::spawn_blocking(move || {
-                fetch_version_catalog_with_refresh(include_snapshots_and_betas, force_refresh)
-                    .map_err(|err| err.to_string())
+                fetch_version_catalog_with_refresh(filter, force_refresh).map_err(|err| err.to_string())
             }),
         )
         .await
@@ -684,23 +683,23 @@ pub(super) fn sync_version_catalog(
         match &result {
             Ok(catalog) => tracing::info!(
                 target: "vertexlauncher/instance_runtime",
-                include_snapshots_and_betas,
+                ?filter,
                 force_refresh,
                 game_versions = catalog.game_versions.len(),
                 "Instance version catalog fetch completed."
             ),
             Err(error) => tracing::warn!(
                 target: "vertexlauncher/instance_runtime",
-                include_snapshots_and_betas,
+                ?filter,
                 force_refresh,
                 error = %error,
                 "Instance version catalog fetch failed."
             ),
         }
-        if let Err(err) = tx.send((include_snapshots_and_betas, result)) {
+        if let Err(err) = tx.send((filter, result)) {
             tracing::error!(
                 target: "vertexlauncher/instance_runtime",
-                include_snapshots_and_betas,
+                ?filter,
                 force_refresh,
                 error = %err,
                 "Failed to deliver instance version catalog result."
@@ -713,21 +712,21 @@ pub(super) fn ensure_version_catalog_channel(state: &mut InstanceScreenState) {
     if state.version_catalog_results_tx.is_some() && state.version_catalog_results_rx.is_some() {
         return;
     }
-    let (tx, rx) = mpsc::channel::<(bool, Result<VersionCatalog, String>)>();
+    let (tx, rx) = mpsc::channel::<(VersionCatalogFilter, Result<VersionCatalog, String>)>();
     state.version_catalog_results_tx = Some(tx);
     state.version_catalog_results_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
 pub(super) fn apply_version_catalog(
     state: &mut InstanceScreenState,
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     catalog: VersionCatalog,
 ) {
     state.available_game_versions = catalog.game_versions;
     state.loader_support = catalog.loader_support;
     state.loader_versions = catalog.loader_versions;
     state.version_catalog_error = None;
-    state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
+    state.version_catalog_filter = Some(filter);
 
     if state.available_game_versions.is_empty() {
         state.selected_game_version_index = 0;
@@ -752,14 +751,14 @@ pub(super) fn apply_version_catalog(
 
 pub(super) fn apply_version_catalog_error(
     state: &mut InstanceScreenState,
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     error: &str,
 ) {
     state.version_catalog_error = Some(format!("Failed to fetch version catalog: {error}"));
     state.available_game_versions.clear();
     state.loader_support = LoaderSupportIndex::default();
     state.loader_versions = LoaderVersionIndex::default();
-    state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
+    state.version_catalog_filter = Some(filter);
     state.selected_game_version_index = 0;
     state.game_version_input.clear();
 }
@@ -801,11 +800,11 @@ pub(super) fn poll_version_catalog(state: &mut InstanceScreenState) {
             Some("Version catalog worker stopped unexpectedly.".to_owned());
     }
 
-    for (include_snapshots_and_betas, result) in updates {
+    for (filter, result) in updates {
         state.version_catalog_in_flight = false;
         match result {
-            Ok(catalog) => apply_version_catalog(state, include_snapshots_and_betas, catalog),
-            Err(err) => apply_version_catalog_error(state, include_snapshots_and_betas, &err),
+            Ok(catalog) => apply_version_catalog(state, filter, catalog),
+            Err(err) => apply_version_catalog_error(state, filter, &err),
         }
     }
 }

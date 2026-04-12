@@ -22,6 +22,8 @@ pub struct TextUi {
     pub(crate) frame_events: Vec<TextInputEvent>,
     pub(crate) markdown_cache: FxHashMap<Id, (u64, u64, Arc<[TextMarkdownBlock]>)>,
     pub(crate) gpu_scene_cache: ThreadSafeLru<u64, Arc<TextGpuScene>>,
+    pub(crate) gpu_scene_page_batch_cache: ThreadSafeLru<u64, Arc<[TextGpuScenePageBatch]>>,
+    pub(crate) gpu_scene_draw_batch_cache: ThreadSafeLru<u64, Arc<[TextGpuScenePageBatch]>>,
     pub(crate) gpu_scene_glyph_cache: ThreadSafeLru<GlyphRasterKey, Arc<PreparedAtlasGlyph>>,
 }
 
@@ -77,6 +79,8 @@ impl TextUi {
             frame_events: Vec::new(),
             markdown_cache: FxHashMap::default(),
             gpu_scene_cache: ThreadSafeLru::new(GPU_SCENE_CACHE_MAX_BYTES),
+            gpu_scene_page_batch_cache: ThreadSafeLru::new(GPU_SCENE_PAGE_BATCH_CACHE_MAX_BYTES),
+            gpu_scene_draw_batch_cache: ThreadSafeLru::new(GPU_SCENE_DRAW_BATCH_CACHE_MAX_BYTES),
             gpu_scene_glyph_cache: ThreadSafeLru::new(GPU_SCENE_GLYPH_CACHE_MAX_BYTES),
         }
     }

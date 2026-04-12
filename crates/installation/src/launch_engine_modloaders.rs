@@ -915,34 +915,51 @@ pub(crate) fn find_java_executable_under(
     Ok(None)
 }
 
-pub(crate) fn cache_file_path(include_snapshots_and_betas: bool) -> PathBuf {
-    let file_name = if include_snapshots_and_betas {
-        CACHE_VERSION_CATALOG_ALL_FILE
-    } else {
-        CACHE_VERSION_CATALOG_RELEASES_FILE
-    };
-    cache_root_dir().join(file_name)
+pub(crate) fn cache_file_path(filter: VersionCatalogFilter) -> PathBuf {
+    if filter == VersionCatalogFilter::default() {
+        return cache_root_dir().join(CACHE_VERSION_CATALOG_RELEASES_FILE);
+    }
+
+    if filter.include_snapshots_and_betas
+        && filter.include_alpha
+        && !filter.include_experimental
+    {
+        return cache_root_dir().join(CACHE_VERSION_CATALOG_ALL_FILE);
+    }
+
+    let mut suffix_parts = Vec::new();
+    if filter.include_snapshots_and_betas {
+        suffix_parts.push("snapshots");
+    }
+    if filter.include_alpha {
+        suffix_parts.push("alpha");
+    }
+    if filter.include_experimental {
+        suffix_parts.push("experimental");
+    }
+    let suffix = suffix_parts.join("_");
+    cache_root_dir().join(format!("version_catalog_{suffix}.json"))
 }
 
 pub(crate) fn read_cached_version_catalog(
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
 ) -> Result<CachedVersionCatalog, InstallationError> {
-    let raw = fs_read_to_string(cache_file_path(include_snapshots_and_betas))?;
+    let raw = fs_read_to_string(cache_file_path(filter))?;
     Ok(serde_json::from_str(&raw)?)
 }
 
 pub(crate) fn write_cached_version_catalog(
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     catalog: &VersionCatalog,
 ) -> Result<(), InstallationError> {
-    let path = cache_file_path(include_snapshots_and_betas);
+    let path = cache_file_path(filter);
     if let Some(parent) = path.parent() {
         fs_create_dir_all(parent)?;
     }
 
     let payload = CachedVersionCatalog {
         fetched_at_unix_secs: now_unix_secs(),
-        include_snapshots_and_betas,
+        filter,
         catalog: catalog.clone(),
     };
     let file = fs_file_create(path)?;

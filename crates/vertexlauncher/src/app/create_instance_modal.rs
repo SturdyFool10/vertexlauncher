@@ -6,6 +6,7 @@ use std::time::Duration;
 use eframe::egui;
 use installation::{
     LoaderSupportIndex, LoaderVersionIndex, MinecraftVersionEntry, VersionCatalog,
+    VersionCatalogFilter,
     fetch_version_catalog_with_refresh,
 };
 use launcher_runtime as tokio_runtime;
@@ -46,11 +47,13 @@ pub struct CreateInstanceState {
     selected_game_version_index: usize,
     loader_support: LoaderSupportIndex,
     loader_versions: LoaderVersionIndex,
-    version_catalog_include_snapshots: Option<bool>,
+    version_catalog_filter: Option<VersionCatalogFilter>,
     version_catalog_error: Option<String>,
     version_catalog_in_flight: bool,
-    version_catalog_results_tx: Option<mpsc::Sender<(bool, Result<VersionCatalog, String>)>>,
-    version_catalog_results_rx: Option<mpsc::Receiver<(bool, Result<VersionCatalog, String>)>>,
+    version_catalog_results_tx:
+        Option<mpsc::Sender<(VersionCatalogFilter, Result<VersionCatalog, String>)>>,
+    version_catalog_results_rx:
+        Option<mpsc::Receiver<(VersionCatalogFilter, Result<VersionCatalog, String>)>>,
     modloader_versions_cache: BTreeMap<String, Vec<String>>,
     modloader_versions_in_flight: HashSet<String>,
     modloader_versions_results_tx: Option<mpsc::Sender<(String, Result<Vec<String>, String>)>>,
@@ -80,7 +83,7 @@ impl Default for CreateInstanceState {
             selected_game_version_index: 0,
             loader_support: LoaderSupportIndex::default(),
             loader_versions: LoaderVersionIndex::default(),
-            version_catalog_include_snapshots: None,
+            version_catalog_filter: None,
             version_catalog_error: None,
             version_catalog_in_flight: false,
             version_catalog_results_tx: None,
@@ -135,11 +138,11 @@ pub fn render(
     ctx: &egui::Context,
     text_ui: &mut TextUi,
     state: &mut CreateInstanceState,
-    include_snapshots_and_betas: bool,
+    version_catalog_filter: VersionCatalogFilter,
 ) -> ModalAction {
     let mut action = ModalAction::None;
     poll_version_catalog(state);
-    sync_version_catalog(state, include_snapshots_and_betas, false);
+    sync_version_catalog(state, version_catalog_filter, false);
     poll_modloader_versions(state);
     if state.version_catalog_in_flight || !state.modloader_versions_in_flight.is_empty() {
         ctx.request_repaint_after(Duration::from_millis(100));
@@ -221,7 +224,7 @@ pub fn render(
                         .inner
                         .clicked();
                     if refresh_versions_clicked {
-                        sync_version_catalog(state, include_snapshots_and_betas, true);
+                        sync_version_catalog(state, version_catalog_filter, true);
                         state.modloader_versions_cache.clear();
                         state.modloader_versions_status = None;
                         state.modloader_versions_status_key = None;
@@ -634,11 +637,11 @@ pub fn render(
 
 fn sync_version_catalog(
     state: &mut CreateInstanceState,
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     force_refresh: bool,
 ) {
     let should_refresh = force_refresh
-        || state.version_catalog_include_snapshots != Some(include_snapshots_and_betas)
+        || state.version_catalog_filter != Some(filter)
         || (state.available_game_versions.is_empty() && state.version_catalog_error.is_none());
     if !should_refresh || state.version_catalog_in_flight {
         return;
@@ -650,11 +653,11 @@ fn sync_version_catalog(
     };
 
     state.version_catalog_in_flight = true;
-    state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
+    state.version_catalog_filter = Some(filter);
     state.version_catalog_error = None;
     tracing::info!(
         target: "vertexlauncher/create_instance",
-        include_snapshots_and_betas,
+        ?filter,
         force_refresh,
         "Starting version catalog fetch for create-instance modal."
     );
@@ -663,7 +666,7 @@ fn sync_version_catalog(
         let result = match tokio::time::timeout(
             VERSION_CATALOG_FETCH_TIMEOUT,
             tokio_runtime::spawn_blocking(move || {
-                fetch_version_catalog_with_refresh(include_snapshots_and_betas, force_refresh)
+                fetch_version_catalog_with_refresh(filter, force_refresh)
                     .map_err(|err| err.to_string())
             }),
         )
@@ -680,23 +683,23 @@ fn sync_version_catalog(
         match &result {
             Ok(catalog) => tracing::info!(
                 target: "vertexlauncher/create_instance",
-                include_snapshots_and_betas,
+                ?filter,
                 force_refresh,
                 game_versions = catalog.game_versions.len(),
                 "Create-instance version catalog fetch completed."
             ),
             Err(error) => tracing::warn!(
                 target: "vertexlauncher/create_instance",
-                include_snapshots_and_betas,
+                ?filter,
                 force_refresh,
                 error = %error,
                 "Create-instance version catalog fetch failed."
             ),
         }
-        if let Err(err) = tx.send((include_snapshots_and_betas, result)) {
+        if let Err(err) = tx.send((filter, result)) {
             tracing::error!(
                 target: "vertexlauncher/create_instance",
-                include_snapshots_and_betas,
+                ?filter,
                 force_refresh,
                 error = %err,
                 "Failed to deliver create-instance version catalog result."
@@ -709,20 +712,20 @@ fn ensure_version_catalog_channel(state: &mut CreateInstanceState) {
     if state.version_catalog_results_tx.is_some() && state.version_catalog_results_rx.is_some() {
         return;
     }
-    let (tx, rx) = mpsc::channel::<(bool, Result<VersionCatalog, String>)>();
+    let (tx, rx) = mpsc::channel::<(VersionCatalogFilter, Result<VersionCatalog, String>)>();
     state.version_catalog_results_tx = Some(tx);
     state.version_catalog_results_rx = Some(rx);
 }
 
 fn apply_version_catalog(
     state: &mut CreateInstanceState,
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     catalog: VersionCatalog,
 ) {
     state.available_game_versions = catalog.game_versions;
     state.loader_support = catalog.loader_support;
     state.loader_versions = catalog.loader_versions;
-    state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
+    state.version_catalog_filter = Some(filter);
     state.version_catalog_error = None;
 
     if state.available_game_versions.is_empty() {
@@ -747,12 +750,12 @@ fn apply_version_catalog(
 
 fn apply_version_catalog_error(
     state: &mut CreateInstanceState,
-    include_snapshots_and_betas: bool,
+    filter: VersionCatalogFilter,
     error: &str,
 ) {
     tracing::warn!(
         target: "vertexlauncher/create_instance",
-        include_snapshots_and_betas,
+        ?filter,
         error = %error,
         "Applying version catalog error to create-instance modal."
     );
@@ -760,7 +763,7 @@ fn apply_version_catalog_error(
     state.available_game_versions.clear();
     state.loader_support = LoaderSupportIndex::default();
     state.loader_versions = LoaderVersionIndex::default();
-    state.version_catalog_include_snapshots = Some(include_snapshots_and_betas);
+    state.version_catalog_filter = Some(filter);
     state.selected_game_version_index = 0;
     state.game_version.clear();
 }
@@ -776,7 +779,7 @@ fn poll_version_catalog(state: &mut CreateInstanceState) {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     tracing::error!(
                         target: "vertexlauncher/create_instance",
-                        include_snapshots_and_betas = ?state.version_catalog_include_snapshots,
+                        version_catalog_filter = ?state.version_catalog_filter,
                         "Create-instance version catalog worker channel disconnected unexpectedly."
                     );
                     should_reset_channel = true;
@@ -794,11 +797,11 @@ fn poll_version_catalog(state: &mut CreateInstanceState) {
             Some("Version catalog worker stopped unexpectedly.".to_owned());
     }
 
-    for (include_snapshots_and_betas, result) in updates {
+    for (filter, result) in updates {
         state.version_catalog_in_flight = false;
         match result {
-            Ok(catalog) => apply_version_catalog(state, include_snapshots_and_betas, catalog),
-            Err(err) => apply_version_catalog_error(state, include_snapshots_and_betas, &err),
+            Ok(catalog) => apply_version_catalog(state, filter, catalog),
+            Err(err) => apply_version_catalog_error(state, filter, &err),
         }
     }
 }
@@ -1216,7 +1219,7 @@ fn build_draft(state: &CreateInstanceState) -> Result<CreateInstanceDraft, Strin
 }
 
 fn support_catalog_ready(state: &CreateInstanceState) -> bool {
-    state.version_catalog_include_snapshots.is_some() && state.version_catalog_error.is_none()
+    state.version_catalog_filter.is_some() && state.version_catalog_error.is_none()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

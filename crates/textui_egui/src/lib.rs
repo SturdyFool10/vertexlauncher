@@ -120,15 +120,6 @@ fn snap_rect_to_pixel_grid(rect: Rect, pixels_per_point: f32) -> Rect {
     )
 }
 
-fn multiply_color32(a: Color32, b: Color32) -> Color32 {
-    Color32::from_rgba_premultiplied(
-        ((u16::from(a.r()) * u16::from(b.r())) / 255) as u8,
-        ((u16::from(a.g()) * u16::from(b.g())) / 255) as u8,
-        ((u16::from(a.b()) * u16::from(b.b())) / 255) as u8,
-        ((u16::from(a.a()) * u16::from(b.a())) / 255) as u8,
-    )
-}
-
 fn texture_options_for_sampling(sampling: TextAtlasSampling) -> TextureOptions {
     match sampling {
         TextAtlasSampling::Linear => TextureOptions::LINEAR,
@@ -527,39 +518,38 @@ fn paint_gpu_scene_impl(
     transform: Option<&PaintTransform>,
 ) {
     let texture_ids = texture_ids_for_gpu_scene(text_ui, painter.ctx(), scene);
-    let mut meshes: HashMap<TextureId, egui::epaint::Mesh> = HashMap::new();
-
-    for quad in &scene.quads {
-        let Some(texture_id) = texture_ids.get(&quad.atlas_page_index).copied() else {
+    let draw_options = if let Some(t) = transform {
+        textui::TextGpuSceneDrawOptions {
+            offset: textui::TextPoint::new(t.offset[0], t.offset[1]),
+            scale: textui::TextVector::new(t.scale[0], t.scale[1]),
+            tint: tint.into(),
+        }
+    } else {
+        textui::TextGpuSceneDrawOptions {
+            offset: textui::TextPoint::ZERO,
+            scale: textui::TextVector::splat(1.0),
+            tint: tint.into(),
+        }
+    };
+    for batch in text_ui
+        .prepare_gpu_scene_draw_batches(scene, draw_options)
+        .iter()
+    {
+        let Some(texture_id) = texture_ids.get(&batch.page_index).copied() else {
             continue;
         };
-        let positions = if let Some(t) = transform {
-            quad.positions.map(|point| {
-                egui::pos2(
-                    t.offset[0] + point[0] * t.scale[0],
-                    t.offset[1] + point[1] * t.scale[1],
-                )
-            })
-        } else {
-            quad.positions.map(|point| egui::pos2(point[0], point[1]))
-        };
-        let uvs = quad.uvs.map(|point| egui::pos2(point[0], point[1]));
-        let final_tint = multiply_color32(
-            Color32::from_rgba_premultiplied(
+        let mut mesh = egui::epaint::Mesh::with_texture(texture_id);
+        for quad in batch.quads.iter() {
+            let positions = quad.positions.map(|point| egui::pos2(point[0], point[1]));
+            let uvs = quad.uvs.map(|point| egui::pos2(point[0], point[1]));
+            let final_tint = Color32::from_rgba_premultiplied(
                 quad.tint_rgba[0],
                 quad.tint_rgba[1],
                 quad.tint_rgba[2],
                 quad.tint_rgba[3],
-            ),
-            tint,
-        );
-        let mesh = meshes
-            .entry(texture_id)
-            .or_insert_with(|| egui::epaint::Mesh::with_texture(texture_id));
-        add_gpu_quad(mesh, positions, uvs, final_tint);
-    }
-
-    for (_, mesh) in meshes {
+            );
+            add_gpu_quad(&mut mesh, positions, uvs, final_tint);
+        }
         if !mesh.is_empty() {
             painter.add(egui::Shape::mesh(mesh));
         }

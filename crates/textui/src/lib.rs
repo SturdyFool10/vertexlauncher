@@ -109,8 +109,9 @@ use crate::gpu::{
     CpuSceneAtlasPage, ResolvedTextGraphicsConfig, ResolvedTextRendererBackend, TextWgpuInstance,
     TextWgpuPreparedScene, TextWgpuSceneBatchSource, TextWgpuSceneCallback,
     allocate_cpu_scene_page_slot, color_image_to_page_data, default_gpu_scene_page_side,
-    gpu_scene_approx_bytes, map_scene_quads_to_rect, paint_text_quads_fallback,
-    quad_positions_from_min_size, rect_from_points, rotated_quad_positions, uv_quad_points,
+    gpu_scene_approx_bytes, gpu_scene_page_batches_approx_bytes, map_scene_quads_to_rect,
+    paint_text_quads_fallback, quad_positions_from_min_size, rect_from_points,
+    rotated_quad_positions, uv_quad_points,
 };
 use crate::input_runtime::apply_gamepad_scroll_if_focused;
 use crate::path_layout::{
@@ -130,12 +131,13 @@ pub use advanced_text::{
     RichTextSpan, RichTextStyle, TextAtlasPageData, TextAtlasPageSnapshot, TextAtlasQuad,
     TextAtlasSampling, TextColor, TextFeatureSetting, TextFrameInfo, TextFrameOutput,
     TextFundamentals, TextGlyphRasterMode, TextGpuPowerPreference, TextGpuQuad, TextGpuScene,
-    TextGraphicsApi, TextGraphicsConfig, TextHintingMode, TextInputEvent, TextKerning, TextKey,
-    TextLabelOptions, TextMarkdownBlock, TextMarkdownHeadingLevel, TextModifiers,
-    TextOpticalSizingMode, TextPath, TextPathError, TextPathGlyph, TextPathLayout, TextPathOptions,
-    TextPoint, TextPointerButton, TextRasterizationConfig, TextRect, TextRenderScene,
-    TextRendererBackend, TextRenderingPolicy, TextStemDarkeningMode, TextVariationSetting,
-    TextVector, VectorGlyphShape, VectorPathCommand, VectorTextShape,
+    TextGpuSceneDrawOptions, TextGpuScenePageBatch, TextGraphicsApi, TextGraphicsConfig,
+    TextHintingMode, TextInputEvent, TextKerning, TextKey, TextLabelOptions, TextMarkdownBlock,
+    TextMarkdownHeadingLevel, TextModifiers, TextOpticalSizingMode, TextPath, TextPathError,
+    TextPathGlyph, TextPathLayout, TextPathOptions, TextPoint, TextPointerButton,
+    TextRasterizationConfig, TextRect, TextRenderScene, TextRendererBackend, TextRenderingPolicy,
+    TextStemDarkeningMode, TextVariationSetting, TextVector, VectorGlyphShape, VectorPathCommand,
+    VectorTextShape,
 };
 pub use clipboard::{apply_smart_quotes, sanitize_for_clipboard};
 pub use conversions::{
@@ -150,6 +152,8 @@ pub const DEFAULT_OPEN_TYPE_FEATURE_TAGS: &str = "kern, liga, calt, onum, pnum";
 const PREPARED_TEXT_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 const ASYNC_RASTER_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
 const GPU_SCENE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+const GPU_SCENE_PAGE_BATCH_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
+const GPU_SCENE_DRAW_BATCH_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const GPU_SCENE_GLYPH_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
 const GLYPH_ATLAS_MAX_BYTES: usize = 64 * 1024 * 1024;
 const GLYPH_ATLAS_STALE_FRAMES: u64 = 900;
@@ -663,6 +667,148 @@ impl TextUi {
 
     pub fn gpu_scene_for_scene(&self, scene: &TextRenderScene) -> TextGpuScene {
         scene.to_gpu_scene(self.atlas_page_data_for_scene(scene))
+    }
+
+    pub fn gpu_scene_page_batches(&self, scene: &TextGpuScene) -> Arc<[TextGpuScenePageBatch]> {
+        let fingerprint = if scene.fingerprint != 0 {
+            scene.fingerprint
+        } else {
+            let mut hasher = new_fingerprint_hasher();
+            scene.bounds_min[0].to_bits().hash(&mut hasher);
+            scene.bounds_min[1].to_bits().hash(&mut hasher);
+            scene.bounds_max[0].to_bits().hash(&mut hasher);
+            scene.bounds_max[1].to_bits().hash(&mut hasher);
+            scene.size_points[0].to_bits().hash(&mut hasher);
+            scene.size_points[1].to_bits().hash(&mut hasher);
+            for quad in &scene.quads {
+                quad.atlas_page_index.hash(&mut hasher);
+                for point in quad.positions {
+                    point[0].to_bits().hash(&mut hasher);
+                    point[1].to_bits().hash(&mut hasher);
+                }
+                for point in quad.uvs {
+                    point[0].to_bits().hash(&mut hasher);
+                    point[1].to_bits().hash(&mut hasher);
+                }
+                quad.tint_rgba.hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+
+        if let Some(batches) = self.gpu_scene_page_batch_cache.write(|state| {
+            state
+                .touch(&fingerprint)
+                .map(|entry| Arc::clone(&entry.value))
+        }) {
+            return batches;
+        }
+
+        let mut grouped = FxHashMap::<usize, Vec<TextGpuQuad>>::default();
+        for quad in &scene.quads {
+            grouped
+                .entry(quad.atlas_page_index)
+                .or_default()
+                .push(quad.clone());
+        }
+        let mut page_indices = grouped.keys().copied().collect::<Vec<_>>();
+        page_indices.sort_unstable();
+        let batches_vec = page_indices
+            .into_iter()
+            .map(|page_index| TextGpuScenePageBatch {
+                page_index,
+                quads: Arc::from(
+                    grouped
+                        .remove(&page_index)
+                        .unwrap_or_default()
+                        .into_boxed_slice(),
+                ),
+            })
+            .collect::<Vec<_>>();
+        let approx_bytes = gpu_scene_page_batches_approx_bytes(&batches_vec);
+        let batches = Arc::from(batches_vec.into_boxed_slice());
+        self.gpu_scene_page_batch_cache.write(|state| {
+            let _ = state.insert(fingerprint, Arc::clone(&batches), approx_bytes);
+        });
+        batches
+    }
+
+    pub fn prepare_gpu_scene_draw_batches(
+        &self,
+        scene: &TextGpuScene,
+        options: TextGpuSceneDrawOptions,
+    ) -> Arc<[TextGpuScenePageBatch]> {
+        let scene_fingerprint = if scene.fingerprint != 0 {
+            scene.fingerprint
+        } else {
+            let mut hasher = new_fingerprint_hasher();
+            scene.bounds_min[0].to_bits().hash(&mut hasher);
+            scene.bounds_min[1].to_bits().hash(&mut hasher);
+            scene.bounds_max[0].to_bits().hash(&mut hasher);
+            scene.bounds_max[1].to_bits().hash(&mut hasher);
+            scene.size_points[0].to_bits().hash(&mut hasher);
+            scene.size_points[1].to_bits().hash(&mut hasher);
+            hasher.finish()
+        };
+        let mut hasher = new_fingerprint_hasher();
+        scene_fingerprint.hash(&mut hasher);
+        options.offset.x.to_bits().hash(&mut hasher);
+        options.offset.y.to_bits().hash(&mut hasher);
+        options.scale.x.to_bits().hash(&mut hasher);
+        options.scale.y.to_bits().hash(&mut hasher);
+        options.tint.to_array().hash(&mut hasher);
+        let draw_fingerprint = hasher.finish();
+
+        if let Some(batches) = self.gpu_scene_draw_batch_cache.write(|state| {
+            state
+                .touch(&draw_fingerprint)
+                .map(|entry| Arc::clone(&entry.value))
+        }) {
+            return batches;
+        }
+
+        let source_batches = self.gpu_scene_page_batches(scene);
+        let transformed_batches = source_batches
+            .iter()
+            .map(|batch| {
+                let quads = batch
+                    .quads
+                    .iter()
+                    .map(|quad| {
+                        let positions = quad.positions.map(|point| {
+                            [
+                                options.offset.x + point[0] * options.scale.x,
+                                options.offset.y + point[1] * options.scale.y,
+                            ]
+                        });
+                        let tint = multiply_color32(
+                            Color32::from_rgba_premultiplied(
+                                quad.tint_rgba[0],
+                                quad.tint_rgba[1],
+                                quad.tint_rgba[2],
+                                quad.tint_rgba[3],
+                            ),
+                            options.tint.into(),
+                        );
+                        TextGpuQuad {
+                            atlas_page_index: quad.atlas_page_index,
+                            positions,
+                            uvs: quad.uvs,
+                            tint_rgba: tint.to_array(),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                TextGpuScenePageBatch {
+                    page_index: batch.page_index,
+                    quads: Arc::from(quads.into_boxed_slice()),
+                }
+            })
+            .collect::<Vec<_>>();
+        let approx_bytes = gpu_scene_page_batches_approx_bytes(&transformed_batches);
+        let batches = Arc::from(transformed_batches.into_boxed_slice());
+        self.gpu_scene_draw_batch_cache.write(|state| {
+            let _ = state.insert(draw_fingerprint, Arc::clone(&batches), approx_bytes);
+        });
+        batches
     }
 
     fn paint_scene_in_rect(
@@ -1254,6 +1400,8 @@ impl TextUi {
         self.glyph_atlas.clear();
         self.markdown_cache.clear();
         let _ = self.gpu_scene_cache.write(|state| state.clear());
+        let _ = self.gpu_scene_page_batch_cache.write(|state| state.clear());
+        let _ = self.gpu_scene_draw_batch_cache.write(|state| state.clear());
         let _ = self.gpu_scene_glyph_cache.write(|state| state.clear());
         if clear_input_states {
             self.input_states.clear();

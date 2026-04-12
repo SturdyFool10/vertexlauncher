@@ -19,6 +19,8 @@ pub enum ToggleSettingId {
     SkinPreviewFreshFormatEnabled,
     SkinPreview3dLayersEnabled,
     SnapshotsAndBetasEnabled,
+    AlphaVersionsEnabled,
+    ExperimentalVersionsEnabled,
     ForceJava21Minimum,
     FrameLimiterEnabled,
     DiscordRichPresenceEnabled,
@@ -88,7 +90,21 @@ impl ToggleSettingId {
                 id: ToggleSettingId::SnapshotsAndBetasEnabled,
                 label: "Include Snapshots and Betas",
                 info_tooltip: Some(
-                    "Allows selecting snapshot and beta/alpha Minecraft versions in instance version dropdowns.",
+                    "Allows selecting snapshot and beta Minecraft versions in instance version dropdowns.",
+                ),
+            },
+            ToggleSettingId::AlphaVersionsEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::AlphaVersionsEnabled,
+                label: "Include Alpha Versions",
+                info_tooltip: Some(
+                    "Allows selecting old alpha Minecraft versions in instance version dropdowns.",
+                ),
+            },
+            ToggleSettingId::ExperimentalVersionsEnabled => ToggleSettingSpec {
+                id: ToggleSettingId::ExperimentalVersionsEnabled,
+                label: "Include Experimental Versions",
+                info_tooltip: Some(
+                    "Allows selecting experimental or otherwise non-standard manifest entries when available.",
                 ),
             },
             ToggleSettingId::ForceJava21Minimum => ToggleSettingSpec {

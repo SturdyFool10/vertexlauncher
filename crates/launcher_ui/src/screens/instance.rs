@@ -12,6 +12,7 @@ use flate2::read::GzDecoder;
 use installation::{
     DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, LaunchRequest,
     LoaderSupportIndex, LoaderVersionIndex, MinecraftVersionEntry, VersionCatalog,
+    VersionCatalogFilter,
     display_user_path, ensure_game_files, ensure_openjdk_runtime, fetch_loader_versions_for_game,
     fetch_version_catalog_with_refresh, is_instance_running_for_account, launch_instance,
     normalize_path_key, running_instance_for_account, stop_running_instance_for_account,
@@ -374,7 +375,15 @@ pub fn render(
     poll_instance_screenshot_scan_results(&mut state);
     poll_instance_log_scan_results(&mut state);
     poll_instance_log_load_results(&mut state);
-    sync_version_catalog(&mut state, config.include_snapshots_and_betas(), false);
+    sync_version_catalog(
+        &mut state,
+        installation::VersionCatalogFilter {
+            include_snapshots_and_betas: config.include_snapshots_and_betas(),
+            include_alpha: config.include_alpha_versions(),
+            include_experimental: config.include_experimental_versions(),
+        },
+        false,
+    );
     if state.version_catalog_in_flight
         || !state.modloader_versions_in_flight.is_empty()
         || state.runtime_prepare_in_flight
@@ -1106,5 +1115,5 @@ fn ensure_selected_modloader_is_supported(state: &mut InstanceScreenState, game_
 }
 
 fn support_catalog_ready(state: &InstanceScreenState) -> bool {
-    state.version_catalog_include_snapshots.is_some() && state.version_catalog_error.is_none()
+    state.version_catalog_filter.is_some() && state.version_catalog_error.is_none()
 }

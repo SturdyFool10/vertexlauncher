@@ -802,7 +802,11 @@ impl VertexApp {
                 ctx,
                 &mut self.text_ui,
                 &mut self.create_instance_state,
-                self.config.include_snapshots_and_betas(),
+                installation::VersionCatalogFilter {
+                    include_snapshots_and_betas: self.config.include_snapshots_and_betas(),
+                    include_alpha: self.config.include_alpha_versions(),
+                    include_experimental: self.config.include_experimental_versions(),
+                },
             ) {
                 create_instance_modal::ModalAction::None => {}
                 create_instance_modal::ModalAction::Cancel => {
