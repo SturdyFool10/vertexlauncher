@@ -315,6 +315,7 @@ pub(super) fn gpu_scene_page_batches_approx_bytes(batches: &[TextGpuScenePageBat
 
 pub(super) fn allocate_cpu_scene_page_slot(
     pages: &mut Vec<CpuSceneAtlasPage>,
+    pool: &mut Vec<CpuSceneAtlasPage>,
     target_page_side_px: usize,
     allocation_size: etagere::Size,
 ) -> Option<(usize, Allocation)> {
@@ -327,13 +328,64 @@ pub(super) fn allocate_cpu_scene_page_slot(
     let side = target_page_side_px
         .max(allocation_size.width.max(1) as usize)
         .max(allocation_size.height.max(1) as usize);
-    let mut allocator = AtlasAllocator::new(size2(side as i32, side as i32));
-    let allocation = allocator.allocate(allocation_size)?;
-    pages.push(CpuSceneAtlasPage {
-        allocator,
-        image: ColorImage::filled([side, side], Color32::TRANSPARENT),
-    });
+    let mut page = if let Some(mut pooled) = pool.pop() {
+        pooled.reset_for_size(side);
+        pooled
+    } else {
+        CpuSceneAtlasPage::new_for_size(side)
+    };
+    let allocation = page.allocator.allocate(allocation_size)?;
+    pages.push(page);
     Some((pages.len() - 1, allocation))
+}
+
+/// Blit a ColorImage into a page's raw RGBA8 buffer.
+/// The Arc must be exclusively owned by the caller (Arc::get_mut must succeed).
+pub(super) fn blit_to_page(
+    dest_rgba8: &mut Arc<[u8]>,
+    dest_size: [usize; 2],
+    src: &ColorImage,
+    dest_x: usize,
+    dest_y: usize,
+) {
+    let copy_width = src.size[0].min(dest_size[0].saturating_sub(dest_x));
+    if copy_width == 0 {
+        return;
+    }
+    let Some(dest) = Arc::get_mut(dest_rgba8) else {
+        debug_assert!(false, "blit_to_page: Arc is not exclusively owned during build");
+        return;
+    };
+    for y in 0..src.size[1] {
+        let target_y = dest_y + y;
+        if target_y >= dest_size[1] {
+            break;
+        }
+        // Safety: Color32 is repr(C) [u8; 4] — valid cast to bytes.
+        let src_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                src.pixels.as_ptr().add(y * src.size[0]) as *const u8,
+                copy_width * 4,
+            )
+        };
+        let dest_start = (target_y * dest_size[0] + dest_x) * 4;
+        dest[dest_start..dest_start + copy_width * 4].copy_from_slice(src_bytes);
+    }
+}
+
+/// Convert a CpuSceneAtlasPage to TextAtlasPageData using a pre-computed content hash.
+/// Clones the Arc (O(1), no pixel copy) instead of copying raw bytes.
+pub(super) fn cpu_page_to_page_data(
+    page: &CpuSceneAtlasPage,
+    page_index: usize,
+    content_hash: u64,
+) -> TextAtlasPageData {
+    TextAtlasPageData {
+        page_index,
+        size_px: page.size,
+        content_hash,
+        rgba8: Arc::clone(&page.rgba8),
+    }
 }
 
 pub(super) fn color_image_to_page_data(page_index: usize, image: &ColorImage) -> TextAtlasPageData {

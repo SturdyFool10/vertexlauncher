@@ -229,7 +229,9 @@ impl TextUi {
         let target_page_side_px =
             default_gpu_scene_page_side(self.resolved_graphics_config(self.max_texture_side_px));
         let graphics_config = self.resolved_graphics_config(self.max_texture_side_px);
+        let mut page_pool = std::mem::take(&mut self.cpu_page_pool);
         let mut pages = Vec::<CpuSceneAtlasPage>::new();
+        let mut page_hashers = Vec::<FxHasher>::new();
         let mut quads = Vec::with_capacity(layout.glyphs.len());
         let mut bounds: Option<Rect> = None;
 
@@ -246,24 +248,42 @@ impl TextUi {
                 atlas_glyph.upload_image.size[0] as i32,
                 atlas_glyph.upload_image.size[1] as i32,
             );
-            let Some((page_index, allocation)) =
-                allocate_cpu_scene_page_slot(&mut pages, target_page_side_px, allocation_size)
-            else {
+            let Some((page_index, allocation)) = allocate_cpu_scene_page_slot(
+                &mut pages,
+                &mut page_pool,
+                target_page_side_px,
+                allocation_size,
+            ) else {
                 continue;
             };
+
+            // Initialize hasher for any newly created pages.
+            while page_hashers.len() < pages.len() {
+                let new_idx = page_hashers.len();
+                let mut h = FxHasher::default();
+                new_idx.hash(&mut h);
+                pages[new_idx].size.hash(&mut h);
+                page_hashers.push(h);
+            }
 
             let pos = [
                 allocation.rectangle.min.x.max(0) as usize,
                 allocation.rectangle.min.y.max(0) as usize,
             ];
-            blit_color_image(
-                &mut pages[page_index].image,
+            // Hash glyph identity + position — O(glyphs) instead of O(pixels) at finalisation.
+            glyph.cache_key.hash(&mut page_hashers[page_index]);
+            pos[0].hash(&mut page_hashers[page_index]);
+            pos[1].hash(&mut page_hashers[page_index]);
+
+            let page_size = pages[page_index].size;
+            blit_to_page(
+                &mut pages[page_index].rgba8,
+                page_size,
                 &atlas_glyph.upload_image,
                 pos[0],
                 pos[1],
             );
 
-            let page_size = pages[page_index].image.size;
             let uv = Rect::from_min_max(
                 Pos2::new(
                     (pos[0] + graphics_config.atlas_padding_px) as f32 / page_size[0] as f32,
@@ -318,12 +338,23 @@ impl TextUi {
         }
 
         let bounds = bounds.unwrap_or(Rect::NOTHING);
+        let atlas_pages = pages
+            .iter()
+            .enumerate()
+            .map(|(i, page)| {
+                let content_hash = page_hashers.get(i).map(|h| h.finish()).unwrap_or(0);
+                cpu_page_to_page_data(page, i, content_hash)
+            })
+            .collect();
+
+        // Return pages to the pool for reuse next call (pixel buffer allocations survive).
+        const CPU_PAGE_POOL_MAX: usize = 4;
+        let return_count = CPU_PAGE_POOL_MAX.saturating_sub(page_pool.len()).min(pages.len());
+        page_pool.extend(pages.drain(..return_count));
+        self.cpu_page_pool = page_pool;
+
         TextGpuScene {
-            atlas_pages: pages
-                .iter()
-                .enumerate()
-                .map(|(page_index, page)| color_image_to_page_data(page_index, &page.image))
-                .collect(),
+            atlas_pages,
             quads,
             bounds_min: [bounds.min.x, bounds.min.y],
             bounds_max: [bounds.max.x, bounds.max.y],
@@ -426,7 +457,9 @@ impl TextUi {
         let target_page_side_px =
             default_gpu_scene_page_side(self.resolved_graphics_config(self.max_texture_side_px));
         let graphics_config = self.resolved_graphics_config(self.max_texture_side_px);
+        let mut page_pool = std::mem::take(&mut self.cpu_page_pool);
         let mut pages = Vec::<CpuSceneAtlasPage>::new();
+        let mut page_hashers = Vec::<FxHasher>::new();
         let mut quads = Vec::with_capacity(layout.glyphs.len());
         let mut bounds: Option<Rect> = None;
 
@@ -443,24 +476,40 @@ impl TextUi {
                 atlas_glyph.upload_image.size[0] as i32,
                 atlas_glyph.upload_image.size[1] as i32,
             );
-            let Some((page_index, allocation)) =
-                allocate_cpu_scene_page_slot(&mut pages, target_page_side_px, allocation_size)
-            else {
+            let Some((page_index, allocation)) = allocate_cpu_scene_page_slot(
+                &mut pages,
+                &mut page_pool,
+                target_page_side_px,
+                allocation_size,
+            ) else {
                 continue;
             };
+
+            while page_hashers.len() < pages.len() {
+                let new_idx = page_hashers.len();
+                let mut h = FxHasher::default();
+                new_idx.hash(&mut h);
+                pages[new_idx].size.hash(&mut h);
+                page_hashers.push(h);
+            }
 
             let pos = [
                 allocation.rectangle.min.x.max(0) as usize,
                 allocation.rectangle.min.y.max(0) as usize,
             ];
-            blit_color_image(
-                &mut pages[page_index].image,
+            glyph.cache_key.hash(&mut page_hashers[page_index]);
+            pos[0].hash(&mut page_hashers[page_index]);
+            pos[1].hash(&mut page_hashers[page_index]);
+
+            let page_size = pages[page_index].size;
+            blit_to_page(
+                &mut pages[page_index].rgba8,
+                page_size,
                 &atlas_glyph.upload_image,
                 pos[0],
                 pos[1],
             );
 
-            let page_size = pages[page_index].image.size;
             let uv = Rect::from_min_max(
                 Pos2::new(
                     (pos[0] + graphics_config.atlas_padding_px) as f32 / page_size[0] as f32,
@@ -520,12 +569,22 @@ impl TextUi {
         }
 
         let bounds = bounds.unwrap_or(egui_rect_from_text(path_layout.bounds));
+        let atlas_pages = pages
+            .iter()
+            .enumerate()
+            .map(|(i, page)| {
+                let content_hash = page_hashers.get(i).map(|h| h.finish()).unwrap_or(0);
+                cpu_page_to_page_data(page, i, content_hash)
+            })
+            .collect();
+
+        const CPU_PAGE_POOL_MAX: usize = 4;
+        let return_count = CPU_PAGE_POOL_MAX.saturating_sub(page_pool.len()).min(pages.len());
+        page_pool.extend(pages.drain(..return_count));
+        self.cpu_page_pool = page_pool;
+
         Ok(TextGpuScene {
-            atlas_pages: pages
-                .iter()
-                .enumerate()
-                .map(|(page_index, page)| color_image_to_page_data(page_index, &page.image))
-                .collect(),
+            atlas_pages,
             quads,
             bounds_min: [bounds.min.x, bounds.min.y],
             bounds_max: [bounds.max.x, bounds.max.y],

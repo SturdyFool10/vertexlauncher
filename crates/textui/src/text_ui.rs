@@ -25,6 +25,8 @@ pub struct TextUi {
     pub(crate) gpu_scene_page_batch_cache: ThreadSafeLru<u64, Arc<[TextGpuScenePageBatch]>>,
     pub(crate) gpu_scene_draw_batch_cache: ThreadSafeLru<u64, Arc<[TextGpuScenePageBatch]>>,
     pub(crate) gpu_scene_glyph_cache: ThreadSafeLru<GlyphRasterKey, Arc<PreparedAtlasGlyph>>,
+    /// Reusable CPU-side atlas pages to avoid per-frame alloc/free of large pixel buffers.
+    pub(crate) cpu_page_pool: Vec<CpuSceneAtlasPage>,
 }
 
 impl Default for TextUi {
@@ -82,6 +84,7 @@ impl TextUi {
             gpu_scene_page_batch_cache: ThreadSafeLru::new(GPU_SCENE_PAGE_BATCH_CACHE_MAX_BYTES),
             gpu_scene_draw_batch_cache: ThreadSafeLru::new(GPU_SCENE_DRAW_BATCH_CACHE_MAX_BYTES),
             gpu_scene_glyph_cache: ThreadSafeLru::new(GPU_SCENE_GLYPH_CACHE_MAX_BYTES),
+            cpu_page_pool: Vec::new(),
         }
     }
 }

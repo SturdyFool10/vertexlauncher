@@ -76,7 +76,7 @@ pub use self::text_ui::TextUi;
 use crate::async_raster::{AsyncRasterState, AsyncRasterWorkerMessage, new_async_raster_state};
 pub(crate) use crate::atlas::{
     GlyphAtlas, GlyphContentMode, GlyphRasterKey, PaintTextQuad, PreparedAtlasGlyph,
-    adjusted_glyph_right_px, adjusted_glyph_x_px, blit_color_image,
+    adjusted_glyph_right_px, adjusted_glyph_x_px,
     collect_glyph_spacing_prefixes_px, collect_prepared_glyphs_from_buffer,
     cursor_stops_for_glyphs, glyph_logical_font_size_points, hash_text_fundamentals,
     hit_buffer_with_fundamentals, rasterize_atlas_glyph, render_swash_outline_commands,
@@ -108,10 +108,10 @@ use crate::geometry::{
 use crate::gpu::{
     CpuSceneAtlasPage, ResolvedTextGraphicsConfig, ResolvedTextRendererBackend, TextWgpuInstance,
     TextWgpuPreparedScene, TextWgpuSceneBatchSource, TextWgpuSceneCallback,
-    allocate_cpu_scene_page_slot, color_image_to_page_data, default_gpu_scene_page_side,
-    gpu_scene_approx_bytes, gpu_scene_page_batches_approx_bytes, map_scene_quads_to_rect,
-    paint_text_quads_fallback, quad_positions_from_min_size, rect_from_points,
-    rotated_quad_positions, uv_quad_points,
+    allocate_cpu_scene_page_slot, blit_to_page, color_image_to_page_data, cpu_page_to_page_data,
+    default_gpu_scene_page_side, gpu_scene_approx_bytes, gpu_scene_page_batches_approx_bytes,
+    map_scene_quads_to_rect, paint_text_quads_fallback, quad_positions_from_min_size,
+    rect_from_points, rotated_quad_positions, uv_quad_points,
 };
 use crate::input_runtime::apply_gamepad_scroll_if_focused;
 use crate::path_layout::{
