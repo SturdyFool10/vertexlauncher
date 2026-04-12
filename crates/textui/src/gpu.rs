@@ -339,10 +339,9 @@ pub(super) fn allocate_cpu_scene_page_slot(
     Some((pages.len() - 1, allocation))
 }
 
-/// Blit a ColorImage into a page's raw RGBA8 buffer.
-/// The Arc must be exclusively owned by the caller (Arc::get_mut must succeed).
+/// Blit a ColorImage into a page's raw RGBA8 Vec buffer.
 pub(super) fn blit_to_page(
-    dest_rgba8: &mut Arc<[u8]>,
+    dest_rgba8: &mut Vec<u8>,
     dest_size: [usize; 2],
     src: &ColorImage,
     dest_x: usize,
@@ -352,10 +351,6 @@ pub(super) fn blit_to_page(
     if copy_width == 0 {
         return;
     }
-    let Some(dest) = Arc::get_mut(dest_rgba8) else {
-        debug_assert!(false, "blit_to_page: Arc is not exclusively owned during build");
-        return;
-    };
     for y in 0..src.size[1] {
         let target_y = dest_y + y;
         if target_y >= dest_size[1] {
@@ -369,12 +364,13 @@ pub(super) fn blit_to_page(
             )
         };
         let dest_start = (target_y * dest_size[0] + dest_x) * 4;
-        dest[dest_start..dest_start + copy_width * 4].copy_from_slice(src_bytes);
+        dest_rgba8[dest_start..dest_start + copy_width * 4].copy_from_slice(src_bytes);
     }
 }
 
 /// Convert a CpuSceneAtlasPage to TextAtlasPageData using a pre-computed content hash.
-/// Clones the Arc (O(1), no pixel copy) instead of copying raw bytes.
+/// Allocates one Arc<[u8]> with a memcpy; the Vec remains owned by the pool page so
+/// reset_for_size can zero it in-place next frame without Arc refcount contention.
 pub(super) fn cpu_page_to_page_data(
     page: &CpuSceneAtlasPage,
     page_index: usize,
@@ -384,7 +380,7 @@ pub(super) fn cpu_page_to_page_data(
         page_index,
         size_px: page.size,
         content_hash,
-        rgba8: Arc::clone(&page.rgba8),
+        rgba8: Arc::from(page.rgba8.as_slice()),
     }
 }
 
