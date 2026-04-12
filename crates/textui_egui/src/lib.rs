@@ -77,6 +77,7 @@ const GPU_SCENE_TEXTURE_CACHE_ID: &str = "textui_egui_gpu_scene_texture_cache";
 const GPU_SCENE_TEXTURE_CACHE_STALE_FRAMES: u64 = 600;
 const RETAINED_GPU_SCENE_CACHE_ID: &str = "textui_egui_retained_gpu_scene_cache";
 const RETAINED_GPU_SCENE_CACHE_STALE_FRAMES: u64 = 600;
+const WIDTH_BIN_PX: f32 = 16.0;
 
 #[derive(Clone)]
 struct CachedGpuSceneTexture {
@@ -118,6 +119,16 @@ fn snap_rect_to_pixel_grid(rect: Rect, pixels_per_point: f32) -> Rect {
         egui::pos2(snap(rect.min.x), snap(rect.min.y)),
         egui::pos2(snap(rect.max.x), snap(rect.max.y)),
     )
+}
+
+fn snap_width_to_bin(width_points: f32, scale: f32) -> f32 {
+    let width_px = (width_points * scale).round();
+    let snapped_px = (width_px / WIDTH_BIN_PX).floor() * WIDTH_BIN_PX;
+    (snapped_px / scale).max(1.0)
+}
+
+fn normalize_wrapped_width(width_points_opt: Option<f32>, scale: f32) -> Option<f32> {
+    width_points_opt.map(|width| snap_width_to_bin(width.max(1.0), scale))
 }
 
 fn texture_options_for_sampling(sampling: TextAtlasSampling) -> TextureOptions {
@@ -333,24 +344,7 @@ fn retained_gpu_scene_for_render_scene(
 
 fn hash_gpu_scene_page(page: &TextAtlasPageData, sampling: TextAtlasSampling) -> u64 {
     let mut hasher = DefaultHasher::new();
-    page.size_px.hash(&mut hasher);
-    page.rgba8.hash(&mut hasher);
-    match sampling {
-        TextAtlasSampling::Linear => 0_u8,
-        TextAtlasSampling::Nearest => 1_u8,
-    }
-    .hash(&mut hasher);
-    hasher.finish()
-}
-
-fn hash_gpu_scene_page_fast(
-    scene_fingerprint: u64,
-    page_index: usize,
-    sampling: TextAtlasSampling,
-) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    scene_fingerprint.hash(&mut hasher);
-    page_index.hash(&mut hasher);
+    page.content_hash.hash(&mut hasher);
     match sampling {
         TextAtlasSampling::Linear => 0_u8,
         TextAtlasSampling::Nearest => 1_u8,
@@ -378,11 +372,7 @@ fn texture_ids_for_gpu_scene(
     }
 
     for page in &scene.atlas_pages {
-        let key = if scene.fingerprint != 0 {
-            hash_gpu_scene_page_fast(scene.fingerprint, page.page_index, sampling)
-        } else {
-            hash_gpu_scene_page(page, sampling)
-        };
+        let key = hash_gpu_scene_page(page, sampling);
         let entry = cache_guard
             .entries
             .entry(key)
@@ -740,7 +730,8 @@ fn label_impl(
     };
 
     let scale = ui.ctx().pixels_per_point();
-    let width_points_opt = options.wrap.then(|| ui.available_width().max(1.0));
+    let width_points_opt =
+        normalize_wrapped_width(options.wrap.then(|| ui.available_width().max(1.0)), scale);
     let cache_id = ui.make_persistent_id((&id_source, "textui_label_retained_scene"));
     let fingerprint = hash_label_scene_request(text, options, width_points_opt, scale);
     let text_options = options.to_text_label_options();
@@ -804,11 +795,14 @@ fn code_block_impl(
     async_mode: bool,
 ) -> Response {
     let scale = ui.ctx().pixels_per_point();
-    let width_points_opt = if options.wrap {
-        Some((ui.available_width() - options.padding.x * 2.0).max(1.0))
-    } else {
-        None
-    };
+    let width_points_opt = normalize_wrapped_width(
+        if options.wrap {
+            Some((ui.available_width() - options.padding.x * 2.0).max(1.0))
+        } else {
+            None
+        },
+        scale,
+    );
     let cache_id = ui.make_persistent_id((&id_source, "textui_code_block_retained_scene"));
     let fingerprint = hash_code_block_scene_request(code, options, width_points_opt, scale);
     let label_options = LabelOptions {
@@ -1068,7 +1062,10 @@ fn tooltip_impl(
 
     let pointer = response.hover_pos().unwrap_or(response.rect.right_bottom());
     let scale = ui.ctx().pixels_per_point();
-    let width_points_opt = Some(320.0_f32.min(ui.ctx().input(|i| i.content_rect().width() * 0.35)));
+    let width_points_opt = normalize_wrapped_width(
+        Some(320.0_f32.min(ui.ctx().input(|i| i.content_rect().width() * 0.35))),
+        scale,
+    );
     let cache_id = ui.make_persistent_id((&id_source, "textui_tooltip_retained_scene"));
     let fingerprint = hash_label_scene_request(text, &options.text, width_points_opt, scale);
     let scene = retained_gpu_scene(ui.ctx(), cache_id, fingerprint, || {
@@ -1173,6 +1170,7 @@ impl TextUiEguiExt for TextUi {
         width_points_opt: Option<f32>,
     ) -> TextTextureHandle {
         let scale = ctx.pixels_per_point();
+        let width_points_opt = normalize_wrapped_width(width_points_opt, scale);
         let fingerprint = hash_label_scene_request(text, options, width_points_opt, scale);
         let scene = retained_gpu_scene(
             ctx,
@@ -1204,6 +1202,7 @@ impl TextUiEguiExt for TextUi {
         width_points_opt: Option<f32>,
     ) -> TextTextureHandle {
         let scale = ctx.pixels_per_point();
+        let width_points_opt = normalize_wrapped_width(width_points_opt, scale);
         let fingerprint = hash_rich_text_scene_request(spans, options, width_points_opt, scale);
         let scene = retained_gpu_scene(
             ctx,

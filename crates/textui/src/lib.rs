@@ -175,7 +175,7 @@ const UNDO_STACK_MAX: usize = 200;
 // Width-bin size in device pixels.  Labels whose available width differs by
 // less than this will share the same cached texture, preventing mass cache
 // busts from sub-pixel layout jitter (scrollbars, fractional DPI, etc.).
-const WIDTH_BIN_PX: f32 = 4.0;
+const WIDTH_BIN_PX: f32 = 16.0;
 
 /// Snap a point-space width to the nearest WIDTH_BIN_PX device-pixel boundary.
 #[inline]

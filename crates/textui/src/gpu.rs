@@ -337,14 +337,20 @@ pub(super) fn allocate_cpu_scene_page_slot(
 }
 
 pub(super) fn color_image_to_page_data(page_index: usize, image: &ColorImage) -> TextAtlasPageData {
-    let mut rgba8 = Vec::with_capacity(image.pixels.len().saturating_mul(4));
-    for pixel in &image.pixels {
-        rgba8.extend_from_slice(&pixel.to_array());
-    }
+    // Safety: Color32 is repr(C) struct([u8; 4]) — identical layout to 4 contiguous u8 bytes.
+    // This avoids an intermediate Vec allocation and the Box→Arc realloc.
+    let rgba8_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(image.pixels.as_ptr() as *const u8, image.pixels.len() * 4)
+    };
+    let mut hasher = rustc_hash::FxHasher::default();
+    page_index.hash(&mut hasher);
+    image.size.hash(&mut hasher);
+    hasher.write(rgba8_bytes);
     TextAtlasPageData {
         page_index,
         size_px: image.size,
-        rgba8,
+        content_hash: hasher.finish(),
+        rgba8: Arc::from(rgba8_bytes),
     }
 }
 

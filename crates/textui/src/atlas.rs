@@ -132,6 +132,7 @@ pub(super) struct GlyphAtlasPage {
     content_mode: GlyphContentMode,
     texture: GlyphAtlasTexture,
     backing: ColorImage,
+    cached_page_data: Mutex<Option<TextAtlasPageData>>,
     dirty_rect: Option<DirtyAtlasRect>,
     live_glyphs: usize,
 }
@@ -778,6 +779,7 @@ impl GlyphAtlas {
             content_mode,
             texture,
             backing: ColorImage::filled([side, side], Color32::TRANSPARENT),
+            cached_page_data: Mutex::new(None),
             dirty_rect: None,
             live_glyphs: 0,
         });
@@ -865,21 +867,34 @@ impl GlyphAtlas {
 
     pub(super) fn page_snapshot(&self, page_index: usize) -> Option<TextAtlasPageSnapshot> {
         let page = self.pages.get(page_index)?;
+        // Safety: Color32 is repr(C) struct([u8; 4]) — identical layout to 4 contiguous u8 bytes.
+        let rgba8 = unsafe {
+            std::slice::from_raw_parts(
+                page.backing.pixels.as_ptr() as *const u8,
+                page.backing.pixels.len() * 4,
+            )
+        }
+        .to_vec();
         Some(TextAtlasPageSnapshot {
             page_index,
             size_px: page.backing.size,
-            rgba8: page
-                .backing
-                .pixels
-                .iter()
-                .flat_map(|pixel| pixel.to_array())
-                .collect(),
+            rgba8,
         })
     }
 
     pub(super) fn page_data(&self, page_index: usize) -> Option<TextAtlasPageData> {
-        self.page_snapshot(page_index)
-            .map(|snapshot| snapshot.to_rgba8())
+        let page = self.pages.get(page_index)?;
+        if let Ok(cached) = page.cached_page_data.lock()
+            && let Some(data) = cached.as_ref()
+        {
+            return Some(data.clone());
+        }
+
+        let data = color_image_to_page_data(page_index, &page.backing);
+        if let Ok(mut cached) = page.cached_page_data.lock() {
+            *cached = Some(data.clone());
+        }
+        Some(data)
     }
 
     pub(super) fn texture_id_for_page(&self, page_index: usize) -> Option<TextureId> {
@@ -907,6 +922,9 @@ impl GlyphAtlas {
             allocation.rectangle.min.y.max(0) as usize,
         ];
         blit_color_image(&mut page.backing, glyph, pos[0], pos[1]);
+        if let Ok(mut cached) = page.cached_page_data.lock() {
+            *cached = None;
+        }
         let dirty = DirtyAtlasRect::new(pos, glyph.size);
         page.dirty_rect = Some(
             page.dirty_rect
@@ -1860,20 +1878,19 @@ pub(super) fn blit_color_image(
     dest_y: usize,
 ) {
     let dest_width = dest.size[0];
+    let copy_width = src.size[0].min(dest_width.saturating_sub(dest_x));
+    if copy_width == 0 {
+        return;
+    }
     for y in 0..src.size[1] {
         let target_y = dest_y + y;
         if target_y >= dest.size[1] {
             break;
         }
-        let src_row = y * src.size[0];
-        let dest_row = target_y * dest_width;
-        for x in 0..src.size[0] {
-            let target_x = dest_x + x;
-            if target_x >= dest_width {
-                break;
-            }
-            dest.pixels[dest_row + target_x] = src.pixels[src_row + x];
-        }
+        let src_start = y * src.size[0];
+        let dest_start = target_y * dest_width + dest_x;
+        dest.pixels[dest_start..dest_start + copy_width]
+            .copy_from_slice(&src.pixels[src_start..src_start + copy_width]);
     }
 }
 
@@ -1884,12 +1901,10 @@ fn color_image_sub_image(src: &ColorImage, rect: DirtyAtlasRect) -> ColorImage {
     let dst_width = size[0];
     for y in 0..size[1] {
         let src_y = rect.min[1] + y;
-        let src_row = src_y * src_width;
-        let dst_row = y * dst_width;
-        for x in 0..size[0] {
-            let src_x = rect.min[0] + x;
-            image.pixels[dst_row + x] = src.pixels[src_row + src_x];
-        }
+        let src_start = src_y * src_width + rect.min[0];
+        let dst_start = y * dst_width;
+        image.pixels[dst_start..dst_start + dst_width]
+            .copy_from_slice(&src.pixels[src_start..src_start + dst_width]);
     }
     image
 }

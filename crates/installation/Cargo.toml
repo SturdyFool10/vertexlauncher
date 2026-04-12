@@ -1,6 +1,6 @@
 [package]
 name = "installation"
-version = "0.1.15-Alpha"
+version = "0.1.16-Alpha"
 edition = "2024"
 
 [dependencies]
