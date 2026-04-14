@@ -22,9 +22,26 @@ PACKAGE_ROOTS=(
   "libsoup-3.0-dev:arm64"
   "libwebkit2gtk-4.1-dev:arm64"
   "libjavascriptcoregtk-4.1-dev:arm64"
+  "libudev-dev:arm64"
 )
 
+bash "${REPO_ROOT}/scripts/compile-slang-shaders.sh"
+
+# Remove host-compiled build-script executables and the aarch64 binary before
+# entering the container so that the container recompiles them against its glibc.
+find "${REPO_ROOT}/target" -name "build-script-build" -delete 2>/dev/null || true
+rm -f "${REPO_ROOT}/target/aarch64-unknown-linux-gnu/release/vertexlauncher" 2>/dev/null || true
+
 mkdir -p "${WORK_ROOT}" "${CARGO_REGISTRY_DIR}" "${CARGO_GIT_DIR}"
+
+# Invalidate sysroot cache when the package list changes.
+PACKAGE_HASH=$(printf '%s\n' "${PACKAGE_ROOTS[@]}" | sha256sum | awk '{print $1}')
+HASH_FILE="${WORK_ROOT}/packages.hash"
+if [[ ! -f "${HASH_FILE}" ]] || [[ "$(cat "${HASH_FILE}" 2>/dev/null)" != "${PACKAGE_HASH}" ]]; then
+    echo "[linux-arm64] package list changed, clearing cached debs and sysroot..."
+    rm -rf "${DEBS_DIR}" "${SYSROOT_DIR}" "${RESOLVED_LIST}"
+    echo "${PACKAGE_HASH}" > "${HASH_FILE}"
+fi
 
 podman run --rm \
   --arch=amd64 \
@@ -68,7 +85,7 @@ podman run --rm \
       : > "${RESOLVED_LIST}"
       total="$(wc -l < "${PACKAGE_LIST}")"
       current=0
-      cd "${DEBS_DIR}"
+      (cd "${DEBS_DIR}"
       while read -r pkg; do
         current="$((current + 1))"
         if apt-get download "${pkg}:arm64" >/dev/null 2>&1; then
@@ -82,6 +99,7 @@ podman run --rm \
           echo "[linux-arm64] downloaded ${current}/${total} packages..."
         fi
       done < "${PACKAGE_LIST}"
+      )
     else
       echo "[linux-arm64] reusing cached Debian sysroot packages..."
     fi
@@ -134,6 +152,14 @@ podman run --rm \
     export CFLAGS_aarch64_unknown_linux_gnu="--sysroot=${SYSROOT_DIR}"
     export CXXFLAGS_aarch64_unknown_linux_gnu="--sysroot=${SYSROOT_DIR}"
 
+    echo "[linux-arm64] cleaning stale workspace build-script artifacts..."
+    cargo clean --package vertexlauncher --package launcher_ui || true
+
     echo "[linux-arm64] building release artifact..."
     cargo build --release --target aarch64-unknown-linux-gnu -p vertexlauncher
+
+    mkdir -p /workspace/target/release
+    cp /workspace/target/aarch64-unknown-linux-gnu/release/vertexlauncher \
+       /workspace/target/release/vertexlauncher-linux-arm64
+    echo "[linux-arm64] Staged: /workspace/target/release/vertexlauncher-linux-arm64"
   '

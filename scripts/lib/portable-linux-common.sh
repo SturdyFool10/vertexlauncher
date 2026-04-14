@@ -116,9 +116,9 @@ run_with_lock() {
     exec {lock_fd}> "${lock_path}"
     flock "${lock_fd}"
     "$@"
-    local status=$?
+    local _ret=$?
     exec {lock_fd}>&-
-    return "${status}"
+    return "${_ret}"
   fi
 
   local lock_dir="${lock_path}.dirlock"
@@ -127,9 +127,9 @@ run_with_lock() {
   done
 
   "$@"
-  local status=$?
+  local _ret=$?
   rmdir "${lock_dir}" 2>/dev/null || true
-  return "${status}"
+  return "${_ret}"
 }
 
 build_cached_podman_image() {

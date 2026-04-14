@@ -7,6 +7,8 @@ CONTAINER_IMAGE="${CONTAINER_IMAGE:-docker.io/library/rust:1-bookworm}"
 WORK_ROOT="${REPO_ROOT}/.cache/appimage-arm64-container"
 SOURCE_BINARY="${REPO_ROOT}/target/aarch64-unknown-linux-gnu/release/vertexlauncher"
 
+bash "${REPO_ROOT}/scripts/compile-slang-shaders.sh"
+
 mkdir -p "${WORK_ROOT}"
 
 if [[ ! -f "${SOURCE_BINARY}" ]]; then

@@ -6,6 +6,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 CONTAINER_IMAGE="${CONTAINER_IMAGE:-docker.io/library/rust:1-bookworm}"
 WORK_ROOT="${REPO_ROOT}/.cache/flatpak-x86_64-container"
 
+bash "${REPO_ROOT}/scripts/compile-slang-shaders.sh"
+
 mkdir -p "${WORK_ROOT}"
 
 podman run --rm \
@@ -31,11 +33,14 @@ podman run --rm \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
+      elfutils \
+      appstream-compose \
       flatpak \
       flatpak-builder \
       ostree \
       python3 \
       python3-aiohttp \
+      python3-tomlkit \
       rsync \
       xz-utils \
       zstd >/dev/null

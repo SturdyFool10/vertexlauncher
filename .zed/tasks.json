@@ -41,7 +41,7 @@
   },
   {
     "label": "[LINUX] target windows x86_64",
-    "command": "fish \"$ZED_WORKTREE_ROOT/scripts/build-release-artifacts.fish\" x86_64-pc-windows-msvc",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-windows-x86_64.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -49,7 +49,7 @@
   },
   {
     "label": "[LINUX] target windows arm64",
-    "command": "fish \"$ZED_WORKTREE_ROOT/scripts/build-release-artifacts.fish\" aarch64-pc-windows-msvc",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-windows-arm64.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -57,7 +57,7 @@
   },
   {
     "label": "[LINUX] target linux x86_64",
-    "command": "fish \"$ZED_WORKTREE_ROOT/scripts/build-release-artifacts.fish\" x86_64-unknown-linux-gnu",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-linux-x86_64-container.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -65,7 +65,7 @@
   },
   {
     "label": "[LINUX] target linux arm64",
-    "command": "fish \"$ZED_WORKTREE_ROOT/scripts/build-release-artifacts.fish\" aarch64-unknown-linux-gnu",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-linux-arm64-container.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -73,7 +73,7 @@
   },
   {
     "label": "[LINUX] target macos arm64",
-    "command": "fish \"$ZED_WORKTREE_ROOT/scripts/build-release-artifacts.fish\" aarch64-apple-darwin",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-macos-arm64.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -81,7 +81,7 @@
   },
   {
     "label": "[LINUX] appimage x86_64",
-    "command": "env VERTEX_APPIMAGE_ARCH=x86_64 bash \"$ZED_WORKTREE_ROOT/scripts/build-appimage.sh\"",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-appimage-x86_64-container.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -89,7 +89,7 @@
   },
   {
     "label": "[LINUX] appimage arm64",
-    "command": "env VERTEX_APPIMAGE_ARCH=aarch64 bash \"$ZED_WORKTREE_ROOT/scripts/build-appimage.sh\"",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-appimage-arm64-container.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -97,7 +97,7 @@
   },
   {
     "label": "[LINUX] flatpak x86_64",
-    "command": "env VERTEX_FLATPAK_ARCHES=x86_64 bash \"$ZED_WORKTREE_ROOT/scripts/build-flatpak.sh\"",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-flatpak-x86_64-container.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,
@@ -105,7 +105,7 @@
   },
   {
     "label": "[LINUX] flatpak arm64",
-    "command": "env VERTEX_FLATPAK_ARCHES=aarch64 bash \"$ZED_WORKTREE_ROOT/scripts/build-flatpak.sh\"",
+    "command": "bash \"$ZED_WORKTREE_ROOT/scripts/build-flatpak-arm64-container.sh\"",
     "cwd": "$ZED_WORKTREE_ROOT",
     "reveal": "always",
     "allow_concurrent_runs": false,

@@ -61,6 +61,43 @@ ensure_runtime_bits() {
         "${RUST_EXT}//${RUST_EXT_TAG}"
 }
 
+# org.gnome.Sdk 49+ (freedesktop 25.08+) ships appstreamcli but dropped the
+# standalone appstream-compose binary.  Debian bookworm's flatpak-builder
+# (1.3.x) still calls appstream-compose by name inside the bwrap sandbox.
+# Inject a one-line shim into the SDK deploy so the call succeeds.
+ensure_appstream_compose() {
+    local arch="$1"
+    local xdg_data="${XDG_DATA_HOME:-${HOME}/.local/share}"
+    local sdk_bin="${xdg_data}/flatpak/runtime/${SDK}/${arch}/${RUNTIME_VERSION}/active/files/bin"
+
+    [[ -d "${sdk_bin}" ]] || return 0
+
+    if [[ -f "${sdk_bin}/appstreamcli" ]]; then
+        log "Injecting appstream-compose→appstreamcli shim into SDK (${arch})"
+        # flatpak-builder calls: appstream-compose --prefix=P --basename=ID --origin=O DIR
+        # appstreamcli compose uses:  appstreamcli compose --prefix=P --origin=O --result-root=P DIR
+        # --basename is not supported and can be dropped (appstreamcli derives the ID from the XML).
+        # Remove first so we can overwrite even if it is an immutable OSTree hardlink.
+        rm -f "${sdk_bin}/appstream-compose" 2>/dev/null || true
+        cat > "${sdk_bin}/appstream-compose" <<'SHIM'
+#!/bin/sh
+# Compatibility shim: flatpak-builder <=1.3.x calls appstream-compose which
+# was removed in AppStream 1.0+.  We translate to appstreamcli compose.
+# In Flatpak builds the prefix is always /app, origin always flatpak, and
+# the share directory is always /app/share — hard-code them for reliability
+# instead of trying to parse the various arg forms across flatpak-builder versions.
+exec appstreamcli compose \
+    --prefix=/app \
+    --origin=flatpak \
+    --result-root=/app \
+    /
+SHIM
+        chmod +x "${sdk_bin}/appstream-compose"
+    else
+        log "WARNING: no appstream-compose or appstreamcli in SDK ${arch}; appstream step may fail"
+    fi
+}
+
 prepare_clean_source_tree() {
     if [[ "${INCREMENTAL}" == "1" ]]; then
         log "Refreshing incremental Flatpak source tree"
@@ -83,8 +120,10 @@ prepare_clean_source_tree() {
         --exclude '.cache' \
         --exclude '.flatpak-builder' \
         --exclude 'flatpak/build' \
+        --exclude 'flatpak/build-dir' \
         --exclude 'flatpak/repo' \
         --exclude 'flatpak/generated' \
+        --exclude 'flatpak/vendor' \
         --exclude 'target' \
         --exclude 'dist' \
         --exclude 'node_modules' \
@@ -95,6 +134,12 @@ prepare_clean_source_tree() {
 
     [[ -f "${SOURCE_TREE}/Cargo.toml" ]] || die "Clean source tree missing Cargo.toml"
     [[ -f "${SOURCE_TREE}/Cargo.lock" ]] || die "Clean source tree missing Cargo.lock"
+}
+
+prebuilt_aarch64() {
+    # Returns true when a cross-compiled aarch64 binary is available and
+    # the current arch is aarch64, meaning we skip cargo entirely.
+    [[ "${1:-}" == "aarch64" && -n "${VERTEX_PREBUILT_AARCH64:-}" && -f "${VERTEX_PREBUILT_AARCH64}" ]]
 }
 
 generate_cargo_sources() {
@@ -124,16 +169,105 @@ generate_cargo_sources() {
             || die "Failed to install aiohttp — run: pip3 install aiohttp"
     fi
 
+    if ! python3 -c "import tomlkit" 2>/dev/null; then
+        log "Installing tomlkit for flatpak-cargo-generator..."
+        python3 -m pip install tomlkit --break-system-packages --quiet \
+            || python3 -m pip install tomlkit --quiet \
+            || die "Failed to install tomlkit — run: pip3 install tomlkit"
+    fi
+
     log "Generating cargo-sources.json"
     python3 "${GENERATOR_PATH}" "${SOURCE_TREE}/Cargo.lock" -o "${CARGO_SOURCES_PATH}"
     [[ -f "${CARGO_SOURCES_PATH}" ]] || die "Failed to generate cargo-sources.json"
     cp "${SOURCE_TREE}/Cargo.lock" "${CARGO_SOURCES_LOCK_SNAPSHOT}"
 }
 
+write_manifest_prebuilt() {
+    local arch="$1"
+    local manifest_path="$2"
+    local bin_dest="${GEN_DIR}/vertexlauncher-prebuilt-${arch}"
+
+    cp "${VERTEX_PREBUILT_AARCH64}" "${bin_dest}"
+    log "Prebuilt binary staged: ${bin_dest}"
+
+    cat > "${manifest_path}" <<MANIFEST
+app-id: ${APP_ID}
+runtime: ${RUNTIME}
+runtime-version: "${RUNTIME_VERSION}"
+sdk: ${SDK}
+command: vertexlauncher
+branch: ${BRANCH}
+separate-locales: false
+
+finish-args:
+  # Network
+  - --share=network
+  - --share=ipc
+
+  # Display / audio
+  - --socket=wayland
+  - --socket=x11
+  - --socket=pulseaudio
+
+  # Full device access: GPU (wgpu/Vulkan), gamepad (gilrs/evdev), DRI
+  - --device=all
+
+  # Full host filesystem
+  - --filesystem=host
+
+  # Runtime sockets not covered by --filesystem=host
+  - --filesystem=xdg-run/gvfs
+  - --filesystem=xdg-run/discord-ipc-0
+  - --filesystem=xdg-run/discord-ipc-1
+  - --filesystem=xdg-run/discord-ipc-2
+  - --filesystem=xdg-run/discord-ipc-3
+  - --filesystem=xdg-run/discord-ipc-4
+  - --filesystem=xdg-run/discord-ipc-5
+  - --filesystem=xdg-run/discord-ipc-6
+  - --filesystem=xdg-run/discord-ipc-7
+  - --filesystem=xdg-run/discord-ipc-8
+  - --filesystem=xdg-run/discord-ipc-9
+  - --filesystem=xdg-run/app/com.discordapp.Discord
+  - --filesystem=xdg-run/app/com.discordapp.DiscordCanary
+  - --filesystem=xdg-run/app/com.discordapp.DiscordPTB
+  - --filesystem=xdg-run/app/dev.vencord.Vesktop
+
+  # D-Bus: session bus needed by WebKitGTK (wry)
+  - --socket=session-bus
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.freedesktop.Flatpak
+  - --talk-name=org.freedesktop.NetworkManager
+
+  - --env=GDK_BACKEND=wayland,x11
+  - --env=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+
+modules:
+  - name: vertexlauncher
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 vertexlauncher-prebuilt-${arch} /app/bin/vertexlauncher
+      - install -Dm644 flatpak/${APP_ID}.desktop /app/share/applications/${APP_ID}.desktop
+      - install -Dm644 flatpak/${APP_ID}.metainfo.xml /app/share/appdata/${APP_ID}.appdata.xml
+      - install -Dm644 Vertex.svg /app/share/icons/hicolor/scalable/apps/${APP_ID}.svg
+    sources:
+      - type: file
+        path: vertexlauncher-prebuilt-${arch}
+      - type: dir
+        path: source-tree
+MANIFEST
+}
+
 write_manifest() {
     local arch="$1"
     local manifest_path="${GEN_DIR}/${APP_ID}-${arch}.yaml"
     mkdir -p "${GEN_DIR}"
+
+    if prebuilt_aarch64 "${arch}"; then
+        write_manifest_prebuilt "${arch}" "${manifest_path}"
+        return
+    fi
+
+    local cargo_aarch64_extra=""
 
     cat > "${manifest_path}" <<MANIFEST
 app-id: ${APP_ID}
@@ -147,65 +281,51 @@ branch: ${BRANCH}
 separate-locales: false
 
 finish-args:
+  # Network
   - --share=network
-
   - --share=ipc
 
+  # Display / audio
   - --socket=wayland
-
   - --socket=x11
-
   - --socket=pulseaudio
 
+  # Full device access: GPU (wgpu/Vulkan), gamepad (gilrs/evdev), DRI
   - --device=all
 
-  - --filesystem=home
+  # Full host filesystem — launcher installs and manages game instances
+  # anywhere on disk, including external drives
+  - --filesystem=host
 
-  - --filesystem=/run/media
-
-  - --filesystem=xdg-config/vertexlauncher
-
-  - --filesystem=xdg-data/vertexlauncher
-
-  - --filesystem=xdg-cache/vertexlauncher
-
-  - --filesystem=xdg-config/vertex-launcher
-
+  # Runtime sockets not covered by --filesystem=host
   - --filesystem=xdg-run/gvfs
-
   - --filesystem=xdg-run/discord-ipc-0
-
   - --filesystem=xdg-run/discord-ipc-1
-
   - --filesystem=xdg-run/discord-ipc-2
-
   - --filesystem=xdg-run/discord-ipc-3
-
   - --filesystem=xdg-run/discord-ipc-4
-
   - --filesystem=xdg-run/discord-ipc-5
-
   - --filesystem=xdg-run/discord-ipc-6
-
   - --filesystem=xdg-run/discord-ipc-7
-
   - --filesystem=xdg-run/discord-ipc-8
-
   - --filesystem=xdg-run/discord-ipc-9
-
   - --filesystem=xdg-run/app/com.discordapp.Discord
-
   - --filesystem=xdg-run/app/com.discordapp.DiscordCanary
-
   - --filesystem=xdg-run/app/com.discordapp.DiscordPTB
-
   - --filesystem=xdg-run/app/dev.vencord.Vesktop
 
+  # D-Bus: session bus needed by WebKitGTK (wry) for GPU process, network
+  # proxy, and IPC between WebKit sub-processes inside the Flatpak sandbox
+  - --socket=session-bus
   - --talk-name=org.freedesktop.secrets
-
   - --talk-name=org.freedesktop.Flatpak
+  - --talk-name=org.freedesktop.NetworkManager
 
+  # Display backend
   - --env=GDK_BACKEND=wayland,x11
+  # WebKitGTK (wry) spawns sub-processes that try to create their own
+  # sandbox; that conflicts with Flatpak's sandbox, so we disable it.
+  - --env=WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   extension-tag: "${RUST_EXT_TAG}"
@@ -219,15 +339,16 @@ modules:
         CARGO_TARGET_DIR: /run/build/vertexlauncher/target
         CARGO_NET_OFFLINE: 'true'
         PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: '1'
-        PKG_CONFIG_PATH: /app/lib/pkgconfig:/app/share/pkgconfig:/usr/lib/pkgconfig
+        PKG_CONFIG_PATH: /app/lib/pkgconfig:/app/share/pkgconfig:/usr/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig
         RUST_BACKTRACE: '1'
+${cargo_aarch64_extra}
     build-commands:
       - cargo --version
       - rustc --version
       - cargo build --offline --release --locked
       - install -Dm755 target/release/vertexlauncher /app/bin/vertexlauncher
       - install -Dm644 flatpak/${APP_ID}.desktop /app/share/applications/${APP_ID}.desktop
-      - install -Dm644 flatpak/${APP_ID}.metainfo.xml /app/share/metainfo/${APP_ID}.metainfo.xml
+      - install -Dm644 flatpak/${APP_ID}.metainfo.xml /app/share/appdata/${APP_ID}.appdata.xml
       - install -Dm644 Vertex.svg /app/share/icons/hicolor/scalable/apps/${APP_ID}.svg
     sources:
       - type: dir
@@ -242,11 +363,18 @@ build_flatpak() {
     local repo_dir="${REPO_ROOT}/flatpak/repo/${arch}"
     local manifest_path="${GEN_DIR}/${APP_ID}-${arch}.yaml"
 
+    # The flatpak-builder state dir lives at .flatpak-builder/ in the repo root.
+    # For clean builds, wipe the build/ and checksums/ sub-trees so that stale
+    # "last cache hit" states (which cause "Cargo.toml not found" failures) are
+    # gone.  We keep downloads/ to avoid re-fetching every crate tarball.
+    local fb_state_dir="${REPO_ROOT}/.flatpak-builder"
+
     if [[ "${INCREMENTAL}" == "1" ]]; then
         rm -rf "${build_dir}"
         mkdir -p "${build_dir}" "${repo_dir}" "${DIST_DIR}"
     else
         rm -rf "${build_dir}" "${repo_dir}"
+        rm -rf "${fb_state_dir}/build" "${fb_state_dir}/checksums" "${fb_state_dir}/rofiles"
         mkdir -p "${build_dir}" "${repo_dir}" "${DIST_DIR}"
     fi
 
@@ -257,7 +385,10 @@ build_flatpak() {
             --arch="${arch}" \
             --repo="${repo_dir}" \
             "${build_dir}" \
-            "${manifest_path}"
+            "${manifest_path}" || {
+                log "Flatpak build failed for arch: ${arch}"
+                exit 1
+            }
     else
         log "Building Flatpak from clean source tree (arch: ${arch})"
         flatpak-builder \
@@ -266,7 +397,10 @@ build_flatpak() {
             --arch="${arch}" \
             --repo="${repo_dir}" \
             "${build_dir}" \
-            "${manifest_path}"
+            "${manifest_path}" || {
+                log "Flatpak build failed for arch: ${arch}"
+                exit 1
+            }
     fi
 
     log "Updating local repo metadata"
@@ -290,6 +424,7 @@ build_flatpak() {
 
     log "Bundling ${app_ref}"
     flatpak build-bundle \
+        --arch="${arch}" \
         "${repo_dir}" \
         "${DIST_DIR}/${APP_ID}-${arch}.flatpak" \
         "${APP_ID}" \
@@ -335,15 +470,26 @@ main() {
         fi
 
         ensure_runtime_bits
+        ensure_appstream_compose "${arch}"
 
         if [[ "${source_prepared}" -eq 0 ]]; then
             prepare_clean_source_tree
-            generate_cargo_sources
+            if ! prebuilt_aarch64 "${arch}"; then
+                generate_cargo_sources || {
+                    log "Failed to generate cargo-sources.json"
+                    exit 1
+                }
+            else
+                log "Skipping cargo-sources generation (prebuilt binary provided)"
+            fi
             source_prepared=1
         fi
 
         write_manifest "${arch}"
-        build_flatpak "${arch}"
+        build_flatpak "${arch}" || {
+            log "Failed to build Flatpak for arch: ${arch}"
+            exit 1
+        }
 
         log "Bundle: ${DIST_DIR}/${APP_ID}-${arch}.flatpak"
     done
