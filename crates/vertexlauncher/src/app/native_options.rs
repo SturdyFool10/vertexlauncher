@@ -102,7 +102,7 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
         },
         renderer,
         hardware_acceleration,
-        vsync: false,
+        vsync: true,
         multisampling: 4,
         depth_buffer: 32,
         stencil_buffer: 0,
@@ -113,8 +113,8 @@ pub fn build(startup_config: &Config) -> eframe::NativeOptions {
         window_builder: None,
         run_and_return: false,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-            present_mode: wgpu::PresentMode::AutoNoVsync,
-            desired_maximum_frame_latency: Some(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            desired_maximum_frame_latency: Some(2),
             wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(wgpu_setup),
             on_surface_status: std::sync::Arc::new(|_| {
                 eframe::egui_wgpu::SurfaceErrorAction::RecreateSurface

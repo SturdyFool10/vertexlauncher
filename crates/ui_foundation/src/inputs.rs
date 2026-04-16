@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use egui::{Color32, CornerRadius, Response, Ui, Vec2};
+use egui::{Color32, CornerRadius, Response, Sense, Ui, Vec2};
 use textui::TextUi;
 use textui_egui::prelude::*;
 
@@ -35,26 +35,52 @@ pub fn themed_text_input(
 
 pub fn selectable_row_button(
     ui: &mut Ui,
-    label: impl Into<egui::WidgetText>,
+    text_ui: &mut TextUi,
+    id_source: impl Hash,
+    label: &str,
     selected: bool,
     min_size: Vec2,
 ) -> Response {
-    ui.add_sized(
-        min_size,
-        egui::Button::new(label)
-            .selected(selected)
-            .fill(if selected {
-                ui.visuals().selection.bg_fill
-            } else {
-                ui.visuals().widgets.inactive.bg_fill
-            })
-            .stroke(if selected {
-                ui.visuals().selection.stroke
-            } else {
-                ui.visuals().widgets.inactive.bg_stroke
-            })
-            .corner_radius(CornerRadius::same(8)),
-    )
+    let (rect, response) = ui.allocate_exact_size(min_size, Sense::click());
+    let fill = if selected {
+        ui.visuals().selection.bg_fill
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered.bg_fill
+    } else {
+        ui.visuals().widgets.inactive.bg_fill
+    };
+    let stroke = if selected {
+        ui.visuals().selection.stroke
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered.bg_stroke
+    } else {
+        ui.visuals().widgets.inactive.bg_stroke
+    };
+    let text_color = if selected {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.visuals().text_color()
+    };
+
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(8), fill);
+    ui.painter()
+        .rect_stroke(rect, CornerRadius::same(8), stroke, egui::StrokeKind::Inside);
+
+    let text_rect = rect.shrink2(egui::vec2(10.0, 4.0));
+    let label_options = LabelOptions {
+        color: text_color,
+        wrap: true,
+        ..LabelOptions::default()
+    };
+    ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+        ui.set_clip_rect(text_rect.intersect(ui.clip_rect()));
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            let _ = text_ui.label(ui, id_source, label, &label_options);
+        });
+    });
+
+    response
 }
 
 fn max_corner_radius(corner_radius: CornerRadius) -> u8 {

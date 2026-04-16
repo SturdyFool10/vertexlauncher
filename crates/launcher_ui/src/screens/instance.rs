@@ -13,9 +13,10 @@ use installation::{
     DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, LaunchRequest,
     LoaderSupportIndex, LoaderVersionIndex, MinecraftVersionEntry, VersionCatalog,
     VersionCatalogFilter,
-    display_user_path, ensure_game_files, ensure_openjdk_runtime, fetch_loader_versions_for_game,
-    fetch_version_catalog_with_refresh, is_instance_running_for_account, launch_instance,
-    normalize_path_key, running_instance_for_account, stop_running_instance_for_account,
+    display_user_path, ensure_game_files_async, ensure_openjdk_runtime_async,
+    fetch_loader_versions_for_game, fetch_version_catalog_with_refresh,
+    is_instance_running_for_account, launch_instance, normalize_path_key,
+    running_instance_for_account, stop_running_instance_for_account,
 };
 use instances::{
     InstanceStore, record_instance_launch_usage, set_instance_settings, set_instance_versions,

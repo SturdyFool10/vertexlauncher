@@ -7,7 +7,7 @@ use std::{
 use config::{Config, JavaRuntimeVersion};
 use installation::{
     DownloadPolicy, InstallProgressCallback, LaunchRequest, LaunchResult, display_user_path,
-    ensure_game_files, ensure_openjdk_runtime, launch_instance,
+    ensure_game_files_async, ensure_openjdk_runtime_async, launch_instance,
 };
 use instances::{
     InstanceRecord, InstanceStore, delete_instance_root_path, instance_root_path,
@@ -112,6 +112,17 @@ pub(super) fn request_runtime_launch(
         .unwrap_or_default();
     let required_java_major = effective_required_java_major(config, game_version.as_str());
     let java_executable = choose_java_executable(config, instance, required_java_major);
+    let java_launch_mode = if let Some(path) = java_executable
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        format!("configured Java at {path}")
+    } else if let Some(runtime_major) = required_java_major {
+        format!("auto-provisioned OpenJDK {runtime_major}")
+    } else {
+        "java from PATH".to_owned()
+    };
     let download_max_concurrent = config.download_max_concurrent().max(1);
     let download_speed_limit_bps = config.parsed_download_speed_limit_bps();
     let default_instance_max_memory_mib = config.default_instance_max_memory_mib();
@@ -130,6 +141,7 @@ pub(super) fn request_runtime_launch(
         .as_deref()
         .and_then(normalize_optional)
         .or(default_instance_cli_args);
+    let extra_env_vars = instance.env_vars.as_deref().and_then(normalize_optional);
     let (linux_set_opengl_driver, linux_use_zink_driver) =
         instances::effective_linux_graphics_settings(
             instance,
@@ -169,12 +181,13 @@ pub(super) fn request_runtime_launch(
     console::push_line_to_tab(
         tab_id.as_str(),
         format!(
-            "Launch request: root={} | Minecraft {} | {}{} | max memory={} MiB",
+            "Launch request: root={} | Minecraft {} | {}{} | max memory={} MiB | {}",
             instance_root_display,
             game_version,
             modloader,
             modloader_version_display,
             max_memory_mib.max(512),
+            java_launch_mode,
         ),
     );
     state.pending_launch_contexts.insert(
@@ -191,131 +204,159 @@ pub(super) fn request_runtime_launch(
     let instance_id_for_result = instance_id.clone();
     let instance_root_for_join_log = instance_root.clone();
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = tokio_runtime::spawn_blocking(move || {
+        let mut configured_java = None;
+        let java_path_result = if let Some(path) = java_executable
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            match tokio::fs::metadata(path).await {
+                Ok(_) => Ok(path.to_owned()),
+                Err(_) if required_java_major.is_some() => {
+                    let runtime_major = required_java_major.unwrap_or_default();
+                    ensure_openjdk_runtime_async(runtime_major)
+                        .await
+                        .map(|installed| {
+                            let installed = display_user_path(installed.as_path());
+                            configured_java = Some((runtime_major, installed.clone()));
+                            installed
+                        })
+                        .map_err(|err| {
+                            format!("failed to auto-install OpenJDK {runtime_major}: {err}")
+                        })
+                }
+                Err(err) => Err(format!(
+                    "configured Java path is not readable ({path}): {err}"
+                )),
+            }
+        } else if let Some(runtime_major) = required_java_major {
+            ensure_openjdk_runtime_async(runtime_major)
+                .await
+                .map(|installed| {
+                    let installed = display_user_path(installed.as_path());
+                    configured_java = Some((runtime_major, installed.clone()));
+                    installed
+                })
+                .map_err(|err| format!("failed to auto-install OpenJDK {runtime_major}: {err}"))
+        } else {
+            Ok("java".to_owned())
+        };
+
+        let result = if let Ok(java_path) = java_path_result {
+            'launch_result: {
             tracing::info!(
                 target: "vertexlauncher/library_runtime",
                 instance_id = %instance_id,
                 instance_root = %instance_root.display(),
                 game_version = %game_version,
                 modloader = %modloader,
+                java_executable = %java_path,
+                required_java_major = ?required_java_major,
                 "Starting library runtime launch task."
             );
-            let result = (|| -> Result<RuntimeLaunchOutcome, String> {
-                let mut configured_java = None;
-                let java_path = if let Some(path) = java_executable
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .filter(|value| Path::new(value).exists())
-                    .map(str::to_owned)
-                {
-                    path
-                } else if let Some(runtime_major) = required_java_major {
-                    let installed = ensure_openjdk_runtime(runtime_major).map_err(|err| {
-                        format!("failed to auto-install OpenJDK {runtime_major}: {err}")
-                    })?;
-                    let installed = display_user_path(installed.as_path());
-                    configured_java = Some((runtime_major, installed.clone()));
-                    installed
-                } else {
-                    "java".to_owned()
-                };
-
-                let progress_instance_id = instance_id.clone();
-                install_activity::set_status(
-                    instance_id.as_str(),
-                    installation::InstallStage::ResolvingMetadata,
-                    format!("Preparing Minecraft {}...", game_version),
-                );
-                let progress_cb: InstallProgressCallback =
-                    Arc::new(move |progress: installation::InstallProgress| {
-                        install_activity::set_progress(progress_instance_id.as_str(), &progress);
-                    });
-
-                let setup = ensure_game_files(
-                    instance_root.as_path(),
-                    game_version.as_str(),
-                    modloader.as_str(),
-                    modloader_version.as_deref(),
-                    Some(java_path.as_str()),
-                    &download_policy,
-                    Some(progress_cb),
-                )
-                .map_err(|err| {
-                    install_activity::clear_instance(instance_id.as_str());
-                    err.to_string()
-                })?;
-                install_activity::clear_instance(instance_id.as_str());
-                tracing::info!(
-                    target: "vertexlauncher/library_runtime",
-                    instance_id = %instance_id,
-                    instance_root = %instance_root.display(),
-                    downloaded_files = setup.downloaded_files,
-                    "Library runtime launch completed ensure_game_files."
-                );
-
-                let launch_request = LaunchRequest {
-                    instance_root: instance_root.clone(),
-                    game_version: game_version.clone(),
-                    modloader: modloader.clone(),
-                    modloader_version: modloader_version.clone(),
-                    account_key: launch_account_name.clone(),
-                    java_executable: Some(java_path),
-                    max_memory_mib,
-                    extra_jvm_args: extra_jvm_args.clone(),
-                    player_name: player_name.clone().or(launch_account_name.clone()),
-                    player_uuid: player_uuid.clone(),
-                    auth_access_token: access_token.clone(),
-                    auth_xuid: xuid.clone(),
-                    auth_user_type: user_type.clone(),
-                    quick_play_singleplayer: quick_play_singleplayer.clone(),
-                    quick_play_multiplayer: quick_play_multiplayer.clone(),
-                    linux_set_opengl_driver,
-                    linux_use_zink_driver,
-                };
-                tracing::info!(
-                    target: "vertexlauncher/library_runtime",
-                    instance_id = %instance_id,
-                    instance_root = %instance_root.display(),
-                    "Launching prepared library instance."
-                );
-                let launch = launch_instance(&launch_request).map_err(|err| err.to_string())?;
-                Ok(RuntimeLaunchOutcome {
-                    launch,
-                    downloaded_files: setup.downloaded_files,
-                    resolved_modloader_version: setup.resolved_modloader_version,
-                    configured_java,
-                })
-            })();
-            match &result {
-                Ok(_) => tracing::info!(
-                    target: "vertexlauncher/library_runtime",
-                    instance_id = %instance_id,
-                    instance_root = %instance_root.display(),
-                    "Library runtime launch task finished successfully."
-                ),
-                Err(error) => tracing::warn!(
-                    target: "vertexlauncher/library_runtime",
-                    instance_id = %instance_id,
-                    instance_root = %instance_root.display(),
-                    error = %error,
-                    "Library runtime launch task failed."
-                ),
-            }
-            result
-        })
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: "vertexlauncher/library_runtime",
-                instance_id = %instance_id_for_join_log,
-                instance_root = %instance_root_for_join_log.display(),
-                error = %err,
-                "Library runtime launch task join failed."
+            let progress_instance_id = instance_id.clone();
+            install_activity::set_status(
+                instance_id.as_str(),
+                installation::InstallStage::ResolvingMetadata,
+                format!("Preparing Minecraft {}...", game_version),
             );
-            format!("{LIBRARY_RUNTIME_LAUNCH_TASK_KIND} failed: {err}")
-        })
-        .and_then(|result| result);
+            let progress_cb: InstallProgressCallback =
+                Arc::new(move |progress: installation::InstallProgress| {
+                    install_activity::set_progress(progress_instance_id.as_str(), &progress);
+                });
+            let setup = ensure_game_files_async(
+                instance_root.clone(),
+                game_version.clone(),
+                modloader.clone(),
+                modloader_version.clone(),
+                Some(java_path.clone()),
+                download_policy,
+                Some(progress_cb),
+            )
+            .await
+            .map_err(|err| {
+                install_activity::clear_instance(instance_id.as_str());
+                err.to_string()
+            });
+            let setup = match setup {
+                Ok(setup) => setup,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "vertexlauncher/library_runtime",
+                        instance_id = %instance_id,
+                        instance_root = %instance_root.display(),
+                        error = %err,
+                        "Library runtime launch task failed."
+                    );
+                    break 'launch_result Err(err);
+                }
+            };
+            install_activity::clear_instance(instance_id.as_str());
+            tracing::info!(
+                target: "vertexlauncher/library_runtime",
+                instance_id = %instance_id,
+                instance_root = %instance_root.display(),
+                downloaded_files = setup.downloaded_files,
+                "Library runtime launch completed ensure_game_files."
+            );
+            let downloaded_files = setup.downloaded_files;
+            let resolved_modloader_version = setup.resolved_modloader_version;
+            let launch_request = LaunchRequest {
+                instance_root: instance_root.clone(),
+                game_version: game_version.clone(),
+                modloader: modloader.clone(),
+                modloader_version: modloader_version.clone(),
+                account_key: launch_account_name.clone(),
+                java_executable: Some(java_path),
+                max_memory_mib,
+                extra_jvm_args: extra_jvm_args.clone(),
+                extra_env_vars: extra_env_vars.clone(),
+                player_name: player_name.clone().or(launch_account_name.clone()),
+                player_uuid: player_uuid.clone(),
+                auth_access_token: access_token.clone(),
+                auth_xuid: xuid.clone(),
+                auth_user_type: user_type.clone(),
+                quick_play_singleplayer: quick_play_singleplayer.clone(),
+                quick_play_multiplayer: quick_play_multiplayer.clone(),
+                linux_set_opengl_driver,
+                linux_use_zink_driver,
+            };
+            let launch = tokio_runtime::spawn_blocking(move || launch_instance(&launch_request))
+                .await
+                .map_err(|err| format!("{LIBRARY_RUNTIME_LAUNCH_TASK_KIND} failed: {err}"))
+                .and_then(|result| result.map_err(|err| err.to_string()));
+            match launch {
+                Ok(launch) => {
+                    tracing::info!(
+                        target: "vertexlauncher/library_runtime",
+                        instance_id = %instance_id,
+                        instance_root = %instance_root.display(),
+                        "Library runtime launch task finished successfully."
+                    );
+                    Ok(RuntimeLaunchOutcome {
+                        launch,
+                        downloaded_files,
+                        resolved_modloader_version,
+                        configured_java,
+                    })
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        target: "vertexlauncher/library_runtime",
+                        instance_id = %instance_id,
+                        instance_root = %instance_root.display(),
+                        error = %err,
+                        "Library runtime launch task failed."
+                    );
+                    Err(err)
+                }
+            }
+            }
+        } else {
+            Err(java_path_result
+                .err()
+                .unwrap_or_else(|| "failed to select Java executable".to_owned()))
+        };
 
         if let Err(err) = tx.send(RuntimeLaunchResult {
             instance_id: instance_id_for_result,
@@ -501,12 +542,10 @@ fn choose_java_executable(
 }
 
 fn required_java_major(game_version: &str) -> Option<u8> {
-    let mut parts = game_version
-        .split('.')
-        .filter_map(|part| part.parse::<u32>().ok());
-    let major = parts.next()?;
-    let minor = parts.next()?;
-    let patch = parts.next().unwrap_or(0);
+    let parsed = parse_java_version_key(game_version)?;
+    let major = parsed.major;
+    let minor = parsed.minor;
+    let patch = parsed.patch;
 
     if major != 1 {
         return major.checked_sub(1).and_then(|v| u8::try_from(v).ok());
@@ -524,6 +563,53 @@ fn required_java_major(game_version: &str) -> Option<u8> {
         return Some(21);
     }
     Some(17)
+}
+
+#[derive(Clone, Copy)]
+struct JavaVersionKey {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+fn parse_java_version_key(game_version: &str) -> Option<JavaVersionKey> {
+    let trimmed = game_version.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((year, week)) = trimmed.split_once('w') {
+        let major = parse_ascii_u32_prefix(year)?;
+        if major >= 26 && parse_ascii_u32_prefix(week).is_some() {
+            return Some(JavaVersionKey {
+                major,
+                minor: 0,
+                patch: 0,
+            });
+        }
+    }
+
+    let mut parts = trimmed.split(['.', '-']);
+    let major = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let minor = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let patch = parts.next().and_then(parse_ascii_u32_prefix).unwrap_or(0);
+    Some(JavaVersionKey {
+        major,
+        minor,
+        patch,
+    })
+}
+
+fn parse_ascii_u32_prefix(value: &str) -> Option<u32> {
+    let digits_len = value
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits_len == 0 {
+        return None;
+    }
+    value.get(..digits_len)?.parse().ok()
 }
 
 fn effective_required_java_major(config: &Config, game_version: &str) -> Option<u8> {

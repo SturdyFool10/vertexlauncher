@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Mutex};
 
 #[derive(Clone, Debug)]
 pub(super) struct MoveInstanceProgress {
@@ -35,8 +35,8 @@ use installation::{
 use vtmpack::{VtmpackExportOptions, VtmpackExportProgress, VtmpackExportStats};
 
 use super::{
-    ContentApplyResult, ContentLookupResult, INSTALLED_CONTENT_PAGE_SIZES, InstalledContentCache,
-    RuntimePrepareOutcome, split_modloader,
+    split_modloader, ContentApplyResult, ContentLookupResult, InstalledContentCache,
+    RuntimePrepareOutcome, INSTALLED_CONTENT_PAGE_SIZES,
 };
 
 #[derive(Clone, Debug)]
@@ -118,6 +118,7 @@ pub(super) struct InstanceScreenState {
     pub(super) memory_override_enabled: bool,
     pub(super) memory_override_mib: u128,
     pub(super) cli_args_input: String,
+    pub(super) env_vars_input: String,
     pub(super) java_override_enabled: bool,
     pub(super) java_override_runtime_major: Option<u8>,
     pub(super) linux_set_opengl_driver: bool,
@@ -302,6 +303,7 @@ impl InstanceScreenState {
                 .cli_args
                 .clone()
                 .unwrap_or_else(|| config.default_instance_cli_args().to_owned()),
+            env_vars_input: instance.env_vars.clone().unwrap_or_default(),
             java_override_enabled: instance.java_override_enabled,
             java_override_runtime_major: instance.java_override_runtime_major,
             linux_set_opengl_driver,

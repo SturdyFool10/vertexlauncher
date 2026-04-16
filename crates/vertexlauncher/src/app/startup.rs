@@ -150,86 +150,106 @@ pub(super) fn start_initial_instance_install(
         ));
         let notification_source_for_progress = notification_source.clone();
         let activity_instance_for_progress = activity_instance.clone();
-        let result: Result<_, String> = (|| {
+        let runtime = recommended_java_runtime_for_game(game_version.as_str());
+        let configured_java = runtime.and_then(|runtime| match runtime {
+            JavaRuntimeVersion::Java8 => java_8.as_deref(),
+            JavaRuntimeVersion::Java16 => java_16.as_deref(),
+            JavaRuntimeVersion::Java17 => java_17.as_deref(),
+            JavaRuntimeVersion::Java21 => java_21.as_deref(),
+            JavaRuntimeVersion::Java25 => java_25.as_deref(),
+        });
+        let java_path_result = if let Some(path) = configured_java
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            match tokio::fs::metadata(path).await {
+                Ok(_) => Ok(path.to_owned()),
+                Err(_) if runtime.is_some() => {
+                    let runtime = runtime.expect("runtime checked above");
+                    ensure_openjdk_runtime_async(runtime.major())
+                        .await
+                        .map(|path| display_user_path(path.as_path()))
+                        .map_err(|err| {
+                            format!("failed to auto-install OpenJDK {}: {err}", runtime.major())
+                        })
+                }
+                Err(err) => Err(format!(
+                    "configured Java path is not readable ({path}): {err}"
+                )),
+            }
+        } else if let Some(runtime) = runtime {
+            ensure_openjdk_runtime_async(runtime.major())
+                .await
+                .map(|path| display_user_path(path.as_path()))
+                .map_err(|err| format!("failed to auto-install OpenJDK {}: {err}", runtime.major()))
+        } else {
+            Ok("java".to_owned())
+        };
+
+        let result: Result<_, String> = if let Ok(java_path) = java_path_result {
             let progress_callback: InstallProgressCallback = {
                 let last_emit = Arc::clone(&last_emit);
                 Arc::new(move |progress: InstallProgress| {
-                    install_activity::set_progress(
-                        activity_instance_for_progress.as_str(),
-                        &progress,
-                    );
-                    let should_emit = if let Ok(mut last) = last_emit.lock() {
-                        if last.elapsed() >= std::time::Duration::from_millis(250) {
-                            *last = std::time::Instant::now();
-                            true
+                        install_activity::set_progress(
+                            activity_instance_for_progress.as_str(),
+                            &progress,
+                        );
+                        let should_emit = if let Ok(mut last) = last_emit.lock() {
+                            if last.elapsed() >= std::time::Duration::from_millis(250) {
+                                *last = std::time::Instant::now();
+                                true
+                            } else {
+                                false
+                            }
                         } else {
                             false
+                        };
+                        if !should_emit {
+                            return;
                         }
-                    } else {
-                        false
-                    };
-                    if !should_emit {
-                        return;
-                    }
-                    let fraction = if progress.total_files > 0 {
-                        (progress.downloaded_files as f32 / progress.total_files as f32)
-                            .clamp(0.0, 1.0)
-                    } else if let Some(total) = progress.total_bytes {
-                        if total > 0 {
-                            (progress.downloaded_bytes as f32 / total as f32).clamp(0.0, 1.0)
+                        let fraction = if progress.total_files > 0 {
+                            (progress.downloaded_files as f32 / progress.total_files as f32)
+                                .clamp(0.0, 1.0)
+                        } else if let Some(total) = progress.total_bytes {
+                            if total > 0 {
+                                (progress.downloaded_bytes as f32 / total as f32).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            }
                         } else {
                             0.0
-                        }
-                    } else {
-                        0.0
-                    };
-                    notification::progress!(
-                        notification::Severity::Info,
-                        notification_source_for_progress.clone(),
-                        fraction,
-                        "{} · {:.1} MiB/s{}",
-                        progress.message,
-                        progress.bytes_per_second / (1024.0 * 1024.0),
-                        progress
-                            .eta_seconds
-                            .map(|eta| format!(" · ETA {}s", eta))
-                            .unwrap_or_default()
-                    );
+                        };
+                        notification::progress!(
+                            notification::Severity::Info,
+                            notification_source_for_progress.clone(),
+                            fraction,
+                            "{} · {:.1} MiB/s{}",
+                            progress.message,
+                            progress.bytes_per_second / (1024.0 * 1024.0),
+                            progress
+                                .eta_seconds
+                                .map(|eta| format!(" · ETA {}s", eta))
+                                .unwrap_or_default()
+                        );
                 })
             };
-            let runtime = recommended_java_runtime_for_game(game_version.as_str());
-            let configured_java = runtime.and_then(|runtime| match runtime {
-                JavaRuntimeVersion::Java8 => java_8.as_deref(),
-                JavaRuntimeVersion::Java16 => java_16.as_deref(),
-                JavaRuntimeVersion::Java17 => java_17.as_deref(),
-                JavaRuntimeVersion::Java21 => java_21.as_deref(),
-                JavaRuntimeVersion::Java25 => java_25.as_deref(),
-            });
-            let java_path = configured_java
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .filter(|value| Path::new(value).exists())
-                .map(str::to_owned)
-                .or_else(|| {
-                    runtime.and_then(|runtime| {
-                        ensure_openjdk_runtime(runtime.major())
-                            .ok()
-                            .map(|path| display_user_path(path.as_path()))
-                    })
-                })
-                .unwrap_or_else(|| "java".to_owned());
 
-            ensure_game_files(
-                instance_root.as_path(),
-                game_version.as_str(),
-                modloader.as_str(),
-                modloader_version.as_deref(),
-                Some(java_path.as_str()),
-                &download_policy,
+            ensure_game_files_async(
+                instance_root.clone(),
+                game_version.clone(),
+                modloader.clone(),
+                modloader_version.clone(),
+                Some(java_path),
+                download_policy,
                 Some(progress_callback),
             )
+            .await
             .map_err(|err| err.to_string())
-        })();
+        } else {
+            Err(java_path_result
+                .err()
+                .unwrap_or_else(|| "failed to select Java executable".to_owned()))
+        };
 
         match result {
             Ok(setup) => {
@@ -285,12 +305,10 @@ pub(super) fn start_initial_instance_install(
 }
 
 pub(super) fn recommended_java_runtime_for_game(game_version: &str) -> Option<JavaRuntimeVersion> {
-    let mut parts = game_version
-        .split('.')
-        .filter_map(|part| part.parse::<u32>().ok());
-    let major = parts.next()?;
-    let minor = parts.next()?;
-    let patch = parts.next().unwrap_or(0);
+    let parsed = parse_java_version_key(game_version)?;
+    let major = parsed.major;
+    let minor = parsed.minor;
+    let patch = parsed.patch;
 
     if major != 1 {
         // New versioning scheme (e.g. 26.x): Java version is major - 1
@@ -306,6 +324,53 @@ pub(super) fn recommended_java_runtime_for_game(game_version: &str) -> Option<Ja
         return Some(JavaRuntimeVersion::Java21);
     }
     Some(JavaRuntimeVersion::Java17)
+}
+
+#[derive(Clone, Copy)]
+struct JavaVersionKey {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+fn parse_java_version_key(game_version: &str) -> Option<JavaVersionKey> {
+    let trimmed = game_version.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((year, week)) = trimmed.split_once('w') {
+        let major = parse_ascii_u32_prefix(year)?;
+        if major >= 26 && parse_ascii_u32_prefix(week).is_some() {
+            return Some(JavaVersionKey {
+                major,
+                minor: 0,
+                patch: 0,
+            });
+        }
+    }
+
+    let mut parts = trimmed.split(['.', '-']);
+    let major = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let minor = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let patch = parts.next().and_then(parse_ascii_u32_prefix).unwrap_or(0);
+    Some(JavaVersionKey {
+        major,
+        minor,
+        patch,
+    })
+}
+
+fn parse_ascii_u32_prefix(value: &str) -> Option<u32> {
+    let digits_len = value
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits_len == 0 {
+        return None;
+    }
+    value.get(..digits_len)?.parse().ok()
 }
 
 pub fn run() -> Result<(), RunError> {

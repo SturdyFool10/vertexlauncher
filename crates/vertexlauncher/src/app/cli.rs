@@ -1,5 +1,4 @@
 use std::env;
-use std::fs;
 use std::io::Read;
 use std::path::Path;
 
@@ -7,8 +6,8 @@ use auth::{CachedAccount, CachedAccountsState};
 use config::{Config, JavaRuntimeVersion, LoadConfigResult, load_config};
 use flate2::read::GzDecoder;
 use installation::{
-    DownloadPolicy, LaunchRequest, display_user_path, ensure_game_files, ensure_openjdk_runtime,
-    launch_instance,
+    DownloadPolicy, LaunchRequest, display_user_path, ensure_game_files_async,
+    ensure_openjdk_runtime_async, launch_instance,
 };
 use instances::{
     InstanceRecord, InstanceStore, instance_root_path, load_store, record_instance_launch_usage,
@@ -62,7 +61,8 @@ pub fn maybe_run_from_args() -> Result<bool, String> {
             let instance = resolve_instance(&store, instance.as_str())?;
             let instance_root =
                 instance_root_path(config.minecraft_installations_root_path(), instance);
-            print_targets(instance, instance_root.as_path());
+            launcher_runtime::block_on(print_targets(instance, instance_root.as_path()))
+                .map_err(|err| err.to_string())?;
             Ok(true)
         }
         CliCommand::Launch {
@@ -79,13 +79,13 @@ pub fn maybe_run_from_args() -> Result<bool, String> {
                 world,
                 server,
             };
-            run_quick_launch(spec)?;
+            launcher_runtime::block_on(run_quick_launch(spec)).map_err(|err| err.to_string())??;
             Ok(true)
         }
     }
 }
 
-fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
+async fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
     let config = startup_config();
     let mut store = load_store().map_err(|err| format!("failed to load instances: {err}"))?;
     let instance = resolve_instance(&store, spec.instance.as_str())?.clone();
@@ -105,7 +105,7 @@ fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
         QuickLaunchMode::World => {
             let selector =
                 world_selector.ok_or_else(|| "missing --world for world launch".to_owned())?;
-            Some(resolve_world_name(instance_root.as_path(), selector)?)
+            Some(resolve_world_name(instance_root.as_path(), selector).await?)
         }
         _ => None,
     };
@@ -113,7 +113,7 @@ fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
         QuickLaunchMode::Server => {
             let selector =
                 server_selector.ok_or_else(|| "missing --server for server launch".to_owned())?;
-            Some(resolve_server_address(instance_root.as_path(), selector)?)
+            Some(resolve_server_address(instance_root.as_path(), selector).await?)
         }
         _ => None,
     };
@@ -121,17 +121,18 @@ fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
         max_concurrent_downloads: config.download_max_concurrent().max(1),
         max_download_bps: config.parsed_download_speed_limit_bps(),
     };
-    let java_path = select_java_path(&config, instance.game_version.as_str())?;
+    let java_path = select_java_path(&config, instance.game_version.as_str()).await?;
     let modloader_version = normalize_optional(instance.modloader_version.as_str());
-    let setup = ensure_game_files(
-        instance_root.as_path(),
-        instance.game_version.as_str(),
-        instance.modloader.as_str(),
-        modloader_version.as_deref(),
-        Some(java_path.as_str()),
-        &download_policy,
+    let setup = ensure_game_files_async(
+        instance_root.clone(),
+        instance.game_version.clone(),
+        instance.modloader.clone(),
+        modloader_version.clone(),
+        Some(java_path.clone()),
+        download_policy,
         None,
     )
+    .await
     .map_err(|err| err.to_string())?;
     let (linux_set_opengl_driver, linux_use_zink_driver) =
         instances::effective_linux_graphics_settings(
@@ -154,6 +155,7 @@ fn run_quick_launch(spec: QuickLaunchSpec) -> Result<(), String> {
             .as_deref()
             .and_then(normalize_optional)
             .or_else(|| normalize_optional(config.default_instance_cli_args())),
+        extra_env_vars: instance.env_vars.as_deref().and_then(normalize_optional),
         player_name: Some(account.minecraft_profile.name.clone()),
         player_uuid: Some(account.minecraft_profile.id.clone()),
         auth_access_token: account.minecraft_access_token.clone(),
@@ -295,14 +297,25 @@ fn resolve_instance<'a>(
         .ok_or_else(|| format!("instance '{selector}' not found"))
 }
 
-fn resolve_world_name(instance_root: &Path, selector: &str) -> Result<String, String> {
+async fn resolve_world_name(instance_root: &Path, selector: &str) -> Result<String, String> {
     let saves = instance_root.join("saves");
-    let entries = fs::read_dir(saves.as_path())
+    let mut entries = tokio::fs::read_dir(saves.as_path())
+        .await
         .map_err(|err| format!("failed to read worlds under '{}': {err}", saves.display()))?;
     let lowered = selector.to_ascii_lowercase();
     let mut candidates = Vec::new();
-    for entry in entries.flatten() {
-        if !entry.path().is_dir() {
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|err| format!("failed to read world entry under '{}': {err}", saves.display()))?
+    {
+        let file_type = entry.file_type().await.map_err(|err| {
+            format!(
+                "failed to inspect world entry under '{}': {err}",
+                saves.display()
+            )
+        })?;
+        if !file_type.is_dir() {
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
@@ -324,9 +337,10 @@ fn resolve_world_name(instance_root: &Path, selector: &str) -> Result<String, St
     ))
 }
 
-fn resolve_server_address(instance_root: &Path, selector: &str) -> Result<String, String> {
-    let servers =
-        parse_servers_dat(instance_root.join("servers.dat").as_path()).unwrap_or_default();
+async fn resolve_server_address(instance_root: &Path, selector: &str) -> Result<String, String> {
+    let servers = parse_servers_dat(instance_root.join("servers.dat").as_path())
+        .await
+        .unwrap_or_default();
     let lowered = selector.to_ascii_lowercase();
     if let Some(entry) = servers.iter().find(|entry| {
         entry.ip.eq_ignore_ascii_case(selector) || entry.name.to_ascii_lowercase() == lowered
@@ -336,15 +350,15 @@ fn resolve_server_address(instance_root: &Path, selector: &str) -> Result<String
     Ok(selector.to_owned())
 }
 
-fn print_targets(instance: &InstanceRecord, instance_root: &Path) {
+async fn print_targets(instance: &InstanceRecord, instance_root: &Path) {
     println!("Instance: {} ({})", instance.name, instance.id);
     println!("Worlds:");
     let saves = instance_root.join("saves");
-    match fs::read_dir(saves.as_path()) {
-        Ok(entries) => {
+    match tokio::fs::read_dir(saves.as_path()).await {
+        Ok(mut entries) => {
             let mut found = false;
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if entry.file_type().await.is_ok_and(|kind| kind.is_dir()) {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if !name.trim().is_empty() {
                         println!("  - {}", name);
@@ -360,7 +374,7 @@ fn print_targets(instance: &InstanceRecord, instance_root: &Path) {
     }
     println!("Servers:");
     let servers =
-        parse_servers_dat(instance_root.join("servers.dat").as_path()).unwrap_or_default();
+        parse_servers_dat(instance_root.join("servers.dat").as_path()).await.unwrap_or_default();
     if servers.is_empty() {
         println!("  (none)");
     } else {
@@ -492,17 +506,18 @@ fn normalize_optional(value: &str) -> Option<String> {
     }
 }
 
-fn select_java_path(config: &Config, game_version: &str) -> Result<String, String> {
+async fn select_java_path(config: &Config, game_version: &str) -> Result<String, String> {
     let runtime = recommended_java_runtime_for_game(game_version);
     let configured = runtime.and_then(|runtime| config.java_runtime_path_ref(runtime));
-    if let Some(path) = configured.filter(|path| path.exists()) {
+    if let Some(path) = configured {
         let normalized = path.as_os_str().to_string_lossy().trim().to_owned();
-        if !normalized.is_empty() {
+        if !normalized.is_empty() && tokio::fs::metadata(path).await.is_ok() {
             return Ok(normalized);
         }
     }
     if let Some(runtime) = runtime {
-        return ensure_openjdk_runtime(runtime.major())
+        return ensure_openjdk_runtime_async(runtime.major())
+            .await
             .map(|path| path.display().to_string())
             .map_err(|err| format!("failed to auto-install OpenJDK {}: {err}", runtime.major()));
     }
@@ -510,12 +525,10 @@ fn select_java_path(config: &Config, game_version: &str) -> Result<String, Strin
 }
 
 fn recommended_java_runtime_for_game(game_version: &str) -> Option<JavaRuntimeVersion> {
-    let mut parts = game_version
-        .split('.')
-        .filter_map(|part| part.parse::<u32>().ok());
-    let major = parts.next()?;
-    let minor = parts.next()?;
-    let patch = parts.next().unwrap_or(0);
+    let parsed = parse_java_version_key(game_version)?;
+    let major = parsed.major;
+    let minor = parsed.minor;
+    let patch = parsed.patch;
 
     if major != 1 {
         // New versioning scheme (e.g. 26.x): Java version is major - 1
@@ -531,6 +544,53 @@ fn recommended_java_runtime_for_game(game_version: &str) -> Option<JavaRuntimeVe
         return Some(JavaRuntimeVersion::Java21);
     }
     Some(JavaRuntimeVersion::Java17)
+}
+
+#[derive(Clone, Copy)]
+struct JavaVersionKey {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+fn parse_java_version_key(game_version: &str) -> Option<JavaVersionKey> {
+    let trimmed = game_version.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((year, week)) = trimmed.split_once('w') {
+        let major = parse_ascii_u32_prefix(year)?;
+        if major >= 26 && parse_ascii_u32_prefix(week).is_some() {
+            return Some(JavaVersionKey {
+                major,
+                minor: 0,
+                patch: 0,
+            });
+        }
+    }
+
+    let mut parts = trimmed.split(['.', '-']);
+    let major = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let minor = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let patch = parts.next().and_then(parse_ascii_u32_prefix).unwrap_or(0);
+    Some(JavaVersionKey {
+        major,
+        minor,
+        patch,
+    })
+}
+
+fn parse_ascii_u32_prefix(value: &str) -> Option<u32> {
+    let digits_len = value
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits_len == 0 {
+        return None;
+    }
+    value.get(..digits_len)?.parse().ok()
 }
 
 fn microsoft_client_id() -> Result<String, String> {
@@ -607,8 +667,8 @@ fn print_help() {
     );
 }
 
-fn parse_servers_dat(path: &Path) -> Option<Vec<ServerDatEntry>> {
-    let bytes = fs::read(path).ok()?;
+async fn parse_servers_dat(path: &Path) -> Option<Vec<ServerDatEntry>> {
+    let bytes = tokio::fs::read(path).await.ok()?;
     if bytes.is_empty() {
         return Some(Vec::new());
     }

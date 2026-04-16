@@ -186,7 +186,9 @@ impl TextUi {
             .rect_stroke(rect, corner_radius, frame_stroke, egui::StrokeKind::Inside);
 
         {
-            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            let painter = ui
+                .painter()
+                .with_clip_rect(content_rect.intersect(ui.clip_rect()));
             self.paint_editor_gpu(
                 &painter,
                 content_rect,
@@ -562,7 +564,9 @@ impl TextUi {
             .rect_stroke(rect, corner_radius, frame_stroke, egui::StrokeKind::Inside);
 
         {
-            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            let painter = ui
+                .painter()
+                .with_clip_rect(content_rect.intersect(ui.clip_rect()));
             self.paint_editor_gpu(
                 &painter,
                 content_rect,
@@ -609,7 +613,9 @@ impl TextUi {
                 Pos2::new(content_rect.min.x, content_rect.min.y + y_offset),
                 placeholder_size.min(content_rect.size()),
             );
-            let painter = ui.painter().with_clip_rect(ui.clip_rect());
+            let painter = ui
+                .painter()
+                .with_clip_rect(content_rect.intersect(ui.clip_rect()));
             self.paint_scene_in_rect(&painter, placeholder_rect, &placeholder_scene);
         }
 

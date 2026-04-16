@@ -137,6 +137,20 @@ where
     }
 }
 
+/// Runs an asynchronous operation to completion on the shared launcher runtime.
+pub fn block_on<F>(future: F) -> Result<F::Output, TaskError>
+where
+    F: Future,
+{
+    match runtime() {
+        Ok(runtime) => Ok(runtime.block_on(future)),
+        Err(error) => {
+            log_runtime_unavailable("block on async task", &error);
+            Err(TaskError::RuntimeUnavailable(error))
+        }
+    }
+}
+
 /// Runs a blocking closure on the runtime blocking thread pool.
 pub fn spawn_blocking<F, R>(task: F) -> TaskHandle<R>
 where

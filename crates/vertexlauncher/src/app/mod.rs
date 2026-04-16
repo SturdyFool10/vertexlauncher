@@ -6,8 +6,8 @@ use eframe::{self, egui, egui_wgpu::wgpu};
 use egui::CentralPanel;
 use installation::{
     DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, display_user_path,
-    ensure_game_files, ensure_openjdk_runtime, normalize_path_key, running_instance_for_account,
-    running_instance_roots, take_finished_instance_processes,
+    ensure_game_files_async, ensure_openjdk_runtime_async, normalize_path_key,
+    running_instance_for_account, running_instance_roots, take_finished_instance_processes,
 };
 use instances::{
     InstanceRecord, InstanceStore, create_instance, delete_instance, instance_root_path,

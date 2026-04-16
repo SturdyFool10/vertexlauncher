@@ -494,8 +494,12 @@ fn render_instance_tile(
                     }
                 }
                 ui.add_space(style::SPACE_SM);
-                let delete_response =
-                    render_delete_instance_button(ui, instance.id.as_str(), delete_disabled);
+                let delete_response = render_delete_instance_button(
+                    ui,
+                    text_ui,
+                    instance.id.as_str(),
+                    delete_disabled,
+                );
                 if delete_response.clicked() && !delete_disabled {
                     action = RuntimeAction::DeleteRequested;
                 }
@@ -720,7 +724,12 @@ fn render_runtime_action_button(
     response
 }
 
-fn render_delete_instance_button(ui: &mut Ui, instance_id: &str, disabled: bool) -> egui::Response {
+fn render_delete_instance_button(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    instance_id: &str,
+    disabled: bool,
+) -> egui::Response {
     let desired_size = egui::vec2(ui.available_width().max(1.0), TILE_DELETE_BUTTON_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
     let response = ui.interact(
@@ -775,15 +784,27 @@ fn render_delete_instance_button(ui: &mut Ui, instance_id: &str, disabled: bool)
             egui::StrokeKind::Outside,
         );
     }
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "Delete Instance",
-        egui::FontId::proportional(15.0),
-        text_color,
-    );
+    let label_style = LabelOptions {
+        font_size: 15.0,
+        line_height: 20.0,
+        color: text_color,
+        ..style::body_strong(ui)
+    };
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+        ui.with_layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                let _ = text_ui.label(
+                    ui,
+                    ("library_delete_instance_button_label", instance_id),
+                    "Delete Instance",
+                    &label_style,
+                );
+            },
+        );
+    });
 
-    let _ = instance_id;
     response
 }
 

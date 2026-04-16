@@ -250,6 +250,7 @@ pub(super) fn render_runtime_row(
                         config.default_instance_max_memory_mib()
                     };
                     let extra_jvm_args = normalize_optional(state.cli_args_input.as_str());
+                    let extra_env_vars = normalize_optional(state.env_vars_input.as_str());
                     state.launch_username = launch_display_name
                         .as_deref()
                         .map(|value| {
@@ -294,6 +295,7 @@ pub(super) fn render_runtime_row(
                         linux_use_zink_driver,
                         max_memory_mib,
                         extra_jvm_args,
+                        extra_env_vars,
                         state.launch_username.clone(),
                         launch_display_name.clone(),
                         launch_player_uuid.clone(),
@@ -667,7 +669,8 @@ pub(super) fn sync_version_catalog(
         let result: Result<VersionCatalog, String> = match tokio::time::timeout(
             VERSION_CATALOG_FETCH_TIMEOUT,
             tokio_runtime::spawn_blocking(move || {
-                fetch_version_catalog_with_refresh(filter, force_refresh).map_err(|err| err.to_string())
+                fetch_version_catalog_with_refresh(filter, force_refresh)
+                    .map_err(|err| err.to_string())
             }),
         )
         .await
@@ -1100,11 +1103,13 @@ pub(super) fn ensure_runtime_progress_channel(state: &mut InstanceScreenState) {
     state.runtime_progress_rx = Some(Arc::new(Mutex::new(rx)));
 }
 
-pub(super) fn reinstall_instance_profile_files(instance_root: &Path) -> Result<(), std::io::Error> {
+pub(super) async fn reinstall_instance_profile_files(
+    instance_root: &Path,
+) -> Result<(), std::io::Error> {
     const REINSTALL_PATHS: [&str; 5] = ["versions", "libraries", "assets", "natives", "loaders"];
     for relative in REINSTALL_PATHS {
         let path = instance_root.join(relative);
-        match std::fs::remove_dir_all(path.as_path()) {
+        match tokio::fs::remove_dir_all(path.as_path()).await {
             Ok(()) => {}
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
             Err(err) => return Err(err),
@@ -1128,6 +1133,7 @@ pub(super) fn request_runtime_prepare(
     linux_use_zink_driver: bool,
     max_memory_mib: u128,
     extra_jvm_args: Option<String>,
+    extra_env_vars: Option<String>,
     visible_username: Option<String>,
     player_name: Option<String>,
     player_uuid: Option<String>,
@@ -1174,6 +1180,7 @@ pub(super) fn request_runtime_prepare(
         .map(str::to_owned);
     let java_executable_for_task = java_executable;
     let extra_jvm_args_for_task = extra_jvm_args;
+    let extra_env_vars_for_task = extra_env_vars;
     let visible_username_for_task = visible_username;
     let player_name_for_task = player_name;
     let player_uuid_for_task = player_uuid;
@@ -1257,65 +1264,113 @@ pub(super) fn request_runtime_prepare(
     let instance_root_for_join_log = instance_root.clone();
     let _ = tokio_runtime::spawn_detached(async move {
         let progress_tx_done = progress_tx.clone();
-        let result = tokio_runtime::spawn_blocking(move || {
-            let instance_root_for_progress = instance_root.clone();
-            let game_version_for_progress = game_version_for_task.clone();
-            let operation_for_progress = operation;
-            let progress_callback: InstallProgressCallback = Arc::new(move |event| {
-                if let Err(err) = progress_tx.send(event) {
-                    tracing::error!(
-                        target: "vertexlauncher/instance_runtime",
-                        instance_root = %instance_root_for_progress.display(),
-                        game_version = %game_version_for_progress,
-                        operation = ?operation_for_progress,
-                        error = %err,
-                        "Failed to deliver runtime prepare progress update."
-                    );
+        let mut configured_java = None;
+        let java_path_result = if let Some(path) = java_executable_for_task
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            match tokio::fs::metadata(path).await {
+                Ok(_) => Ok(path.to_owned()),
+                Err(_) if required_java_major.is_some() => {
+                    let runtime_major = required_java_major.unwrap_or_default();
+                    ensure_openjdk_runtime_async(runtime_major)
+                        .await
+                        .map(|installed| {
+                            let installed = display_user_path(installed.as_path());
+                            configured_java = Some((runtime_major, installed.clone()));
+                            installed
+                        })
+                        .map_err(|err| {
+                            format!("failed to auto-install OpenJDK {runtime_major}: {err}")
+                        })
                 }
-            });
-            tracing::info!(
-                target: "vertexlauncher/instance_runtime",
-                instance_root = %instance_root.display(),
-                game_version = %game_version_for_task,
-                modloader = %modloader_for_task,
-                operation = ?operation,
-                "Starting instance runtime prepare task."
-            );
-            let result: Result<RuntimePrepareOutcome, String> = (|| {
-                let mut configured_java = None;
-                let java_path = if let Some(path) = java_executable_for_task
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .filter(|value| Path::new(value).exists())
-                    .map(str::to_owned)
-                {
-                    path
-                } else if let Some(runtime_major) = required_java_major {
-                    let installed = ensure_openjdk_runtime(runtime_major).map_err(|err| {
-                        format!("failed to auto-install OpenJDK {runtime_major}: {err}")
-                    })?;
+                Err(err) => Err(format!(
+                    "configured Java path is not readable ({path}): {err}"
+                )),
+            }
+        } else if let Some(runtime_major) = required_java_major {
+            ensure_openjdk_runtime_async(runtime_major)
+                .await
+                .map(|installed| {
                     let installed = display_user_path(installed.as_path());
                     configured_java = Some((runtime_major, installed.clone()));
                     installed
-                } else {
-                    "java".to_owned()
-                };
+                })
+                .map_err(|err| format!("failed to auto-install OpenJDK {runtime_major}: {err}"))
+        } else {
+            Ok("java".to_owned())
+        };
+
+        let result = if let Ok(java_path) = java_path_result {
+            'runtime_result: {
+                let instance_root_for_progress = instance_root.clone();
+                let game_version_for_progress = game_version_for_task.clone();
+                let operation_for_progress = operation;
+                let progress_callback: InstallProgressCallback = Arc::new(move |event| {
+                    if let Err(err) = progress_tx.send(event) {
+                        tracing::error!(
+                            target: "vertexlauncher/instance_runtime",
+                            instance_root = %instance_root_for_progress.display(),
+                            game_version = %game_version_for_progress,
+                            operation = ?operation_for_progress,
+                            error = %err,
+                            "Failed to deliver runtime prepare progress update."
+                        );
+                    }
+                });
+                tracing::info!(
+                    target: "vertexlauncher/instance_runtime",
+                    instance_root = %instance_root.display(),
+                    game_version = %game_version_for_task,
+                    modloader = %modloader_for_task,
+                    operation = ?operation,
+                    "Starting instance runtime prepare task."
+                );
+                tracing::info!(
+                    target: "vertexlauncher/instance_runtime",
+                    instance_root = %instance_root.display(),
+                    game_version = %game_version_for_task,
+                    java_executable = %java_path,
+                    required_java_major = ?required_java_major,
+                    operation = ?operation,
+                    "Selected Java executable for instance runtime task."
+                );
                 if operation == RuntimePrepareOperation::ReinstallProfile {
-                    reinstall_instance_profile_files(instance_root.as_path()).map_err(|err| {
-                        format!("failed to clear install artifacts before reinstall: {err}")
-                    })?;
+                    let reinstall_result = reinstall_instance_profile_files(instance_root.as_path())
+                        .await
+                        .map_err(|err| {
+                            format!("failed to clear install artifacts before reinstall: {err}")
+                        });
+                    if let Err(err) = reinstall_result {
+                        break 'runtime_result Err(err);
+                    }
                 }
-                let setup = ensure_game_files(
-                    instance_root.as_path(),
-                    game_version_for_task.as_str(),
-                    modloader_for_task.as_str(),
-                    modloader_version_for_task.as_deref(),
-                    Some(java_path.as_str()),
-                    &download_policy,
+                let setup = ensure_game_files_async(
+                    instance_root.clone(),
+                    game_version_for_task.clone(),
+                    modloader_for_task.clone(),
+                    modloader_version_for_task.clone(),
+                    Some(java_path.clone()),
+                    download_policy,
                     Some(progress_callback),
                 )
-                .map_err(|err| err.to_string())?;
+                .await
+                .map_err(|err| err.to_string());
+                let setup = match setup {
+                    Ok(setup) => setup,
+                    Err(err) => {
+                        tracing::warn!(
+                            target: "vertexlauncher/instance_runtime",
+                            instance_root = %instance_root.display(),
+                            game_version = %game_version_for_task,
+                            operation = ?operation,
+                            error = %err,
+                            "Instance runtime prepare task failed."
+                        );
+                        break 'runtime_result Err(err);
+                    }
+                };
                 tracing::info!(
                     target: "vertexlauncher/instance_runtime",
                     instance_root = %instance_root.display(),
@@ -1333,6 +1388,7 @@ pub(super) fn request_runtime_prepare(
                         java_executable: Some(java_path.clone()),
                         max_memory_mib,
                         extra_jvm_args: extra_jvm_args_for_task.clone(),
+                        extra_env_vars: extra_env_vars_for_task.clone(),
                         player_name: player_name_for_task
                             .clone()
                             .or(launch_account_name_for_task.clone()),
@@ -1351,49 +1407,36 @@ pub(super) fn request_runtime_prepare(
                         game_version = %game_version_for_task,
                         "Launching prepared instance runtime."
                     );
-                    Some(launch_instance(&launch_request).map_err(|err| err.to_string())?)
+                    match tokio_runtime::spawn_blocking(move || launch_instance(&launch_request))
+                        .await
+                        .map_err(|err| format!("{RUNTIME_PREPARE_TASK_KIND} failed: {err}"))
+                        .and_then(|result| result.map_err(|err| err.to_string()))
+                    {
+                        Ok(launch) => Some(launch),
+                        Err(err) => break 'runtime_result Err(err),
+                    }
                 } else {
                     None
                 };
+                tracing::info!(
+                    target: "vertexlauncher/instance_runtime",
+                    instance_root = %instance_root.display(),
+                    game_version = %game_version_for_task,
+                    operation = ?operation,
+                    "Instance runtime prepare task finished successfully."
+                );
                 Ok(RuntimePrepareOutcome {
                     operation,
                     setup,
                     configured_java,
                     launch,
                 })
-            })();
-            match &result {
-                Ok(_) => tracing::info!(
-                    target: "vertexlauncher/instance_runtime",
-                    instance_root = %instance_root.display(),
-                    game_version = %game_version_for_task,
-                    operation = ?operation,
-                    "Instance runtime prepare task finished successfully."
-                ),
-                Err(error) => tracing::warn!(
-                    target: "vertexlauncher/instance_runtime",
-                    instance_root = %instance_root.display(),
-                    game_version = %game_version_for_task,
-                    operation = ?operation,
-                    error = %error,
-                    "Instance runtime prepare task failed."
-                ),
             }
-            result
-        })
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                target: "vertexlauncher/instance_runtime",
-                instance_root = %instance_root_for_join_log.display(),
-                game_version = %game_version_for_result,
-                operation = ?operation,
-                error = %err,
-                "Instance runtime prepare task join failed."
-            );
-            format!("{RUNTIME_PREPARE_TASK_KIND} failed: {err}")
-        })
-        .and_then(|result| result);
+        } else {
+            Err(java_path_result
+                .err()
+                .unwrap_or_else(|| "failed to select Java executable".to_owned()))
+        };
         if let Err(err) = tx.send((
             game_version_for_result.clone(),
             instance_root_display.clone(),
@@ -1760,12 +1803,10 @@ pub(super) fn choose_java_executable(
 }
 
 pub(super) fn required_java_major(game_version: &str) -> Option<u8> {
-    let mut parts = game_version
-        .split('.')
-        .filter_map(|part| part.parse::<u32>().ok());
-    let major = parts.next()?;
-    let minor = parts.next()?;
-    let patch = parts.next().unwrap_or(0);
+    let parsed = parse_java_version_key(game_version)?;
+    let major = parsed.major;
+    let minor = parsed.minor;
+    let patch = parsed.patch;
 
     if major != 1 {
         // New versioning scheme (e.g. 26.x): Java version is major - 1
@@ -1784,6 +1825,53 @@ pub(super) fn required_java_major(game_version: &str) -> Option<u8> {
         return Some(21);
     }
     Some(17)
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct JavaVersionKey {
+    major: u32,
+    minor: u32,
+    patch: u32,
+}
+
+pub(super) fn parse_java_version_key(game_version: &str) -> Option<JavaVersionKey> {
+    let trimmed = game_version.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((year, week)) = trimmed.split_once('w') {
+        let major = parse_ascii_u32_prefix(year)?;
+        if major >= 26 && parse_ascii_u32_prefix(week).is_some() {
+            return Some(JavaVersionKey {
+                major,
+                minor: 0,
+                patch: 0,
+            });
+        }
+    }
+
+    let mut parts = trimmed.split(['.', '-']);
+    let major = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let minor = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let patch = parts.next().and_then(parse_ascii_u32_prefix).unwrap_or(0);
+    Some(JavaVersionKey {
+        major,
+        minor,
+        patch,
+    })
+}
+
+pub(super) fn parse_ascii_u32_prefix(value: &str) -> Option<u32> {
+    let digits_len = value
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits_len == 0 {
+        return None;
+    }
+    value.get(..digits_len)?.parse().ok()
 }
 
 pub(super) fn effective_required_java_major(config: &Config, game_version: &str) -> Option<u8> {

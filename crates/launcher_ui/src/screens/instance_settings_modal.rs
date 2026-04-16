@@ -509,6 +509,7 @@ pub(super) fn render_instance_settings_modal(
                                         None,
                                         None,
                                         None,
+                                        None,
                                     );
                                 } else {
                                     state.status_message =
@@ -581,6 +582,18 @@ pub(super) fn render_instance_settings_modal(
                         Some("Leave blank to use launcher instance default JVM args."),
                         &mut state.cli_args_input,
                     );
+                    ui.add_space(6.0);
+                    let _ = settings_widgets::full_width_multiline_text_input_row(
+                        text_ui,
+                        ui,
+                        ("instance_env_vars_override", instance_id),
+                        "Environment variables (optional)",
+                        Some("One KEY=value per line. Blank lines and # comments are ignored. Values are not written to launch logs."),
+                        &mut state.env_vars_input,
+                        4,
+                        Some("VK_INSTANCE_LAYERS=\nMESA_VK_WSI_PRESENT_MODE=mailbox"),
+                    );
+                    ui.add_space(6.0);
                     let _ = settings_widgets::toggle_row(
                         text_ui,
                         ui,
@@ -682,6 +695,7 @@ pub(super) fn render_instance_settings_modal(
                                 None
                             };
                             let cli_override = normalize_optional(state.cli_args_input.as_str());
+                            let env_override = normalize_optional(state.env_vars_input.as_str());
                             let (linux_set_opengl_driver, linux_use_zink_driver) =
                                 linux_instance_driver_settings_for_save(
                                     state,
@@ -692,6 +706,7 @@ pub(super) fn render_instance_settings_modal(
                                 instance_id,
                                 memory_override,
                                 cli_override,
+                                env_override,
                                 state.java_override_enabled,
                                 java_override_runtime_major,
                                 linux_set_opengl_driver,

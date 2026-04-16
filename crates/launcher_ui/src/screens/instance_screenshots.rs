@@ -80,6 +80,7 @@ pub(super) fn render_instance_screenshot_gallery(
                 |column_ui, index, tile_height| {
                     let action = render_instance_screenshot_tile(
                         column_ui,
+                        text_ui,
                         screenshot_images,
                         &screenshots[index],
                         tile_height,
@@ -113,6 +114,7 @@ fn instance_screenshot_tile_height(screenshot: &InstanceScreenshotEntry, column_
 
 fn render_instance_screenshot_tile(
     ui: &mut Ui,
+    text_ui: &mut TextUi,
     screenshot_images: &mut LazyImageBytes,
     screenshot: &InstanceScreenshotEntry,
     tile_height: f32,
@@ -147,14 +149,24 @@ fn render_instance_screenshot_tile(
                     .paint_at(ui, rect);
             }
             image_textures::ManagedTextureStatus::Loading => {
-                paint_instance_screenshot_placeholder(ui, rect, LazyImageBytesStatus::Loading);
+                paint_instance_screenshot_placeholder(
+                    ui,
+                    text_ui,
+                    rect,
+                    LazyImageBytesStatus::Loading,
+                );
             }
             image_textures::ManagedTextureStatus::Failed => {
-                paint_instance_screenshot_placeholder(ui, rect, LazyImageBytesStatus::Failed);
+                paint_instance_screenshot_placeholder(
+                    ui,
+                    text_ui,
+                    rect,
+                    LazyImageBytesStatus::Failed,
+                );
             }
         }
     } else {
-        paint_instance_screenshot_placeholder(ui, rect, image_status);
+        paint_instance_screenshot_placeholder(ui, text_ui, rect, image_status);
     }
 
     let tile_contains_pointer = ui_pointer_over_rect(ui, rect);
@@ -169,6 +181,7 @@ fn render_instance_screenshot_tile(
     if tile_contains_pointer || overlay_was_active {
         overlay_result = render_instance_screenshot_overlay_action(
             ui,
+            text_ui,
             rect,
             "instance_gallery",
             screenshot,
@@ -210,17 +223,28 @@ fn render_instance_screenshot_tile(
         egui::CornerRadius::same(8),
         egui::Color32::from_rgba_premultiplied(6, 9, 14, 185),
     );
-    ui.painter().text(
-        egui::pos2(label_bg_rect.min.x + 8.0, label_bg_rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        format!(
-            "{} | {}",
-            screenshot.file_name,
-            format_time_ago(screenshot.modified_at_ms, current_time_millis())
-        ),
-        egui::TextStyle::Body.resolve(ui.style()),
-        egui::Color32::WHITE,
+    let label = format!(
+        "{} | {}",
+        screenshot.file_name,
+        format_time_ago(screenshot.modified_at_ms, current_time_millis())
     );
+    let label_style = LabelOptions {
+        color: egui::Color32::WHITE,
+        wrap: false,
+        ..style::body(ui)
+    };
+    let label_text_rect = label_bg_rect.shrink2(egui::vec2(8.0, 0.0));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(label_text_rect), |ui| {
+        ui.set_clip_rect(label_text_rect.intersect(ui.clip_rect()));
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            let _ = text_ui.label(
+                ui,
+                ("instance_screenshot_tile_label", screenshot_key(screenshot.path.as_path())),
+                label.as_str(),
+                &label_style,
+            );
+        });
+    });
 
     image_response = image_response.on_hover_text(format!(
         "{}\n{}x{}\n{}",
@@ -245,6 +269,7 @@ fn ui_pointer_over_rect(ui: &Ui, rect: egui::Rect) -> bool {
 
 fn paint_instance_screenshot_placeholder(
     ui: &mut Ui,
+    text_ui: &mut TextUi,
     rect: egui::Rect,
     image_status: LazyImageBytesStatus,
 ) {
@@ -258,13 +283,24 @@ fn paint_instance_screenshot_placeholder(
         LazyImageBytesStatus::Failed => "Failed to load",
         LazyImageBytesStatus::Ready | LazyImageBytesStatus::Unrequested => "Waiting...",
     };
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        label,
-        egui::TextStyle::Button.resolve(ui.style()),
-        ui.visuals().weak_text_color(),
-    );
+    let label_style = LabelOptions {
+        color: ui.visuals().weak_text_color(),
+        ..style::body_strong(ui)
+    };
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+        ui.with_layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_screenshot_placeholder", label),
+                    label,
+                    &label_style,
+                );
+            },
+        );
+    });
 }
 
 pub(super) fn retain_instance_viewer_image(
@@ -290,6 +326,32 @@ pub(super) fn retain_instance_viewer_image(
     state
         .screenshot_images
         .request(image_key, screenshot.path.clone());
+}
+
+fn paint_instance_screenshot_centered_status(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    rect: egui::Rect,
+    label: &str,
+) {
+    let label_style = LabelOptions {
+        color: ui.visuals().weak_text_color(),
+        ..style::body_strong(ui)
+    };
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+        ui.with_layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_screenshot_center_status", label),
+                    label,
+                    &label_style,
+                );
+            },
+        );
+    });
 }
 
 pub(super) fn render_instance_screenshot_viewer_modal(
@@ -523,12 +585,11 @@ pub(super) fn render_instance_screenshot_viewer_modal(
                             egui::CornerRadius::same(12),
                             ui.visuals().widgets.inactive.bg_fill,
                         );
-                        ui.painter().text(
-                            image_rect.center(),
-                            egui::Align2::CENTER_CENTER,
+                        paint_instance_screenshot_centered_status(
+                            ui,
+                            text_ui,
+                            image_rect,
                             "Loading screenshot...",
-                            egui::TextStyle::Button.resolve(ui.style()),
-                            ui.visuals().weak_text_color(),
                         );
                     }
                     image_textures::ManagedTextureStatus::Failed => {
@@ -537,12 +598,11 @@ pub(super) fn render_instance_screenshot_viewer_modal(
                             egui::CornerRadius::same(12),
                             ui.visuals().widgets.inactive.bg_fill,
                         );
-                        ui.painter().text(
-                            image_rect.center(),
-                            egui::Align2::CENTER_CENTER,
+                        paint_instance_screenshot_centered_status(
+                            ui,
+                            text_ui,
+                            image_rect,
                             "Failed to load screenshot",
-                            egui::TextStyle::Button.resolve(ui.style()),
-                            ui.visuals().weak_text_color(),
                         );
                     }
                 }
@@ -557,13 +617,7 @@ pub(super) fn render_instance_screenshot_viewer_modal(
                 } else {
                     "Loading screenshot..."
                 };
-                ui.painter().text(
-                    image_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    label,
-                    egui::TextStyle::Button.resolve(ui.style()),
-                    ui.visuals().weak_text_color(),
-                );
+                paint_instance_screenshot_centered_status(ui, text_ui, image_rect, label);
             }
             ui.painter().rect_stroke(
                 image_rect,
@@ -707,6 +761,7 @@ pub(super) fn render_instance_delete_screenshot_modal(
 
 fn render_instance_screenshot_overlay_action(
     ui: &mut Ui,
+    text_ui: &mut TextUi,
     tile_rect: egui::Rect,
     scope: &str,
     screenshot: &InstanceScreenshotEntry,
@@ -717,6 +772,7 @@ fn render_instance_screenshot_overlay_action(
     let mut result = InstanceScreenshotOverlayResult::default();
     let copy_result = render_instance_screenshot_overlay_button(
         ui,
+        text_ui,
         tile_rect,
         scope,
         screenshot_key.as_str(),
@@ -742,6 +798,7 @@ fn render_instance_screenshot_overlay_action(
     }
     let delete_result = render_instance_screenshot_overlay_button(
         ui,
+        text_ui,
         tile_rect,
         scope,
         screenshot_key.as_str(),
@@ -761,6 +818,7 @@ fn render_instance_screenshot_overlay_action(
 
 fn render_instance_screenshot_overlay_button(
     ui: &mut Ui,
+    text_ui: &mut TextUi,
     tile_rect: egui::Rect,
     scope: &str,
     screenshot_key: &str,
@@ -832,7 +890,16 @@ fn render_instance_screenshot_overlay_button(
         )
         .gap(12.0)
         .show(|ui| {
-            ui.label(tooltip);
+            let tooltip_style = LabelOptions {
+                color: ui.visuals().text_color(),
+                ..style::body(ui)
+            };
+            let _ = text_ui.label(
+                ui,
+                ("instance_screenshot_overlay_tooltip", id_source, tooltip),
+                tooltip,
+                &tooltip_style,
+            );
         });
     }
     InstanceScreenshotOverlayButtonResult {

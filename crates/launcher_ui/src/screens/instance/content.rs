@@ -246,6 +246,7 @@ pub(super) fn render_installed_content_section(
         let bulk_update_tooltip = bulk_update_button_tooltip(state.selected_content_tab);
         let bulk_update_clicked = render_bulk_update_button(
             ui,
+            text_ui,
             (
                 "instance_content_bulk_update",
                 instance_id,
@@ -856,6 +857,7 @@ fn render_installed_content_action_button(
 
 fn render_bulk_update_button(
     ui: &mut Ui,
+    text_ui: &mut TextUi,
     id_source: impl std::hash::Hash + Copy,
     label: &str,
     tooltip: &str,
@@ -916,13 +918,22 @@ fn render_bulk_update_button(
             egui::Image::from_bytes(icon_uri, refresh_icon_svg)
                 .fit_to_exact_size(egui::vec2(icon_size, icon_size)),
         );
-        ui.painter().text(
-            egui::pos2(icon_rect.max.x + 8.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            label,
-            egui::FontId::proportional(14.0),
-            text_color,
+        let label_rect = egui::Rect::from_min_max(
+            egui::pos2(icon_rect.max.x + 8.0, rect.top()),
+            egui::pos2(rect.right() - 10.0, rect.bottom()),
         );
+        let label_style = LabelOptions {
+            font_size: 14.0,
+            line_height: 18.0,
+            color: text_color,
+            ..style::body_strong(ui)
+        };
+        ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect), |ui| {
+            ui.set_clip_rect(label_rect.intersect(ui.clip_rect()));
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let _ = text_ui.label(ui, ("instance_content_bulk_update_label", label), label, &label_style);
+            });
+        });
 
         response
             .on_hover_text(if enabled {

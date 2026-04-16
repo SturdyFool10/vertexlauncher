@@ -186,7 +186,8 @@ fn render_discover_browse_content(
                     search_submitted = true;
                 }
             }
-            if !state.search_tags.is_empty() && render_search_tag_chips(ui, &mut state.search_tags)
+            if !state.search_tags.is_empty()
+                && render_search_tag_chips(ui, text_ui, &mut state.search_tags)
             {
                 search_submitted = true;
             }
@@ -1209,8 +1210,18 @@ fn compose_search_query(input: &str, tags: &[String]) -> String {
     parts.join(" ")
 }
 
-fn render_search_tag_chips(ui: &mut Ui, search_tags: &mut Vec<String>) -> bool {
+fn render_search_tag_chips(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    search_tags: &mut Vec<String>,
+) -> bool {
     let mut removed_index: Option<usize> = None;
+    let tag_style = LabelOptions {
+        font_size: 14.0,
+        line_height: 18.0,
+        color: ui.visuals().text_color(),
+        ..style::body(ui)
+    };
     ui.add_space(style::SPACE_SM);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(style::SPACE_SM, style::SPACE_SM);
@@ -1246,7 +1257,12 @@ fn render_search_tag_chips(ui: &mut Ui, search_tags: &mut Vec<String>) -> bool {
                         {
                             removed_index = Some(index);
                         }
-                        let _ = ui.label(tag.as_str());
+                        let _ = text_ui.label(
+                            ui,
+                            ("discover_search_tag", tag.as_str()),
+                            tag.as_str(),
+                            &tag_style,
+                        );
                     });
                 });
         }

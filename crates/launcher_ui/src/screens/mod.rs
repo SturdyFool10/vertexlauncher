@@ -410,7 +410,7 @@ pub fn render(
         instances,
         config.minecraft_installations_root_path(),
     );
-    context_menu::show(ui.ctx());
+    context_menu::show(ui.ctx(), text_ui);
     modal::end_frame(ui.ctx());
     output
 }

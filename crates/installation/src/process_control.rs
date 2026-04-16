@@ -113,7 +113,8 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
         }
     }
 
-    let java = normalize_java_executable(request.java_executable.as_deref());
+    let java_resolution = resolve_java_executable(request.java_executable.as_deref());
+    let java = java_resolution.executable.as_str();
     let (profile_id, profile_path) = resolve_launch_profile_path(
         instance_root.as_path(),
         request.game_version.as_str(),
@@ -149,10 +150,20 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
         profile_id,
         display_user_path(instance_root.as_path())
     );
+    let _ = writeln!(
+        launch_log_file,
+        "[vertexlauncher] Java resolution: {}",
+        format_java_executable_resolution(&java_resolution)
+    );
+    log_java_executable_resolution(
+        "vertexlauncher/installation/launch",
+        "minecraft launch",
+        &java_resolution,
+    );
     let stderr_log = launch_log_file.try_clone()?;
     let mut command_log = launch_log_file.try_clone()?;
 
-    let mut command = Command::new(java.as_str());
+    let mut command = Command::new(java);
     command
         .current_dir(instance_root.as_path())
         .stdin(Stdio::null())
@@ -160,8 +171,14 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
         .stderr(Stdio::from(stderr_log));
     apply_linux_opengl_driver_env(
         &mut command,
+        request.game_version.as_str(),
         request.linux_set_opengl_driver,
         request.linux_use_zink_driver,
+    );
+    apply_extra_environment_vars(
+        &mut command,
+        request.extra_env_vars.as_deref(),
+        &mut command_log,
     );
 
     command.arg(format!("-Xmx{}M", request.max_memory_mib.max(512)));
@@ -228,11 +245,11 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
     let _ = writeln!(
         command_log,
         "[vertexlauncher] Command: {} {}",
-        quote_command_arg(java.as_str()),
+        quote_command_arg(java),
         command_args.join(" ")
     );
 
-    let mut child = spawn_command_child(&mut command, java.as_str())?;
+    let mut child = spawn_command_child(&mut command, &java_resolution)?;
     thread::sleep(Duration::from_millis(1200));
     if let Some(status) = child.try_wait()? {
         return Err(InstallationError::LaunchExitedImmediately {
@@ -263,10 +280,19 @@ pub fn launch_instance(request: &LaunchRequest) -> Result<LaunchResult, Installa
 #[cfg(target_os = "linux")]
 fn apply_linux_opengl_driver_env(
     command: &mut Command,
+    game_version: &str,
     set_linux_opengl_driver: bool,
     use_zink_driver: bool,
 ) {
     if !set_linux_opengl_driver {
+        return;
+    }
+    if should_skip_linux_opengl_driver_env_for_vulkan_capable_version(game_version) {
+        tracing::info!(
+            target: "vertexlauncher/installation/launch",
+            game_version,
+            "Skipping Linux OpenGL driver environment overrides for a Vulkan-capable Minecraft version."
+        );
         return;
     }
 
@@ -279,12 +305,148 @@ fn apply_linux_opengl_driver_env(
     }
 }
 
+#[cfg(target_os = "linux")]
+fn should_skip_linux_opengl_driver_env_for_vulkan_capable_version(game_version: &str) -> bool {
+    let Some(version) = parse_vulkan_capable_version_key(game_version) else {
+        return false;
+    };
+    version.major > 26 || (version.major == 26 && (version.is_snapshot || version.minor >= 2))
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+struct VulkanCapableVersionKey {
+    major: u32,
+    minor: u32,
+    is_snapshot: bool,
+}
+
+#[cfg(target_os = "linux")]
+fn parse_vulkan_capable_version_key(game_version: &str) -> Option<VulkanCapableVersionKey> {
+    let trimmed = game_version.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((year, week)) = trimmed.split_once('w') {
+        let major = parse_ascii_u32_prefix(year)?;
+        if major >= 26 && parse_ascii_u32_prefix(week).is_some() {
+            return Some(VulkanCapableVersionKey {
+                major,
+                minor: 0,
+                is_snapshot: true,
+            });
+        }
+    }
+
+    let mut parts = trimmed.split(['.', '-']);
+    let major = parts.next().and_then(parse_ascii_u32_prefix)?;
+    let minor = parts.next().and_then(parse_ascii_u32_prefix).unwrap_or(0);
+    Some(VulkanCapableVersionKey {
+        major,
+        minor,
+        is_snapshot: false,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn parse_ascii_u32_prefix(value: &str) -> Option<u32> {
+    let digits_len = value
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits_len == 0 {
+        return None;
+    }
+    value.get(..digits_len)?.parse().ok()
+}
+
 #[cfg(not(target_os = "linux"))]
 fn apply_linux_opengl_driver_env(
     _command: &mut Command,
+    _game_version: &str,
     _set_linux_opengl_driver: bool,
     _use_zink_driver: bool,
 ) {
+}
+
+fn apply_extra_environment_vars(
+    command: &mut Command,
+    raw_env_vars: Option<&str>,
+    command_log: &mut impl Write,
+) {
+    let Some(raw_env_vars) = raw_env_vars else {
+        return;
+    };
+
+    for (line_index, raw_line) in raw_env_vars.lines().enumerate() {
+        let line_number = line_index + 1;
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = line.split_once('=') else {
+            let _ = writeln!(
+                command_log,
+                "[vertexlauncher] Ignored environment override on line {line_number}: expected KEY=value"
+            );
+            tracing::warn!(
+                target: "vertexlauncher/installation/launch",
+                line_number,
+                "Ignored instance environment override without KEY=value syntax."
+            );
+            continue;
+        };
+        let key = raw_key.trim();
+        let value = raw_value.trim();
+        if !is_valid_environment_key(key) || value.contains('\0') {
+            let _ = writeln!(
+                command_log,
+                "[vertexlauncher] Ignored environment override on line {line_number}: invalid key or value"
+            );
+            tracing::warn!(
+                target: "vertexlauncher/installation/launch",
+                line_number,
+                key,
+                "Ignored invalid instance environment override."
+            );
+            continue;
+        }
+        command.env(key, value);
+        let _ = writeln!(
+            command_log,
+            "[vertexlauncher] Applied environment override: {key}=<redacted>"
+        );
+        tracing::info!(
+            target: "vertexlauncher/installation/launch",
+            key,
+            "Applied instance environment override to Minecraft process."
+        );
+    }
+}
+
+fn is_valid_environment_key(key: &str) -> bool {
+    !key.is_empty() && !key.contains('=') && !key.contains('\0')
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::should_skip_linux_opengl_driver_env_for_vulkan_capable_version;
+
+    #[test]
+    fn skips_linux_opengl_driver_env_for_vulkan_capable_snapshots() {
+        assert!(should_skip_linux_opengl_driver_env_for_vulkan_capable_version("26w15a"));
+        assert!(should_skip_linux_opengl_driver_env_for_vulkan_capable_version("27w01a"));
+    }
+
+    #[test]
+    fn skips_linux_opengl_driver_env_for_26_2_and_later_releases() {
+        assert!(!should_skip_linux_opengl_driver_env_for_vulkan_capable_version("26.1"));
+        assert!(should_skip_linux_opengl_driver_env_for_vulkan_capable_version("26.2"));
+        assert!(should_skip_linux_opengl_driver_env_for_vulkan_capable_version("26.2.1"));
+        assert!(should_skip_linux_opengl_driver_env_for_vulkan_capable_version("27.0"));
+    }
 }
 
 pub fn stop_running_instance(instance_root: &Path) -> bool {

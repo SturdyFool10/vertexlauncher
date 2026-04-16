@@ -109,6 +109,7 @@ pub struct InstanceRecord {
     pub modloader_version: String,
     pub max_memory_mib: Option<u128>,
     pub cli_args: Option<String>,
+    pub env_vars: Option<String>,
     pub java_override_enabled: bool,
     pub java_override_runtime_major: Option<u8>,
     pub linux_set_opengl_driver: Option<bool>,
@@ -134,6 +135,7 @@ impl Default for InstanceRecord {
             modloader_version: String::new(),
             max_memory_mib: None,
             cli_args: None,
+            env_vars: None,
             java_override_enabled: false,
             java_override_runtime_major: None,
             linux_set_opengl_driver: None,
@@ -317,6 +319,7 @@ pub fn create_instance(
         modloader_version,
         max_memory_mib: None,
         cli_args: None,
+        env_vars: None,
         java_override_enabled: false,
         java_override_runtime_major: None,
         linux_set_opengl_driver: None,
@@ -384,6 +387,7 @@ pub fn set_instance_settings(
     id: &str,
     max_memory_mib: Option<u128>,
     cli_args: Option<String>,
+    env_vars: Option<String>,
     java_override_enabled: bool,
     java_override_runtime_major: Option<u8>,
     linux_set_opengl_driver: Option<bool>,
@@ -395,6 +399,7 @@ pub fn set_instance_settings(
         .ok_or_else(|| InstanceError::MissingInstance(id.to_owned()))?;
     instance.max_memory_mib = max_memory_mib;
     instance.cli_args = normalize_optional_string(cli_args.as_deref());
+    instance.env_vars = normalize_optional_string(env_vars.as_deref());
     instance.java_override_enabled = java_override_enabled;
     instance.java_override_runtime_major =
         normalize_java_override(java_override_enabled, java_override_runtime_major);
@@ -406,6 +411,7 @@ pub fn set_instance_settings(
         id,
         max_memory_mib = ?instance.max_memory_mib,
         has_cli_args = instance.cli_args.is_some(),
+        has_env_vars = instance.env_vars.is_some(),
         java_override_enabled = instance.java_override_enabled,
         java_override_runtime_major = ?instance.java_override_runtime_major,
         linux_set_opengl_driver = ?instance.linux_set_opengl_driver,
@@ -730,6 +736,7 @@ fn normalize_instance(instance: &mut InstanceRecord) {
     .unwrap_or_else(|_| DEFAULT_GAME_VERSION.to_owned());
     instance.modloader_version = instance.modloader_version.trim().to_owned();
     instance.cli_args = normalize_optional_string(instance.cli_args.as_deref());
+    instance.env_vars = normalize_optional_string(instance.env_vars.as_deref());
     instance.java_override_runtime_major = normalize_java_override(
         instance.java_override_enabled,
         instance.java_override_runtime_major,

@@ -35,7 +35,7 @@ pub(super) fn render_instance_logs_tab(
         ui.allocate_ui_with_layout(
             egui::vec2(full_size.x, list_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| render_instance_log_list(ui, state, &logs_snapshot),
+            |ui| render_instance_log_list(ui, text_ui, state, &logs_snapshot),
         );
         ui.add_space(12.0);
         ui.allocate_ui_with_layout(
@@ -48,7 +48,7 @@ pub(super) fn render_instance_logs_tab(
             ui.allocate_ui_with_layout(
                 egui::vec2(sidebar_width, full_size.y),
                 egui::Layout::top_down(egui::Align::Min),
-                |ui| render_instance_log_list(ui, state, &logs_snapshot),
+                |ui| render_instance_log_list(ui, text_ui, state, &logs_snapshot),
             );
             ui.add_space(12.0);
             ui.allocate_ui_with_layout(
@@ -62,6 +62,7 @@ pub(super) fn render_instance_logs_tab(
 
 fn render_instance_log_list(
     ui: &mut Ui,
+    text_ui: &mut TextUi,
     state: &mut InstanceScreenState,
     logs_snapshot: &[InstanceLogEntry],
 ) {
@@ -81,11 +82,9 @@ fn render_instance_log_list(
                 }
                 let response = selectable_row_button(
                     ui,
-                    egui::RichText::new(label).color(if selected {
-                        ui.visuals().selection.stroke.color
-                    } else {
-                        ui.visuals().text_color()
-                    }),
+                    text_ui,
+                    ("instance_log_row", log.path.as_path()),
+                    label.as_str(),
                     selected,
                     egui::vec2(ui.available_width(), 44.0),
                 );

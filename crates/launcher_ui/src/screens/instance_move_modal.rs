@@ -314,12 +314,19 @@ pub(super) fn render_move_instance_modal(
                     );
                     if total_bytes > 0 && state.move_instance_in_flight {
                         let pct = (progress_fraction * 100.0) as u32;
+                        let pct_text = format!("{pct}%");
+                        let pct_style = LabelOptions {
+                            font_size: 15.0,
+                            line_height: 20.0,
+                            color: weak_text_color,
+                            ..style::body_strong(ui)
+                        };
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(format!("{pct}%"))
-                                    .size(15.0)
-                                    .strong()
-                                    .color(weak_text_color),
+                            let _ = text_ui.label(
+                                ui,
+                                ("instance_move_progress_percent", instance_id),
+                                pct_text.as_str(),
+                                &pct_style,
                             );
                         });
                     }
@@ -340,11 +347,18 @@ pub(super) fn render_move_instance_modal(
                             bytes_text.as_str(),
                             &detail_style,
                         );
+                        let files_style = LabelOptions {
+                            font_size: 13.0,
+                            line_height: 18.0,
+                            color: weak_text_color,
+                            ..style::body(ui)
+                        };
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(files_text.as_str())
-                                    .size(13.0)
-                                    .color(weak_text_color),
+                            let _ = text_ui.label(
+                                ui,
+                                ("instance_move_progress_files_right", instance_id),
+                                files_text.as_str(),
+                                &files_style,
                             );
                         });
                     });

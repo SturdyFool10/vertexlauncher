@@ -120,7 +120,21 @@ pub(super) fn render_discover_detail_content(
                 .and_then(|provider| provider.primary_url.as_deref())
             {
                 ui.add_space(style::SPACE_SM);
-                ui.hyperlink_to("Open project page", url);
+                let link_style = LabelOptions {
+                    color: ui.visuals().hyperlink_color,
+                    ..style::body_strong(ui)
+                };
+                if text_ui
+                    .clickable_label(
+                        ui,
+                        ("discover_detail_project_link", entry.dedupe_key.as_str()),
+                        "Open project page",
+                        &link_style,
+                    )
+                    .clicked()
+                {
+                    let _ = crate::desktop::open_url(url);
+                }
             }
         });
 

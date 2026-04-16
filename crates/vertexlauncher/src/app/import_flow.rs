@@ -651,10 +651,22 @@ pub(super) fn render_curseforge_manual_download_modal(
                                 reference.as_str(),
                                 &subtle_style,
                             );
-                            ui.hyperlink_to(
-                                "Open CurseForge file page",
-                                requirement.download_page_url.as_str(),
-                            );
+                            let link_style = LabelOptions {
+                                color: ui.visuals().hyperlink_color,
+                                ..ui::style::body_strong(ui)
+                            };
+                            if text_ui
+                                .clickable_label(
+                                    ui,
+                                    ("cf_manual_download_link", requirement.file_id),
+                                    "Open CurseForge file page",
+                                    &link_style,
+                                )
+                                .clicked()
+                            {
+                                let _ =
+                                    launcher_ui::desktop::open_url(requirement.download_page_url.as_str());
+                            }
                         });
                         ui.add_space(ui::style::SPACE_XS);
                     }

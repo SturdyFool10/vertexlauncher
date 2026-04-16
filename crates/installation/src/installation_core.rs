@@ -124,6 +124,7 @@ pub struct LaunchRequest {
     pub java_executable: Option<String>,
     pub max_memory_mib: u128,
     pub extra_jvm_args: Option<String>,
+    pub extra_env_vars: Option<String>,
     pub player_name: Option<String>,
     pub player_uuid: Option<String>,
     pub auth_access_token: Option<String>,
@@ -235,9 +236,14 @@ pub enum InstallationError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error(
-        "Java executable was not found: {executable}. Configure a valid Java path or install Java."
+        "Java executable was not found: {executable}. Source: {java_source}. Requested: {requested}. OS error: {message}. Configure a valid Java path or install Java."
     )]
-    JavaExecutableNotFound { executable: String },
+    JavaExecutableNotFound {
+        executable: String,
+        java_source: String,
+        requested: String,
+        message: String,
+    },
     #[error("Minecraft version '{0}' was not found in Mojang manifest")]
     UnknownMinecraftVersion(String),
     #[error("Version metadata for '{0}' is missing client download information")]
@@ -382,9 +388,213 @@ pub fn ensure_openjdk_runtime(runtime_major: u8) -> Result<PathBuf, Installation
     Ok(canonicalize_existing_path(installed))
 }
 
+pub async fn ensure_openjdk_runtime_async(runtime_major: u8) -> Result<PathBuf, InstallationError> {
+    let (os, arch, arch_cache_key) = platform_for_adoptium()?;
+    let install_root = cache_root_dir()
+        .join("java")
+        .join(format!("openjdk-{runtime_major}-{arch_cache_key}"));
+    if let Some(existing) = find_java_executable_under_async(install_root.clone()).await? {
+        return Ok(canonicalize_existing_path_async(existing).await);
+    }
+
+    if let Some(parent) = install_root.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    if tokio::fs::try_exists(&install_root).await? {
+        tokio::fs::remove_dir_all(&install_root).await?;
+    }
+    tokio::fs::create_dir_all(&install_root).await?;
+
+    let metadata_url = format!(
+        "https://api.adoptium.net/v3/assets/latest/{runtime_major}/hotspot?architecture={arch}&image_type=jdk&jvm_impl=hotspot&os={os}&vendor=eclipse"
+    );
+    let metadata: serde_json::Value =
+        get_json_with_user_agent_async(metadata_url.as_str(), OPENJDK_USER_AGENT).await?;
+    let (package_url, package_name) = extract_adoptium_package(&metadata)
+        .ok_or(InstallationError::OpenJdkMetadataMissing { runtime_major })?;
+
+    let downloads_dir = cache_root_dir().join("downloads");
+    tokio::fs::create_dir_all(&downloads_dir).await?;
+    let archive_path = downloads_dir.join(package_name.as_str());
+    download_file_simple_async(package_url.as_str(), archive_path.as_path()).await?;
+
+    let archive_path_for_extract = archive_path.clone();
+    let install_root_for_extract = install_root.clone();
+    tokio::task::spawn_blocking(move || {
+        extract_archive(
+            archive_path_for_extract.as_path(),
+            install_root_for_extract.as_path(),
+        )
+    })
+    .await
+    .map_err(map_tokio_join_error)??;
+
+    let installed = find_java_executable_under_async(install_root.clone())
+        .await?
+        .ok_or(InstallationError::OpenJdkMetadataMissing { runtime_major })?;
+    Ok(canonicalize_existing_path_async(installed).await)
+}
+
+async fn find_java_executable_under_async(
+    root: PathBuf,
+) -> Result<Option<PathBuf>, InstallationError> {
+    if !tokio::fs::try_exists(&root).await? {
+        return Ok(None);
+    }
+    let binary = if cfg!(target_os = "windows") {
+        "java.exe"
+    } else {
+        "java"
+    };
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        let mut entries = tokio::fs::read_dir(&dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            let file_type = entry.file_type().await?;
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if name.eq_ignore_ascii_case(binary)
+                && path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|part| part.eq_ignore_ascii_case("bin"))
+            {
+                return Ok(Some(path));
+            }
+        }
+    }
+    Ok(None)
+}
+
+async fn canonicalize_existing_path_async(path: PathBuf) -> PathBuf {
+    tokio::fs::canonicalize(path.as_path())
+        .await
+        .unwrap_or(path)
+}
+
+fn map_tokio_join_error(err: tokio::task::JoinError) -> InstallationError {
+    InstallationError::Io(std::io::Error::other(format!(
+        "background task failed: {err}"
+    )))
+}
+
+async fn get_json_with_user_agent_async<T: DeserializeOwned>(
+    url: &str,
+    user_agent: &str,
+) -> Result<T, InstallationError> {
+    let raw = call_get_text_with_retry_async(url, user_agent).await?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+async fn call_get_text_with_retry_async(
+    url: &str,
+    user_agent: &str,
+) -> Result<String, InstallationError> {
+    let response = call_get_response_with_retry_async(url, user_agent).await?;
+    response
+        .text()
+        .await
+        .map_err(|err| InstallationError::Transport {
+            url: url.to_owned(),
+            message: err.to_string(),
+        })
+}
+
+async fn call_get_response_with_retry_async(
+    url: &str,
+    user_agent: &str,
+) -> Result<reqwest::Response, InstallationError> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(HTTP_TIMEOUT_CONNECT)
+        .timeout(HTTP_TIMEOUT_GLOBAL)
+        .build()
+        .map_err(|err| InstallationError::Transport {
+            url: url.to_owned(),
+            message: err.to_string(),
+        })?;
+    let mut last_err = None;
+    for attempt in 1..=HTTP_RETRY_ATTEMPTS {
+        let response = client
+            .get(url)
+            .header("User-Agent", user_agent)
+            .send()
+            .await;
+        match response {
+            Ok(response) if response.status().is_success() => return Ok(response),
+            Ok(response) => {
+                let status = response.status().as_u16();
+                let body = response.text().await.unwrap_or_default();
+                return Err(InstallationError::HttpStatus {
+                    url: url.to_owned(),
+                    status,
+                    body,
+                });
+            }
+            Err(err) => {
+                last_err = Some(err.to_string());
+                if attempt < HTTP_RETRY_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_millis(
+                        HTTP_RETRY_BASE_DELAY_MS.saturating_mul(attempt as u64),
+                    ))
+                    .await;
+                }
+            }
+        }
+    }
+    Err(InstallationError::Transport {
+        url: url.to_owned(),
+        message: last_err.unwrap_or_else(|| "request failed".to_owned()),
+    })
+}
+
+pub(crate) async fn download_file_simple_async(
+    url: &str,
+    destination: &Path,
+) -> Result<(), InstallationError> {
+    if tokio::fs::try_exists(destination).await? {
+        return Ok(());
+    }
+    if let Some(parent) = destination.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut response = call_get_response_with_retry_async(url, OPENJDK_USER_AGENT).await?;
+    let temp = temporary_download_path(destination);
+    let mut file = tokio::fs::File::create(&temp).await?;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| InstallationError::Transport {
+            url: url.to_owned(),
+            message: err.to_string(),
+        })?
+    {
+        tokio::io::AsyncWriteExt::write_all(&mut file, chunk.as_ref()).await?;
+    }
+    tokio::io::AsyncWriteExt::flush(&mut file).await?;
+    drop(file);
+    tokio::fs::rename(temp.as_path(), destination).await?;
+    Ok(())
+}
+
 pub fn purge_cache() -> Result<(), InstallationError> {
     let cache_root = cache_root_dir();
     match fs_remove_dir_all(&cache_root) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(InstallationError::Io(err)),
+    }
+}
+
+pub async fn purge_cache_async() -> Result<(), InstallationError> {
+    let cache_root = cache_root_dir();
+    match tokio::fs::remove_dir_all(&cache_root).await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
         Err(err) => Err(InstallationError::Io(err)),
@@ -494,8 +704,9 @@ fn fetch_version_catalog_uncached(
             let version_type = map_version_type(entry.version_type.as_str());
             let include = match version_type {
                 MinecraftVersionType::Release => true,
-                MinecraftVersionType::Snapshot
-                | MinecraftVersionType::OldBeta => filter.include_snapshots_and_betas,
+                MinecraftVersionType::Snapshot | MinecraftVersionType::OldBeta => {
+                    filter.include_snapshots_and_betas
+                }
                 MinecraftVersionType::OldAlpha => filter.include_alpha,
                 MinecraftVersionType::Unknown => filter.include_experimental,
             };
@@ -781,4 +992,28 @@ pub fn ensure_game_files(
         downloaded_files,
         resolved_modloader_version,
     })
+}
+
+pub async fn ensure_game_files_async(
+    instance_root: PathBuf,
+    game_version: String,
+    modloader: String,
+    modloader_version: Option<String>,
+    java_executable: Option<String>,
+    download_policy: DownloadPolicy,
+    progress: Option<InstallProgressCallback>,
+) -> Result<GameSetupResult, InstallationError> {
+    tokio::task::spawn_blocking(move || {
+        ensure_game_files(
+            instance_root.as_path(),
+            game_version.as_str(),
+            modloader.as_str(),
+            modloader_version.as_deref(),
+            java_executable.as_deref(),
+            &download_policy,
+            progress,
+        )
+    })
+    .await
+    .map_err(map_tokio_join_error)?
 }

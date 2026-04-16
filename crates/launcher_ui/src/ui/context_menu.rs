@@ -1,7 +1,9 @@
 use egui::{
-    Align2, Area, Color32, Context, CornerRadius, CursorIcon, FontId, Id, Key, Order, Pos2, Rect,
-    Sense, pos2, vec2,
+    Area, Color32, Context, CornerRadius, CursorIcon, FontId, Id, Key, Order, Pos2, Rect, Sense,
+    pos2, vec2,
 };
+use textui::TextUi;
+use textui_egui::prelude::*;
 
 use crate::ui::{motion, style};
 
@@ -186,7 +188,7 @@ pub fn take_invocation(ctx: &Context, source_id: Id) -> Option<String> {
     None
 }
 
-pub fn show(ctx: &Context) {
+pub fn show(ctx: &Context, text_ui: &mut TextUi) {
     let mut state = ctx
         .data_mut(|data| data.get_temp::<ContextMenuState>(Id::new(STATE_ID)))
         .unwrap_or_default();
@@ -433,13 +435,31 @@ pub fn show(ctx: &Context) {
                                 let _ = ui.put(icon_rect, icon);
                             }
 
-                            ui.painter().text(
-                                pos2(text_left, item_rect.center().y),
-                                Align2::LEFT_CENTER,
-                                item.label.as_str(),
-                                label_font.clone(),
-                                item_color,
+                            let label_rect = Rect::from_min_max(
+                                pos2(text_left, item_rect.top()),
+                                pos2(item_rect.right() - 10.0, item_rect.bottom()),
                             );
+                            let label_style = LabelOptions {
+                                font_size: 14.0,
+                                line_height: 18.0,
+                                color: item_color,
+                                wrap: false,
+                                ..style::body_strong(ui)
+                            };
+                            ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect), |ui| {
+                                ui.set_clip_rect(label_rect.intersect(ui.clip_rect()));
+                                ui.with_layout(
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        let _ = text_ui.label(
+                                            ui,
+                                            ("context_menu_item_label", item.action_id.as_str()),
+                                            item.label.as_str(),
+                                            &label_style,
+                                        );
+                                    },
+                                );
+                            });
 
                             if response.hovered() {
                                 ui.ctx().set_cursor_icon(CursorIcon::Default);

@@ -399,14 +399,13 @@ pub(crate) fn run_modloader_installer_and_verify(
         .ok_or_else(|| InstallationError::MissingJavaRuntime {
             loader: loader_label.to_owned(),
         })?;
-    let java = normalize_java_executable(Some(configured_java.as_str()));
-    if java == "java" && configured_java != "java" {
-        tracing::warn!(
-            target: "vertexlauncher/installation/modloader",
-            "Configured Java path missing ({}), falling back to `java` from PATH.",
-            configured_java
-        );
-    }
+    let java_resolution = resolve_java_executable(Some(configured_java.as_str()));
+    let java = java_resolution.executable.as_str();
+    log_java_executable_resolution(
+        "vertexlauncher/installation/modloader",
+        "modloader installer",
+        &java_resolution,
+    );
     let installer_path =
         find_installer_jar(instance_root, loader_kind, game_version, loader_version)?.ok_or_else(
             || InstallationError::ModloaderInstallOutputMissing {
@@ -431,7 +430,7 @@ pub(crate) fn run_modloader_installer_and_verify(
     // Try both flag variants used by Forge/NeoForge installers.
     let mut last_failure = None;
     for flag in ["--installClient", "--install-client"] {
-        let mut cmd = Command::new(java.as_str());
+        let mut cmd = Command::new(java);
         cmd.arg("-jar")
             .arg(installer_path.as_os_str())
             .arg(flag)
@@ -441,7 +440,7 @@ pub(crate) fn run_modloader_installer_and_verify(
             "{} -jar {} {} {}",
             java, installer_path_arg, flag, installer_target_arg
         );
-        let output = run_command_output(&mut cmd, java.as_str())?;
+        let output = run_command_output(&mut cmd, &java_resolution)?;
         if output.status.success() {
             if verify_modloader_profile(instance_root, loader_kind, game_version, loader_version)? {
                 return Ok(());
