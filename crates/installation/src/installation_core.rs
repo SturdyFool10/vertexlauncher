@@ -315,7 +315,9 @@ pub(crate) struct CachedLoaderVersions {
     pub(crate) versions_by_game_version: BTreeMap<String, Vec<String>>,
 }
 
-pub fn fetch_version_catalog(filter: VersionCatalogFilter) -> Result<VersionCatalog, InstallationError> {
+pub fn fetch_version_catalog(
+    filter: VersionCatalogFilter,
+) -> Result<VersionCatalog, InstallationError> {
     fetch_version_catalog_with_refresh(filter, false)
 }
 

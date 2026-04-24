@@ -443,26 +443,56 @@ impl TextUi {
         let mut ctx_select_all = false;
         response.context_menu(|menu| {
             let has_selection = state.editor.selection() != Selection::None;
+            let button_options = ButtonOptions {
+                font_size: 14.0,
+                line_height: 18.0,
+                text_color: menu.visuals().text_color(),
+                fill: Color32::TRANSPARENT,
+                fill_hovered: menu.visuals().widgets.hovered.bg_fill,
+                fill_active: menu.visuals().widgets.active.bg_fill,
+                fill_selected: Color32::TRANSPARENT,
+                stroke: egui::Stroke::NONE,
+                corner_radius: 4,
+                padding: egui::vec2(8.0, 4.0),
+                min_size: egui::vec2(menu.available_width().max(96.0), 26.0),
+            };
             if menu
-                .add_enabled(has_selection, egui::Button::new("Cut"))
+                .add_enabled_ui(has_selection, |menu| {
+                    self.button(menu, "textui_input_context_cut", "Cut", &button_options)
+                })
+                .inner
                 .clicked()
             {
                 ctx_cut = true;
                 menu.close();
             }
             if menu
-                .add_enabled(has_selection, egui::Button::new("Copy"))
+                .add_enabled_ui(has_selection, |menu| {
+                    self.button(menu, "textui_input_context_copy", "Copy", &button_options)
+                })
+                .inner
                 .clicked()
             {
                 ctx_copy = true;
                 menu.close();
             }
-            if menu.button("Paste").clicked() {
+            if self
+                .button(menu, "textui_input_context_paste", "Paste", &button_options)
+                .clicked()
+            {
                 ctx_paste = true;
                 menu.close();
             }
             menu.separator();
-            if menu.button("Select All").clicked() {
+            if self
+                .button(
+                    menu,
+                    "textui_input_context_select_all",
+                    "Select All",
+                    &button_options,
+                )
+                .clicked()
+            {
                 ctx_select_all = true;
                 menu.close();
             }

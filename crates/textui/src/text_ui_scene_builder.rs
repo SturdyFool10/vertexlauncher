@@ -349,7 +349,9 @@ impl TextUi {
 
         // Return pages to the pool for reuse next call (pixel buffer allocations survive).
         const CPU_PAGE_POOL_MAX: usize = 4;
-        let return_count = CPU_PAGE_POOL_MAX.saturating_sub(page_pool.len()).min(pages.len());
+        let return_count = CPU_PAGE_POOL_MAX
+            .saturating_sub(page_pool.len())
+            .min(pages.len());
         page_pool.extend(pages.drain(..return_count));
         self.cpu_page_pool = page_pool;
 
@@ -579,7 +581,9 @@ impl TextUi {
             .collect();
 
         const CPU_PAGE_POOL_MAX: usize = 4;
-        let return_count = CPU_PAGE_POOL_MAX.saturating_sub(page_pool.len()).min(pages.len());
+        let return_count = CPU_PAGE_POOL_MAX
+            .saturating_sub(page_pool.len())
+            .min(pages.len());
         page_pool.extend(pages.drain(..return_count));
         self.cpu_page_pool = page_pool;
 

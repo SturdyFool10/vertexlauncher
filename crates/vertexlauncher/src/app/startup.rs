@@ -190,47 +190,47 @@ pub(super) fn start_initial_instance_install(
             let progress_callback: InstallProgressCallback = {
                 let last_emit = Arc::clone(&last_emit);
                 Arc::new(move |progress: InstallProgress| {
-                        install_activity::set_progress(
-                            activity_instance_for_progress.as_str(),
-                            &progress,
-                        );
-                        let should_emit = if let Ok(mut last) = last_emit.lock() {
-                            if last.elapsed() >= std::time::Duration::from_millis(250) {
-                                *last = std::time::Instant::now();
-                                true
-                            } else {
-                                false
-                            }
+                    install_activity::set_progress(
+                        activity_instance_for_progress.as_str(),
+                        &progress,
+                    );
+                    let should_emit = if let Ok(mut last) = last_emit.lock() {
+                        if last.elapsed() >= std::time::Duration::from_millis(250) {
+                            *last = std::time::Instant::now();
+                            true
                         } else {
                             false
-                        };
-                        if !should_emit {
-                            return;
                         }
-                        let fraction = if progress.total_files > 0 {
-                            (progress.downloaded_files as f32 / progress.total_files as f32)
-                                .clamp(0.0, 1.0)
-                        } else if let Some(total) = progress.total_bytes {
-                            if total > 0 {
-                                (progress.downloaded_bytes as f32 / total as f32).clamp(0.0, 1.0)
-                            } else {
-                                0.0
-                            }
+                    } else {
+                        false
+                    };
+                    if !should_emit {
+                        return;
+                    }
+                    let fraction = if progress.total_files > 0 {
+                        (progress.downloaded_files as f32 / progress.total_files as f32)
+                            .clamp(0.0, 1.0)
+                    } else if let Some(total) = progress.total_bytes {
+                        if total > 0 {
+                            (progress.downloaded_bytes as f32 / total as f32).clamp(0.0, 1.0)
                         } else {
                             0.0
-                        };
-                        notification::progress!(
-                            notification::Severity::Info,
-                            notification_source_for_progress.clone(),
-                            fraction,
-                            "{} · {:.1} MiB/s{}",
-                            progress.message,
-                            progress.bytes_per_second / (1024.0 * 1024.0),
-                            progress
-                                .eta_seconds
-                                .map(|eta| format!(" · ETA {}s", eta))
-                                .unwrap_or_default()
-                        );
+                        }
+                    } else {
+                        0.0
+                    };
+                    notification::progress!(
+                        notification::Severity::Info,
+                        notification_source_for_progress.clone(),
+                        fraction,
+                        "{} · {:.1} MiB/s{}",
+                        progress.message,
+                        progress.bytes_per_second / (1024.0 * 1024.0),
+                        progress
+                            .eta_seconds
+                            .map(|eta| format!(" · ETA {}s", eta))
+                            .unwrap_or_default()
+                    );
                 })
             };
 

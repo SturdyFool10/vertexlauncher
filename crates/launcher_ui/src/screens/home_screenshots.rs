@@ -588,20 +588,10 @@ fn render_screenshot_tile(
                     .paint_at(ui, rect);
             }
             image_textures::ManagedTextureStatus::Loading => {
-                paint_screenshot_tile_placeholder(
-                    ui,
-                    text_ui,
-                    rect,
-                    LazyImageBytesStatus::Loading,
-                );
+                paint_screenshot_tile_placeholder(ui, text_ui, rect, LazyImageBytesStatus::Loading);
             }
             image_textures::ManagedTextureStatus::Failed => {
-                paint_screenshot_tile_placeholder(
-                    ui,
-                    text_ui,
-                    rect,
-                    LazyImageBytesStatus::Failed,
-                );
+                paint_screenshot_tile_placeholder(ui, text_ui, rect, LazyImageBytesStatus::Failed);
             }
         }
     } else {

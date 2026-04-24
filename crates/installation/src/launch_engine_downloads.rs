@@ -145,13 +145,19 @@ pub(crate) fn collect_library_download_tasks(
     else {
         return;
     };
+    let mut seen_destinations: HashSet<PathBuf> =
+        tasks.iter().map(|t| t.destination.clone()).collect();
     for library in libraries {
+        if !library_rules_allow(library) {
+            continue;
+        }
         if let Some(downloads) = library.get("downloads") {
             if let Some(artifact) = downloads.get("artifact") {
                 push_download_task_from_download_entry(
                     instance_root.join("libraries").as_path(),
                     artifact,
                     tasks,
+                    &mut seen_destinations,
                 );
             }
             if let Some(classifiers) = downloads
@@ -163,12 +169,13 @@ pub(crate) fn collect_library_download_tasks(
                         instance_root.join("libraries").as_path(),
                         entry,
                         tasks,
+                        &mut seen_destinations,
                     );
                 }
             }
         } else if let Some((url, relative_path)) = resolve_library_maven_download(library) {
             let destination = instance_root.join("libraries").join(relative_path.as_str());
-            if !destination.exists() {
+            if !destination.exists() && seen_destinations.insert(destination.clone()) {
                 tasks.push(FileDownloadTask {
                     url,
                     destination,
@@ -333,6 +340,7 @@ pub(crate) fn push_download_task_from_download_entry(
     root: &Path,
     download_entry: &serde_json::Value,
     tasks: &mut Vec<FileDownloadTask>,
+    seen_destinations: &mut HashSet<PathBuf>,
 ) {
     let Some(url) = download_entry
         .get("url")
@@ -352,7 +360,7 @@ pub(crate) fn push_download_task_from_download_entry(
         return;
     }
     let destination = root.join(path);
-    if destination.exists() {
+    if destination.exists() || !seen_destinations.insert(destination.clone()) {
         return;
     }
     tasks.push(FileDownloadTask {

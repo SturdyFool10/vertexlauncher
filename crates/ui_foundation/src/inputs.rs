@@ -62,10 +62,13 @@ pub fn selectable_row_button(
         ui.visuals().text_color()
     };
 
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(8), fill);
-    ui.painter()
-        .rect_stroke(rect, CornerRadius::same(8), stroke, egui::StrokeKind::Inside);
+    ui.painter().rect_filled(rect, CornerRadius::same(8), fill);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(8),
+        stroke,
+        egui::StrokeKind::Inside,
+    );
 
     let text_rect = rect.shrink2(egui::vec2(10.0, 4.0));
     let label_options = LabelOptions {

@@ -1337,11 +1337,12 @@ pub(super) fn request_runtime_prepare(
                     "Selected Java executable for instance runtime task."
                 );
                 if operation == RuntimePrepareOperation::ReinstallProfile {
-                    let reinstall_result = reinstall_instance_profile_files(instance_root.as_path())
-                        .await
-                        .map_err(|err| {
-                            format!("failed to clear install artifacts before reinstall: {err}")
-                        });
+                    let reinstall_result =
+                        reinstall_instance_profile_files(instance_root.as_path())
+                            .await
+                            .map_err(|err| {
+                                format!("failed to clear install artifacts before reinstall: {err}")
+                            });
                     if let Err(err) = reinstall_result {
                         break 'runtime_result Err(err);
                     }

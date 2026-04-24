@@ -849,7 +849,10 @@ impl Config {
             ToggleSettingId::SnapshotsAndBetasEnabled.spec(),
             include_snapshots_and_betas,
         );
-        visit(ToggleSettingId::AlphaVersionsEnabled.spec(), include_alpha_versions);
+        visit(
+            ToggleSettingId::AlphaVersionsEnabled.spec(),
+            include_alpha_versions,
+        );
         visit(
             ToggleSettingId::ExperimentalVersionsEnabled.spec(),
             include_experimental_versions,

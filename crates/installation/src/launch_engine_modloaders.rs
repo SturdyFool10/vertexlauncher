@@ -919,10 +919,7 @@ pub(crate) fn cache_file_path(filter: VersionCatalogFilter) -> PathBuf {
         return cache_root_dir().join(CACHE_VERSION_CATALOG_RELEASES_FILE);
     }
 
-    if filter.include_snapshots_and_betas
-        && filter.include_alpha
-        && !filter.include_experimental
-    {
+    if filter.include_snapshots_and_betas && filter.include_alpha && !filter.include_experimental {
         return cache_root_dir().join(CACHE_VERSION_CATALOG_ALL_FILE);
     }
 

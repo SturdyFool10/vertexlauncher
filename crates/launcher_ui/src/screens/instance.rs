@@ -12,8 +12,7 @@ use flate2::read::GzDecoder;
 use installation::{
     DownloadPolicy, InstallProgress, InstallProgressCallback, InstallStage, LaunchRequest,
     LoaderSupportIndex, LoaderVersionIndex, MinecraftVersionEntry, VersionCatalog,
-    VersionCatalogFilter,
-    display_user_path, ensure_game_files_async, ensure_openjdk_runtime_async,
+    VersionCatalogFilter, display_user_path, ensure_game_files_async, ensure_openjdk_runtime_async,
     fetch_loader_versions_for_game, fetch_version_catalog_with_refresh,
     is_instance_running_for_account, launch_instance, normalize_path_key,
     running_instance_for_account, stop_running_instance_for_account,

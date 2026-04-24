@@ -304,11 +304,12 @@ async fn resolve_world_name(instance_root: &Path, selector: &str) -> Result<Stri
         .map_err(|err| format!("failed to read worlds under '{}': {err}", saves.display()))?;
     let lowered = selector.to_ascii_lowercase();
     let mut candidates = Vec::new();
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|err| format!("failed to read world entry under '{}': {err}", saves.display()))?
-    {
+    while let Some(entry) = entries.next_entry().await.map_err(|err| {
+        format!(
+            "failed to read world entry under '{}': {err}",
+            saves.display()
+        )
+    })? {
         let file_type = entry.file_type().await.map_err(|err| {
             format!(
                 "failed to inspect world entry under '{}': {err}",
@@ -373,8 +374,9 @@ async fn print_targets(instance: &InstanceRecord, instance_root: &Path) {
         Err(_) => println!("  (none)"),
     }
     println!("Servers:");
-    let servers =
-        parse_servers_dat(instance_root.join("servers.dat").as_path()).await.unwrap_or_default();
+    let servers = parse_servers_dat(instance_root.join("servers.dat").as_path())
+        .await
+        .unwrap_or_default();
     if servers.is_empty() {
         println!("  (none)");
     } else {

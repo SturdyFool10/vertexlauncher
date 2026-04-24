@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 #[derive(Clone, Debug)]
 pub(super) struct MoveInstanceProgress {
@@ -35,8 +35,8 @@ use installation::{
 use vtmpack::{VtmpackExportOptions, VtmpackExportProgress, VtmpackExportStats};
 
 use super::{
-    split_modloader, ContentApplyResult, ContentLookupResult, InstalledContentCache,
-    RuntimePrepareOutcome, INSTALLED_CONTENT_PAGE_SIZES,
+    ContentApplyResult, ContentLookupResult, INSTALLED_CONTENT_PAGE_SIZES, InstalledContentCache,
+    RuntimePrepareOutcome, split_modloader,
 };
 
 #[derive(Clone, Debug)]

@@ -664,8 +664,9 @@ pub(super) fn render_curseforge_manual_download_modal(
                                 )
                                 .clicked()
                             {
-                                let _ =
-                                    launcher_ui::desktop::open_url(requirement.download_page_url.as_str());
+                                let _ = launcher_ui::desktop::open_url(
+                                    requirement.download_page_url.as_str(),
+                                );
                             }
                         });
                         ui.add_space(ui::style::SPACE_XS);

@@ -76,11 +76,10 @@ pub use self::text_ui::TextUi;
 use crate::async_raster::{AsyncRasterState, AsyncRasterWorkerMessage, new_async_raster_state};
 pub(crate) use crate::atlas::{
     GlyphAtlas, GlyphContentMode, GlyphRasterKey, PaintTextQuad, PreparedAtlasGlyph,
-    adjusted_glyph_right_px, adjusted_glyph_x_px,
-    collect_glyph_spacing_prefixes_px, collect_prepared_glyphs_from_buffer,
-    cursor_stops_for_glyphs, glyph_logical_font_size_points, hash_text_fundamentals,
-    hit_buffer_with_fundamentals, rasterize_atlas_glyph, render_swash_outline_commands,
-    shared_variation_settings,
+    adjusted_glyph_right_px, adjusted_glyph_x_px, collect_glyph_spacing_prefixes_px,
+    collect_prepared_glyphs_from_buffer, cursor_stops_for_glyphs, glyph_logical_font_size_points,
+    hash_text_fundamentals, hit_buffer_with_fundamentals, rasterize_atlas_glyph,
+    render_swash_outline_commands, shared_variation_settings,
 };
 pub(crate) use crate::conversions::{
     core_label_options, cosmic_to_egui_color, egui_key_from_text, egui_modifiers_from_text,

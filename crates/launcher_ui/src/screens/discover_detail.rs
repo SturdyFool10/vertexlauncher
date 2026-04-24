@@ -54,21 +54,31 @@ pub(super) fn render_discover_detail_content(
 
         if entry.provider_refs.len() > 1 {
             ui.add_space(style::SPACE_SM);
-            sized_combo_box(
+            let source_options = entry
+                .provider_refs
+                .iter()
+                .map(|provider| provider.source.label())
+                .collect::<Vec<_>>();
+            let mut selected_source_index = entry
+                .provider_refs
+                .iter()
+                .position(|provider| provider.source == selected_source)
+                .unwrap_or(0);
+            if sized_dropdown_picker(
                 ui,
+                text_ui,
                 "discover_detail_source",
                 180.0,
-                selected_source.label(),
-                |ui| {
-                    for provider in &entry.provider_refs {
-                        ui.selectable_value(
-                            &mut state.detail_selected_source,
-                            Some(provider.source),
-                            provider.source.label(),
-                        );
-                    }
-                },
-            );
+                &mut selected_source_index,
+                &source_options,
+            )
+            .changed()
+            {
+                state.detail_selected_source = entry
+                    .provider_refs
+                    .get(selected_source_index)
+                    .map(|provider| provider.source);
+            }
         }
     });
     if state.detail_selected_source != previous_selected_source {

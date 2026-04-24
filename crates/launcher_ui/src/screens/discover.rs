@@ -1300,25 +1300,6 @@ fn sized_dropdown_picker(
     .inner
 }
 
-fn sized_combo_box(
-    ui: &mut Ui,
-    id: impl std::hash::Hash,
-    width: f32,
-    selected_text: &str,
-    add_contents: impl FnOnce(&mut Ui),
-) {
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, style::CONTROL_HEIGHT),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            egui::ComboBox::from_id_salt(id)
-                .width(width)
-                .selected_text(selected_text)
-                .show_ui(ui, add_contents);
-        },
-    );
-}
-
 fn request_version_catalog(state: &mut DiscoverState) {
     if state.version_catalog_in_flight
         || !state.available_game_versions.is_empty()

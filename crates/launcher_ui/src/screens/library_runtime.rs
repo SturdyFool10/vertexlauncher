@@ -244,113 +244,114 @@ pub(super) fn request_runtime_launch(
 
         let result = if let Ok(java_path) = java_path_result {
             'launch_result: {
-            tracing::info!(
-                target: "vertexlauncher/library_runtime",
-                instance_id = %instance_id,
-                instance_root = %instance_root.display(),
-                game_version = %game_version,
-                modloader = %modloader,
-                java_executable = %java_path,
-                required_java_major = ?required_java_major,
-                "Starting library runtime launch task."
-            );
-            let progress_instance_id = instance_id.clone();
-            install_activity::set_status(
-                instance_id.as_str(),
-                installation::InstallStage::ResolvingMetadata,
-                format!("Preparing Minecraft {}...", game_version),
-            );
-            let progress_cb: InstallProgressCallback =
-                Arc::new(move |progress: installation::InstallProgress| {
-                    install_activity::set_progress(progress_instance_id.as_str(), &progress);
-                });
-            let setup = ensure_game_files_async(
-                instance_root.clone(),
-                game_version.clone(),
-                modloader.clone(),
-                modloader_version.clone(),
-                Some(java_path.clone()),
-                download_policy,
-                Some(progress_cb),
-            )
-            .await
-            .map_err(|err| {
-                install_activity::clear_instance(instance_id.as_str());
-                err.to_string()
-            });
-            let setup = match setup {
-                Ok(setup) => setup,
-                Err(err) => {
-                    tracing::warn!(
-                        target: "vertexlauncher/library_runtime",
-                        instance_id = %instance_id,
-                        instance_root = %instance_root.display(),
-                        error = %err,
-                        "Library runtime launch task failed."
-                    );
-                    break 'launch_result Err(err);
-                }
-            };
-            install_activity::clear_instance(instance_id.as_str());
-            tracing::info!(
-                target: "vertexlauncher/library_runtime",
-                instance_id = %instance_id,
-                instance_root = %instance_root.display(),
-                downloaded_files = setup.downloaded_files,
-                "Library runtime launch completed ensure_game_files."
-            );
-            let downloaded_files = setup.downloaded_files;
-            let resolved_modloader_version = setup.resolved_modloader_version;
-            let launch_request = LaunchRequest {
-                instance_root: instance_root.clone(),
-                game_version: game_version.clone(),
-                modloader: modloader.clone(),
-                modloader_version: modloader_version.clone(),
-                account_key: launch_account_name.clone(),
-                java_executable: Some(java_path),
-                max_memory_mib,
-                extra_jvm_args: extra_jvm_args.clone(),
-                extra_env_vars: extra_env_vars.clone(),
-                player_name: player_name.clone().or(launch_account_name.clone()),
-                player_uuid: player_uuid.clone(),
-                auth_access_token: access_token.clone(),
-                auth_xuid: xuid.clone(),
-                auth_user_type: user_type.clone(),
-                quick_play_singleplayer: quick_play_singleplayer.clone(),
-                quick_play_multiplayer: quick_play_multiplayer.clone(),
-                linux_set_opengl_driver,
-                linux_use_zink_driver,
-            };
-            let launch = tokio_runtime::spawn_blocking(move || launch_instance(&launch_request))
+                tracing::info!(
+                    target: "vertexlauncher/library_runtime",
+                    instance_id = %instance_id,
+                    instance_root = %instance_root.display(),
+                    game_version = %game_version,
+                    modloader = %modloader,
+                    java_executable = %java_path,
+                    required_java_major = ?required_java_major,
+                    "Starting library runtime launch task."
+                );
+                let progress_instance_id = instance_id.clone();
+                install_activity::set_status(
+                    instance_id.as_str(),
+                    installation::InstallStage::ResolvingMetadata,
+                    format!("Preparing Minecraft {}...", game_version),
+                );
+                let progress_cb: InstallProgressCallback =
+                    Arc::new(move |progress: installation::InstallProgress| {
+                        install_activity::set_progress(progress_instance_id.as_str(), &progress);
+                    });
+                let setup = ensure_game_files_async(
+                    instance_root.clone(),
+                    game_version.clone(),
+                    modloader.clone(),
+                    modloader_version.clone(),
+                    Some(java_path.clone()),
+                    download_policy,
+                    Some(progress_cb),
+                )
                 .await
-                .map_err(|err| format!("{LIBRARY_RUNTIME_LAUNCH_TASK_KIND} failed: {err}"))
-                .and_then(|result| result.map_err(|err| err.to_string()));
-            match launch {
-                Ok(launch) => {
-                    tracing::info!(
-                        target: "vertexlauncher/library_runtime",
-                        instance_id = %instance_id,
-                        instance_root = %instance_root.display(),
-                        "Library runtime launch task finished successfully."
-                    );
-                    Ok(RuntimeLaunchOutcome {
-                        launch,
-                        downloaded_files,
-                        resolved_modloader_version,
-                        configured_java,
-                    })
+                .map_err(|err| {
+                    install_activity::clear_instance(instance_id.as_str());
+                    err.to_string()
+                });
+                let setup = match setup {
+                    Ok(setup) => setup,
+                    Err(err) => {
+                        tracing::warn!(
+                            target: "vertexlauncher/library_runtime",
+                            instance_id = %instance_id,
+                            instance_root = %instance_root.display(),
+                            error = %err,
+                            "Library runtime launch task failed."
+                        );
+                        break 'launch_result Err(err);
+                    }
+                };
+                install_activity::clear_instance(instance_id.as_str());
+                tracing::info!(
+                    target: "vertexlauncher/library_runtime",
+                    instance_id = %instance_id,
+                    instance_root = %instance_root.display(),
+                    downloaded_files = setup.downloaded_files,
+                    "Library runtime launch completed ensure_game_files."
+                );
+                let downloaded_files = setup.downloaded_files;
+                let resolved_modloader_version = setup.resolved_modloader_version;
+                let launch_request = LaunchRequest {
+                    instance_root: instance_root.clone(),
+                    game_version: game_version.clone(),
+                    modloader: modloader.clone(),
+                    modloader_version: modloader_version.clone(),
+                    account_key: launch_account_name.clone(),
+                    java_executable: Some(java_path),
+                    max_memory_mib,
+                    extra_jvm_args: extra_jvm_args.clone(),
+                    extra_env_vars: extra_env_vars.clone(),
+                    player_name: player_name.clone().or(launch_account_name.clone()),
+                    player_uuid: player_uuid.clone(),
+                    auth_access_token: access_token.clone(),
+                    auth_xuid: xuid.clone(),
+                    auth_user_type: user_type.clone(),
+                    quick_play_singleplayer: quick_play_singleplayer.clone(),
+                    quick_play_multiplayer: quick_play_multiplayer.clone(),
+                    linux_set_opengl_driver,
+                    linux_use_zink_driver,
+                };
+                let launch =
+                    tokio_runtime::spawn_blocking(move || launch_instance(&launch_request))
+                        .await
+                        .map_err(|err| format!("{LIBRARY_RUNTIME_LAUNCH_TASK_KIND} failed: {err}"))
+                        .and_then(|result| result.map_err(|err| err.to_string()));
+                match launch {
+                    Ok(launch) => {
+                        tracing::info!(
+                            target: "vertexlauncher/library_runtime",
+                            instance_id = %instance_id,
+                            instance_root = %instance_root.display(),
+                            "Library runtime launch task finished successfully."
+                        );
+                        Ok(RuntimeLaunchOutcome {
+                            launch,
+                            downloaded_files,
+                            resolved_modloader_version,
+                            configured_java,
+                        })
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            target: "vertexlauncher/library_runtime",
+                            instance_id = %instance_id,
+                            instance_root = %instance_root.display(),
+                            error = %err,
+                            "Library runtime launch task failed."
+                        );
+                        Err(err)
+                    }
                 }
-                Err(err) => {
-                    tracing::warn!(
-                        target: "vertexlauncher/library_runtime",
-                        instance_id = %instance_id,
-                        instance_root = %instance_root.display(),
-                        error = %err,
-                        "Library runtime launch task failed."
-                    );
-                    Err(err)
-                }
-            }
             }
         } else {
             Err(java_path_result

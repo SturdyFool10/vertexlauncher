@@ -6,8 +6,7 @@ use std::time::Duration;
 use eframe::egui;
 use installation::{
     LoaderSupportIndex, LoaderVersionIndex, MinecraftVersionEntry, VersionCatalog,
-    VersionCatalogFilter,
-    fetch_version_catalog_with_refresh,
+    VersionCatalogFilter, fetch_version_catalog_with_refresh,
 };
 use launcher_runtime as tokio_runtime;
 use launcher_ui::{

@@ -239,7 +239,10 @@ fn render_instance_screenshot_tile(
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             let _ = text_ui.label(
                 ui,
-                ("instance_screenshot_tile_label", screenshot_key(screenshot.path.as_path())),
+                (
+                    "instance_screenshot_tile_label",
+                    screenshot_key(screenshot.path.as_path()),
+                ),
                 label.as_str(),
                 &label_style,
             );

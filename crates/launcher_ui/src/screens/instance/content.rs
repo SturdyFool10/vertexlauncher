@@ -180,22 +180,32 @@ pub(super) fn render_installed_content_section(
             "Items per page",
             &label_style,
         );
-        egui::ComboBox::from_id_salt(("instance_content_page_size", instance_id))
-            .selected_text(state.installed_content_page_size.to_string())
-            .show_ui(ui, |ui| {
-                for page_size in INSTALLED_CONTENT_PAGE_SIZES {
-                    if ui
-                        .selectable_value(
-                            &mut state.installed_content_page_size,
-                            page_size,
-                            page_size.to_string(),
-                        )
-                        .changed()
-                    {
-                        state.installed_content_page = 1;
-                    }
-                }
-            });
+        let page_size_labels = INSTALLED_CONTENT_PAGE_SIZES
+            .iter()
+            .map(|page_size| page_size.to_string())
+            .collect::<Vec<_>>();
+        let page_size_options = page_size_labels
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let mut selected_page_size_index = INSTALLED_CONTENT_PAGE_SIZES
+            .iter()
+            .position(|candidate| *candidate == state.installed_content_page_size)
+            .unwrap_or(0);
+        if settings_widgets::dropdown_picker(
+            text_ui,
+            ui,
+            ("instance_content_page_size", instance_id),
+            &mut selected_page_size_index,
+            &page_size_options,
+            Some(92.0),
+        )
+        .changed()
+        {
+            state.installed_content_page_size =
+                INSTALLED_CONTENT_PAGE_SIZES[selected_page_size_index];
+            state.installed_content_page = 1;
+        }
 
         let _ = text_ui.label(
             ui,
@@ -203,20 +213,29 @@ pub(super) fn render_installed_content_section(
             "Page",
             &label_style,
         );
-        egui::ComboBox::from_id_salt(("instance_content_page", instance_id))
-            .selected_text(format!(
-                "{} / {}",
-                state.installed_content_page, total_pages
-            ))
-            .show_ui(ui, |ui| {
-                for page in 1..=total_pages {
-                    ui.selectable_value(
-                        &mut state.installed_content_page,
-                        page,
-                        format!("Page {page}"),
-                    );
+        let page_labels = (1..=total_pages)
+            .map(|page| {
+                if page == state.installed_content_page {
+                    format!("{page} / {total_pages}")
+                } else {
+                    format!("Page {page}")
                 }
-            });
+            })
+            .collect::<Vec<_>>();
+        let page_options = page_labels.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut selected_page_index = state.installed_content_page.saturating_sub(1);
+        if settings_widgets::dropdown_picker(
+            text_ui,
+            ui,
+            ("instance_content_page", instance_id),
+            &mut selected_page_index,
+            &page_options,
+            Some(112.0),
+        )
+        .changed()
+        {
+            state.installed_content_page = selected_page_index + 1;
+        }
 
         let _ = text_ui.label(
             ui,
@@ -931,7 +950,12 @@ fn render_bulk_update_button(
         ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect), |ui| {
             ui.set_clip_rect(label_rect.intersect(ui.clip_rect()));
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                let _ = text_ui.label(ui, ("instance_content_bulk_update_label", label), label, &label_style);
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_content_bulk_update_label", label),
+                    label,
+                    &label_style,
+                );
             });
         });
 
