@@ -1,6 +1,6 @@
 [package]
 name = "vertexlauncher"
-version = "0.1.16-Alpha"
+version = "0.1.17-Alpha"
 edition = "2024"
 build = "build.rs"
 
