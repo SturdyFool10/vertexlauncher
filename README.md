@@ -21,6 +21,7 @@ If you build from source, install:
 - Cargo
 - Git
 - a working C/C++ toolchain
+- Slang binaries found from `https://shader-slang.org/tools/`
 
 Windows release artifacts must use the MSVC targets. `windows-gnu` is not part of the supported release matrix.
 
