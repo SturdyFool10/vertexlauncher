@@ -972,7 +972,7 @@ fn emit_cached_account_renewal_notification(event: CachedAccountRenewalEvent, st
             notification::emit_replace(
                 notification::Severity::Info,
                 "Login Renewal",
-                format!("login token for {display_name} successful, you are ready to play!"),
+                format!("login token for {display_name} successful, you are now ready to play!"),
                 renewal_replace_key(&profile_id),
             );
         }
