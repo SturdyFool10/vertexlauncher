@@ -103,3 +103,6 @@ opt-level = 3
 debug = 1
 incremental = true
 codegen-units = 16
+
+[profile.release]
+debug = true
