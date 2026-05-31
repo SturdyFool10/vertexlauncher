@@ -150,6 +150,56 @@ pub(super) fn render_installed_content_section(
         return;
     }
 
+    let search_response = themed_text_input(
+        text_ui,
+        ui,
+        (
+            "instance_content_search",
+            instance_id,
+            state.selected_content_tab.label(),
+        ),
+        &mut state.installed_content_search_query,
+        InputOptions {
+            desired_width: Some(ui.available_width().max(180.0)),
+            placeholder_text: Some(format!(
+                "Search installed {} by name, file, version, or provider",
+                state.selected_content_tab.label().to_lowercase()
+            )),
+            ..InputOptions::default()
+        },
+    );
+    if search_response.changed() {
+        state.installed_content_page = 1;
+    }
+    ui.add_space(8.0);
+
+    let filtered_files = filter_installed_content_files(state, installed_files.as_ref());
+    if filtered_files.is_empty() {
+        let query = state.installed_content_search_query.trim();
+        let message = if query.is_empty() {
+            format!(
+                "No {} installed.",
+                state.selected_content_tab.label().to_lowercase()
+            )
+        } else {
+            format!(
+                "No {} match '{query}'.",
+                state.selected_content_tab.label().to_lowercase()
+            )
+        };
+        let _ = text_ui.label(
+            ui,
+            (
+                "instance_content_empty_filtered",
+                instance_id,
+                state.selected_content_tab.label(),
+            ),
+            &message,
+            &style::muted(ui),
+        );
+        return;
+    }
+
     let page_size = if INSTALLED_CONTENT_PAGE_SIZES.contains(&state.installed_content_page_size) {
         state.installed_content_page_size
     } else {
@@ -157,93 +207,9 @@ pub(super) fn render_installed_content_section(
     };
     state.installed_content_page_size = page_size;
 
-    let total_items = installed_files.len();
+    let total_items = filtered_files.len();
     let total_pages = total_items.div_ceil(page_size).max(1);
     state.installed_content_page = state.installed_content_page.clamp(1, total_pages);
-
-    ui.horizontal(|ui| {
-        ui.set_min_height(style::CONTROL_HEIGHT);
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-        let label_style = LabelOptions {
-            line_height: style::CONTROL_HEIGHT - 6.0,
-            wrap: false,
-            ..style::body(ui)
-        };
-        let muted_label_style = LabelOptions {
-            color: ui.visuals().weak_text_color(),
-            ..label_style.clone()
-        };
-
-        let _ = text_ui.label(
-            ui,
-            ("instance_content_page_size_label", instance_id),
-            "Items per page",
-            &label_style,
-        );
-        let page_size_labels = INSTALLED_CONTENT_PAGE_SIZES
-            .iter()
-            .map(|page_size| page_size.to_string())
-            .collect::<Vec<_>>();
-        let page_size_options = page_size_labels
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        let mut selected_page_size_index = INSTALLED_CONTENT_PAGE_SIZES
-            .iter()
-            .position(|candidate| *candidate == state.installed_content_page_size)
-            .unwrap_or(0);
-        if settings_widgets::dropdown_picker(
-            text_ui,
-            ui,
-            ("instance_content_page_size", instance_id),
-            &mut selected_page_size_index,
-            &page_size_options,
-            Some(92.0),
-        )
-        .changed()
-        {
-            state.installed_content_page_size =
-                INSTALLED_CONTENT_PAGE_SIZES[selected_page_size_index];
-            state.installed_content_page = 1;
-        }
-
-        let _ = text_ui.label(
-            ui,
-            ("instance_content_page_label", instance_id),
-            "Page",
-            &label_style,
-        );
-        let page_labels = (1..=total_pages)
-            .map(|page| {
-                if page == state.installed_content_page {
-                    format!("{page} / {total_pages}")
-                } else {
-                    format!("Page {page}")
-                }
-            })
-            .collect::<Vec<_>>();
-        let page_options = page_labels.iter().map(String::as_str).collect::<Vec<_>>();
-        let mut selected_page_index = state.installed_content_page.saturating_sub(1);
-        if settings_widgets::dropdown_picker(
-            text_ui,
-            ui,
-            ("instance_content_page", instance_id),
-            &mut selected_page_index,
-            &page_options,
-            Some(112.0),
-        )
-        .changed()
-        {
-            state.installed_content_page = selected_page_index + 1;
-        }
-
-        let _ = text_ui.label(
-            ui,
-            ("instance_content_page_total", instance_id),
-            &format!("{total_items} installed"),
-            &muted_label_style,
-        );
-    });
 
     let selected_game_version = selected_game_version(state).to_owned();
     let selected_modloader = selected_modloader_value(state).to_owned();
@@ -260,7 +226,7 @@ pub(super) fn render_installed_content_section(
     }
 
     if has_bulk_update_available {
-        ui.add_space(10.0);
+        ui.add_space(2.0);
         let bulk_update_label = bulk_update_button_label(state.selected_content_tab);
         let bulk_update_tooltip = bulk_update_button_tooltip(state.selected_content_tab);
         let bulk_update_clicked = render_bulk_update_button(
@@ -289,9 +255,20 @@ pub(super) fn render_installed_content_section(
         }
     }
 
+    ui.add_space(8.0);
+    render_installed_content_pagination_controls(
+        ui,
+        text_ui,
+        instance_id,
+        state,
+        total_items,
+        installed_files.len(),
+        total_pages,
+    );
+
     let start_index = (state.installed_content_page - 1) * state.installed_content_page_size;
     let end_index = (start_index + state.installed_content_page_size).min(total_items);
-    let visible_files = &installed_files[start_index..end_index];
+    let visible_files = &filtered_files[start_index..end_index];
     let _ = request_content_metadata_lookup_batch(
         state,
         visible_files,
@@ -398,8 +375,11 @@ pub(super) fn render_installed_content_section(
                     .inner;
 
                 if rendered.toggle_clicked {
-                    pending_toggle =
-                        Some((entry.file_path.clone(), entry.lookup_key.clone(), entry.disabled));
+                    pending_toggle = Some((
+                        entry.file_path.clone(),
+                        entry.lookup_key.clone(),
+                        entry.disabled,
+                    ));
                 } else if rendered.delete_clicked {
                     pending_delete = Some((entry.file_path.clone(), entry.lookup_key.clone()));
                 } else if rendered.update_clicked {
@@ -570,6 +550,175 @@ fn render_installed_content_tab_row(
             }
         });
     });
+}
+
+fn render_installed_content_pagination_controls(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    instance_id: &str,
+    state: &mut InstanceScreenState,
+    total_items: usize,
+    total_installed: usize,
+    total_pages: usize,
+) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(style::CONTROL_HEIGHT);
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        let label_style = LabelOptions {
+            line_height: style::CONTROL_HEIGHT - 6.0,
+            wrap: false,
+            ..style::body(ui)
+        };
+        let muted_label_style = LabelOptions {
+            color: ui.visuals().weak_text_color(),
+            ..label_style.clone()
+        };
+
+        let _ = text_ui.label(
+            ui,
+            ("instance_content_page_size_label", instance_id),
+            "Items per page",
+            &label_style,
+        );
+        let page_size_labels = INSTALLED_CONTENT_PAGE_SIZES
+            .iter()
+            .map(|page_size| page_size.to_string())
+            .collect::<Vec<_>>();
+        let page_size_options = page_size_labels
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let mut selected_page_size_index = INSTALLED_CONTENT_PAGE_SIZES
+            .iter()
+            .position(|candidate| *candidate == state.installed_content_page_size)
+            .unwrap_or(0);
+        if settings_widgets::dropdown_picker(
+            text_ui,
+            ui,
+            ("instance_content_page_size", instance_id),
+            &mut selected_page_size_index,
+            &page_size_options,
+            Some(92.0),
+        )
+        .changed()
+        {
+            state.installed_content_page_size =
+                INSTALLED_CONTENT_PAGE_SIZES[selected_page_size_index];
+            state.installed_content_page = 1;
+        }
+
+        let _ = text_ui.label(
+            ui,
+            ("instance_content_page_label", instance_id),
+            "Page",
+            &label_style,
+        );
+        let page_labels = (1..=total_pages)
+            .map(|page| {
+                if page == state.installed_content_page {
+                    format!("{page} / {total_pages}")
+                } else {
+                    format!("Page {page}")
+                }
+            })
+            .collect::<Vec<_>>();
+        let page_options = page_labels.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut selected_page_index = state.installed_content_page.saturating_sub(1);
+        if settings_widgets::dropdown_picker(
+            text_ui,
+            ui,
+            ("instance_content_page", instance_id),
+            &mut selected_page_index,
+            &page_options,
+            Some(112.0),
+        )
+        .changed()
+        {
+            state.installed_content_page = selected_page_index + 1;
+        }
+
+        let _ = text_ui.label(
+            ui,
+            ("instance_content_page_total", instance_id),
+            &installed_content_count_label(
+                total_items,
+                total_installed,
+                state.installed_content_search_query.as_str(),
+            ),
+            &muted_label_style,
+        );
+    });
+}
+
+fn filter_installed_content_files(
+    state: &InstanceScreenState,
+    files: &[InstalledContentFile],
+) -> Vec<InstalledContentFile> {
+    let query = state
+        .installed_content_search_query
+        .trim()
+        .to_ascii_lowercase();
+    if query.is_empty() {
+        return files.to_vec();
+    }
+
+    files
+        .iter()
+        .filter(|file| installed_content_file_matches_search(state, file, query.as_str()))
+        .cloned()
+        .collect()
+}
+
+fn installed_content_file_matches_search(
+    state: &InstanceScreenState,
+    file: &InstalledContentFile,
+    query: &str,
+) -> bool {
+    let mut haystack = vec![
+        file.file_name.as_str(),
+        file.lookup_query.as_str(),
+        file.lookup_key.as_str(),
+    ];
+    if let Some(value) = file.fallback_lookup_query.as_deref() {
+        haystack.push(value);
+    }
+    if let Some(value) = file.fallback_lookup_key.as_deref() {
+        haystack.push(value);
+    }
+    if let Some(identity) = file.managed_identity.as_ref() {
+        haystack.push(identity.name.as_str());
+        haystack.push(identity.selected_version_id.as_str());
+    }
+    if let Some(metadata) = state
+        .content_metadata_cache
+        .get(&file.lookup_key)
+        .and_then(|metadata| metadata.as_ref())
+    {
+        haystack.push(metadata.entry.name.as_str());
+        haystack.push(metadata.entry.summary.as_str());
+        haystack.push(metadata.entry.source.label());
+        if let Some(version) = metadata.installed_version_label.as_deref() {
+            haystack.push(version);
+        }
+        if let Some(warning) = metadata.warning_message.as_deref() {
+            haystack.push(warning);
+        }
+        if let Some(update) = metadata.update.as_ref() {
+            haystack.push(update.latest_version_label.as_str());
+        }
+    }
+
+    haystack
+        .iter()
+        .any(|value| value.to_ascii_lowercase().contains(query))
+}
+
+fn installed_content_count_label(matching: usize, total: usize, query: &str) -> String {
+    if query.trim().is_empty() || matching == total {
+        format!("{total} installed")
+    } else {
+        format!("{matching} matching / {total} installed")
+    }
 }
 
 fn installed_content_files_for_tab(
@@ -926,13 +1075,7 @@ use crate::ui::toggle_anim::ToggleAnimState;
 
 // ── Animated toggle widget ────────────────────────────────────────────────────
 
-fn render_mod_enable_toggle(
-    ui: &mut Ui,
-    id: &str,
-    enabled: bool,
-    width: f32,
-    height: f32,
-) -> bool {
+fn render_mod_enable_toggle(ui: &mut Ui, id: &str, enabled: bool, width: f32, height: f32) -> bool {
     let size = egui::vec2(width, height);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
 
@@ -958,15 +1101,16 @@ fn render_mod_enable_toggle(
 
     // Geometry
     let track_h = (height * 0.68).max(14.0);
-    let track_rect = egui::Rect::from_center_size(
-        rect.center(),
-        egui::vec2(width - 6.0, track_h),
-    );
+    let track_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(width - 6.0, track_h));
     let cr = egui::CornerRadius::same((track_h * 0.5) as u8);
     let visuals = ui.visuals();
 
     // Track fill and stroke — interpolated in OKLab.
-    let fill = lerp_color32_oklab(visuals.widgets.inactive.bg_fill, visuals.selection.bg_fill, pos);
+    let fill = lerp_color32_oklab(
+        visuals.widgets.inactive.bg_fill,
+        visuals.selection.bg_fill,
+        pos,
+    );
     let stroke_color = lerp_color32_oklab(
         visuals.widgets.inactive.bg_stroke.color,
         visuals.selection.stroke.color,
@@ -993,8 +1137,11 @@ fn render_mod_enable_toggle(
         visuals.widgets.active.fg_stroke.color,
         pos,
     );
-    ui.painter()
-        .circle_filled(egui::pos2(knob_x, track_rect.center().y), knob_r, knob_color);
+    ui.painter().circle_filled(
+        egui::pos2(knob_x, track_rect.center().y),
+        knob_r,
+        knob_color,
+    );
 
     let tooltip = if enabled { "Disable mod" } else { "Enable mod" };
     response

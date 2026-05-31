@@ -127,6 +127,7 @@ pub(super) struct InstanceScreenState {
     pub(super) selected_content_tab: InstalledContentKind,
     pub(super) installed_content_page_size: usize,
     pub(super) installed_content_page: usize,
+    pub(super) installed_content_search_query: String,
     pub(super) installed_content_cache: InstalledContentCache,
     pub(super) installed_content_entry_ui_cache: HashMap<String, InstalledContentEntryUiCache>,
     pub(super) content_metadata_cache: HashMap<String, Option<ResolvedInstalledContent>>,
@@ -312,6 +313,7 @@ impl InstanceScreenState {
             selected_content_tab: InstalledContentKind::Mods,
             installed_content_page_size: INSTALLED_CONTENT_PAGE_SIZES[1],
             installed_content_page: 1,
+            installed_content_search_query: String::new(),
             installed_content_cache: InstalledContentCache::default(),
             installed_content_entry_ui_cache: HashMap::new(),
             content_metadata_cache: HashMap::new(),
@@ -460,6 +462,7 @@ impl InstanceScreenState {
         self.status_message = None;
         self.selected_content_tab = InstalledContentKind::Mods;
         self.installed_content_page = 1;
+        self.installed_content_search_query.clear();
         self.installed_content_cache.clear();
         self.installed_content_entry_ui_cache.clear();
         self.content_metadata_cache.clear();
