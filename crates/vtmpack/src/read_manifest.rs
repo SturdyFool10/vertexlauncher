@@ -4,9 +4,6 @@ use std::path::{Path, PathBuf};
 use crate::{VTMPACK_EXTENSION, VtmpackManifest};
 
 const XZ_MAGIC: &[u8] = &[0xfd, b'7', b'z', b'X', b'Z', 0x00];
-const ZPAQ_MAGIC: &[u8] = &[
-    0x37, 0x6b, 0x53, 0x74, 0xa0, 0x31, 0x83, 0xd3, 0x8c, 0xb2, 0x28, 0xb0, 0xd3,
-];
 
 #[must_use]
 pub fn default_vtmpack_file_name(instance_name: &str) -> String {
@@ -39,8 +36,24 @@ pub fn enforce_vtmpack_extension(mut path: PathBuf) -> PathBuf {
 }
 
 pub fn read_vtmpack_manifest(path: &Path) -> Result<VtmpackManifest, String> {
-    let mut archive = open_vtmpack_tar_archive(path)?;
+    let archive = open_vtmpack_tar_archive(path)?;
+    read_vtmpack_manifest_from_tar_archive(path, archive)
+}
 
+pub fn read_vtmpack_manifest_with_progress<F>(
+    path: &Path,
+    _progress: F,
+) -> Result<VtmpackManifest, String>
+where
+    F: FnMut(u64),
+{
+    read_vtmpack_manifest(path)
+}
+
+pub fn read_vtmpack_manifest_from_tar_archive(
+    path: &Path,
+    mut archive: tar::Archive<Box<dyn Read>>,
+) -> Result<VtmpackManifest, String> {
     for entry in archive
         .entries()
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?
@@ -68,42 +81,40 @@ pub fn read_vtmpack_manifest(path: &Path) -> Result<VtmpackManifest, String> {
 pub fn open_vtmpack_tar_archive(path: &Path) -> Result<tar::Archive<Box<dyn Read>>, String> {
     let bytes =
         std::fs::read(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
-    if bytes.starts_with(XZ_MAGIC) {
-        let decoder = xz2::read::XzDecoder::new(Cursor::new(bytes));
-        return Ok(tar::Archive::new(Box::new(decoder)));
+    if !bytes.starts_with(XZ_MAGIC) {
+        return Err(format!(
+            "Unsupported Vertex pack compression in {}. Expected xz.",
+            path.display()
+        ));
     }
-    if bytes.starts_with(ZPAQ_MAGIC) {
-        let mut tar_bytes = Vec::new();
-        zpaq_rs::decompress_stream(Cursor::new(bytes), &mut tar_bytes).map_err(|err| {
-            format!(
-                "failed to decompress zpaq vtmpack {}: {err}",
-                path.display()
-            )
-        })?;
-        return Ok(tar::Archive::new(Box::new(Cursor::new(tar_bytes))));
-    }
+    let decoder = xz2::read::XzDecoder::new(Cursor::new(bytes));
+    Ok(tar::Archive::new(Box::new(decoder)))
+}
 
-    Err(format!(
-        "Unsupported Vertex pack compression in {}. Expected xz or zpaq.",
-        path.display()
-    ))
+pub fn open_vtmpack_tar_archive_with_progress<F>(
+    path: &Path,
+    _progress: F,
+) -> Result<tar::Archive<Box<dyn Read>>, String>
+where
+    F: FnMut(u64),
+{
+    open_vtmpack_tar_archive(path)
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::Write;
 
     use super::*;
     use crate::{VTMPACK_MANIFEST_VERSION, VtmpackInstanceMetadata};
 
     #[test]
-    fn reads_zpaq_vtmpack_manifest() {
+    fn reads_xz_vtmpack_manifest() {
         let manifest = VtmpackManifest {
             format: "vtmpack".to_owned(),
             version: VTMPACK_MANIFEST_VERSION,
             instance: VtmpackInstanceMetadata {
-                name: "ZPAQ Pack".to_owned(),
+                name: "XZ Pack".to_owned(),
                 game_version: "1.20.1".to_owned(),
                 modloader: "Fabric".to_owned(),
                 ..VtmpackInstanceMetadata::default()
@@ -127,24 +138,18 @@ mod tests {
         }
 
         let path = std::env::temp_dir().join(format!(
-            "vertexlauncher-zpaq-vtmpack-test-{}.vtmpack",
+            "vertexlauncher-xz-vtmpack-test-{}.vtmpack",
             std::process::id()
         ));
-        let mut file = fs::File::create(path.as_path()).expect("create zpaq test pack");
-        zpaq_rs::compress_stream(
-            Cursor::new(tar_bytes),
-            &mut file,
-            "1",
-            Some("vtmpack.tar"),
-            None,
-        )
-        .expect("compress zpaq test pack");
-        file.flush().expect("flush zpaq test pack");
+        let file = fs::File::create(path.as_path()).expect("create xz test pack");
+        let mut encoder = xz2::write::XzEncoder::new(file, 6);
+        std::io::copy(&mut Cursor::new(tar_bytes), &mut encoder).expect("compress xz test pack");
+        encoder.finish().expect("finish xz test pack");
 
-        let parsed = read_vtmpack_manifest(path.as_path()).expect("read zpaq manifest");
+        let parsed = read_vtmpack_manifest(path.as_path()).expect("read xz manifest");
         let _ = fs::remove_file(path.as_path());
 
         assert_eq!(parsed.format, "vtmpack");
-        assert_eq!(parsed.instance.name, "ZPAQ Pack");
+        assert_eq!(parsed.instance.name, "XZ Pack");
     }
 }

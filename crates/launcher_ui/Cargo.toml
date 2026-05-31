@@ -1,6 +1,6 @@
 [package]
 name = "launcher_ui"
-version = "0.1.18-Alpha"
+version = "0.1.19-Alpha"
 edition = "2024"
 
 [lints.rust]

@@ -1,13 +1,23 @@
 use super::*;
 
 pub(super) fn inspect_package(path: &Path) -> Result<ImportPreview, String> {
+    inspect_package_with_progress(path, |_| {})
+}
+
+pub(super) fn inspect_package_with_progress<F>(
+    path: &Path,
+    progress: F,
+) -> Result<ImportPreview, String>
+where
+    F: FnMut(String),
+{
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
     match extension.as_str() {
-        "vtmpack" => inspect_vtmpack(path),
+        "vtmpack" => inspect_vtmpack_with_progress(path, progress),
         "mrpack" => inspect_mrpack(path),
         "zip" => inspect_curseforge_pack(path),
         _ => Err(format!(
@@ -17,8 +27,21 @@ pub(super) fn inspect_package(path: &Path) -> Result<ImportPreview, String> {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn inspect_vtmpack(path: &Path) -> Result<ImportPreview, String> {
-    let manifest = read_vtmpack_manifest(path)?;
+    inspect_vtmpack_with_progress(path, |_| {})
+}
+
+pub(super) fn inspect_vtmpack_with_progress<F>(
+    path: &Path,
+    mut progress: F,
+) -> Result<ImportPreview, String>
+where
+    F: FnMut(String),
+{
+    let manifest = read_vtmpack_manifest_with_progress(path, |_| {
+        progress("Reading XZ .vtmpack for inspection...".to_owned());
+    })?;
     Ok(ImportPreview {
         kind: ImportPreviewKind::Manifest(ImportPackageKind::VertexPack),
         detected_name: manifest.instance.name.clone(),
@@ -26,7 +49,7 @@ pub(super) fn inspect_vtmpack(path: &Path) -> Result<ImportPreview, String> {
         modloader: manifest.instance.modloader.clone(),
         modloader_version: manifest.instance.modloader_version.clone(),
         summary: format!(
-            "{} for Minecraft {} ({}) with {} downloadable items, {} bundled mods, {} config files.",
+            "XZ-compressed {} for Minecraft {} ({}) with {} downloadable items, {} bundled mods, {} config files.",
             manifest.instance.name,
             manifest.instance.game_version,
             format_loader_label(

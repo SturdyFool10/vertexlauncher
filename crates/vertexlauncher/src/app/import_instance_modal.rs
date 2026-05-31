@@ -27,7 +27,8 @@ use textui::TextUi;
 use textui_egui::prelude::*;
 use ui_foundation::{DialogPreset, dialog_options, primary_button, secondary_button, show_dialog};
 use vtmpack::{
-    VtmpackDownloadableEntry, VtmpackManifest, open_vtmpack_tar_archive, read_vtmpack_manifest,
+    VtmpackDownloadableEntry, VtmpackManifest, open_vtmpack_tar_archive,
+    read_vtmpack_manifest_with_progress,
 };
 
 const MODAL_GAP_SM: f32 = 6.0;

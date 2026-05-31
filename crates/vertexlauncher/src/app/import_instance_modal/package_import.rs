@@ -44,9 +44,9 @@ pub(super) fn import_vtmpack(
     let ImportSource::ManifestFile(package_path) = &request.source else {
         return Err("Vertex pack import requires a manifest file source.".to_owned());
     };
-    progress(import_progress("Reading .vtmpack manifest...", 0, 1));
-    let manifest = read_vtmpack_manifest(package_path.as_path())?;
-    let extract_steps = count_vtmpack_payload_entries(package_path.as_path())?;
+    progress(import_progress("Reading XZ .vtmpack manifest...", 0, 1));
+    let manifest = read_vtmpack_manifest_with_progress(package_path.as_path(), |_| {})?;
+    let extract_steps = count_vtmpack_manifest_payload_entries(&manifest);
     let total_steps = 3 + extract_steps + manifest.downloadable_content.len();
     let instance = create_instance(
         store,
@@ -497,6 +497,13 @@ pub(super) fn unique_temp_instance_root(installations_root: &Path, instance_id: 
     installations_root.join(format!(".vertex-modpack-update-{instance_id}-overflow"))
 }
 
+fn count_vtmpack_manifest_payload_entries(manifest: &VtmpackManifest) -> usize {
+    usize::from(!manifest.downloadable_content.is_empty())
+        + manifest.bundled_mods.len()
+        + manifest.configs.len()
+        + manifest.additional_paths.len()
+}
+
 pub(super) fn populate_vtmpack_instance(
     package_path: &Path,
     manifest: VtmpackManifest,
@@ -546,7 +553,24 @@ pub(super) fn extract_vtmpack_payload(
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<(), String> {
     let mut archive = open_vtmpack_tar_archive(package_path)?;
+    extract_vtmpack_payload_from_archive(
+        package_path,
+        &mut archive,
+        instance_root,
+        total_steps,
+        completed_steps,
+        progress,
+    )
+}
 
+fn extract_vtmpack_payload_from_archive(
+    package_path: &Path,
+    archive: &mut tar::Archive<Box<dyn Read>>,
+    instance_root: &Path,
+    total_steps: usize,
+    completed_steps: &mut usize,
+    progress: &mut dyn FnMut(ImportProgress),
+) -> Result<(), String> {
     for entry in archive
         .entries()
         .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?
@@ -917,30 +941,6 @@ pub(super) fn extract_mrpack_overrides(
     }
 
     Ok(())
-}
-
-pub(super) fn count_vtmpack_payload_entries(package_path: &Path) -> Result<usize, String> {
-    let mut archive = open_vtmpack_tar_archive(package_path)?;
-    let mut count = 0usize;
-    for entry in archive
-        .entries()
-        .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?
-    {
-        let entry = entry.map_err(|err| {
-            format!(
-                "failed to read archive entry in {}: {err}",
-                package_path.display()
-            )
-        })?;
-        let entry_path = entry
-            .path()
-            .map_err(|err| format!("failed to decode archive path: {err}"))?
-            .to_path_buf();
-        if entry_path.to_string_lossy().replace('\\', "/") != "manifest.toml" {
-            count += 1;
-        }
-    }
-    Ok(count)
 }
 
 pub(super) fn count_mrpack_override_entries(package_path: &Path) -> Result<usize, String> {
@@ -1381,5 +1381,96 @@ mod tests {
 
         file.download_url = None;
         assert!(!curseforge_file_has_api_download(&file));
+    }
+
+    #[test]
+    fn imports_standard_xz_vtmpack_payload() {
+        imports_vtmpack_payload(vtmpack::VtmpackCompressionMode::Standard, "standard-xz");
+    }
+
+    #[test]
+    fn imports_extreme_xz_vtmpack_payload() {
+        imports_vtmpack_payload(vtmpack::VtmpackCompressionMode::Extreme, "extreme-xz");
+    }
+
+    fn imports_vtmpack_payload(compression_mode: vtmpack::VtmpackCompressionMode, suffix: &str) {
+        let root = std::env::temp_dir().join(format!(
+            "vertexlauncher-import-vtmpack-test-{}-{}",
+            std::process::id(),
+            suffix
+        ));
+        let source_root = root.join("source");
+        let installations_root = root.join("instances");
+        let package_path = root.join("pack.vtmpack");
+        let _ = fs::remove_dir_all(root.as_path());
+        fs::create_dir_all(source_root.join("mods")).expect("create source mods");
+        fs::create_dir_all(source_root.join("config")).expect("create source config");
+        fs::write(source_root.join("mods/local.jar"), b"local mod").expect("write local mod");
+        fs::write(source_root.join("config/options.txt"), b"ao=true").expect("write config");
+        fs::write(source_root.join("servers.dat"), b"servers").expect("write root file");
+
+        let mut included_root_entries = std::collections::BTreeMap::new();
+        included_root_entries.insert("mods".to_owned(), true);
+        included_root_entries.insert("config".to_owned(), true);
+        included_root_entries.insert("servers.dat".to_owned(), true);
+        vtmpack::export_instance_as_vtmpack(
+            &vtmpack::VtmpackInstanceMetadata {
+                id: "source".to_owned(),
+                name: "XZ Import Pack".to_owned(),
+                game_version: "1.21.1".to_owned(),
+                modloader: "Fabric".to_owned(),
+                modloader_version: "0.16.10".to_owned(),
+            },
+            source_root.as_path(),
+            package_path.as_path(),
+            &vtmpack::VtmpackExportOptions {
+                provider_mode: vtmpack::VtmpackProviderMode::ExcludeCurseForge,
+                compression_mode,
+                included_root_entries,
+            },
+        )
+        .expect("export vtmpack");
+
+        let preview = inspect_vtmpack(package_path.as_path()).expect("inspect vtmpack");
+        assert_eq!(preview.detected_name, "XZ Import Pack");
+        assert!(preview.summary.starts_with("XZ"));
+
+        let mut store = InstanceStore::default();
+        let request = ImportRequest {
+            source: ImportSource::ManifestFile(package_path.clone()),
+            instance_name: "Imported XZ Pack".to_owned(),
+            manual_curseforge_files: HashMap::new(),
+            manual_curseforge_staging_dir: None,
+            max_concurrent_downloads: 4,
+        };
+        let mut progress_updates = Vec::new();
+        let instance = import_vtmpack(
+            &mut store,
+            installations_root.as_path(),
+            &request,
+            &mut |progress| progress_updates.push(progress),
+        )
+        .expect("import xz vtmpack");
+        let imported_root = instance_root_path(installations_root.as_path(), &instance);
+
+        assert_eq!(
+            fs::read(imported_root.join("mods/local.jar")).expect("read imported mod"),
+            b"local mod"
+        );
+        assert_eq!(
+            fs::read(imported_root.join("config/options.txt")).expect("read imported config"),
+            b"ao=true"
+        );
+        assert_eq!(
+            fs::read(imported_root.join("servers.dat")).expect("read imported root file"),
+            b"servers"
+        );
+        assert!(
+            progress_updates
+                .iter()
+                .any(|progress| progress.message == "Import complete.")
+        );
+
+        let _ = fs::remove_dir_all(root.as_path());
     }
 }

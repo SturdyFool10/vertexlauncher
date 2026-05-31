@@ -12,7 +12,7 @@ pub struct VtmpackExportOptions {
 impl Default for VtmpackExportOptions {
     fn default() -> Self {
         Self {
-            provider_mode: VtmpackProviderMode::IncludeCurseForge,
+            provider_mode: VtmpackProviderMode::ExcludeCurseForge,
             compression_mode: VtmpackCompressionMode::Standard,
             included_root_entries: BTreeMap::new(),
         }

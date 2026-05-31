@@ -281,7 +281,10 @@ pub fn render(
                 let _ = text_ui.label(
                     ui,
                     "instance_import_preview_in_flight",
-                    "Inspecting import source in the background...",
+                    state
+                        .preview_status_message
+                        .as_deref()
+                        .unwrap_or("Inspecting import source in the background..."),
                     &body_style,
                 );
             }
@@ -393,6 +396,9 @@ pub fn render(
 
     if response.close_requested && !state.import_in_flight && matches!(action, ModalAction::None) {
         action = ModalAction::Cancel;
+    }
+    if state.preview_in_flight || state.import_in_flight {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 
     action
@@ -571,12 +577,18 @@ pub(super) fn load_preview_from_state(state: &mut ImportInstanceState) {
     state.preview_request_serial = state.preview_request_serial.saturating_add(1);
     let request_serial = state.preview_request_serial;
     state.preview_in_flight = true;
+    state.preview_status_message = Some("Inspecting import source in the background...".to_owned());
     state.error = None;
+    let progress_tx = state.preview_progress_tx.as_ref().cloned();
     let _ = tokio_runtime::spawn_detached(async move {
         let result = tokio_runtime::spawn_blocking(move || {
             let (path, launcher_hint, manifest_mode) = request;
             if manifest_mode {
-                inspect_package(path.as_path())
+                inspect_package_with_progress(path.as_path(), |message| {
+                    if let Some(tx) = progress_tx.as_ref() {
+                        let _ = tx.send((request_serial, message));
+                    }
+                })
             } else {
                 inspect_launcher_instance(path.as_path(), launcher_hint)
             }

@@ -7,8 +7,8 @@ pub enum VtmpackCompressionMode {
 impl VtmpackCompressionMode {
     pub fn label(self) -> &'static str {
         match self {
-            VtmpackCompressionMode::Standard => "Standard compression",
-            VtmpackCompressionMode::Extreme => "Extreme compression",
+            VtmpackCompressionMode::Standard => "Standard XZ compression",
+            VtmpackCompressionMode::Extreme => "Extreme XZ compression",
         }
     }
 }

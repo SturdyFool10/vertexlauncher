@@ -28,21 +28,7 @@ pub(super) fn render_export_vtmpack_modal(
             DialogPreset::Form,
         ),
         |ui| {
-            let title_style = style::modal_title(ui);
             let body_style = style::muted(ui);
-            let _ = text_ui.label(
-                ui,
-                ("instance_export_vtmpack_title", instance_id),
-                "Export .vtmpack",
-                &title_style,
-            );
-            let _ = text_ui.label(
-                ui,
-                ("instance_export_vtmpack_body", instance_id),
-                "Choose whether the exported pack may reference CurseForge metadata directly, then select which top-level files and folders from the Minecraft root should be bundled into the pack.",
-                &body_style,
-            );
-            ui.add_space(12.0);
 
             if state.export_vtmpack_in_flight {
                 let progress = state.export_vtmpack_latest_progress.as_ref();
@@ -104,6 +90,21 @@ pub(super) fn render_export_vtmpack_modal(
                         .show_percentage(),
                 );
             } else {
+                let title_style = style::modal_title(ui);
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_export_vtmpack_title", instance_id),
+                    "Export .vtmpack",
+                    &title_style,
+                );
+                let _ = text_ui.label(
+                    ui,
+                    ("instance_export_vtmpack_body", instance_id),
+                    "Choose whether the exported pack may reference CurseForge metadata directly, then select which top-level files and folders from the Minecraft root should be bundled into the pack.",
+                    &body_style,
+                );
+                ui.add_space(12.0);
+
                 for provider_mode in [
                     VtmpackProviderMode::IncludeCurseForge,
                     VtmpackProviderMode::ExcludeCurseForge,
@@ -149,10 +150,10 @@ pub(super) fn render_export_vtmpack_modal(
                 }
                 let compression_help = match state.export_vtmpack_options.compression_mode {
                     VtmpackCompressionMode::Standard => {
-                        "Uses maximum XZ compression with the normal encoder settings."
+                        "Uses the standard XZ compression preset for a balanced export."
                     }
                     VtmpackCompressionMode::Extreme => {
-                        "Uses ZPAQ ultra compression. Exports take longer and may use more memory, but prioritize the smallest archive."
+                        "Uses the maximum XZ preset with the extreme flag. Exports take longer and may use more memory, but prioritize the smallest archive."
                     }
                 };
                 let _ = text_ui.label(
@@ -506,6 +507,7 @@ fn default_server_root_entry_selected(entry: &str) -> bool {
             | "config"
             | "defaultconfigs"
             | "kubejs"
+            | "tacz"
             | "scripts"
             | "serverconfig"
             | "libraries"

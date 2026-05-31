@@ -17,7 +17,8 @@ pub use export::{
 };
 pub use read_manifest::{
     default_vtmpack_file_name, enforce_vtmpack_extension, open_vtmpack_tar_archive,
-    read_vtmpack_manifest,
+    open_vtmpack_tar_archive_with_progress, read_vtmpack_manifest,
+    read_vtmpack_manifest_from_tar_archive, read_vtmpack_manifest_with_progress,
 };
 pub use vtmpack_compression_mode::VtmpackCompressionMode;
 pub use vtmpack_downloadable_entry::VtmpackDownloadableEntry;

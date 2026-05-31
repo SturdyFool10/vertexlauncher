@@ -135,16 +135,25 @@ pub(super) fn start_import_instance_task(
     }
 
     request.max_concurrent_downloads = app.config.download_max_concurrent().max(1);
-    if matches!(
-        request.source,
-        import_instance_modal::ImportSource::ManifestFile(_)
-    ) && request.manual_curseforge_files.is_empty()
+    if should_preflight_curseforge_manual_downloads(&request)
+        && request.manual_curseforge_files.is_empty()
     {
         start_curseforge_manual_download_preflight(app, request);
         return;
     }
 
     spawn_import_instance_task(app, request);
+}
+
+fn should_preflight_curseforge_manual_downloads(
+    request: &import_instance_modal::ImportRequest,
+) -> bool {
+    let import_instance_modal::ImportSource::ManifestFile(path) = &request.source else {
+        return false;
+    };
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
 }
 
 pub(super) fn start_curseforge_manual_download_preflight(

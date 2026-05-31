@@ -17,8 +17,9 @@ use crate::{
     VtmpackExportStats, VtmpackInstanceMetadata, VtmpackManifest, VtmpackProviderMode,
 };
 
-const XZ_LEVEL_BEST: u32 = 9;
-const ZPAQ_ULTRA_METHOD: &str = "5";
+const XZ_PRESET_STANDARD: u32 = 6;
+const XZ_PRESET_EXTREME_FLAG: u32 = 1 << 31;
+const XZ_PRESET_EXTREME: u32 = 9 | XZ_PRESET_EXTREME_FLAG;
 
 pub fn sanitize_managed_manifest_for_export(
     manifest: &ContentInstallManifest,
@@ -67,10 +68,11 @@ where
     // missing on disk (e.g. not yet synced, or deleted by the user).
     let managed_manifest = {
         let path = content_manifest_path(instance_root);
-        fs::read_to_string(&path)
+        let manifest = fs::read_to_string(&path)
             .ok()
             .and_then(|raw| toml::from_str::<ContentInstallManifest>(&raw).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        manifest_with_disabled_mod_paths(instance_root, &manifest)
     };
     let selected_root_entries = options
         .included_root_entries
@@ -248,76 +250,39 @@ where
     let config_file_count = pack_manifest.configs.len();
     let additional_file_count = pack_manifest.additional_paths.len();
 
-    match options.compression_mode {
-        VtmpackCompressionMode::Standard => {
-            let encoder = xz2::write::XzEncoder::new(output_file, XZ_LEVEL_BEST);
-            let mut archive = tar::Builder::new(encoder);
-            write_tar_payload(
-                &mut archive,
-                &pack_manifest,
-                &sanitized_managed_manifest,
-                bundled_mod_files,
-                mods_dir.as_path(),
-                config_files,
-                configs_dir.as_path(),
-                additional_files,
-                instance_root,
-                total_steps,
-                &mut completed_steps,
-                &mut progress,
-            )?;
-            progress(progress_update(
-                "Finalizing archive...",
-                completed_steps,
-                total_steps,
-            ));
-            archive
-                .finish()
-                .map_err(|err| format!("failed to finalize archive: {err}"))?;
-            let encoder = archive
-                .into_inner()
-                .map_err(|err| format!("failed to flush archive stream: {err}"))?;
-            encoder
-                .finish()
-                .map_err(|err| format!("failed to finalize xz stream: {err}"))?;
-        }
-        VtmpackCompressionMode::Extreme => {
-            let mut tar_bytes = Vec::new();
-            {
-                let mut archive = tar::Builder::new(&mut tar_bytes);
-                write_tar_payload(
-                    &mut archive,
-                    &pack_manifest,
-                    &sanitized_managed_manifest,
-                    bundled_mod_files,
-                    mods_dir.as_path(),
-                    config_files,
-                    configs_dir.as_path(),
-                    additional_files,
-                    instance_root,
-                    total_steps,
-                    &mut completed_steps,
-                    &mut progress,
-                )?;
-                progress(progress_update(
-                    "Compressing archive with ZPAQ...",
-                    completed_steps,
-                    total_steps,
-                ));
-                archive
-                    .finish()
-                    .map_err(|err| format!("failed to finalize uncompressed archive: {err}"))?;
-            }
-            zpaq_rs::compress_stream(
-                Cursor::new(tar_bytes),
-                output_file,
-                ZPAQ_ULTRA_METHOD,
-                Some("vtmpack.tar"),
-                None,
-            )
-            .map_err(|err| format!("failed to finalize zpaq stream: {err}"))?;
-        }
-    }
+    let encoder = xz2::write::XzEncoder::new(
+        output_file,
+        xz_preset_for_compression_mode(options.compression_mode),
+    );
+    let mut archive = tar::Builder::new(encoder);
+    write_tar_payload(
+        &mut archive,
+        &pack_manifest,
+        &sanitized_managed_manifest,
+        bundled_mod_files,
+        mods_dir.as_path(),
+        config_files,
+        configs_dir.as_path(),
+        additional_files,
+        instance_root,
+        total_steps,
+        &mut completed_steps,
+        &mut progress,
+    )?;
+    progress(progress_update(
+        "Finalizing XZ archive...",
+        completed_steps,
+        total_steps,
+    ));
+    archive
+        .finish()
+        .map_err(|err| format!("failed to finalize archive: {err}"))?;
+    let encoder = archive
+        .into_inner()
+        .map_err(|err| format!("failed to flush archive stream: {err}"))?;
+    encoder
+        .finish()
+        .map_err(|err| format!("failed to finalize xz stream: {err}"))?;
     completed_steps += 1;
     progress(progress_update(
         "Export complete.",
@@ -330,6 +295,13 @@ where
         config_files: config_file_count,
         additional_files: additional_file_count,
     })
+}
+
+fn xz_preset_for_compression_mode(mode: VtmpackCompressionMode) -> u32 {
+    match mode {
+        VtmpackCompressionMode::Standard => XZ_PRESET_STANDARD,
+        VtmpackCompressionMode::Extreme => XZ_PRESET_EXTREME,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -429,6 +401,32 @@ where
     Ok(())
 }
 
+fn manifest_with_disabled_mod_paths(
+    instance_root: &Path,
+    manifest: &ContentInstallManifest,
+) -> ContentInstallManifest {
+    let mut manifest = manifest.clone();
+    for project in manifest.projects.values_mut() {
+        let normalized_path = normalize_pack_path(project.file_path.as_path());
+        let path_text = normalized_path.to_string_lossy();
+        if !path_text.starts_with("mods/") || path_text.ends_with(".DISABLED") {
+            continue;
+        }
+        if instance_root.join(normalized_path.as_path()).exists() {
+            continue;
+        }
+        let Some(file_name) = normalized_path.file_name() else {
+            continue;
+        };
+        let disabled_path =
+            normalized_path.with_file_name(format!("{}.DISABLED", file_name.to_string_lossy()));
+        if instance_root.join(disabled_path.as_path()).is_file() {
+            project.file_path = disabled_path;
+        }
+    }
+    manifest
+}
+
 fn rediscover_modrinth_mods(
     instance_root: &Path,
     manifest: &ContentInstallManifest,
@@ -456,6 +454,19 @@ fn rediscover_modrinth_mods(
         }
     };
 
+    let known_modrinth_paths = manifest
+        .projects
+        .values()
+        .filter(|project| project.selected_source == Some(ManagedContentSource::Modrinth))
+        .filter(|project| {
+            project
+                .selected_version_id
+                .as_deref()
+                .is_some_and(|version| !version.trim().is_empty())
+        })
+        .map(|project| normalize_pack_path(project.file_path.as_path()))
+        .collect::<HashSet<_>>();
+
     let mut mod_files = Vec::<DiscoveredModFile>::new();
     for entry in entries.flatten() {
         let absolute_path = entry.path();
@@ -466,7 +477,7 @@ fn rediscover_modrinth_mods(
             .strip_prefix(instance_root)
             .unwrap_or(absolute_path.as_path());
         let file_path = normalize_pack_path(relative_path);
-        if file_path.as_os_str().is_empty() {
+        if file_path.as_os_str().is_empty() || known_modrinth_paths.contains(&file_path) {
             continue;
         }
         match modrinth::hash_file_sha1_and_sha512_hex(absolute_path.as_path()) {
@@ -681,7 +692,10 @@ pub fn list_exportable_root_entries(instance_root: &Path) -> Vec<String> {
 }
 
 pub fn default_vtmpack_root_entry_selected(entry: &str) -> bool {
-    matches!(entry, "mods" | "resourcepacks" | "shaderpacks" | "config")
+    matches!(
+        entry,
+        "mods" | "resourcepacks" | "shaderpacks" | "config" | "kubejs" | "tacz"
+    )
 }
 
 fn collect_regular_files_recursive(root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -745,6 +759,107 @@ mod tests {
     use managed_content::{InstalledContentProject, ManagedContentSource};
 
     use super::*;
+
+    #[test]
+    fn export_remembers_disabled_managed_mod_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "vertexlauncher-vtmpack-disabled-test-{}",
+            std::process::id()
+        ));
+        let mods_dir = root.join("mods");
+        let _ = std::fs::remove_dir_all(root.as_path());
+        std::fs::create_dir_all(mods_dir.as_path()).expect("create mods dir");
+        std::fs::write(mods_dir.join("example.jar.DISABLED"), b"disabled mod")
+            .expect("write disabled mod");
+
+        let manifest = ContentInstallManifest {
+            projects: BTreeMap::from([(
+                "mod::example".to_owned(),
+                InstalledContentProject {
+                    name: "Example".to_owned(),
+                    file_path: PathBuf::from("mods/example.jar"),
+                    selected_source: Some(ManagedContentSource::Modrinth),
+                    selected_version_id: Some("version".to_owned()),
+                    ..InstalledContentProject::default()
+                },
+            )]),
+        };
+
+        let updated = manifest_with_disabled_mod_paths(root.as_path(), &manifest);
+        assert_eq!(
+            updated
+                .projects
+                .get("mod::example")
+                .expect("project should remain")
+                .file_path,
+            PathBuf::from("mods/example.jar.DISABLED")
+        );
+
+        let _ = std::fs::remove_dir_all(root.as_path());
+    }
+
+    #[test]
+    fn exported_manifest_records_disabled_managed_mod_path() {
+        let root = std::env::temp_dir().join(format!(
+            "vertexlauncher-vtmpack-disabled-export-test-{}",
+            std::process::id()
+        ));
+        let mods_dir = root.join("mods");
+        let package_path = root.join("disabled-pack.vtmpack");
+        let _ = std::fs::remove_dir_all(root.as_path());
+        std::fs::create_dir_all(mods_dir.as_path()).expect("create mods dir");
+        std::fs::write(mods_dir.join("example.jar.DISABLED"), b"disabled mod")
+            .expect("write disabled mod");
+
+        let manifest = ContentInstallManifest {
+            projects: BTreeMap::from([(
+                "mod::example".to_owned(),
+                InstalledContentProject {
+                    project_key: "mod::example".to_owned(),
+                    name: "Example".to_owned(),
+                    file_path: PathBuf::from("mods/example.jar"),
+                    modrinth_project_id: Some("example".to_owned()),
+                    selected_source: Some(ManagedContentSource::Modrinth),
+                    selected_version_id: Some("version".to_owned()),
+                    ..InstalledContentProject::default()
+                },
+            )]),
+        };
+        std::fs::write(
+            content_manifest_path(root.as_path()),
+            toml::to_string_pretty(&manifest).expect("serialize content manifest"),
+        )
+        .expect("write content manifest");
+
+        let mut included_root_entries = BTreeMap::new();
+        included_root_entries.insert("mods".to_owned(), true);
+        export_instance_as_vtmpack(
+            &VtmpackInstanceMetadata {
+                name: "Disabled Export".to_owned(),
+                game_version: "1.21.1".to_owned(),
+                modloader: "Fabric".to_owned(),
+                ..VtmpackInstanceMetadata::default()
+            },
+            root.as_path(),
+            package_path.as_path(),
+            &VtmpackExportOptions {
+                provider_mode: VtmpackProviderMode::ExcludeCurseForge,
+                compression_mode: VtmpackCompressionMode::Standard,
+                included_root_entries,
+            },
+        )
+        .expect("export vtmpack");
+
+        let exported = crate::read_vtmpack_manifest(package_path.as_path()).expect("read vtmpack");
+        assert_eq!(exported.downloadable_content.len(), 1);
+        assert_eq!(
+            exported.downloadable_content[0].file_path,
+            PathBuf::from("mods/example.jar.DISABLED")
+        );
+        assert!(exported.bundled_mods.is_empty());
+
+        let _ = std::fs::remove_dir_all(root.as_path());
+    }
 
     #[test]
     fn export_can_strip_curseforge_metadata() {

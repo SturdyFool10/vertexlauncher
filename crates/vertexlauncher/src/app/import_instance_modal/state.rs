@@ -39,15 +39,39 @@ pub(super) use self::launcher_kind::LauncherKind;
 pub use self::modal_action::ModalAction;
 
 pub(super) fn ensure_preview_channel(state: &mut ImportInstanceState) {
-    if state.preview_results_tx.is_some() && state.preview_results_rx.is_some() {
-        return;
+    if state.preview_results_tx.is_none() || state.preview_results_rx.is_none() {
+        let (tx, rx) = mpsc::channel::<(u64, Result<ImportPreview, String>)>();
+        state.preview_results_tx = Some(tx);
+        state.preview_results_rx = Some(Arc::new(Mutex::new(rx)));
     }
-    let (tx, rx) = mpsc::channel::<(u64, Result<ImportPreview, String>)>();
-    state.preview_results_tx = Some(tx);
-    state.preview_results_rx = Some(Arc::new(Mutex::new(rx)));
+    if state.preview_progress_tx.is_none() || state.preview_progress_rx.is_none() {
+        let (tx, rx) = mpsc::channel::<(u64, String)>();
+        state.preview_progress_tx = Some(tx);
+        state.preview_progress_rx = Some(Arc::new(Mutex::new(rx)));
+    }
 }
 
 pub(super) fn poll_preview_results(state: &mut ImportInstanceState) {
+    if let Some(rx) = state.preview_progress_rx.as_ref().cloned()
+        && let Ok(receiver) = rx.lock()
+    {
+        loop {
+            match receiver.try_recv() {
+                Ok((request_serial, message)) => {
+                    if request_serial == state.preview_request_serial {
+                        state.preview_status_message = Some(message);
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    state.preview_progress_tx = None;
+                    state.preview_progress_rx = None;
+                    break;
+                }
+            }
+        }
+    }
+
     let Some(rx) = state.preview_results_rx.as_ref().cloned() else {
         return;
     };
@@ -72,6 +96,7 @@ pub(super) fn poll_preview_results(state: &mut ImportInstanceState) {
                     continue;
                 }
                 state.preview_in_flight = false;
+                state.preview_status_message = None;
                 match result {
                     Ok(preview) => {
                         tracing::info!(

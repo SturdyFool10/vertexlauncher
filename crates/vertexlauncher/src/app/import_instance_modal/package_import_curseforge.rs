@@ -860,6 +860,13 @@ pub fn prepare_curseforge_manual_downloads(
     let ImportSource::ManifestFile(package_path) = &request.source else {
         return Ok(None);
     };
+    if !package_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+    {
+        return Ok(None);
+    }
     if inspect_package(package_path.as_path())
         .map(|preview| preview.kind)
         .ok()

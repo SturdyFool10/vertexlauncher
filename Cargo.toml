@@ -90,9 +90,6 @@ vertex_constants = { path = "crates/vertex_constants" }
 vertex_3d_build = { path = "crates/vertex_3d_build" }
 vertex_3d = { path = "crates/vertex_3d" }
 
-[patch.crates-io]
-zpaq_rs = { path = "crates/third_party/zpaq_rs" }
-
 [profile.dev]
 # Your crates (workspace members): keep normal dev behavior
 opt-level = 0

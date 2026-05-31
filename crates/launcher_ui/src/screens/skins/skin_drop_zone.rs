@@ -74,7 +74,8 @@ pub(super) fn render_skin_drop_zone(
     choose_style.fill_selected = ui.visuals().selection.bg_fill.gamma_multiply(0.7);
     let content_rect = rect.shrink2(egui::vec2(18.0, 18.0));
     let title_style = style::section_heading(ui);
-    let muted = style::muted(ui);
+    let mut muted = style::muted(ui);
+    muted.wrap = false;
     let button_label_style = LabelOptions {
         font_size: choose_style.font_size,
         line_height: choose_style.line_height,

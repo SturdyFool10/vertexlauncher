@@ -1,6 +1,6 @@
 [package]
 name = "vtmpack"
-version = "0.1.18-Alpha"
+version = "0.1.19-Alpha"
 edition = "2024"
 
 [dependencies]
@@ -12,4 +12,3 @@ tracing.workspace = true
 vertex_constants.workspace = true
 tar = "*"
 xz2 = "*"
-zpaq_rs = "1.0.4"
