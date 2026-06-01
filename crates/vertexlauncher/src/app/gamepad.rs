@@ -1,9 +1,10 @@
 use std::{
     collections::BTreeMap,
     collections::{HashMap, HashSet},
-    fs, io,
     time::{Duration, Instant},
 };
+#[cfg(target_os = "linux")]
+use std::{fs, io};
 
 use auth::MinecraftSkinVariant;
 use config::GamepadCalibration;
@@ -138,7 +139,9 @@ pub struct GamepadNavigator {
     prompted_uncalibrated: HashSet<String>,
     pending_calibration_request: Option<GamepadDeviceIdentity>,
     startup_scan_complete: bool,
+    #[cfg(target_os = "linux")]
     linux_access_warning_emitted: bool,
+    #[cfg(target_os = "linux")]
     linux_probe_logged: bool,
 }
 
@@ -154,7 +157,9 @@ impl GamepadNavigator {
                 prompted_uncalibrated: HashSet::new(),
                 pending_calibration_request: None,
                 startup_scan_complete: false,
+                #[cfg(target_os = "linux")]
                 linux_access_warning_emitted: false,
+                #[cfg(target_os = "linux")]
                 linux_probe_logged: false,
             }),
             Err(err) => {
