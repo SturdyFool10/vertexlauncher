@@ -8,8 +8,9 @@ mod vtmpack_export_stats;
 mod vtmpack_instance_metadata;
 mod vtmpack_manifest;
 mod vtmpack_provider_mode;
+mod vtmpatch;
 
-pub use constants::{VTMPACK_EXTENSION, VTMPACK_MANIFEST_VERSION};
+pub use constants::{VTMPACK_EXTENSION, VTMPACK_MANIFEST_VERSION, VTMPATCH_EXTENSION};
 pub use export::{
     default_vtmpack_root_entry_selected, export_instance_as_vtmpack,
     export_instance_as_vtmpack_with_progress, list_exportable_root_entries,
@@ -27,3 +28,7 @@ pub use vtmpack_export_stats::{VtmpackExportProgress, VtmpackExportStats};
 pub use vtmpack_instance_metadata::VtmpackInstanceMetadata;
 pub use vtmpack_manifest::VtmpackManifest;
 pub use vtmpack_provider_mode::VtmpackProviderMode;
+pub use vtmpatch::{
+    VtmpatchManifest, apply_vtmpatch_to_instance, default_vtmpatch_file_name,
+    enforce_vtmpatch_extension, export_instance_as_vtmpatch_with_progress,
+};

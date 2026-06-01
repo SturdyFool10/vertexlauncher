@@ -329,11 +329,11 @@ impl Client {
             },
         )?;
         if response.is_empty() {
-            warn!(
+            debug!(
                 target: "vertexlauncher/modrinth",
                 algorithm,
                 hashes = prepared_hashes.len(),
-                "Modrinth version-file lookup returned no matches"
+                "Modrinth version-file lookup returned no matches (files may not be on Modrinth)"
             );
         }
 
@@ -355,11 +355,11 @@ impl Client {
 
         let mut versions = self.get_versions_from_hashes(&[normalized_hash.clone()], algorithm)?;
         if versions.is_empty() {
-            warn!(
+            debug!(
                 target: "vertexlauncher/modrinth",
                 hash = normalized_hash,
                 algorithm,
-                "Modrinth hash lookup returned no version"
+                "Modrinth hash lookup returned no version (file may not be on Modrinth)"
             );
         } else if versions.len() > 1 {
             warn!(
@@ -405,11 +405,11 @@ impl Client {
             },
         )?;
         if response.is_empty() {
-            warn!(
+            debug!(
                 target: "vertexlauncher/modrinth",
                 algorithm,
                 hashes = prepared_hashes.len(),
-                "Modrinth version-file update lookup returned no matches"
+                "Modrinth version-file update lookup returned no matches (no newer versions or files not on Modrinth)"
             );
         }
 

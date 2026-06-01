@@ -249,6 +249,97 @@ pub(super) fn refresh_installed_content_state(
     super::clear_content_hash_cache(state, instance_root);
 }
 
+pub(super) fn request_vtmpatch_apply(
+    state: &mut InstanceScreenState,
+    instance_root: &Path,
+    patch_path: PathBuf,
+) {
+    if state.content_apply_in_flight {
+        return;
+    }
+
+    ensure_content_apply_channel(state);
+    let Some(tx) = state.content_apply_results_tx.as_ref().cloned() else {
+        return;
+    };
+
+    let instance_root = instance_root.to_path_buf();
+    let instance_name = state.name_input.clone();
+    state.content_apply_in_flight = true;
+    state.status_message = Some(format!("Applying patch {}...", patch_path.display()));
+    install_activity::set_status(
+        instance_name.as_str(),
+        InstallStage::DownloadingCore,
+        "Applying patch...".to_owned(),
+    );
+
+    let _ = tokio_runtime::spawn_detached(async move {
+        let patch_path_for_task = patch_path.clone();
+        let instance_root_for_task = instance_root.clone();
+        let join = tokio_runtime::spawn_blocking(move || {
+            apply_vtmpatch_to_instance(
+                patch_path_for_task.as_path(),
+                instance_root_for_task.as_path(),
+            )
+        });
+        let result = match join.await {
+            Ok(r) => r,
+            Err(err) => Err(format!("patch apply worker failed: {err}")),
+        };
+
+        let patch_file_name = patch_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| patch_path.display().to_string());
+
+        match &result {
+            Ok(message) => {
+                tracing::info!(
+                    target: CONTENT_UPDATE_LOG_TARGET,
+                    instance = %instance_name,
+                    patch = %patch_path.display(),
+                    "vtmpatch apply succeeded: {message}"
+                );
+                notification::info!(
+                    "vtmpatch/apply",
+                    "Patch applied — {} — {}",
+                    patch_file_name,
+                    message
+                );
+            }
+            Err(err) => {
+                tracing::error!(
+                    target: CONTENT_UPDATE_LOG_TARGET,
+                    instance = %instance_name,
+                    patch = %patch_path.display(),
+                    "vtmpatch apply failed: {err}"
+                );
+                notification::error!(
+                    "vtmpatch/apply",
+                    "Patch apply failed — {} — {}",
+                    patch_file_name,
+                    err
+                );
+            }
+        }
+
+        if let Err(err) = tx.send(ContentApplyResult {
+            kind: InstalledContentKind::Mods,
+            focus_lookup_keys: Vec::new(),
+            refresh_all_content: true,
+            status_message: result,
+        }) {
+            tracing::error!(
+                target: CONTENT_UPDATE_LOG_TARGET,
+                instance = %instance_name,
+                patch = %patch_path.display(),
+                error = %err,
+                "Failed to deliver vtmpatch apply result."
+            );
+        }
+    });
+}
+
 pub(super) fn request_local_content_import(
     state: &mut InstanceScreenState,
     instance_root: &Path,
@@ -496,9 +587,7 @@ pub(super) fn request_content_toggle(
     } else {
         let disabled_name = format!(
             "{}.DISABLED",
-            path.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
+            path.file_name().unwrap_or_default().to_string_lossy()
         );
         path.with_file_name(disabled_name)
     };
@@ -691,6 +780,9 @@ pub(super) fn poll_content_apply_results(state: &mut InstanceScreenState, instan
                 state.status_message = Some(message);
             }
             Err(err) => {
+                if result.refresh_all_content {
+                    refresh_installed_content_state(state, instance_root);
+                }
                 tracing::error!(
                     target: "vertexlauncher/instance_content",
                     error = %err,

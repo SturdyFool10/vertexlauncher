@@ -10,8 +10,6 @@ mod flattened_outline;
 mod glyph_atlas_texture;
 #[path = "atlas/glyph_atlas_worker_message.rs"]
 mod glyph_atlas_worker_message;
-#[path = "atlas/glyph_error_score.rs"]
-mod glyph_error_score;
 #[path = "atlas/native_glyph_atlas_texture.rs"]
 mod native_glyph_atlas_texture;
 
@@ -20,7 +18,6 @@ use self::field_line_segment::FieldLineSegment;
 use self::flattened_outline::FlattenedOutline;
 use self::glyph_atlas_texture::GlyphAtlasTexture;
 use self::glyph_atlas_worker_message::GlyphAtlasWorkerMessage;
-use self::glyph_error_score::GlyphErrorScore;
 use self::native_glyph_atlas_texture::NativeGlyphAtlasTexture;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -1037,7 +1034,7 @@ pub(super) fn rasterize_atlas_glyph(
         }
     }
 
-    let image = rasterize_best_alpha_glyph(font_system, scale_context, cache_key, rasterization)?;
+    let image = render_swash_image(font_system, scale_context, cache_key, rasterization)?;
     let glyph_width = image.placement.width as usize;
     let glyph_height = image.placement.height as usize;
     if glyph_width == 0 || glyph_height == 0 {
@@ -1055,67 +1052,6 @@ pub(super) fn rasterize_atlas_glyph(
         is_color: matches!(image.content, SwashContent::Color),
         content_mode: GlyphContentMode::AlphaMask,
     })
-}
-
-fn rasterize_best_alpha_glyph(
-    font_system: &mut FontSystem,
-    scale_context: &mut ScaleContext,
-    raster_key: &GlyphRasterKey,
-    rasterization: TextRasterizationConfig,
-) -> Option<SwashImage> {
-    let primary = render_swash_image(font_system, scale_context, raster_key, rasterization)?;
-    if !matches!(primary.content, SwashContent::Mask) {
-        return Some(primary);
-    }
-
-    let mut reference_rasterization = rasterization;
-    reference_rasterization.hinting = TextHintingMode::Disabled;
-    let Some(outline_commands) = render_swash_outline_commands(
-        font_system,
-        scale_context,
-        raster_key,
-        reference_rasterization,
-    ) else {
-        return Some(primary);
-    };
-    let outline = flatten_outline_commands_for_field(&outline_commands, GlyphContentMode::Sdf);
-    if outline.segments.is_empty()
-        || !outline.min[0].is_finite()
-        || !outline.min[1].is_finite()
-        || !outline.max[0].is_finite()
-        || !outline.max[1].is_finite()
-    {
-        return Some(primary);
-    }
-
-    let mut best_image = primary.clone();
-    let mut best_score = alpha_glyph_error_against_outline(&outline, &primary);
-
-    let mut variants = [rasterization; 3];
-    variants[0].stem_darkening = TextStemDarkeningMode::Disabled;
-    variants[1].hinting = TextHintingMode::Disabled;
-    variants[2].stem_darkening = TextStemDarkeningMode::Disabled;
-    variants[2].hinting = TextHintingMode::Disabled;
-
-    for variant in variants {
-        if variant == rasterization {
-            continue;
-        }
-        let Some(candidate) = render_swash_image(font_system, scale_context, raster_key, variant)
-        else {
-            continue;
-        };
-        if !matches!(candidate.content, SwashContent::Mask) {
-            continue;
-        }
-        let score = alpha_glyph_error_against_outline(&outline, &candidate);
-        if score.total_error < best_score.total_error {
-            best_image = candidate;
-            best_score = score;
-        }
-    }
-
-    Some(best_image)
 }
 
 fn render_swash_image(
@@ -1401,7 +1337,7 @@ fn rasterize_field_glyph(
                 GlyphContentMode::Msdf => {
                     encode_msdf_sample(sample, inside, &outline.segments, field_range_px)
                 }
-                GlyphContentMode::AlphaMask => unreachable!(),
+                GlyphContentMode::AlphaMask => return None,
             };
             glyph_image.pixels[y * glyph_width + x] =
                 Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]);
@@ -1496,46 +1432,6 @@ fn field_glyph_matches_reference(
     mean_error <= FIELD_GLYPH_MEAN_ALPHA_ERROR_LIMIT
         && max_error <= FIELD_GLYPH_MAX_ALPHA_ERROR_LIMIT
         && large_error_ratio <= FIELD_GLYPH_LARGE_ERROR_PIXEL_RATIO_LIMIT
-}
-
-fn alpha_glyph_error_against_outline(
-    outline: &FlattenedOutline,
-    image: &SwashImage,
-) -> GlyphErrorScore {
-    let Some(color_image) = swash_image_to_color_image(image) else {
-        return GlyphErrorScore {
-            total_error: f32::INFINITY,
-        };
-    };
-
-    let image_left = image.placement.left;
-    let image_top = image.placement.top;
-    let outline_left = outline.min[0].floor() as i32;
-    let outline_right = outline.max[0].ceil() as i32;
-    let outline_bottom = outline.min[1].floor() as i32;
-    let outline_top = outline.max[1].ceil() as i32;
-    let compare_left = image_left.min(outline_left);
-    let compare_right = (image_left + color_image.size[0] as i32).max(outline_right);
-    let image_bottom = image_top - color_image.size[1] as i32;
-    let compare_bottom = image_bottom.min(outline_bottom);
-    let compare_top = image_top.max(outline_top);
-
-    if compare_left >= compare_right || compare_bottom >= compare_top {
-        return GlyphErrorScore {
-            total_error: f32::INFINITY,
-        };
-    }
-
-    let mut total_error = 0.0_f32;
-    for y in compare_bottom..compare_top {
-        for x in compare_left..compare_right {
-            let actual_alpha = sample_color_image_alpha(image_left, image_top, &color_image, x, y);
-            let reference_alpha = outline_pixel_coverage(outline, x, y);
-            total_error += (actual_alpha - reference_alpha).abs();
-        }
-    }
-
-    GlyphErrorScore { total_error }
 }
 
 fn flatten_outline_commands_for_field(
@@ -1804,24 +1700,6 @@ fn median3(a: f32, b: f32, c: f32) -> f32 {
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
-}
-
-fn outline_pixel_coverage(outline: &FlattenedOutline, x: i32, y: i32) -> f32 {
-    let samples = OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS as f32;
-    let mut covered = 0usize;
-    let total = OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS * OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS;
-    for sy in 0..OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS {
-        for sx in 0..OUTLINE_REFERENCE_SUPERSAMPLES_PER_AXIS {
-            let sample = [
-                x as f32 + (sx as f32 + 0.5) / samples,
-                y as f32 + (sy as f32 + 0.5) / samples,
-            ];
-            if point_inside_outline(sample, &outline.contours) {
-                covered += 1;
-            }
-        }
-    }
-    covered as f32 / total as f32
 }
 
 fn distance_to_segment(point: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {

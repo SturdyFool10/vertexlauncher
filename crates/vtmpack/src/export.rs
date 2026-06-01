@@ -119,6 +119,7 @@ where
         })
         .collect::<Vec<_>>();
 
+    let downloadable_entry_count = downloadable_entries.len();
     let downloadable_paths = downloadable_entries
         .iter()
         .map(|entry| normalize_pack_path(entry.file_path.as_path()))
@@ -292,6 +293,7 @@ where
 
     Ok(VtmpackExportStats {
         bundled_mod_files: bundled_mod_file_count,
+        downloadable_mod_files: downloadable_entry_count,
         config_files: config_file_count,
         additional_files: additional_file_count,
     })
@@ -401,7 +403,7 @@ where
     Ok(())
 }
 
-fn manifest_with_disabled_mod_paths(
+pub(crate) fn manifest_with_disabled_mod_paths(
     instance_root: &Path,
     manifest: &ContentInstallManifest,
 ) -> ContentInstallManifest {
@@ -427,7 +429,7 @@ fn manifest_with_disabled_mod_paths(
     manifest
 }
 
-fn rediscover_modrinth_mods(
+pub(crate) fn rediscover_modrinth_mods(
     instance_root: &Path,
     manifest: &ContentInstallManifest,
     selected_root_entries: &HashSet<&str>,
@@ -738,7 +740,7 @@ fn progress_update(
     }
 }
 
-fn normalize_pack_path(path: &std::path::Path) -> PathBuf {
+pub(crate) fn normalize_pack_path(path: &std::path::Path) -> PathBuf {
     let normalized = path
         .to_string_lossy()
         .trim()

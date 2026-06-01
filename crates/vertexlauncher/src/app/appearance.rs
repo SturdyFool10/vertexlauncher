@@ -77,9 +77,7 @@ pub(super) fn preferred_text_graphics_api(backends: wgpu::Backends) -> textui::T
     if backends.contains(wgpu::Backends::DX12) {
         return textui::TextGraphicsApi::Dx12;
     }
-    if backends.contains(wgpu::Backends::GL) {
-        return textui::TextGraphicsApi::Gl;
-    }
+    let _ = backends;
     textui::TextGraphicsApi::Auto
 }
 

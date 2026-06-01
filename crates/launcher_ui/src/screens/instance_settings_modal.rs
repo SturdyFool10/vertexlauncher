@@ -791,6 +791,20 @@ pub(super) fn render_instance_settings_modal(
                         )
                         .clicked()
                     {
+                        state.export_vtmpack_patch_mode = false;
+                        state.show_export_vtmpack_modal = true;
+                    }
+                    ui.add_space(6.0);
+                    if text_ui
+                        .button(
+                            ui,
+                            ("instance_generate_vtmpatch", instance_id),
+                            "Generate Patch...",
+                            &refresh_style,
+                        )
+                        .clicked()
+                    {
+                        state.export_vtmpack_patch_mode = true;
                         state.show_export_vtmpack_modal = true;
                     }
                     ui.add_space(6.0);

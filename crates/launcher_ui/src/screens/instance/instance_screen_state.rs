@@ -94,6 +94,7 @@ pub(super) struct InstanceLogEntry {
 pub(super) struct VtmpackExportOutcome {
     pub(super) instance_name: String,
     pub(super) output_path: PathBuf,
+    pub(super) is_patch: bool,
     pub(super) result: Result<VtmpackExportStats, String>,
 }
 
@@ -239,6 +240,7 @@ pub(super) struct InstanceScreenState {
     pub(super) show_settings_modal: bool,
     pub(super) show_export_vtmpack_modal: bool,
     pub(super) show_export_server_modal: bool,
+    pub(super) export_vtmpack_patch_mode: bool,
     pub(super) export_vtmpack_options: VtmpackExportOptions,
     pub(super) export_vtmpack_in_flight: bool,
     pub(super) export_vtmpack_output_path: Option<PathBuf>,
@@ -395,6 +397,7 @@ impl InstanceScreenState {
             show_settings_modal: false,
             show_export_vtmpack_modal: false,
             show_export_server_modal: false,
+            export_vtmpack_patch_mode: false,
             export_vtmpack_options: VtmpackExportOptions::default(),
             export_vtmpack_in_flight: false,
             export_vtmpack_output_path: None,
@@ -544,6 +547,7 @@ impl InstanceScreenState {
         self.show_settings_modal = false;
         self.show_export_vtmpack_modal = false;
         self.show_export_server_modal = false;
+        self.export_vtmpack_patch_mode = false;
         self.export_vtmpack_in_flight = false;
         self.export_vtmpack_output_path = None;
         self.export_vtmpack_progress_tx = None;

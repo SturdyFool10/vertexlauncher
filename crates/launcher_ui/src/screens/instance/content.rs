@@ -14,6 +14,7 @@ use self::content_actions::{
     poll_content_apply_results, refresh_installed_content_state,
     render_joined_content_browser_controls, request_bulk_content_update, request_content_delete,
     request_content_toggle, request_content_update, request_local_content_import,
+    request_vtmpatch_apply,
 };
 use self::content_updates::{
     bulk_update_button_label, bulk_update_button_tooltip, installed_content_lookup_repaint_delay,
@@ -104,6 +105,26 @@ pub(super) fn render_installed_content_section(
                     .pick_files()
                 {
                     request_local_content_import(state, instance_root, selected_paths);
+                }
+            }
+
+            let apply_patch_response = ui
+                .add_enabled_ui(!state.content_apply_in_flight, |ui| {
+                    text_ui.button(
+                        ui,
+                        ("instance_content_popup_apply_patch", instance_id),
+                        "Apply Patch",
+                        &popup_button_style,
+                    )
+                })
+                .inner;
+            if apply_patch_response.clicked() {
+                if let Some(selected_path) = rfd::FileDialog::new()
+                    .set_title("Apply Vertex Patch")
+                    .add_filter("Vertex Modpack Patch", &[VTMPATCH_EXTENSION])
+                    .pick_file()
+                {
+                    request_vtmpatch_apply(state, instance_root, selected_path);
                 }
             }
 
@@ -1552,15 +1573,18 @@ fn request_content_metadata_lookup_batch(
                 return;
             }
         };
-        if let Err(err) = tx.send(result) {
-            tracing::error!(
+        if let Err(_) = tx.send(result) {
+            // The result channel is closed when the instance screen state is
+            // refreshed (e.g. after a patch apply).  In-flight lookup tasks
+            // that complete after the reset simply drop their results — this
+            // is harmless and expected, so we log at debug rather than error.
+            tracing::debug!(
                 target: "vertexlauncher/instance_content",
                 kind = %kind.folder_name(),
                 scheduled_count,
                 game_version = %game_version,
                 loader = %loader,
-                error = %err,
-                "Failed to deliver installed-content metadata lookup result."
+                "installed-content metadata lookup completed after state reset; result discarded"
             );
         }
     });

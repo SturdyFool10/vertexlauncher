@@ -91,16 +91,25 @@ pub(super) fn render_export_vtmpack_modal(
                 );
             } else {
                 let title_style = style::modal_title(ui);
+                let title = if state.export_vtmpack_patch_mode {
+                    "Generate .vtmpatch"
+                } else {
+                    "Export .vtmpack"
+                };
                 let _ = text_ui.label(
                     ui,
                     ("instance_export_vtmpack_title", instance_id),
-                    "Export .vtmpack",
+                    title,
                     &title_style,
                 );
                 let _ = text_ui.label(
                     ui,
                     ("instance_export_vtmpack_body", instance_id),
-                    "Choose whether the exported pack may reference CurseForge metadata directly, then select which top-level files and folders from the Minecraft root should be bundled into the pack.",
+                    if state.export_vtmpack_patch_mode {
+                        "Choose what to include in the patch. After clicking Choose file, you will be prompted for the base .vtmpack to compare against, then where to save the generated .vtmpatch."
+                    } else {
+                        "Choose whether the exported pack may reference CurseForge metadata directly, then select which top-level files and folders from the Minecraft root should be bundled into the pack."
+                    },
                     &body_style,
                 );
                 ui.add_space(12.0);
@@ -250,7 +259,11 @@ pub(super) fn render_export_vtmpack_modal(
                         .button(
                             ui,
                             ("instance_export_vtmpack_confirm", instance_id),
-                            "Choose file",
+                            if state.export_vtmpack_patch_mode {
+                                "Choose files"
+                            } else {
+                                "Choose file"
+                            },
                             &primary_button(ui, egui::vec2(140.0, style::CONTROL_HEIGHT)),
                         )
                         .clicked()
@@ -270,30 +283,58 @@ pub(super) fn render_export_vtmpack_modal(
     if export_requested {
         if let Some(instance) = instances.find(instance_id) {
             let instance_root = instances::instance_root_path(&installations_root, instance);
-            let default_file_name = default_vtmpack_file_name(instance.name.as_str());
-            let selected_output = rfd::FileDialog::new()
-                .set_title("Export Modpack")
-                .set_file_name(default_file_name.as_str())
-                .add_filter("Vertex Modpack", &[VTMPACK_EXTENSION])
-                .save_file();
-
-            if let Some(selected_path) = selected_output {
-                let output_path = enforce_vtmpack_extension(selected_path);
-                let pack_instance = VtmpackInstanceMetadata {
-                    id: instance.id.clone(),
-                    name: instance.name.clone(),
-                    game_version: instance.game_version.clone(),
-                    modloader: instance.modloader.clone(),
-                    modloader_version: instance.modloader_version.clone(),
+            if state.export_vtmpack_patch_mode {
+                let selected_base = rfd::FileDialog::new()
+                    .set_title("Choose Base Modpack")
+                    .add_filter("Vertex Modpack", &[VTMPACK_EXTENSION])
+                    .pick_file();
+                let Some(base_path) = selected_base else {
+                    return;
                 };
-                request_vtmpack_export(
-                    state,
-                    pack_instance,
-                    instance_root,
-                    output_path,
-                    state.export_vtmpack_options.clone(),
-                );
-                state.show_export_vtmpack_modal = true;
+                let default_file_name = default_vtmpatch_file_name(instance.name.as_str());
+                let selected_output = rfd::FileDialog::new()
+                    .set_title("Generate Patch")
+                    .set_file_name(default_file_name.as_str())
+                    .add_filter("Vertex Modpack Patch", &[VTMPATCH_EXTENSION])
+                    .save_file();
+                if let Some(selected_path) = selected_output {
+                    let output_path = enforce_vtmpatch_extension(selected_path);
+                    request_vtmpatch_export(
+                        state,
+                        instance.name.clone(),
+                        instance_root,
+                        base_path,
+                        output_path,
+                        state.export_vtmpack_options.clone(),
+                    );
+                    state.show_export_vtmpack_modal = true;
+                }
+            } else {
+                let default_file_name = default_vtmpack_file_name(instance.name.as_str());
+                let selected_output = rfd::FileDialog::new()
+                    .set_title("Export Modpack")
+                    .set_file_name(default_file_name.as_str())
+                    .add_filter("Vertex Modpack", &[VTMPACK_EXTENSION])
+                    .save_file();
+
+                if let Some(selected_path) = selected_output {
+                    let output_path = enforce_vtmpack_extension(selected_path);
+                    let pack_instance = VtmpackInstanceMetadata {
+                        id: instance.id.clone(),
+                        name: instance.name.clone(),
+                        game_version: instance.game_version.clone(),
+                        modloader: instance.modloader.clone(),
+                        modloader_version: instance.modloader_version.clone(),
+                    };
+                    request_vtmpack_export(
+                        state,
+                        pack_instance,
+                        instance_root,
+                        output_path,
+                        state.export_vtmpack_options.clone(),
+                    );
+                    state.show_export_vtmpack_modal = true;
+                }
             }
         } else {
             state.status_message = Some("Instance was removed before export.".to_owned());
@@ -375,12 +416,85 @@ fn request_vtmpack_export(
         if let Err(err) = results_tx.send(VtmpackExportOutcome {
             instance_name,
             output_path,
+            is_patch: false,
             result,
         }) {
             tracing::error!(
                 target: "vertexlauncher/instance_export",
                 error = %err,
                 "Failed to deliver vtmpack export result."
+            );
+        }
+    });
+}
+
+fn request_vtmpatch_export(
+    state: &mut InstanceScreenState,
+    instance_name: String,
+    instance_root: PathBuf,
+    base_vtmpack_path: PathBuf,
+    output_path: PathBuf,
+    options: vtmpack::VtmpackExportOptions,
+) {
+    if state.export_vtmpack_in_flight {
+        state.show_export_vtmpack_modal = true;
+        return;
+    }
+
+    ensure_vtmpack_export_channels(state);
+    let Some(progress_tx) = state.export_vtmpack_progress_tx.as_ref().cloned() else {
+        state.status_message =
+            Some("Failed to start .vtmpatch export progress channel.".to_owned());
+        return;
+    };
+    let Some(results_tx) = state.export_vtmpack_results_tx.as_ref().cloned() else {
+        state.status_message = Some("Failed to start .vtmpatch export result channel.".to_owned());
+        return;
+    };
+
+    state.export_vtmpack_in_flight = true;
+    state.export_vtmpack_output_path = Some(output_path.clone());
+    state.export_vtmpack_latest_progress = None;
+    state.show_export_vtmpack_modal = true;
+    state.status_message = Some(format!(
+        "Generating patch for {} at {}...",
+        instance_name,
+        output_path.display()
+    ));
+
+    let instance_name_for_task = instance_name.clone();
+    let output_path_for_task = output_path.clone();
+    let _ = tokio_runtime::spawn_detached(async move {
+        let instance_name_for_progress = instance_name_for_task.clone();
+        let output_path_for_progress = output_path.clone();
+        let result = export_instance_as_vtmpatch_with_progress(
+            instance_name_for_task.as_str(),
+            instance_root.as_path(),
+            base_vtmpack_path.as_path(),
+            output_path_for_task.as_path(),
+            &options,
+            |progress| {
+                if let Err(err) = progress_tx.send(progress) {
+                    tracing::error!(
+                        target: "vertexlauncher/instance_export",
+                        instance_name = %instance_name_for_progress,
+                        output_path = %output_path_for_progress.display(),
+                        error = %err,
+                        "Failed to deliver vtmpatch export progress update."
+                    );
+                }
+            },
+        );
+        if let Err(err) = results_tx.send(VtmpackExportOutcome {
+            instance_name,
+            output_path,
+            is_patch: true,
+            result,
+        }) {
+            tracing::error!(
+                target: "vertexlauncher/instance_export",
+                error = %err,
+                "Failed to deliver vtmpatch export result."
             );
         }
     });
@@ -459,16 +573,82 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
         state.export_vtmpack_latest_progress = None;
         state.export_vtmpack_output_path = None;
         state.show_export_vtmpack_modal = false;
+        let output_file_name = update
+            .output_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| update.output_path.display().to_string());
         match update.result {
             Ok(stats) => {
-                state.status_message = Some(format!(
-                    "Exported {} ({} bundled mods, {} config files, {} additional files) to {}",
-                    update.instance_name,
-                    stats.bundled_mod_files,
-                    stats.config_files,
-                    stats.additional_files,
-                    update.output_path.display()
-                ));
+                if update.is_patch {
+                    let msg = format!(
+                        "Generated patch for {} — {} downloadable mod{}, {} bundled mod{}, {} changed config file{}, {} changed additional file{} — saved to {}",
+                        update.instance_name,
+                        stats.downloadable_mod_files,
+                        if stats.downloadable_mod_files == 1 { "" } else { "s" },
+                        stats.bundled_mod_files,
+                        if stats.bundled_mod_files == 1 { "" } else { "s" },
+                        stats.config_files,
+                        if stats.config_files == 1 { "" } else { "s" },
+                        stats.additional_files,
+                        if stats.additional_files == 1 { "" } else { "s" },
+                        update.output_path.display()
+                    );
+                    tracing::info!(
+                        target: "vertexlauncher/instance_export",
+                        instance_name = %update.instance_name,
+                        output = %update.output_path.display(),
+                        downloadable_mods = stats.downloadable_mod_files,
+                        bundled_mods = stats.bundled_mod_files,
+                        config_files = stats.config_files,
+                        additional_files = stats.additional_files,
+                        "vtmpatch export succeeded"
+                    );
+                    notification::info!(
+                        "vtmpatch/export",
+                        "Patch generated — {} — {} downloadable mod{}, {} bundled mod{}",
+                        output_file_name,
+                        stats.downloadable_mod_files,
+                        if stats.downloadable_mod_files == 1 { "" } else { "s" },
+                        stats.bundled_mod_files,
+                        if stats.bundled_mod_files == 1 { "" } else { "s" },
+                    );
+                    state.status_message = Some(msg);
+                } else {
+                    let msg = format!(
+                        "Exported {} — {} downloadable mod{}, {} bundled mod{}, {} config file{}, {} additional file{} — saved to {}",
+                        update.instance_name,
+                        stats.downloadable_mod_files,
+                        if stats.downloadable_mod_files == 1 { "" } else { "s" },
+                        stats.bundled_mod_files,
+                        if stats.bundled_mod_files == 1 { "" } else { "s" },
+                        stats.config_files,
+                        if stats.config_files == 1 { "" } else { "s" },
+                        stats.additional_files,
+                        if stats.additional_files == 1 { "" } else { "s" },
+                        update.output_path.display()
+                    );
+                    tracing::info!(
+                        target: "vertexlauncher/instance_export",
+                        instance_name = %update.instance_name,
+                        output = %update.output_path.display(),
+                        downloadable_mods = stats.downloadable_mod_files,
+                        bundled_mods = stats.bundled_mod_files,
+                        config_files = stats.config_files,
+                        additional_files = stats.additional_files,
+                        "vtmpack export succeeded"
+                    );
+                    notification::info!(
+                        "vtmpack/export",
+                        "Pack exported — {} — {} downloadable mod{}, {} bundled mod{}",
+                        output_file_name,
+                        stats.downloadable_mod_files,
+                        if stats.downloadable_mod_files == 1 { "" } else { "s" },
+                        stats.bundled_mod_files,
+                        if stats.bundled_mod_files == 1 { "" } else { "s" },
+                    );
+                    state.status_message = Some(msg);
+                }
             }
             Err(err) => {
                 tracing::error!(
@@ -476,9 +656,17 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
                     instance_name = %update.instance_name,
                     output_path = %update.output_path.display(),
                     error = %err,
-                    "vtmpack export failed."
+                    "{} export failed",
+                    if update.is_patch { "vtmpatch" } else { "vtmpack" }
                 );
-                state.status_message = Some(format!("Failed to export .vtmpack: {err}"));
+                let ext = if update.is_patch { "vtmpatch" } else { "vtmpack" };
+                notification::error!(
+                    "vtmpack/export",
+                    "{} export failed — {}",
+                    output_file_name,
+                    err
+                );
+                state.status_message = Some(format!("Failed to export .{ext}: {err}"));
             }
         }
     }
@@ -489,7 +677,7 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
         state.export_vtmpack_output_path = None;
         state.show_export_vtmpack_modal = false;
         state.status_message =
-            Some("Failed to export .vtmpack: export task stopped unexpectedly.".to_owned());
+            Some("Failed to export: export task stopped unexpectedly.".to_owned());
     }
 
     if should_reset_channel || !state.export_vtmpack_in_flight {

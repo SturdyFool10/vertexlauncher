@@ -4,9 +4,12 @@ version = "0.1.19-Alpha"
 edition = "2024"
 
 [dependencies]
+curseforge.workspace = true
 managed_content.workspace = true
 modrinth.workspace = true
+ureq.workspace = true
 serde.workspace = true
+sha2 = "*"
 toml.workspace = true
 tracing.workspace = true
 vertex_constants.workspace = true
