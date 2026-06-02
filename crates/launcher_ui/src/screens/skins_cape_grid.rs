@@ -284,7 +284,7 @@ fn draw_cape_tile(
         egui::vec2(tile_rect.width() - 12.0, 34.0),
     );
     ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect), |ui| {
-        ui.set_clip_rect(label_rect);
+        ui.set_clip_rect(label_rect.intersect(ui.clip_rect()));
         ui.with_layout(
             egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
             |ui| {
