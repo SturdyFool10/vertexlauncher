@@ -264,7 +264,7 @@ pub(super) fn start_initial_instance_install(
                 );
                 notification::info!(
                     "Installation Complete!",
-                    "{} installed successfully.",
+                    "{} was installed successfully.",
                     instance_name
                 );
             }
