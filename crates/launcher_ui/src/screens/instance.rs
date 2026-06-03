@@ -78,6 +78,7 @@ mod instance_screen_state;
 mod instance_screenshots;
 #[path = "instance_settings_modal.rs"]
 mod instance_settings_modal;
+mod instance_version_detection;
 mod move_instance;
 mod platform;
 mod runtime;
@@ -85,6 +86,7 @@ mod runtime_prepare_operation;
 mod runtime_prepare_outcome;
 
 pub use self::instance_presence_section::InstancePresenceSection;
+pub use instance_version_detection::{DetectedInstanceVersions, detect_instance_versions};
 
 use content::ContentApplyResult;
 use content::{poll_content_lookup_results, render_installed_content_section};

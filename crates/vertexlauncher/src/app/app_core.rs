@@ -682,14 +682,17 @@ impl VertexApp {
             msaa_samples: skin_preview_msaa_samples,
         };
         let auth = screens::PlayerAuthContext {
-            launch_auth: self.auth.active_launch_context().map(|c| screens::LaunchAuthContext {
-                account_key: c.account_key,
-                player_name: c.player_name,
-                player_uuid: c.player_uuid,
-                access_token: c.access_token,
-                xuid: c.xuid,
-                user_type: c.user_type,
-            }),
+            launch_auth: self
+                .auth
+                .active_launch_context()
+                .map(|c| screens::LaunchAuthContext {
+                    account_key: c.account_key,
+                    player_name: c.player_name,
+                    player_uuid: c.player_uuid,
+                    access_token: c.access_token,
+                    xuid: c.xuid,
+                    user_type: c.user_type,
+                }),
             token_refresh_in_progress: self.auth.token_refresh_in_progress(),
             account_avatars: self.auth.account_avatars_by_key(),
         };
@@ -1110,6 +1113,44 @@ impl VertexApp {
             .filter(|name| !name.is_empty())
             .unwrap_or("Linked Profile")
             .to_owned();
+        let detected_versions = match screens::detect_instance_versions(path.as_path()) {
+            Ok(detected) => Some(detected),
+            Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/instances",
+                    root = %path.display(),
+                    error = %err,
+                    "Failed to auto-detect linked instance versions; using fallback metadata."
+                );
+                notification::warn!(
+                    "instance_link",
+                    "Linked profile version detection failed; using fallback version metadata. You can run auto-detect from Instance Settings."
+                );
+                None
+            }
+        };
+        let detected_summary = detected_versions.as_ref().map(|detected| {
+            if detected.modloader_version.trim().is_empty() {
+                format!(
+                    "{} for Minecraft {}",
+                    detected.modloader, detected.game_version
+                )
+            } else {
+                format!(
+                    "{} {} for Minecraft {}",
+                    detected.modloader, detected.modloader_version, detected.game_version
+                )
+            }
+        });
+        let (modloader, game_version, modloader_version) = detected_versions
+            .map(|detected| {
+                (
+                    detected.modloader,
+                    detected.game_version,
+                    detected.modloader_version,
+                )
+            })
+            .unwrap_or_else(|| ("Vanilla".to_owned(), "latest".to_owned(), String::new()));
         let installations_root = self
             .config
             .minecraft_installations_root_path()
@@ -1125,9 +1166,9 @@ impl VertexApp {
                     display_user_path(path.as_path())
                 )),
                 thumbnail_path: None,
-                modloader: "Vanilla".to_owned(),
-                game_version: "latest".to_owned(),
-                modloader_version: String::new(),
+                modloader,
+                game_version,
+                modloader_version,
             },
         ) {
             Ok(instance) => {
@@ -1135,11 +1176,19 @@ impl VertexApp {
                 self.active_screen = screens::AppScreen::Instance;
                 self.refresh_instance_shortcuts();
                 queue_instance_store_save(self);
-                notification::info!(
-                    "instance_link",
-                    "Linked existing profile '{}'. You can adjust Minecraft/version settings from the profile screen.",
-                    instance.name
-                );
+                if let Some(summary) = detected_summary.as_deref() {
+                    notification::info!(
+                        "instance_link",
+                        "Linked existing profile '{}' and detected {summary}.",
+                        instance.name
+                    );
+                } else {
+                    notification::info!(
+                        "instance_link",
+                        "Linked existing profile '{}'. You can adjust Minecraft/version settings from the profile screen.",
+                        instance.name
+                    );
+                }
             }
             Err(err) => {
                 notification::error!(
