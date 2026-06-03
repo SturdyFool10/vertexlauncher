@@ -235,8 +235,10 @@ fn auto_graphics_api_backends(
 ) -> wgpu::Backends {
     #[cfg(target_os = "windows")]
     {
-        let _ = transparent_viewport;
         let _ = resolved_graphics_api_preference;
+        if transparent_viewport {
+            return wgpu::Backends::DX12;
+        }
         return wgpu::Backends::DX12 | wgpu::Backends::VULKAN;
     }
 

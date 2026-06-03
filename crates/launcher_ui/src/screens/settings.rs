@@ -669,6 +669,14 @@ fn supported_graphics_api_preferences(config: &Config) -> Vec<GraphicsApiPrefere
 fn render_graphics_api_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Config) {
     let setting = DropdownSettingId::GraphicsApiPreference.spec();
     let options = supported_graphics_api_preferences(config);
+    if !options.contains(&config.graphics_api_preference()) {
+        let fallback = if options.contains(&GraphicsApiPreference::Dx12) {
+            GraphicsApiPreference::Dx12
+        } else {
+            GraphicsApiPreference::Auto
+        };
+        config.set_graphics_api_preference(fallback);
+    }
     let labels = options
         .iter()
         .map(|option| option.settings_label())
@@ -972,6 +980,24 @@ fn render_window_blur_setting(ui: &mut Ui, text_ui: &mut TextUi, config: &mut Co
         );
         if response.changed() {
             config.set_window_blur_enabled(value);
+            #[cfg(target_os = "windows")]
+            if value
+                && matches!(
+                    config.graphics_api_preference(),
+                    GraphicsApiPreference::Vulkan
+                )
+            {
+                config.set_graphics_api_preference(GraphicsApiPreference::Dx12);
+            }
+        }
+        #[cfg(target_os = "windows")]
+        if config.window_blur_enabled() {
+            let _ = text_ui.label(
+                ui,
+                "window_blur_windows_graphics_api_note",
+                "Window blur uses the DirectX 12 renderer on Windows; Vulkan is unavailable while blur is enabled.",
+                &style::muted(ui),
+            );
         }
         ui.add_space(style::SPACE_MD);
     }
