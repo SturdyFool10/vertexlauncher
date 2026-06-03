@@ -89,7 +89,7 @@ pub use self::instance_presence_section::InstancePresenceSection;
 use content::ContentApplyResult;
 use content::{poll_content_lookup_results, render_installed_content_section};
 use content_lookup_result::ContentLookupResult;
-use installed_content_cache::InstalledContentCache;
+use installed_content_cache::{InstalledContentCache, InstalledContentScanResult};
 use installed_entry_render_result::InstalledEntryRenderResult;
 use instance_exports::*;
 use instance_logs::*;
@@ -134,6 +134,19 @@ const INSTANCE_SCREENSHOT_MIN_COLUMN_WIDTH: f32 = 180.0;
 const MAX_INSTANCE_LOG_LINES: usize = 12_000;
 const INSTANCE_SCREENSHOT_COPY_BUTTON_SIZE: f32 = 28.0;
 const INSTANCE_TOP_TAB_ID_KEY: &str = "instance_top_tab_id";
+const INSTANCE_ROOT_COPY_BUTTON_SIZE: f32 = 28.0;
+
+fn absolute_path_for_clipboard(path: &Path) -> String {
+    let absolute_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+
+    absolute_path.display().to_string()
+}
 
 fn instance_screen_state_id(instance_id: &str) -> egui::Id {
     egui::Id::new(("instance_screen_state", instance_id))
@@ -316,7 +329,6 @@ pub fn render(
         .options_mut(|options| options.reduce_texture_memory = true);
     let mut output = InstanceScreenOutput::default();
     let body_style = style::body(ui);
-    let muted_style = style::muted(ui);
 
     let Some(instance_id) = selected_instance_id else {
         let _ = text_ui.label(
@@ -408,12 +420,48 @@ pub fn render(
         max_download_bps: config.parsed_download_speed_limit_bps(),
     };
 
-    let _ = text_ui.label(
-        ui,
-        ("instance_screen_root", instance_id),
-        &format!("Root: {}", instance_root_path.display()),
-        &muted_style,
-    );
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let root_text = format!("Root: {}", instance_root_path.display());
+        let root_label_style = style::muted_single_line(ui);
+        let reserved_button_width = INSTANCE_ROOT_COPY_BUTTON_SIZE + ui.spacing().item_spacing.x;
+        let max_root_text_width = (ui.available_width() - reserved_button_width).max(1.0);
+        let display_root_text = truncate_single_line_text_with_ellipsis(
+            text_ui,
+            ui,
+            root_text.as_str(),
+            max_root_text_width,
+            &root_label_style,
+        );
+        let root_response = text_ui.label(
+            ui,
+            ("instance_screen_root", instance_id),
+            display_root_text.as_str(),
+            &root_label_style,
+        );
+        if display_root_text != root_text {
+            root_response.on_hover_text(root_text.as_str());
+        }
+
+        let copy_button_id = format!("instance-root-copy-{instance_id}");
+        let copy_response = icon_button::svg(
+            ui,
+            copy_button_id.as_str(),
+            assets::COPY_SVG,
+            "Copy instance root path",
+            false,
+            INSTANCE_ROOT_COPY_BUTTON_SIZE,
+        )
+        .on_hover_text("Copy absolute instance root path");
+        if copy_response.clicked() {
+            ui.ctx()
+                .copy_text(absolute_path_for_clipboard(instance_root_path.as_path()));
+            notification::info!(
+                "instance/root",
+                "Copied instance root path to the clipboard."
+            );
+        }
+    });
     ui.add_space(12.0);
 
     let selected_game_version_for_runtime = selected_game_version(&state).to_owned();

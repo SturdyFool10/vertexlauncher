@@ -64,6 +64,8 @@ pub(super) fn render_installed_content_section(
     ui.add_space(12.0);
     ui.separator();
     ui.add_space(10.0);
+    poll_installed_content_scan_results(state);
+    poll_content_hash_cache_load_results(state);
     poll_content_hash_cache_save_results(state);
     poll_content_apply_results(state, instance_root);
     ensure_content_hash_cache_loaded(state, instance_root);
@@ -154,6 +156,27 @@ pub(super) fn render_installed_content_section(
 
     let installed_files =
         installed_content_files_for_tab(state, instance_root, state.selected_content_tab);
+    if state
+        .installed_content_cache
+        .scans_in_flight
+        .contains(&state.selected_content_tab)
+    {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+        let _ = text_ui.label(
+            ui,
+            (
+                "instance_content_loading",
+                instance_id,
+                state.selected_content_tab.label(),
+            ),
+            &format!(
+                "Loading installed {}...",
+                state.selected_content_tab.label().to_lowercase()
+            ),
+            &style::muted(ui),
+        );
+        return;
+    }
     if installed_files.is_empty() {
         let _ = text_ui.label(
             ui,
@@ -483,7 +506,7 @@ pub(super) fn render_installed_content_section(
             .unwrap_or(CONTENT_HASH_CACHE_FLUSH_DEBOUNCE);
         ui.ctx().request_repaint_after(repaint_after);
     }
-    if state.content_hash_cache_save_in_flight {
+    if state.content_hash_cache_load_in_flight || state.content_hash_cache_save_in_flight {
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
     flush_content_hash_cache(state, instance_root);
@@ -742,6 +765,99 @@ fn installed_content_count_label(matching: usize, total: usize, query: &str) -> 
     }
 }
 
+fn ensure_installed_content_scan_channel(state: &mut InstanceScreenState) {
+    if state.installed_content_cache.scan_results_tx.is_some()
+        && state.installed_content_cache.scan_results_rx.is_some()
+    {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<InstalledContentScanResult>();
+    state.installed_content_cache.scan_results_tx = Some(tx);
+    state.installed_content_cache.scan_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_installed_content_scan_results(state: &mut InstanceScreenState) {
+    let Some(rx) = state.installed_content_cache.scan_results_rx.as_ref() else {
+        return;
+    };
+    let Ok(guard) = rx.lock() else {
+        tracing::error!(
+            target: "vertexlauncher/instance_content",
+            "Installed-content scan receiver mutex was poisoned."
+        );
+        return;
+    };
+
+    while let Ok(result) = guard.try_recv() {
+        if result.generation != state.installed_content_cache.scan_generation {
+            continue;
+        }
+        state
+            .installed_content_cache
+            .scans_in_flight
+            .remove(&result.kind);
+        state.installed_content_cache.managed_identities = Some(result.managed_identities);
+        state
+            .installed_content_cache
+            .files_by_tab
+            .insert(result.kind, result.files);
+    }
+}
+
+fn request_installed_content_scan(
+    state: &mut InstanceScreenState,
+    instance_root: &Path,
+    tab: InstalledContentKind,
+) {
+    if state.installed_content_cache.scans_in_flight.contains(&tab) {
+        return;
+    }
+    ensure_installed_content_scan_channel(state);
+    let Some(tx) = state
+        .installed_content_cache
+        .scan_results_tx
+        .as_ref()
+        .cloned()
+    else {
+        return;
+    };
+
+    let generation = state.installed_content_cache.scan_generation;
+    let instance_root = instance_root.to_path_buf();
+    state.installed_content_cache.scans_in_flight.insert(tab);
+    let _ = tokio_runtime::spawn_detached(async move {
+        let join = tokio_runtime::spawn_blocking(move || {
+            let managed_identities = load_managed_content_identities(instance_root.as_path());
+            let files: Arc<[InstalledContentFile]> =
+                InstalledContentResolver::scan_installed_content_files(
+                    instance_root.as_path(),
+                    tab,
+                    &managed_identities,
+                )
+                .into();
+            InstalledContentScanResult {
+                generation,
+                kind: tab,
+                managed_identities,
+                files,
+            }
+        });
+        match join.await {
+            Ok(result) => {
+                let _ = tx.send(result);
+            }
+            Err(err) => {
+                tracing::error!(
+                    target: "vertexlauncher/instance_content",
+                    kind = %tab.folder_name(),
+                    error = %err,
+                    "Installed-content scan worker panicked."
+                );
+            }
+        }
+    });
+}
+
 fn installed_content_files_for_tab(
     state: &mut InstanceScreenState,
     instance_root: &Path,
@@ -751,22 +867,8 @@ fn installed_content_files_for_tab(
         return files.clone();
     }
 
-    let managed_identities = state
-        .installed_content_cache
-        .managed_identities
-        .get_or_insert_with(|| load_managed_content_identities(instance_root));
-    let files: Arc<[InstalledContentFile]> =
-        InstalledContentResolver::scan_installed_content_files(
-            instance_root,
-            tab,
-            managed_identities,
-        )
-        .into();
-    state
-        .installed_content_cache
-        .files_by_tab
-        .insert(tab, files.clone());
-    files
+    request_installed_content_scan(state, instance_root, tab);
+    Arc::from([])
 }
 
 fn render_installed_content_entry(
@@ -1378,10 +1480,71 @@ fn render_installed_content_warning(
     response.on_hover_text(warning_message);
 }
 
-fn ensure_content_hash_cache_loaded(state: &mut InstanceScreenState, instance_root: &Path) {
-    if state.content_hash_cache.is_none() {
-        state.content_hash_cache = Some(InstalledContentResolver::load_hash_cache(instance_root));
+fn ensure_content_hash_cache_load_channel(state: &mut InstanceScreenState) {
+    if state.content_hash_cache_load_results_tx.is_some()
+        && state.content_hash_cache_load_results_rx.is_some()
+    {
+        return;
     }
+    let (tx, rx) = mpsc::channel::<Result<InstalledContentHashCache, String>>();
+    state.content_hash_cache_load_results_tx = Some(tx);
+    state.content_hash_cache_load_results_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_content_hash_cache_load_results(state: &mut InstanceScreenState) {
+    let Some(rx) = state.content_hash_cache_load_results_rx.as_ref() else {
+        return;
+    };
+    let Ok(guard) = rx.lock() else {
+        tracing::error!(
+            target: "vertexlauncher/instance_content",
+            "Content hash-cache load receiver mutex was poisoned."
+        );
+        return;
+    };
+
+    while let Ok(result) = guard.try_recv() {
+        state.content_hash_cache_load_in_flight = false;
+        if state.content_hash_cache.is_some() {
+            continue;
+        }
+        match result {
+            Ok(cache) => state.content_hash_cache = Some(cache),
+            Err(err) => {
+                tracing::warn!(
+                    target: "vertexlauncher/instance_content",
+                    error = %err,
+                    "Failed to load installed-content hash cache; using an empty cache."
+                );
+                state.content_hash_cache = Some(InstalledContentHashCache::default());
+            }
+        }
+    }
+}
+
+fn ensure_content_hash_cache_loaded(state: &mut InstanceScreenState, instance_root: &Path) {
+    if state.content_hash_cache.is_some() || state.content_hash_cache_load_in_flight {
+        return;
+    }
+    ensure_content_hash_cache_load_channel(state);
+    let Some(tx) = state.content_hash_cache_load_results_tx.as_ref().cloned() else {
+        state.content_hash_cache = Some(InstalledContentHashCache::default());
+        return;
+    };
+
+    let instance_root = instance_root.to_path_buf();
+    state.content_hash_cache_load_in_flight = true;
+    let _ = tokio_runtime::spawn_detached(async move {
+        let result = tokio_runtime::spawn_blocking(move || {
+            Ok::<_, String>(InstalledContentResolver::load_hash_cache(
+                instance_root.as_path(),
+            ))
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
+        let _ = tx.send(result);
+    });
 }
 
 fn flush_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Path) {
@@ -1422,11 +1585,18 @@ fn flush_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Pat
 
 fn clear_content_hash_cache(state: &mut InstanceScreenState, instance_root: &Path) {
     state.content_hash_cache = Some(InstalledContentHashCache::default());
+    state.content_hash_cache_load_in_flight = false;
     state.content_hash_cache_dirty = false;
     state.content_hash_cache_dirty_since = None;
     state.content_hash_cache_serial = state.content_hash_cache_serial.saturating_add(1);
     state.content_hash_cache_save_in_flight = false;
-    let _ = InstalledContentResolver::clear_hash_cache(instance_root);
+    let instance_root = instance_root.to_path_buf();
+    let _ = tokio_runtime::spawn_detached(async move {
+        let _ = tokio_runtime::spawn_blocking(move || {
+            InstalledContentResolver::clear_hash_cache(instance_root.as_path())
+        })
+        .await;
+    });
 }
 
 fn cached_truncated_description(
@@ -1518,7 +1688,7 @@ fn request_content_metadata_lookup_batch(
     force_refresh: bool,
     max_batch_size: usize,
 ) -> usize {
-    if files.is_empty() || max_batch_size == 0 {
+    if files.is_empty() || max_batch_size == 0 || state.content_hash_cache.is_none() {
         return 0;
     }
 
@@ -1721,112 +1891,30 @@ fn refresh_cached_metadata_after_apply(
     kind: InstalledContentKind,
     focus_lookup_keys: &[String],
 ) {
-    let managed_identities = load_managed_content_identities(instance_root);
-    let installed_files: Arc<[InstalledContentFile]> =
-        InstalledContentResolver::scan_installed_content_files(
-            instance_root,
-            kind,
-            &managed_identities,
-        )
-        .into();
-    let active_keys = installed_files
-        .iter()
-        .map(|entry| entry.lookup_key.clone())
-        .collect::<HashSet<_>>();
     let key_prefix = format!("{}::", kind.folder_name());
+    let focus_keys = focus_lookup_keys.iter().cloned().collect::<HashSet<_>>();
 
-    state.installed_content_cache.managed_identities = Some(managed_identities);
-    state
-        .installed_content_cache
-        .files_by_tab
-        .insert(kind, installed_files.clone());
+    state.installed_content_cache.files_by_tab.remove(&kind);
     state
         .content_metadata_cache
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
     state
         .installed_content_entry_ui_cache
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
     state
         .content_lookup_in_flight
-        .retain(|key| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+        .retain(|key| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
     state
         .content_lookup_latest_serial_by_key
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
     state
         .content_lookup_retry_after_by_key
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
     state
         .content_lookup_failure_count_by_key
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || active_keys.contains(key));
+        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
 
-    if installed_files.is_empty() {
-        return;
-    }
-
-    let selected_game_version = selected_game_version(state).to_owned();
-    let selected_modloader = selected_modloader_value(state).to_owned();
-    let mut refresh_keys = HashSet::new();
-    for lookup_key in focus_lookup_keys {
-        if active_keys.contains(lookup_key) {
-            refresh_keys.insert(lookup_key.clone());
-        }
-    }
-
-    let (start_index, end_index) = if state.selected_content_tab == kind {
-        let total_items = installed_files.len();
-        let total_pages = total_items
-            .div_ceil(state.installed_content_page_size.max(1))
-            .max(1);
-        state.installed_content_page = state.installed_content_page.clamp(1, total_pages);
-        let start = (state.installed_content_page - 1) * state.installed_content_page_size;
-        let end = (start + state.installed_content_page_size).min(total_items);
-        (start, end)
-    } else {
-        (
-            0,
-            installed_files
-                .len()
-                .min(CONTENT_UPDATE_PREFETCH_BATCH_SIZE),
-        )
-    };
-
-    for entry in &installed_files[start_index..end_index] {
-        refresh_keys.insert(entry.lookup_key.clone());
-    }
-
-    let refresh_files = installed_files
-        .iter()
-        .filter(|entry| refresh_keys.contains(&entry.lookup_key))
-        .cloned()
-        .collect::<Vec<_>>();
-    for entry in &refresh_files {
-        state
-            .content_lookup_in_flight
-            .remove(entry.lookup_key.as_str());
-        state
-            .content_lookup_retry_after_by_key
-            .remove(entry.lookup_key.as_str());
-        state
-            .content_lookup_failure_count_by_key
-            .remove(entry.lookup_key.as_str());
-    }
-    let _ = request_content_metadata_lookup_batch(
-        state,
-        refresh_files.as_slice(),
-        kind,
-        selected_game_version.as_str(),
-        selected_modloader.as_str(),
-        true,
-        refresh_files.len(),
-    );
-
-    prefetch_bulk_update_metadata(
-        state,
-        installed_files.as_ref(),
-        kind,
-        selected_game_version.as_str(),
-        selected_modloader.as_str(),
-    );
+    request_installed_content_scan(state, instance_root, kind);
 }
 
 fn content_lookup_retry_delay(failure_count: u8) -> Duration {

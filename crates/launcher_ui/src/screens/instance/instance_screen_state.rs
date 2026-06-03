@@ -133,6 +133,11 @@ pub(super) struct InstanceScreenState {
     pub(super) installed_content_entry_ui_cache: HashMap<String, InstalledContentEntryUiCache>,
     pub(super) content_metadata_cache: HashMap<String, Option<ResolvedInstalledContent>>,
     pub(super) content_hash_cache: Option<InstalledContentHashCache>,
+    pub(super) content_hash_cache_load_in_flight: bool,
+    pub(super) content_hash_cache_load_results_tx:
+        Option<mpsc::Sender<Result<InstalledContentHashCache, String>>>,
+    pub(super) content_hash_cache_load_results_rx:
+        Option<Arc<Mutex<mpsc::Receiver<Result<InstalledContentHashCache, String>>>>>,
     pub(super) content_hash_cache_dirty: bool,
     pub(super) content_hash_cache_dirty_since: Option<Instant>,
     pub(super) content_hash_cache_serial: u64,
@@ -320,6 +325,9 @@ impl InstanceScreenState {
             installed_content_entry_ui_cache: HashMap::new(),
             content_metadata_cache: HashMap::new(),
             content_hash_cache: None,
+            content_hash_cache_load_in_flight: false,
+            content_hash_cache_load_results_tx: None,
+            content_hash_cache_load_results_rx: None,
             content_hash_cache_dirty: false,
             content_hash_cache_dirty_since: None,
             content_hash_cache_serial: 0,

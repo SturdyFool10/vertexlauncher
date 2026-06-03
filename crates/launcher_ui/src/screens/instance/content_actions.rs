@@ -524,25 +524,32 @@ pub(super) fn request_content_delete(
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = (|| -> Result<String, String> {
-            let delete_result = if path.is_dir() {
-                std::fs::remove_dir_all(path.as_path())
-            } else {
-                std::fs::remove_file(path.as_path())
-            };
-            delete_result.map_err(|err| format!("failed to remove {}: {err}", path.display()))?;
+        let result = tokio_runtime::spawn_blocking({
+            let instance_root = instance_root.clone();
+            let path = path.clone();
+            move || -> Result<String, String> {
+                let delete_result = if path.is_dir() {
+                    std::fs::remove_dir_all(path.as_path())
+                } else {
+                    std::fs::remove_file(path.as_path())
+                };
+                delete_result.map_err(|err| format!("failed to remove {}: {err}", path.display()))?;
 
-            managed_content::remove_content_manifest_entries_for_path(
-                instance_root.as_path(),
-                path.as_path(),
-            )
-            .map(|_| "Removed installed content.".to_owned())
-            .map_err(|err| {
-                format!(
-                    "removed installed content, but failed to update the content manifest: {err}"
+                managed_content::remove_content_manifest_entries_for_path(
+                    instance_root.as_path(),
+                    path.as_path(),
                 )
-            })
-        })();
+                .map(|_| "Removed installed content.".to_owned())
+                .map_err(|err| {
+                    format!(
+                        "removed installed content, but failed to update the content manifest: {err}"
+                    )
+                })
+            }
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
 
         if let Err(err) = tx.send(ContentApplyResult {
             kind,
@@ -597,15 +604,24 @@ pub(super) fn request_content_toggle(
     // causing visible flicker with no useful progress indication.
 
     let _ = tokio_runtime::spawn_detached(async move {
-        let result = std::fs::rename(&path, &new_path)
-            .map(|_| {
-                if currently_disabled {
-                    "Mod enabled.".to_owned()
-                } else {
-                    "Mod disabled.".to_owned()
-                }
-            })
-            .map_err(|err| format!("failed to rename {}: {err}", path.display()));
+        let result = tokio_runtime::spawn_blocking({
+            let path = path.clone();
+            let new_path = new_path.clone();
+            move || {
+                std::fs::rename(&path, &new_path)
+                    .map(|_| {
+                        if currently_disabled {
+                            "Mod enabled.".to_owned()
+                        } else {
+                            "Mod disabled.".to_owned()
+                        }
+                    })
+                    .map_err(|err| format!("failed to rename {}: {err}", path.display()))
+            }
+        })
+        .await
+        .map_err(|err| err.to_string())
+        .and_then(|result| result);
 
         if let Err(err) = tx.send(ContentApplyResult {
             kind,
