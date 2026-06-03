@@ -343,7 +343,7 @@ mod windows {
         let blur_behind = DWM_BLURBEHIND {
             dwFlags: DWM_BB_ENABLE,
             fEnable: 1,
-            hRgnBlur: 0,
+            hRgnBlur: std::ptr::null_mut(),
             fTransitionOnMaximized: 0,
         };
         let result = unsafe { DwmEnableBlurBehindWindow(hwnd, &blur_behind) };

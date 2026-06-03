@@ -6,6 +6,62 @@ mod memory_slider_max_state;
 
 use self::memory_slider_max_state::MemorySliderMaxState;
 
+fn apply_detected_instance_versions(
+    state: &mut InstanceScreenState,
+    detected: &DetectedInstanceVersions,
+) {
+    state.game_version_input = detected.game_version.clone();
+    if let Some(index) = state
+        .available_game_versions
+        .iter()
+        .position(|entry| entry.id == detected.game_version)
+    {
+        state.selected_game_version_index = index;
+    }
+
+    let (selected_modloader, custom_modloader) = split_modloader(detected.modloader.as_str());
+    state.selected_modloader = selected_modloader;
+    state.custom_modloader = custom_modloader;
+    state.modloader_version_input = detected.modloader_version.clone();
+    state.incompatible_modloader_version_warning_key = None;
+    state.modloader_versions_status = None;
+    state.modloader_versions_status_key = None;
+
+    if selected_modloader != 0
+        && selected_modloader != CUSTOM_MODLOADER_INDEX
+        && !detected.modloader_version.trim().is_empty()
+    {
+        let cache_key = modloader_versions_cache_key(
+            detected.modloader.as_str(),
+            detected.game_version.as_str(),
+        );
+        let versions = state
+            .modloader_versions_cache
+            .entry(cache_key)
+            .or_insert_with(Vec::new);
+        if !versions
+            .iter()
+            .any(|version| version.eq_ignore_ascii_case(detected.modloader_version.as_str()))
+        {
+            versions.insert(0, detected.modloader_version.clone());
+        }
+    }
+}
+
+fn detected_versions_summary(detected: &DetectedInstanceVersions) -> String {
+    if detected.modloader_version.trim().is_empty() {
+        format!(
+            "{} for Minecraft {}",
+            detected.modloader, detected.game_version
+        )
+    } else {
+        format!(
+            "{} {} for Minecraft {}",
+            detected.modloader, detected.modloader_version, detected.game_version
+        )
+    }
+}
+
 pub(super) fn render_instance_settings_modal(
     ctx: &egui::Context,
     text_ui: &mut TextUi,
@@ -17,6 +73,11 @@ pub(super) fn render_instance_settings_modal(
     if !state.show_settings_modal {
         return false;
     }
+
+    let installations_root = config.minecraft_installations_root_path().to_path_buf();
+    let instance_root_for_detection = instances
+        .find(instance_id)
+        .map(|instance| instances::instance_root_path(&installations_root, instance));
 
     let mut instances_changed = false;
     let mut close_requested = false;
@@ -126,28 +187,77 @@ pub(super) fn render_instance_settings_modal(
                     }
                     ui.add_space(6.0);
 
-                    if text_ui
-                        .button(
-                            ui,
-                            ("instance_refresh_versions", instance_id),
-                            "Refresh version list",
-                            &refresh_style,
-                        )
-                        .clicked()
-                    {
-                        sync_version_catalog(
-                            state,
-                            installation::VersionCatalogFilter {
-                                include_snapshots_and_betas: config.include_snapshots_and_betas(),
-                                include_alpha: config.include_alpha_versions(),
-                                include_experimental: config.include_experimental_versions(),
-                            },
-                            true,
-                        );
-                        state.modloader_versions_cache.clear();
-                        state.modloader_versions_status = None;
-                        state.modloader_versions_status_key = None;
-                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if text_ui
+                            .button(
+                                ui,
+                                ("instance_refresh_versions", instance_id),
+                                "Refresh version list",
+                                &refresh_style,
+                            )
+                            .clicked()
+                        {
+                            sync_version_catalog(
+                                state,
+                                installation::VersionCatalogFilter {
+                                    include_snapshots_and_betas: config.include_snapshots_and_betas(),
+                                    include_alpha: config.include_alpha_versions(),
+                                    include_experimental: config.include_experimental_versions(),
+                                },
+                                true,
+                            );
+                            state.modloader_versions_cache.clear();
+                            state.modloader_versions_status = None;
+                            state.modloader_versions_status_key = None;
+                        }
+
+                        let detect_clicked = ui
+                            .add_enabled_ui(instance_root_for_detection.is_some(), |ui| {
+                                text_ui.button(
+                                    ui,
+                                    ("instance_detect_versions", instance_id),
+                                    "Auto-detect installed versions",
+                                    &refresh_style,
+                                )
+                            })
+                            .inner
+                            .clicked();
+                        if detect_clicked {
+                            if let Some(instance_root) = instance_root_for_detection.as_deref() {
+                                match detect_instance_versions(instance_root) {
+                                    Ok(detected) => {
+                                        apply_detected_instance_versions(state, &detected);
+                                        match set_instance_versions(
+                                            instances,
+                                            instance_id,
+                                            detected.modloader.clone(),
+                                            detected.game_version.clone(),
+                                            detected.modloader_version.clone(),
+                                        ) {
+                                            Ok(()) => {
+                                                instances_changed = true;
+                                                state.status_message = Some(format!(
+                                                    "Detected and saved {} from profile '{}'.",
+                                                    detected_versions_summary(&detected),
+                                                    detected.source_profile_id
+                                                ));
+                                            }
+                                            Err(err) => {
+                                                state.status_message = Some(format!(
+                                                    "Detected versions, but failed to save them: {err}"
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        state.status_message = Some(format!(
+                                            "Could not auto-detect installed versions: {err}"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    });
                     if state.version_catalog_in_flight {
                         ui.horizontal(|ui| {
                             ui.spinner();

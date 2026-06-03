@@ -18,13 +18,13 @@ mod home;
 mod instance;
 #[path = "screens/launch_auth_context.rs"]
 mod launch_auth_context;
-#[path = "screens/player_auth_context.rs"]
-mod player_auth_context;
 mod legal;
 mod library;
 #[path = "screens/menu_presence_context.rs"]
 mod menu_presence_context;
 mod platform;
+#[path = "screens/player_auth_context.rs"]
+mod player_auth_context;
 #[path = "screens/quick_launch_command_mode.rs"]
 mod quick_launch_command_mode;
 #[path = "screens/screen_output.rs"]
@@ -56,13 +56,14 @@ pub use instance::instance_top_screenshots_tab_id;
 pub use instance::purge_inactive_state as purge_inactive_instance_state;
 pub use instance::purge_screenshot_state as purge_instance_screenshot_state;
 pub use instance::set_gamepad_screenshot_viewer_input as set_instance_screenshot_viewer_gamepad_input;
+pub use instance::{DetectedInstanceVersions, detect_instance_versions};
 pub use launch_auth_context::LaunchAuthContext;
-pub use player_auth_context::PlayerAuthContext;
 pub use library::{
     purge_inactive_state as purge_inactive_library_state, render_global_overlays,
     request_delete_instance,
 };
 pub use menu_presence_context::MenuPresenceContext;
+pub use player_auth_context::PlayerAuthContext;
 pub use quick_launch_command_mode::QuickLaunchCommandMode;
 pub use screen_output::ScreenOutput;
 pub use settings::prewarm as prewarm_settings;
@@ -261,14 +262,7 @@ pub fn render(
         ($ui:expr) => {
             match screen {
                 AppScreen::Home => {
-                    let output = home::render(
-                        $ui,
-                        text_ui,
-                        instances,
-                        config,
-                        auth,
-                        streamer_mode,
-                    );
+                    let output = home::render($ui, text_ui, instances, config, auth, streamer_mode);
                     ScreenOutput {
                         instances_changed: false,
                         requested_screen: output.requested_screen,
@@ -362,12 +356,7 @@ pub fn render(
                     }
                 }
                 AppScreen::Settings => {
-                    settings::render(
-                        $ui,
-                        text_ui,
-                        config,
-                        options,
-                    );
+                    settings::render($ui, text_ui, config, options);
                     ScreenOutput {
                         menu_presence_context: Some(MenuPresenceContext::Screen(
                             AppScreen::Settings,
