@@ -39,6 +39,8 @@ pub struct SidebarOutput {
     pub create_instance_clicked: bool,
     /// Requests opening the import-instance flow.
     pub import_instance_clicked: bool,
+    /// Requests linking an existing Vertex profile directory without copying it.
+    pub link_existing_profile_clicked: bool,
     /// Context-menu actions requested for a specific instance shortcut.
     ///
     /// The shell handles these centrally so sidebar interactions can reuse the
@@ -172,7 +174,11 @@ fn render_segments(
                     },
                 )
                 .inner;
-            let create_menu_labels = ["Create from scratch", "Import profile"];
+            let create_menu_labels = [
+                "Create from scratch",
+                "Import profile",
+                "Link existing Vertex profile",
+            ];
             let create_menu_width = popup_menu_width(ui, &create_menu_labels);
             let _ = egui::Popup::menu(&create_response)
                 .id(ui.id().with("sidebar_create_instance_popup"))
@@ -213,6 +219,17 @@ fn render_segments(
                         .clicked()
                     {
                         output.import_instance_clicked = true;
+                    }
+                    if text_ui
+                        .button(
+                            ui,
+                            "sidebar_link_existing_profile",
+                            create_menu_labels[2],
+                            &popup_button_style,
+                        )
+                        .clicked()
+                    {
+                        output.link_existing_profile_clicked = true;
                     }
                 });
 

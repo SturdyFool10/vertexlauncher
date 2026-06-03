@@ -10,8 +10,8 @@ use installation::{
     running_instance_for_account, running_instance_roots, take_finished_instance_processes,
 };
 use instances::{
-    InstanceRecord, InstanceStore, create_instance, delete_instance, instance_root_path,
-    load_store, save_store as save_instance_store,
+    InstanceRecord, InstanceStore, LinkedInstanceSpec, create_instance, delete_instance,
+    instance_root_path, link_instance_root, load_store, save_store as save_instance_store,
 };
 use launcher_runtime as tokio_runtime;
 use launcher_ui::ui::svg_aa;

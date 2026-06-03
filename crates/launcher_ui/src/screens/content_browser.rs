@@ -234,6 +234,11 @@ pub fn render(
         );
     }
 
+    poll_manifest_load(state);
+    if state.manifest_load_in_flight {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
+
     ui.add_space(style::SPACE_MD);
     match state.current_view {
         ContentBrowserPage::Browse => {
@@ -321,20 +326,67 @@ pub fn render(
     output
 }
 
+fn ensure_manifest_load_channel(state: &mut ContentBrowserState) {
+    if state.manifest_load_tx.is_some() && state.manifest_load_rx.is_some() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel::<Arc<ContentInstallManifest>>();
+    state.manifest_load_tx = Some(tx);
+    state.manifest_load_rx = Some(Arc::new(Mutex::new(rx)));
+}
+
+fn poll_manifest_load(state: &mut ContentBrowserState) {
+    let Some(rx) = state.manifest_load_rx.as_ref() else {
+        return;
+    };
+    let Ok(guard) = rx.lock() else {
+        tracing::error!(
+            target: "vertexlauncher/content_browser",
+            "Content manifest load receiver mutex was poisoned."
+        );
+        return;
+    };
+
+    while let Ok(manifest) = guard.try_recv() {
+        state.cached_manifest = Some(manifest);
+        state.manifest_dirty = false;
+        state.manifest_load_in_flight = false;
+    }
+}
+
 fn cached_manifest_for_instance(
     state: &mut ContentBrowserState,
     instance_root: &Path,
 ) -> Arc<ContentInstallManifest> {
     if state.manifest_dirty || state.cached_manifest.is_none() {
-        state.cached_manifest = Some(Arc::new(load_content_manifest(instance_root)));
-        state.manifest_dirty = false;
+        if !state.manifest_load_in_flight {
+            ensure_manifest_load_channel(state);
+            if let Some(tx) = state.manifest_load_tx.as_ref().cloned() {
+                let instance_root = instance_root.to_path_buf();
+                state.manifest_load_in_flight = true;
+                let _ = tokio_runtime::spawn_detached(async move {
+                    let result = tokio_runtime::spawn_blocking(move || {
+                        Arc::new(load_content_manifest(instance_root.as_path()))
+                    })
+                    .await;
+                    if let Ok(manifest) = result {
+                        let _ = tx.send(manifest);
+                    }
+                });
+            }
+        }
+        return state
+            .cached_manifest
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(ContentInstallManifest::default()));
     }
 
     state
         .cached_manifest
         .as_ref()
         .cloned()
-        .expect("content browser manifest cache should be initialized")
+        .unwrap_or_else(|| Arc::new(ContentInstallManifest::default()))
 }
 
 fn request_search_for_current_filters(state: &mut ContentBrowserState, reset_page: bool) {

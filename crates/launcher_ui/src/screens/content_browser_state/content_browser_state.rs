@@ -52,6 +52,9 @@ pub struct ContentBrowserState {
     pub(crate) search_notification_active: bool,
     pub(crate) download_notification_active: bool,
     pub(crate) cached_manifest: Option<Arc<ContentInstallManifest>>,
+    pub(crate) manifest_load_in_flight: bool,
+    pub(crate) manifest_load_tx: Option<mpsc::Sender<Arc<ContentInstallManifest>>>,
+    pub(crate) manifest_load_rx: Option<Arc<Mutex<mpsc::Receiver<Arc<ContentInstallManifest>>>>>,
     pub(crate) manifest_dirty: bool,
 }
 
@@ -105,6 +108,9 @@ impl Default for ContentBrowserState {
             search_notification_active: false,
             download_notification_active: false,
             cached_manifest: None,
+            manifest_load_in_flight: false,
+            manifest_load_tx: None,
+            manifest_load_rx: None,
             manifest_dirty: true,
         }
     }

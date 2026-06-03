@@ -650,6 +650,9 @@ impl VertexApp {
             self.show_import_instance_modal = true;
             self.import_instance_state.error = None;
         }
+        if sidebar_output.link_existing_profile_clicked {
+            self.link_existing_profile_folder();
+        }
 
         let mut screen_output = screens::ScreenOutput::default();
         let wgpu_target_format = frame.wgpu_render_state().map(|state| state.target_format);
@@ -1078,6 +1081,73 @@ impl VertexApp {
                 thumbnail_path: instance.thumbnail_path.clone(),
             })
             .collect();
+    }
+
+    pub(super) fn link_existing_profile_folder(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Link Existing Vertex Profile")
+            .pick_folder()
+        else {
+            return;
+        };
+
+        if self.instance_store.instances.iter().any(|instance| {
+            instance.instance_root_override.as_deref() == Some(path.as_path())
+                || instance_root_path(self.config.minecraft_installations_root_path(), instance)
+                    == path
+        }) {
+            notification::warn!(
+                "instance_link",
+                "That profile folder is already registered in Vertex."
+            );
+            return;
+        }
+
+        let fallback_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Linked Profile")
+            .to_owned();
+        let installations_root = self
+            .config
+            .minecraft_installations_root_path()
+            .to_path_buf();
+        match link_instance_root(
+            &mut self.instance_store,
+            installations_root.as_path(),
+            LinkedInstanceSpec {
+                name: fallback_name,
+                root_path: path.clone(),
+                description: Some(format!(
+                    "Linked existing profile at {}.",
+                    display_user_path(path.as_path())
+                )),
+                thumbnail_path: None,
+                modloader: "Vanilla".to_owned(),
+                game_version: "latest".to_owned(),
+                modloader_version: String::new(),
+            },
+        ) {
+            Ok(instance) => {
+                self.selected_instance_id = Some(instance.id.clone());
+                self.active_screen = screens::AppScreen::Instance;
+                self.refresh_instance_shortcuts();
+                queue_instance_store_save(self);
+                notification::info!(
+                    "instance_link",
+                    "Linked existing profile '{}'. You can adjust Minecraft/version settings from the profile screen.",
+                    instance.name
+                );
+            }
+            Err(err) => {
+                notification::error!(
+                    "instance_link",
+                    "Failed to link existing profile folder: {err}"
+                );
+            }
+        }
     }
 
     pub(super) fn open_instance_folder(&mut self, instance_id: &str) {

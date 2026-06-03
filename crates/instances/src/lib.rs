@@ -168,6 +168,18 @@ pub struct NewInstanceSpec {
     pub modloader_version: String,
 }
 
+/// Inputs required to register an existing instance directory without copying it.
+#[derive(Clone, Debug)]
+pub struct LinkedInstanceSpec {
+    pub name: String,
+    pub root_path: PathBuf,
+    pub description: Option<String>,
+    pub thumbnail_path: Option<PathBuf>,
+    pub modloader: String,
+    pub game_version: String,
+    pub modloader_version: String,
+}
+
 /// Errors raised by instance store and filesystem operations.
 #[derive(Debug, thiserror::Error)]
 pub enum InstanceError {
@@ -343,6 +355,61 @@ pub fn create_instance(
         has_description = instance.description.is_some(),
         has_modloader_version = !instance.modloader_version.is_empty(),
         "created instance"
+    );
+    Ok(instance)
+}
+
+/// Registers an existing instance directory without copying or modifying its files.
+pub fn link_instance_root(
+    store: &mut InstanceStore,
+    installations_root: &Path,
+    spec: LinkedInstanceSpec,
+) -> Result<InstanceRecord, InstanceError> {
+    let name = required(spec.name, InstanceError::EmptyName)?;
+    let modloader = required(spec.modloader, InstanceError::EmptyModloader)?;
+    let game_version = required(spec.game_version, InstanceError::EmptyGameVersion)?;
+    let modloader_version = spec.modloader_version.trim().to_owned();
+    let description = normalize_optional_string(spec.description.as_deref());
+    let thumbnail_path = normalize_optional_path(spec.thumbnail_path.as_deref());
+    let root_path = normalize_optional_path(Some(spec.root_path.as_path())).ok_or_else(|| {
+        InstanceError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "linked instance path cannot be empty",
+        ))
+    })?;
+    let minecraft_root = unique_minecraft_root(store, installations_root, &name);
+
+    let instance = InstanceRecord {
+        id: next_instance_id(),
+        name,
+        description,
+        minecraft_root,
+        thumbnail_path,
+        modloader,
+        game_version,
+        modloader_version,
+        max_memory_mib: None,
+        cli_args: None,
+        env_vars: None,
+        java_override_enabled: false,
+        java_override_runtime_major: None,
+        linux_set_opengl_driver: None,
+        linux_use_zink_driver: None,
+        discord_rich_presence_mod_installed: false,
+        launch_count: 0,
+        last_launched_at_ms: None,
+        favorite_world_ids: Vec::new(),
+        favorite_server_ids: Vec::new(),
+        instance_root_override: Some(root_path),
+    };
+
+    store.instances.push(instance.clone());
+    tracing::info!(
+        target: "vertexlauncher/instances",
+        id = instance.id.as_str(),
+        name = instance.name.as_str(),
+        root = %instance.instance_root_override.as_ref().map(|path| path.display().to_string()).unwrap_or_default(),
+        "linked existing instance root"
     );
     Ok(instance)
 }
