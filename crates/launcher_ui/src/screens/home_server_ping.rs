@@ -58,15 +58,11 @@ pub(super) fn collect_servers_from_request(request: &HomeActivityScanRequest) ->
         let parsed = parse_servers_dat(servers_dat.as_path()).unwrap_or_default();
         for server in parsed {
             let favorite_id = normalize_server_address(server.ip.as_str());
-            let (host, port) = split_server_address(server.ip.as_str());
             servers.push(ServerEntry {
                 instance_id: instance.instance_id.clone(),
-                instance_name: instance.instance_name.clone(),
                 server_name: server.name,
                 address: server.ip,
                 favorite_id: favorite_id.clone(),
-                host,
-                port,
                 icon_png: decode_server_icon(server.icon.as_deref()),
                 last_used_at_ms,
                 favorite: instance
@@ -432,40 +428,15 @@ pub(super) fn server_meta_line(
     server: &ServerEntry,
     ping: Option<&ServerPingSnapshot>,
     now_ms: u64,
-    streamer_mode: bool,
 ) -> String {
-    let address = if streamer_mode {
-        "IP hidden".to_owned()
-    } else if server.port == 25565 {
-        server.host.clone()
-    } else {
-        format!("{}:{}", server.host, server.port)
-    };
-    let ping_text = match ping.map(|value| value.status) {
-        Some(ServerPingStatus::Online { latency_ms }) => format!("reachable {latency_ms}ms"),
-        Some(ServerPingStatus::Offline) => "offline".to_owned(),
-        _ => "status unknown".to_owned(),
-    };
-    let players_text = match ping {
-        Some(ServerPingSnapshot {
-            players_online: Some(online),
-            players_max: Some(max),
-            ..
-        }) => format!("players {online}/{max}"),
-        _ => "players n/a".to_owned(),
-    };
     let motd = ping
         .and_then(|snapshot| snapshot.motd.as_deref())
         .map(collapse_motd_for_meta_line)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "motd unavailable".to_owned());
     format!(
-        "{} | {} | {} | {} | {} | last used {}",
-        format!("instance {}", server.instance_name),
-        address,
+        "{} | last used {}",
         motd,
-        players_text,
-        ping_text,
         format_time_ago(server.last_used_at_ms, now_ms)
     )
 }

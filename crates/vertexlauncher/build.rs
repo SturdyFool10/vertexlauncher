@@ -7,8 +7,7 @@ use std::{
 fn main() {
     emit_version_metadata();
 
-    #[cfg(target_os = "windows")]
-    {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=../../Vertex.webp");
         if let Err(error) = compile_windows_resources() {
             println!("cargo:warning=failed to configure Windows resources: {error}");
@@ -213,13 +212,14 @@ fn shorten_hash(hash: &str) -> &str {
     &hash[..end]
 }
 
-#[cfg(target_os = "windows")]
 fn compile_windows_resources() -> Result<(), String> {
     use image::{
         ColorType, ImageEncoder, codecs::ico::IcoEncoder, imageops::FilterType,
         io::Reader as ImageReader,
     };
     use std::{fs::File, io::Cursor, path::PathBuf};
+
+    configure_windows_resource_tool_env();
 
     let out_dir = std::env::var("OUT_DIR")
         .map(PathBuf::from)
@@ -248,4 +248,18 @@ fn compile_windows_resources() -> Result<(), String> {
         .compile()
         .map_err(|error| format!("failed to compile Windows resources: {error}"))?;
     Ok(())
+}
+
+fn configure_windows_resource_tool_env() {
+    if env::var_os("CROSS_COMPILE").is_some() || env::var_os("HOST") == env::var_os("TARGET") {
+        return;
+    }
+
+    if env::var("TARGET").as_deref() == Ok("aarch64-pc-windows-msvc") {
+        // winresource only uses this for GNU resource-tool defaults, but setting
+        // it avoids a spurious warning before the MSVC llvm-rc path is selected.
+        unsafe {
+            env::set_var("CROSS_COMPILE", "llvm-");
+        }
+    }
 }

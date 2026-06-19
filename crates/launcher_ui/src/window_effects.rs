@@ -343,7 +343,7 @@ mod windows {
         let blur_behind = DWM_BLURBEHIND {
             dwFlags: DWM_BB_ENABLE,
             fEnable: 1,
-            hRgnBlur: std::ptr::null_mut(),
+            hRgnBlur: 0,
             fTransitionOnMaximized: 0,
         };
         let result = unsafe { DwmEnableBlurBehindWindow(hwnd, &blur_behind) };
@@ -363,15 +363,25 @@ mod linux {
     use std::ffi::c_void;
     use std::os::raw::c_uchar;
     use wayland_backend::client::{Backend, ObjectId};
-    use wayland_client::globals::GlobalListContents;
-    use wayland_client::protocol::{wl_registry, wl_surface::WlSurface};
-    use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, delegate_noop};
+    use wayland_client::globals::{GlobalList, GlobalListContents};
+    use wayland_client::protocol::{
+        wl_compositor::WlCompositor, wl_region::WlRegion, wl_registry, wl_surface::WlSurface,
+    };
+    use wayland_client::{
+        Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum, delegate_noop,
+    };
+    use wayland_protocols::ext::background_effect::v1::client::ext_background_effect_manager_v1::{
+        Capability as BackgroundEffectCapability, Event as ExtBackgroundEffectManagerEvent,
+        ExtBackgroundEffectManagerV1,
+    };
+    use wayland_protocols::ext::background_effect::v1::client::ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1;
     use wayland_protocols_plasma::blur::client::org_kde_kwin_blur::OrgKdeKwinBlur;
     use wayland_protocols_plasma::blur::client::org_kde_kwin_blur_manager::OrgKdeKwinBlurManager;
     use x11_dl::xlib;
 
     static KDE_BLUR_ATOM: &CStr = c"_KDE_NET_WM_BLUR_BEHIND_REGION";
     static CARDINAL_ATOM: &CStr = c"CARDINAL";
+    const WHOLE_SURFACE_BLUR_REGION_SIZE: i32 = i32::MAX;
 
     pub fn apply(cc: &CreationContext<'_>) -> Result<(), String> {
         let window_handle = cc
@@ -439,9 +449,12 @@ mod linux {
         Ok(())
     }
 
-    struct KdeBlurState;
+    #[derive(Default)]
+    struct WaylandBlurState {
+        ext_background_effect_blur_supported: bool,
+    }
 
-    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for KdeBlurState {
+    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandBlurState {
         fn event(
             _: &mut Self,
             _: &wl_registry::WlRegistry,
@@ -453,8 +466,31 @@ mod linux {
         }
     }
 
-    delegate_noop!(KdeBlurState: ignore OrgKdeKwinBlurManager);
-    delegate_noop!(KdeBlurState: ignore OrgKdeKwinBlur);
+    impl Dispatch<ExtBackgroundEffectManagerV1, ()> for WaylandBlurState {
+        fn event(
+            state: &mut Self,
+            _: &ExtBackgroundEffectManagerV1,
+            event: ExtBackgroundEffectManagerEvent,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            if let ExtBackgroundEffectManagerEvent::Capabilities { flags } = event {
+                let capabilities = match flags {
+                    WEnum::Value(capabilities) => capabilities,
+                    WEnum::Unknown(bits) => BackgroundEffectCapability::from_bits_retain(bits),
+                };
+                state.ext_background_effect_blur_supported =
+                    capabilities.contains(BackgroundEffectCapability::Blur);
+            }
+        }
+    }
+
+    delegate_noop!(WaylandBlurState: ignore ExtBackgroundEffectSurfaceV1);
+    delegate_noop!(WaylandBlurState: ignore WlCompositor);
+    delegate_noop!(WaylandBlurState: ignore WlRegion);
+    delegate_noop!(WaylandBlurState: ignore OrgKdeKwinBlurManager);
+    delegate_noop!(WaylandBlurState: ignore OrgKdeKwinBlur);
 
     fn apply_wayland(display: *mut c_void, surface: *mut c_void) -> Result<(), String> {
         if display.is_null() || surface.is_null() {
@@ -473,21 +509,108 @@ mod linux {
         };
 
         let Ok((globals, mut queue)) =
-            wayland_client::globals::registry_queue_init::<KdeBlurState>(&conn)
+            wayland_client::globals::registry_queue_init::<WaylandBlurState>(&conn)
         else {
             return Err("failed to initialize Wayland registry for blur support".to_owned());
         };
 
         let qh = queue.handle();
-        let Ok(manager) = globals.bind::<OrgKdeKwinBlurManager, _, _>(&qh, 1..=1, ()) else {
-            return Err("KDE Wayland blur manager is unavailable".to_owned());
-        };
+        let mut state = WaylandBlurState::default();
+        match apply_ext_background_effect(&conn, &globals, &mut queue, &mut state, &qh, &surface) {
+            Ok(()) => {
+                tracing::info!(
+                    target: "vertexlauncher/window_blur",
+                    protocol = "ext_background_effect_v1",
+                    "Wayland blur effect applied."
+                );
+                Ok(())
+            }
+            Err(ext_error) => {
+                match apply_kde_blur(&conn, &globals, &mut queue, &mut state, &qh, &surface) {
+                    Ok(()) => {
+                        tracing::info!(
+                            target: "vertexlauncher/window_blur",
+                            protocol = "org_kde_kwin_blur",
+                            fallback_from = "ext_background_effect_v1",
+                            fallback_reason = %ext_error,
+                            "Wayland blur effect applied using fallback protocol."
+                        );
+                        Ok(())
+                    }
+                    Err(kde_error) => Err(format!(
+                        "Wayland blur protocols are unavailable: ext_background_effect_v1: {ext_error}; org_kde_kwin_blur: {kde_error}"
+                    )),
+                }
+            }
+        }
+    }
 
-        let blur = manager.create(&surface, &qh, ());
+    fn apply_ext_background_effect(
+        conn: &Connection,
+        globals: &GlobalList,
+        queue: &mut EventQueue<WaylandBlurState>,
+        state: &mut WaylandBlurState,
+        qh: &QueueHandle<WaylandBlurState>,
+        surface: &WlSurface,
+    ) -> Result<(), String> {
+        state.ext_background_effect_blur_supported = false;
+        let manager = globals
+            .bind::<ExtBackgroundEffectManagerV1, _, _>(qh, 1..=1, ())
+            .map_err(|_| "ext_background_effect_v1 manager is unavailable".to_owned())?;
+
+        queue.roundtrip(state).map_err(|error| {
+            format!("failed to read ext_background_effect_v1 capabilities: {error}")
+        })?;
+        if !state.ext_background_effect_blur_supported {
+            manager.destroy();
+            return Err(
+                "ext_background_effect_v1 manager does not advertise blur capability".to_owned(),
+            );
+        }
+
+        let compositor = match globals.bind::<WlCompositor, _, _>(qh, 1..=6, ()) {
+            Ok(compositor) => compositor,
+            Err(_) => {
+                manager.destroy();
+                return Err("Wayland compositor global is unavailable".to_owned());
+            }
+        };
+        let region = compositor.create_region(qh, ());
+        region.add(
+            0,
+            0,
+            WHOLE_SURFACE_BLUR_REGION_SIZE,
+            WHOLE_SURFACE_BLUR_REGION_SIZE,
+        );
+
+        let effect = manager.get_background_effect(surface, qh, ());
+        effect.set_blur_region(Some(&region));
+        manager.destroy();
+        region.destroy();
+        surface.commit();
+
+        let _ = conn.flush();
+        let _ = queue.dispatch_pending(state);
+        Ok(())
+    }
+
+    fn apply_kde_blur(
+        conn: &Connection,
+        globals: &GlobalList,
+        queue: &mut EventQueue<WaylandBlurState>,
+        state: &mut WaylandBlurState,
+        qh: &QueueHandle<WaylandBlurState>,
+        surface: &WlSurface,
+    ) -> Result<(), String> {
+        let manager = globals
+            .bind::<OrgKdeKwinBlurManager, _, _>(qh, 1..=1, ())
+            .map_err(|_| "KDE Wayland blur manager is unavailable".to_owned())?;
+
+        let blur = manager.create(surface, qh, ());
         blur.commit();
 
         let _ = conn.flush();
-        let _ = queue.dispatch_pending(&mut KdeBlurState);
+        let _ = queue.dispatch_pending(state);
         Ok(())
     }
 }

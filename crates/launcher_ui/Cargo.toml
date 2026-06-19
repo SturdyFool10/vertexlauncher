@@ -59,6 +59,7 @@ rfd = { version = "*", default-features = false, features = ["gtk3"] }
 x11-dl = "*"
 wayland-backend = { version = "*", features = ["client_system"] }
 wayland-client = "*"
+wayland-protocols = { version = "*", default-features = false, features = ["client", "staging"] }
 wayland-protocols-plasma = { version = "*", default-features = false, features = ["client"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

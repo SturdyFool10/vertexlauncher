@@ -12,9 +12,7 @@ use flate2::read::GzDecoder;
 use instances::{InstanceStore, instance_root_path, set_server_favorite, set_world_favorite};
 use launcher_runtime as tokio_runtime;
 use textui::TextUi;
-use textui_egui::{
-    prelude::*, truncate_single_line_text_with_ellipsis_preserving_whitespace as truncate_for_width,
-};
+use textui_egui::prelude::*;
 use ui_foundation::{
     DialogPreset, UiMetrics, danger_button, dialog_options, fill_tab_row, secondary_button,
     show_dialog,
@@ -77,6 +75,8 @@ const SERVER_PING_CONNECT_TIMEOUT: Duration = Duration::from_millis(350);
 const SERVER_PINGS_PER_SCAN: usize = 3;
 const ENTRY_ICON_SIZE: f32 = 14.0;
 const SERVER_PING_ICON_SIZE: f32 = 24.0;
+const SERVER_STATUS_GROUP_WIDTH: f32 = 86.0;
+const SERVER_STATUS_GROUP_GAP: f32 = 6.0;
 const FAVORITE_STAR_BUTTON_SIZE: f32 = 20.0;
 const FAVORITE_STAR_ICON_SIZE: f32 = 14.0;
 const ACTIVITY_ENTRY_THUMBNAIL_SIZE: f32 = 34.0;
@@ -555,11 +555,7 @@ fn render_instance_usage(
                             }
                         }
                         InstanceContextAction::CopyLaunchCommand => {
-                            copy_instance_launch_command(
-                                ui.ctx(),
-                                instance.id.as_str(),
-                                auth,
-                            );
+                            copy_instance_launch_command(ui.ctx(), instance.id.as_str(), auth);
                         }
                         InstanceContextAction::CopySteamLaunchOptions => {
                             copy_instance_steam_launch_options(
@@ -652,7 +648,7 @@ fn render_activity_feed(
     egui::ScrollArea::vertical()
         .id_salt("home_activity_scroll")
         .max_height(ui.available_height().max(180.0))
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
             if !favorites.is_empty() {
                 let _ = text_ui.label(
                     ui,
@@ -662,37 +658,21 @@ fn render_activity_feed(
                 );
                 ui.add_space(4.0);
                 for (index, entry) in favorites.into_iter().enumerate() {
-                    match entry {
-                        HomeEntryRef::World(world) => render_world_row(
-                            ui,
-                            text_ui,
-                            world,
-                            now_ms,
-                            ("home_favorite_world", index),
-                            instances,
-                            output,
-                            requested_rescan,
-                            auth,
-                            metrics,
-                        ),
-                        HomeEntryRef::Server(server) => render_server_row(
-                            ui,
-                            text_ui,
-                            server,
-                            state
-                                .server_pings
-                                .get(&normalize_server_address(&server.address)),
-                            now_ms,
-                            streamer_mode,
-                            ("home_favorite_server", index),
-                            instances,
-                            output,
-                            requested_rescan,
-                            auth,
-                            metrics,
-                        ),
-                    }
-                    ui.add_space(2.0);
+                    render_activity_entry_row_if_visible(
+                        ui,
+                        text_ui,
+                        entry,
+                        state,
+                        now_ms,
+                        streamer_mode,
+                        ("home_favorite", index),
+                        instances,
+                        output,
+                        requested_rescan,
+                        auth,
+                        metrics,
+                        viewport,
+                    );
                 }
                 ui.separator();
                 ui.add_space(8.0);
@@ -716,43 +696,81 @@ fn render_activity_feed(
             );
             ui.add_space(4.0);
             for (index, entry) in entries.into_iter().enumerate() {
-                match entry {
-                    HomeEntryRef::World(world) => {
-                        render_world_row(
-                            ui,
-                            text_ui,
-                            world,
-                            now_ms,
-                            ("home_recent_world", index),
-                            instances,
-                            output,
-                            requested_rescan,
-                            auth,
-                            metrics,
-                        );
-                    }
-                    HomeEntryRef::Server(server) => {
-                        render_server_row(
-                            ui,
-                            text_ui,
-                            server,
-                            state
-                                .server_pings
-                                .get(&normalize_server_address(&server.address)),
-                            now_ms,
-                            streamer_mode,
-                            ("home_recent_server", index),
-                            instances,
-                            output,
-                            requested_rescan,
-                            auth,
-                            metrics,
-                        );
-                    }
-                }
-                ui.add_space(2.0);
+                render_activity_entry_row_if_visible(
+                    ui,
+                    text_ui,
+                    entry,
+                    state,
+                    now_ms,
+                    streamer_mode,
+                    ("home_recent", index),
+                    instances,
+                    output,
+                    requested_rescan,
+                    auth,
+                    metrics,
+                    viewport,
+                );
             }
         });
+}
+
+fn render_activity_entry_row_if_visible(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    entry: HomeEntryRef<'_>,
+    state: &HomeState,
+    now_ms: u64,
+    streamer_mode: bool,
+    id_source: impl std::hash::Hash + Copy,
+    instances: &mut InstanceStore,
+    output: &mut HomeOutput,
+    requested_rescan: &mut bool,
+    auth: &PlayerAuthContext<'_>,
+    metrics: HomeUiMetrics,
+    viewport: egui::Rect,
+) {
+    const ROW_GAP: f32 = 2.0;
+    let row_height = activity_entry_row_height(ui, metrics, &entry);
+    let total_height = row_height + ROW_GAP;
+    let row_top = ui.cursor().top();
+    let row_bottom = row_top + total_height;
+    if row_bottom < viewport.top() || row_top > viewport.bottom() {
+        ui.add_space(total_height);
+        return;
+    }
+
+    match entry {
+        HomeEntryRef::World(world) => render_world_row(
+            ui,
+            text_ui,
+            world,
+            now_ms,
+            (id_source, "world"),
+            instances,
+            output,
+            requested_rescan,
+            auth,
+            metrics,
+        ),
+        HomeEntryRef::Server(server) => render_server_row(
+            ui,
+            text_ui,
+            server,
+            state
+                .server_pings
+                .get(&normalize_server_address(&server.address)),
+            now_ms,
+            streamer_mode,
+            (id_source, "server"),
+            instances,
+            output,
+            requested_rescan,
+            auth,
+            metrics,
+        ),
+    }
+    ui.add_space(ROW_GAP);
 }
 
 fn render_world_row(
@@ -769,14 +787,8 @@ fn render_world_row(
 ) {
     let name_label_options = activity_entry_name_label_options(ui);
     let meta_label_options = activity_entry_meta_label_options(ui);
-    let row_height = activity_entry_min_row_height(
-        ui,
-        text_ui,
-        metrics,
-        &name_label_options,
-        &meta_label_options,
-        0.0,
-    );
+    let row_height =
+        activity_entry_min_row_height(ui, metrics, &name_label_options, &meta_label_options, 0.0);
     let mut star_clicked = false;
     let row_response = render_clickable_entry_row(ui, (id_source, "row"), row_height, |ui| {
         if render_favorite_star_button(ui, (id_source, "world_star"), world.favorite)
@@ -801,35 +813,16 @@ fn render_world_row(
         );
         ui.add_space(ACTIVITY_ENTRY_CONTENT_GAP);
         let text_max_width = ui.available_width().max(80.0);
-        let world_name = truncate_for_width(
-            text_ui,
+        render_activity_text_stack(
             ui,
+            text_ui,
+            id_source,
             world.world_name.as_str(),
-            text_max_width,
-            &name_label_options,
-        );
-        let world_meta = truncate_for_width(
-            text_ui,
-            ui,
             world_meta_line(world, now_ms).as_str(),
             text_max_width,
+            &name_label_options,
             &meta_label_options,
         );
-        ui.vertical(|ui| {
-            ui.set_max_width(text_max_width);
-            let _ = text_ui.label(
-                ui,
-                (id_source, "name"),
-                world_name.as_str(),
-                &name_label_options,
-            );
-            let _ = text_ui.label(
-                ui,
-                (id_source, "meta"),
-                world_meta.as_str(),
-                &meta_label_options,
-            );
-        });
     });
     if star_clicked {
         let _ = set_world_favorite(
@@ -932,7 +925,7 @@ fn render_server_row(
     server: &ServerEntry,
     ping: Option<&ServerPingSnapshot>,
     now_ms: u64,
-    streamer_mode: bool,
+    _streamer_mode: bool,
     id_source: impl std::hash::Hash + Copy,
     instances: &mut InstanceStore,
     output: &mut HomeOutput,
@@ -940,12 +933,12 @@ fn render_server_row(
     auth: &PlayerAuthContext<'_>,
     metrics: HomeUiMetrics,
 ) {
-    let server_meta_full = server_meta_line(server, ping, now_ms, streamer_mode);
+    let server_meta_full = server_meta_line(server, ping, now_ms);
+    let player_count = server_player_count_text(ping);
     let name_label_options = activity_entry_name_label_options(ui);
     let meta_label_options = activity_entry_meta_label_options(ui);
     let row_height = activity_entry_min_row_height(
         ui,
-        text_ui,
         metrics,
         &name_label_options,
         &meta_label_options,
@@ -974,39 +967,34 @@ fn render_server_row(
             ACTIVITY_ENTRY_THUMBNAIL_SIZE,
         );
         ui.add_space(ACTIVITY_ENTRY_CONTENT_GAP);
-        let text_max_width = (ui.available_width() - SERVER_PING_ICON_SIZE - 8.0).max(80.0);
-        let server_name = truncate_for_width(
-            text_ui,
+        let text_max_width = (ui.available_width() - SERVER_STATUS_GROUP_WIDTH - 8.0).max(80.0);
+        let content_height = ui.available_height();
+        render_activity_text_stack_sized(
             ui,
+            text_ui,
+            id_source,
             server.server_name.as_str(),
-            text_max_width,
-            &name_label_options,
-        );
-        let server_meta = truncate_for_width(
-            text_ui,
-            ui,
             server_meta_full.as_str(),
             text_max_width,
+            content_height,
+            &name_label_options,
             &meta_label_options,
         );
-        ui.vertical(|ui| {
-            ui.set_max_width(text_max_width);
-            let _ = text_ui.label(
-                ui,
-                (id_source, "name"),
-                server_name.as_str(),
-                &name_label_options,
-            );
-            let _ = text_ui.label(
-                ui,
-                (id_source, "meta"),
-                server_meta.as_str(),
-                &meta_label_options,
-            );
-        });
-        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            render_server_ping_icon(ui, ping);
-        });
+        ui.add_space(8.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(SERVER_STATUS_GROUP_WIDTH, content_height),
+            Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                render_server_ping_icon(ui, ping);
+                ui.add_space(SERVER_STATUS_GROUP_GAP);
+                let _ = text_ui.label(
+                    ui,
+                    (id_source, "players"),
+                    player_count.as_deref().unwrap_or(""),
+                    &meta_label_options,
+                );
+            },
+        );
     });
     if star_clicked {
         let _ = set_server_favorite(
@@ -1068,6 +1056,63 @@ fn render_server_row(
     }
 }
 
+fn server_player_count_text(ping: Option<&ServerPingSnapshot>) -> Option<String> {
+    let snapshot = ping?;
+    Some(format!(
+        "{}/{}",
+        snapshot.players_online?, snapshot.players_max?
+    ))
+}
+
+fn render_activity_text_stack(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    id_source: impl std::hash::Hash + Copy,
+    name: &str,
+    meta: &str,
+    width: f32,
+    name_label_options: &LabelOptions,
+    meta_label_options: &LabelOptions,
+) {
+    render_activity_text_stack_sized(
+        ui,
+        text_ui,
+        id_source,
+        name,
+        meta,
+        width,
+        activity_entry_text_stack_height(ui, name_label_options, meta_label_options),
+        name_label_options,
+        meta_label_options,
+    );
+}
+
+fn render_activity_text_stack_sized(
+    ui: &mut Ui,
+    text_ui: &mut TextUi,
+    id_source: impl std::hash::Hash + Copy,
+    name: &str,
+    meta: &str,
+    width: f32,
+    height: f32,
+    name_label_options: &LabelOptions,
+    meta_label_options: &LabelOptions,
+) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, height),
+        Layout::top_down(egui::Align::LEFT),
+        |ui| {
+            let text_stack_height =
+                activity_entry_text_stack_height(ui, name_label_options, meta_label_options);
+            ui.add_space(((height - text_stack_height) * 0.5).max(0.0));
+            let clip_rect = ui.max_rect().intersect(ui.clip_rect());
+            ui.set_clip_rect(clip_rect);
+            let _ = text_ui.label(ui, (id_source, "name"), name, name_label_options);
+            let _ = text_ui.label(ui, (id_source, "meta"), meta, meta_label_options);
+        },
+    );
+}
+
 fn activity_entry_name_label_options(ui: &Ui) -> LabelOptions {
     style::body_strong(ui)
 }
@@ -1076,17 +1121,34 @@ fn activity_entry_meta_label_options(ui: &Ui) -> LabelOptions {
     style::muted_single_line(ui)
 }
 
+fn activity_entry_row_height(ui: &Ui, metrics: HomeUiMetrics, entry: &HomeEntryRef<'_>) -> f32 {
+    let trailing_content_height = match entry {
+        HomeEntryRef::World(_) => 0.0,
+        HomeEntryRef::Server(_) => SERVER_PING_ICON_SIZE,
+    };
+    let name_label_options = activity_entry_name_label_options(ui);
+    let meta_label_options = activity_entry_meta_label_options(ui);
+    activity_entry_min_row_height(
+        ui,
+        metrics,
+        &name_label_options,
+        &meta_label_options,
+        trailing_content_height,
+    )
+}
+
 fn activity_entry_min_row_height(
     ui: &Ui,
-    text_ui: &mut TextUi,
     metrics: HomeUiMetrics,
     name_label_options: &LabelOptions,
     meta_label_options: &LabelOptions,
     trailing_content_height: f32,
 ) -> f32 {
-    let name_height = activity_entry_label_height(ui, text_ui, name_label_options);
-    let meta_height = activity_entry_label_height(ui, text_ui, meta_label_options);
-    let text_stack_height = name_height + ui.spacing().item_spacing.y + meta_height;
+    let text_stack_height = activity_entry_text_stack_height_for_spacing(
+        ui.spacing().item_spacing.y,
+        name_label_options,
+        meta_label_options,
+    );
     let content_height = text_stack_height
         .max(ACTIVITY_ENTRY_THUMBNAIL_SIZE)
         .max(FAVORITE_STAR_BUTTON_SIZE)
@@ -1096,8 +1158,30 @@ fn activity_entry_min_row_height(
         .max((content_height + (ACTIVITY_ENTRY_ROW_VERTICAL_PADDING * 2.0)).ceil())
 }
 
-fn activity_entry_label_height(ui: &Ui, text_ui: &mut TextUi, label_options: &LabelOptions) -> f32 {
-    (text_ui.measure_text_size(ui, "Ag", label_options).y + (label_options.padding.y * 2.0)).ceil()
+fn activity_entry_text_stack_height(
+    ui: &Ui,
+    name_label_options: &LabelOptions,
+    meta_label_options: &LabelOptions,
+) -> f32 {
+    activity_entry_text_stack_height_for_spacing(
+        ui.spacing().item_spacing.y,
+        name_label_options,
+        meta_label_options,
+    )
+}
+
+fn activity_entry_text_stack_height_for_spacing(
+    item_spacing_y: f32,
+    name_label_options: &LabelOptions,
+    meta_label_options: &LabelOptions,
+) -> f32 {
+    activity_entry_label_height(name_label_options)
+        + item_spacing_y
+        + activity_entry_label_height(meta_label_options)
+}
+
+fn activity_entry_label_height(label_options: &LabelOptions) -> f32 {
+    (label_options.line_height + (label_options.padding.y * 2.0)).ceil()
 }
 
 fn copy_instance_launch_command(

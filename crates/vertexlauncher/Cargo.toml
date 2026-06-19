@@ -70,6 +70,4 @@ objc = "*"
 
 [build-dependencies]
 image.workspace = true
-
-[target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "*"
