@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-const DEFAULT_THEME_ID: &str = "matrix_oled";
+const DEFAULT_THEME_ID: &str = "high_contrast";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Oklch {
