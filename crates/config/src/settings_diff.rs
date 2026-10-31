@@ -119,6 +119,8 @@ impl Config {
             macos_visual_effect_emphasized,
             ui_opacity_percent,
             window_corner_radius,
+            windows_blur_tint_rgb,
+            windows_blur_tint_opacity_percent,
             legacy_windows_transparency_level,
             linux_set_opengl_driver,
             linux_use_zink_driver,
@@ -202,6 +204,8 @@ impl Config {
                 || *macos_visual_effect_emphasized != new.macos_visual_effect_emphasized
                 || *ui_opacity_percent != new.ui_opacity_percent
                 || *window_corner_radius != new.window_corner_radius
+                || *windows_blur_tint_rgb != new.windows_blur_tint_rgb
+                || *windows_blur_tint_opacity_percent != new.windows_blur_tint_opacity_percent
                 || *legacy_windows_transparency_level != new.legacy_windows_transparency_level,
             SettingsDomain::WindowEffect,
         );

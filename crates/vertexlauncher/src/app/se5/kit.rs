@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::icons::{self, Icon};
 use super::images::{ImageCache, ImageSource, Picture};
@@ -584,6 +584,12 @@ pub struct Kit {
     pub images: ImageCache,
     /// Icon render scale from the anti-aliasing setting.
     pub svg_supersample: u32,
+    /// The graphics device generation the icon textures were made on; a switch invalidates them.
+    pub svg_device_generation: u64,
+    /// Which bold/italic faces the current font has, per styled role (see `fonts::StyledFaces`).
+    pub styled_faces: super::fonts::StyledFaces,
+    /// When the icons are made once more after a device switch; see `apply_fonts`.
+    pub svg_rebuild_at: Option<Instant>,
     buttons: HashMap<String, ButtonState>,
     toggles: HashMap<String, ToggleState>,
     sliders: HashMap<String, SliderState>,
@@ -637,6 +643,9 @@ impl Kit {
             delta_seconds: 0.016,
             images: ImageCache::default(),
             svg_supersample: 2,
+            svg_device_generation: 0,
+            styled_faces: Default::default(),
+            svg_rebuild_at: None,
             buttons: HashMap::new(),
             toggles: HashMap::new(),
             sliders: HashMap::new(),
@@ -929,6 +938,25 @@ impl Kit {
         let text = launcher_ui::privacy::scrub(text);
         let shown = ui.ellipsize(&style, &text, max_width);
         ui.text(&shown, &style);
+    }
+
+    /// [`text_clipped`](Self::text_clipped) for text inside the element `container_id`: it is cut with an ellipsis at
+    /// whatever width that element was given last frame, so it follows the window instead of a fixed number. The
+    /// container should grow to fill its row and clip horizontally (so it can shrink below its content); `fallback` is
+    /// used on the first frame, before it has been measured.
+    pub fn text_fitted(
+        &self,
+        ui: &mut Ui<'_>,
+        role: TextRole,
+        text: &str,
+        container_id: &str,
+        fallback: f32,
+    ) {
+        let width = ui
+            .element_bounds(container_id)
+            .map_or(fallback, |(_, size)| size.x - 1.0)
+            .max(0.0);
+        self.text_clipped(ui, role, text, width);
     }
 
     /// Text that may mention accounts (see `launcher_ui::account_text`): names read as plain text, and in streamer mode

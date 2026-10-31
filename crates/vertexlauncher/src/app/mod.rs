@@ -13,6 +13,7 @@ use std::{
 mod app_icon;
 mod app_metadata;
 mod appearance;
+mod better_blur;
 mod auth_state;
 mod cli;
 mod discord_presence;

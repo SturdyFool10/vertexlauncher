@@ -16,6 +16,7 @@ use vertex_shell::sturdy::ui_kit;
 use super::super::AppState;
 use super::super::icons::Icon;
 use super::super::kit::{self, ButtonKind, Kit, LogPoint, MenuEntry, TextRole};
+use super::super::mc_text;
 
 pub const LINES_ID: &str = "console::lines";
 
@@ -99,7 +100,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             let text = snapshot
                 .active_lines
                 .iter()
-                .map(|line| log_format::strip_ansi(line))
+                .map(|line| log_format::plain_text(line))
                 .collect::<Vec<_>>()
                 .join("\n");
             let _ = ui
@@ -225,7 +226,7 @@ fn log_lines_view(
         if index < start.0 || index > end.0 || index >= lines.len() {
             return None;
         }
-        let plain = log_format::strip_ansi(&lines[index]);
+        let plain = log_format::plain_text(&lines[index]);
         let from = (if index == start.0 { start.1 } else { 0 }).min(plain.len());
         let to = (if index == end.0 { end.1 } else { plain.len() }).min(plain.len());
         let at = |upto: usize| ui.measure_text(&line_style, plain.get(..upto).unwrap_or_default()).x;
@@ -279,30 +280,25 @@ fn log_lines_view(
                         .direction(Direction::LeftToRight)
                         .align(ChildAlignment::new(AlignX::Left, AlignY::Center)),
                 );
-                for segment in log_format::ansi_segments(&lines[index]) {
-                    let color = segment.foreground.map_or(default_color, |[r, g, b]| {
-                        Vec4::new(
-                            f32::from(r) / 255.0,
-                            f32::from(g) / 255.0,
-                            f32::from(b) / 255.0,
-                            1.0,
-                        )
-                    });
-                    // Whole, never split at the selection: cutting the text there would cut a ligature in two.
-                    kit::label(
-                        ui,
-                        &segment.text,
-                        &TextStyle {
-                            color,
-                            ..line_style
-                        },
-                    );
-                }
+                // ANSI colours and Minecraft section-sign codes together; a run with no colour (and `§r`) is the line's
+                // own colour, which is the level's.
+                let runs = log_format::styled_runs(&lines[index]);
+                // Whole runs, never split at the selection: cutting the text there would cut a ligature in two.
+                mc_text::draw(
+                    ui,
+                    kit,
+                    &row_id,
+                    &runs,
+                    &TextStyle {
+                        color: default_color,
+                        ..line_style
+                    },
+                );
             }
             // Where in the line the pointer is: the text's own width decides which character it is between.
             let point_in_line = |ui: &Ui<'_>| {
                 let origin = ui.element_bounds(&row_id).map_or(0.0, |(position, _)| position.x);
-                let plain = log_format::strip_ansi(&lines[index]);
+                let plain = log_format::plain_text(&lines[index]);
                 let at = ui.hit_test_text(&line_style, &plain, ui.pointer_position().x - origin);
                 (index, at.min(plain.len()))
             };
@@ -370,7 +366,7 @@ fn log_lines_view(
             let last = lines.len().saturating_sub(1);
             let text = (start.0.min(last)..=end.0.min(last))
                 .map(|index| {
-                    let plain = log_format::strip_ansi(&lines[index]);
+                    let plain = log_format::plain_text(&lines[index]);
                     let from = if index == start.0 { start.1.min(plain.len()) } else { 0 };
                     let to = if index == end.0 { end.1.min(plain.len()) } else { plain.len() };
                     plain.get(from..to).unwrap_or_default().to_owned()

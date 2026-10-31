@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use installation::display_user_path;
 use instances::{LinkedInstanceSpec, instance_root_path, link_instance_root};
-use launcher_ui::file_dialog::{Dialog as PickerDialog, Pick};
+use crate::app::se5::file_dialog::{Dialog as PickerDialog, Pick};
 use launcher_ui::notification;
 use launcher_ui::screens::{DetectedInstanceVersions, detect_instance_versions};
 

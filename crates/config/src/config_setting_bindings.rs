@@ -61,6 +61,8 @@ impl Config {
             macos_visual_effect_emphasized: _,
             ui_opacity_percent: _,
             window_corner_radius: _,
+            windows_blur_tint_rgb: _,
+            windows_blur_tint_opacity_percent: _,
             legacy_windows_transparency_level: _,
             linux_set_opengl_driver: _,
             linux_use_zink_driver: _,

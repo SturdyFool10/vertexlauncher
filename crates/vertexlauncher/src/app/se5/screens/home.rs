@@ -10,6 +10,7 @@ use launcher_ui::screens::{
     QuickLaunchCommandMode, build_quick_launch_command, build_quick_launch_steam_options,
 };
 use vertex_shell::sturdy::ui::{
+    Clip,
     AlignX, AlignY, Border, ChildAlignment, CornerRadius, Direction, ElementDesc, Padding,
     Sizing, TextStyle, TextWrap, Ui,
 };
@@ -18,6 +19,7 @@ use vertex_shell::sturdy::ui_kit::{self};
 use super::super::icons::Icon;
 use super::super::images::ImageSource;
 use super::super::kit::{self, ButtonKind, Kit, MenuEntry, TextRole};
+use super::super::mc_text;
 use super::super::{AppState, Dialog};
 use super::{library, sync_dialogs};
 
@@ -223,8 +225,17 @@ fn usage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                     .corner_radius(CornerRadius::all(12.0)),
             );
             library::thumbnail(ui, kit, instance, &format!("{id}::thumb"), 40.0);
-            kit.text_clipped(ui, TextRole::Body, &instance.name, 420.0);
-            kit.fill(ui);
+            let name_id = format!("{id}::name");
+            {
+                let _name = ui.element(
+                    &ElementDesc::new()
+                        .id(name_id.clone())
+                        .width(Sizing::Grow)
+                        .height(Sizing::Fit)
+                        .clip(Clip::horizontal()),
+                );
+                kit.text_fitted(ui, TextRole::Body, &instance.name, &name_id, 420.0);
+            }
             kit.text(
                 ui,
                 TextRole::Small,
@@ -273,6 +284,51 @@ fn ping_indicator(
     }
 }
 
+/// A server's MOTD as the game draws it, two lines of room reserved for it so cards are all the same height. When the
+/// server was last used follows the first line, after a " | ".
+fn server_motd_row(ui: &mut Ui<'_>, kit: &mut Kit, entry: &EntryView, id: &str) {
+    let small = kit.style(TextRole::Small);
+    // A MOTD with no colour of its own is the server list's grey.
+    let line_style = TextStyle {
+        wrap: TextWrap::None,
+        color: vertex_shell::sturdy::glam::Vec4::new(2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 1.0),
+        ..small
+    };
+    let line_height = ui.measure_text(&line_style, "Ag").y.ceil().max(f32::from(small.font_size));
+    let motd_id = format!("{id}::motd");
+    // Clipped so the MOTD can shrink below its content as the card narrows; its lines are cut to the width it was given
+    // last frame.
+    let _motd = ui.element(
+        &ElementDesc::new()
+            .id(motd_id.clone())
+            .width(Sizing::Grow)
+            .height(Sizing::Fixed(line_height * 2.0))
+            .direction(Direction::TopToBottom)
+            .clip(Clip::horizontal()),
+    );
+    let width = ui.element_bounds(&motd_id).map_or(420.0, |(_, size)| size.x - 1.0).max(0.0);
+    let suffix = format!(" | {}", entry.meta);
+    let suffix_style = TextStyle { color: small.color, ..line_style };
+    // The first line gives up the room the "last used" text needs; the MOTD is cut with an ellipsis to what is left.
+    let first_width = (width - ui.measure_text(&suffix_style, &suffix).x).max(0.0);
+    {
+        let _first = kit.row(ui, 0);
+        if entry.motd.is_empty() {
+            let unavailable = ui.ellipsize(&suffix_style, "MOTD unavailable", first_width);
+            kit::label(ui, &unavailable, &suffix_style);
+        } else {
+            let fitted = mc_text::fit(ui, kit, &entry.motd[0], &line_style, first_width);
+            mc_text::draw(ui, kit, &format!("{id}::motd::0"), &fitted, &line_style);
+        }
+        kit::label(ui, &suffix, &suffix_style);
+    }
+    if let Some(line) = entry.motd.get(1) {
+        let fitted = mc_text::fit(ui, kit, line, &line_style, width);
+        let _second = kit.row(ui, 0);
+        mc_text::draw(ui, kit, &format!("{id}::motd::1"), &fitted, &line_style);
+    }
+}
+
 fn entry_row(
     ui: &mut Ui<'_>,
     kit: &mut Kit,
@@ -281,7 +337,9 @@ fn entry_row(
 ) -> Option<EntryAction> {
     let id = format!("home::entry::{}", entry.key);
     let star_id = format!("{id}::star");
-    let hovered = ui.hovered(&id);
+    let text_id = format!("{id}::text");
+    // Servers are not a button to point at: no hover highlight (a click still launches).
+    let hovered = entry.kind == EntryKind::World && ui.hovered(&id);
     let mut result = None;
     {
         let _row = ui.element(
@@ -382,13 +440,33 @@ fn entry_row(
             {
                 let _text = ui.element(
                     &ElementDesc::new()
+                        .id(text_id.clone())
                         .width(Sizing::Grow)
                         .height(Sizing::Fit)
                         .direction(Direction::TopToBottom)
-                        .child_gap(2),
+                        .child_gap(2)
+                        .clip(Clip::horizontal()),
                 );
-                kit.text_clipped(ui, TextRole::Body, &entry.title, 560.0);
-                kit.text_clipped(ui, TextRole::Small, &entry.meta, 560.0);
+                if entry.title.contains('§') {
+                    // A name the game lets you format: shown as the game would, not with the codes spelled out.
+                    let body = kit.style(TextRole::Body);
+                    let title_style = TextStyle { wrap: TextWrap::None, ..body };
+                    let width = ui
+                        .element_bounds(&text_id)
+                        .map_or(560.0, |(_, size)| size.x - 1.0)
+                        .max(0.0);
+                    let runs = launcher_ui::mc_text::parse_legacy(&entry.title, Default::default());
+                    let fitted = mc_text::fit(ui, kit, &runs, &title_style, width);
+                    let _line = kit.row(ui, 0);
+                    mc_text::draw(ui, kit, &format!("{id}::title"), &fitted, &title_style);
+                } else {
+                    kit.text_fitted(ui, TextRole::Body, &entry.title, &text_id, 560.0);
+                }
+                if entry.kind == EntryKind::Server {
+                    server_motd_row(ui, kit, entry, &id);
+                } else {
+                    kit.text_fitted(ui, TextRole::Small, &entry.meta, &text_id, 560.0);
+                }
             }
             if entry.kind == EntryKind::Server {
                 let (icon, color, tip) = ping_indicator(kit, entry.ping.as_ref());
@@ -405,7 +483,14 @@ fn entry_row(
                 }
                 kit.tooltip(ui, &ping_id, &tip);
                 if let Some(players) = entry.ping.as_ref().and_then(|ping| ping.players.as_ref()) {
-                    kit.text(ui, TextRole::Small, players);
+                    let players_id = format!("{id}::players");
+                    {
+                        let _players = ui.element(&ElementDesc::new().id(players_id.clone()).width(Sizing::Fit).height(Sizing::Fit));
+                        kit.text(ui, TextRole::Small, players);
+                    }
+                    if let Some(tip) = entry.ping.as_ref().and_then(|ping| ping.players_tip.as_deref()) {
+                        kit.tooltip(ui, &players_id, tip);
+                    }
                 }
             }
         }
@@ -432,13 +517,6 @@ fn entry_row(
     }
     if entry.targets.len() == 1 && kit.clicked(ui, &id) {
         return Some(EntryAction::Launch(0));
-    }
-    if let Some(tip) = entry
-        .ping
-        .as_ref()
-        .and_then(|ping| ping.players_tip.as_deref())
-    {
-        kit.tooltip(ui, &id, tip);
     }
     if let Some(at) = kit.secondary(ui, &id) {
         state.home_menu_target = Some(entry.key.clone());

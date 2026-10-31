@@ -16,17 +16,20 @@ pub enum WindowsBackdropType {
     MicaAlt,
     /// Legacy blur effect for older Windows versions.
     LegacyBlur,
+    /// The older acrylic (accent policy) backdrop, which takes a tint colour and strength.
+    LegacyAcrylic,
 }
 
 impl WindowsBackdropType {
     /// Array of all available Windows backdrop types in preference order.
-    pub const ALL: [WindowsBackdropType; 6] = [
+    pub const ALL: [WindowsBackdropType; 7] = [
         WindowsBackdropType::Auto,
         WindowsBackdropType::None,
         WindowsBackdropType::Mica,
         WindowsBackdropType::Acrylic,
         WindowsBackdropType::MicaAlt,
         WindowsBackdropType::LegacyBlur,
+        WindowsBackdropType::LegacyAcrylic,
     ];
 
     /// Human-readable label for UI display.
@@ -38,6 +41,7 @@ impl WindowsBackdropType {
             WindowsBackdropType::Acrylic => "Acrylic",
             WindowsBackdropType::MicaAlt => "Mica Alt",
             WindowsBackdropType::LegacyBlur => "Legacy Blur",
+            WindowsBackdropType::LegacyAcrylic => "Legacy Acrylic",
         }
     }
 }

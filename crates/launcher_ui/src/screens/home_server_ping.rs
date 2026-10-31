@@ -187,7 +187,7 @@ fn split_server_address(address: &str) -> (String, u16) {
 fn query_server_snapshot(address: &str) -> ServerPingSnapshot {
     let unknown = || ServerPingSnapshot {
         status: ServerPingStatus::Unknown,
-        motd: None,
+        motd: Vec::new(),
         players_online: None,
         players_max: None,
         players_sample: Vec::new(),
@@ -202,7 +202,7 @@ fn query_server_snapshot(address: &str) -> ServerPingSnapshot {
         None => {
             return ServerPingSnapshot {
                 status: ServerPingStatus::Offline,
-                motd: None,
+                motd: Vec::new(),
                 players_online: None,
                 players_max: None,
                 players_sample: Vec::new(),
@@ -229,7 +229,7 @@ fn query_server_snapshot(address: &str) -> ServerPingSnapshot {
             status: ServerPingStatus::Online {
                 latency_ms: start.elapsed().as_millis() as u64,
             },
-            motd: None,
+            motd: Vec::new(),
             players_online: None,
             players_max: None,
             players_sample: Vec::new(),
@@ -353,7 +353,7 @@ fn read_mc_string_from_stream(stream: &mut TcpStream) -> Result<String, ()> {
 }
 
 struct ParsedServerStatus {
-    motd: Option<String>,
+    motd: Vec<Vec<crate::mc_text::Span>>,
     players_online: Option<u32>,
     players_max: Option<u32>,
     players_sample: Vec<String>,
@@ -361,12 +361,7 @@ struct ParsedServerStatus {
 
 fn parse_status_json(raw: &str) -> Result<ParsedServerStatus, ()> {
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| ())?;
-    let motd = value
-        .get("description")
-        .and_then(motd_from_json)
-        .map(|text| strip_minecraft_format_codes(text.as_str()))
-        .map(|text| text.trim().to_owned())
-        .filter(|text| !text.is_empty());
+    let motd = value.get("description").map(motd_lines).unwrap_or_default();
     let players_online = value
         .get("players")
         .and_then(|players| players.get("online"))
@@ -385,7 +380,7 @@ fn parse_status_json(raw: &str) -> Result<ParsedServerStatus, ()> {
             sample
                 .iter()
                 .filter_map(|player| player.get("name")?.as_str())
-                .map(|name| strip_minecraft_format_codes(name).trim().to_owned())
+                .map(|name| crate::mc_text::strip_codes(name).trim().to_owned())
                 .filter(|name| !name.is_empty())
                 .collect()
         })
@@ -398,41 +393,26 @@ fn parse_status_json(raw: &str) -> Result<ParsedServerStatus, ()> {
     })
 }
 
-fn motd_from_json(value: &serde_json::Value) -> Option<String> {
-    if let Some(text) = value.as_str() {
-        return Some(text.to_owned());
-    }
-    let mut out = String::new();
-    append_motd_text(value, &mut out);
-    if out.trim().is_empty() {
-        None
-    } else {
-        Some(out)
-    }
-}
-
-fn append_motd_text(value: &serde_json::Value, out: &mut String) {
-    if let Some(text) = value.get("text").and_then(|text| text.as_str()) {
-        out.push_str(text);
-    }
-    if let Some(extra) = value.get("extra").and_then(|extra| extra.as_array()) {
-        for part in extra {
-            append_motd_text(part, out);
+/// The status `description` as the game draws it: its lines, each as styled runs, with the blanks around each line (many
+/// servers centre their MOTD with spaces) and empty lines at the ends left out.
+fn motd_lines(description: &serde_json::Value) -> Vec<Vec<crate::mc_text::Span>> {
+    let mut lines = crate::mc_text::split_lines(&crate::mc_text::from_component(description));
+    for line in &mut lines {
+        if let Some(first) = line.first_mut() {
+            first.text = first.text.trim_start().to_owned();
         }
-    }
-}
-
-fn strip_minecraft_format_codes(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '§' {
-            let _ = chars.next();
-            continue;
+        if let Some(last) = line.last_mut() {
+            last.text = last.text.trim_end().to_owned();
         }
-        out.push(ch);
+        line.retain(|span| !span.text.is_empty());
     }
-    out
+    while lines.last().is_some_and(Vec::is_empty) {
+        lines.pop();
+    }
+    while lines.first().is_some_and(Vec::is_empty) {
+        lines.remove(0);
+    }
+    lines
 }
 
 fn decode_server_icon(raw: Option<&str>) -> Option<Arc<[u8]>> {
@@ -462,24 +442,13 @@ fn decode_server_icon(raw: Option<&str>) -> Option<Arc<[u8]>> {
 
 pub(super) fn server_meta_line(
     server: &ServerEntry,
-    ping: Option<&ServerPingSnapshot>,
+    _ping: Option<&ServerPingSnapshot>,
     now_ms: u64,
 ) -> String {
-    let motd = ping
-        .and_then(|snapshot| snapshot.motd.as_deref())
-        .map(collapse_motd_for_meta_line)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "motd unavailable".to_owned());
-    format!(
-        "{} | last used {}",
-        motd,
-        format_time_ago(server.last_used_at_ms, now_ms)
-    )
+    // The screen draws the MOTD (or says there is none) on its own, so this is only when the server was last used.
+    format!("last used {}", format_time_ago(server.last_used_at_ms, now_ms))
 }
 
-fn collapse_motd_for_meta_line(motd: &str) -> String {
-    motd.split_whitespace().collect::<Vec<_>>().join(" ")
-}
 
 
 

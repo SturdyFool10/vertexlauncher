@@ -349,15 +349,15 @@ fn content_tab(
     if add_files {
         state.file_dialogs.open(
             "instance::add-local",
-            launcher_ui::file_dialog::Pick::Files,
-            launcher_ui::file_dialog::Dialog::new().title("Add Local Content"),
+            crate::app::se5::file_dialog::Pick::Files,
+            crate::app::se5::file_dialog::Dialog::new().title("Add Local Content"),
         );
     }
     if apply_patch {
         state.file_dialogs.open(
             "instance::apply-patch",
-            launcher_ui::file_dialog::Pick::File,
-            launcher_ui::file_dialog::Dialog::new()
+            crate::app::se5::file_dialog::Pick::File,
+            crate::app::se5::file_dialog::Dialog::new()
                 .title("Apply Vertex Patch")
                 .filter("Vertex Modpack Patch", &[vtmpack::VTMPATCH_EXTENSION]),
         );
@@ -395,7 +395,7 @@ fn content_tab(
             }
         }
     }
-    if view.empty_message.is_some() && view.search.is_empty() && view.rows.is_empty() {
+    if view.empty_message.is_some() && view.search.is_empty() && view.rows.is_empty() && !view.updatable_only {
         if let Some(message) = &view.empty_message {
             kit.text(ui, TextRole::Muted, message);
         }
@@ -415,7 +415,10 @@ fn content_tab(
     ) {
         api::content::set_search(&mut session.state, &query);
     }
-    if let Some(message) = &view.empty_message {
+    // With the updates filter on, the controls stay up whatever the list holds, so the filter can always be switched off.
+    if let Some(message) = &view.empty_message
+        && !view.updatable_only
+    {
         kit.text(ui, TextRole::Muted, message);
         return;
     }
@@ -469,6 +472,22 @@ fn content_tab(
             api::content::set_page(&mut session.state, index + 1);
         }
         kit.text(ui, TextRole::Muted, &view.count_label);
+        // Pushes the filter to the right edge: the spacer grows, the Fit wrapper keeps the checkbox its natural width.
+        let _spacer = ui.element(&ElementDesc::new().width(Sizing::Grow).height(Sizing::Fixed(1.0)));
+        drop(_spacer);
+        let _filter = ui.element(&ElementDesc::new().width(Sizing::Fit).height(Sizing::Fit));
+        if let Some(on) = kit.checkbox(
+            ui,
+            "instance::updatable-only",
+            "Show updatable files",
+            view.updatable_only,
+        ) {
+            api::content::set_updatable_only(&mut session.state, on);
+        }
+    }
+    if let Some(message) = &view.empty_message {
+        kit.text(ui, TextRole::Muted, message);
+        return;
     }
 
     let is_mods = view.kind == InstalledContentKind::Mods;

@@ -41,13 +41,11 @@ vertex_constants.workspace = true
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 discord-rich-presence = "1.1.0"
 gilrs.workspace = true
+regex = "1"
 vertex_shell.workspace = true
 vertex_theme.workspace = true
 # The binary forwards the engine's native link directives to Cargo so they reach the final link.
-sturdy-sys = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "0977447f863334e842f02a8a3c33f1d7dba0c8c6" }
-
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-rfd = "0.11"
+sturdy-sys = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "0f1199f0cd4067da114ab5ab90999c3de5e896af" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wry = "=0.31.1"
@@ -57,7 +55,6 @@ windows = { version = "=0.37.0", features = ["Win32_Foundation", "Win32_Graphics
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
-rfd = { version = "0.11", default-features = false, features = ["gtk3"] }
 wry = "=0.31.1"
 tao = "=0.22.0"
 

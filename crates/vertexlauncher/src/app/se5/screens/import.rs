@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use launcher_ui::file_dialog::{Dialog as PickerDialog, Pick};
+use crate::app::se5::file_dialog::{Dialog as PickerDialog, Pick};
 use vertex_shell::sturdy::ui::{Sizing, TextStyle, TextWrap, Ui};
 use vertex_shell::sturdy::ui_kit::ModalStyle;
 

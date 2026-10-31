@@ -11,31 +11,128 @@ use vertex_shell::sturdy::ui::{
 use super::super::icons::{self, Icon};
 use super::super::kit::{self, Kit, TextRole};
 
-/// One notice as shown: the projects it covers and the licence text they share.
+/// One notice as shown: the projects it covers, the licence type(s) they share, and the licence text.
 struct Notice {
-    name: String,
+    names: Vec<String>,
+    licenses: Vec<String>,
     source: String,
     text: String,
 }
 
-/// Vertex's own bundled fonts and icons.
-const BUNDLED: &[(&str, &str, &str)] = &[
+impl Notice {
+    /// "Tabler Icons (MIT)", "fmt, spdlog and glm (MIT)", "stb (MIT or Public Domain)"-style heading.
+    fn title(&self) -> String {
+        let names = join_natural(&self.names, "and");
+        if self.licenses.is_empty() {
+            names
+        } else {
+            format!("{names} ({})", join_natural(&self.licenses, "and"))
+        }
+    }
+}
+
+/// "A", "A and B", "A, B, and C".
+fn join_natural(items: &[String], conjunction: &str) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [a, b] => format!("{a} {conjunction} {b}"),
+        [rest @ .., last] => format!("{}, {conjunction} {last}", rest.join(", ")),
+    }
+}
+
+/// Vertex's own bundled fonts and icons: (projects, licence, file, text).
+const BUNDLED: &[(&[&str], &str, &str, &str)] = &[
     (
-        "Tabler Icons (MIT)",
+        &["Tabler Icons"],
+        "MIT",
         "legal/TABLER_LICENSE.txt",
         include_str!("../../../../../launcher_ui/src/legal/TABLER_LICENSE.txt"),
     ),
     (
-        "Maple Mono NF and Maple Mono NF CN (SIL OFL 1.1)",
+        &["Maple Mono NF", "Maple Mono NF CN"],
+        "SIL OFL 1.1",
         "legal/MAPLE_LICENSE.txt",
         include_str!("../../../../../launcher_ui/src/legal/MAPLE_LICENSE.txt"),
     ),
     (
-        "Noto Color Emoji (SIL OFL 1.1)",
+        &["Noto Color Emoji"],
+        "SIL OFL 1.1",
         "legal/NOTO_EMOJI_LICENSE.txt",
         include_str!("../../../../../launcher_ui/src/legal/NOTO_EMOJI_LICENSE.txt"),
     ),
 ];
+
+/// The licence type(s) a licence text declares, which the engine's own list does not name. An SPDX identifier in the
+/// text wins; otherwise the well-known wording of each licence is recognised. Empty when nothing is recognised, so no
+/// label is shown rather than a wrong one.
+fn detect_licenses(text: &str) -> Vec<String> {
+    let lower = normalize(text).to_lowercase();
+    let has = |needle: &str| lower.contains(needle);
+    if let Some(at) = lower.find("spdx-license-identifier:") {
+        let id = &text_after(text, at + "spdx-license-identifier:".len());
+        if !id.is_empty() {
+            return vec![id.clone()];
+        }
+    }
+    // libtiff's own permissive licence quotes BSD wording; it is one licence, not two.
+    if has("libtiff license") {
+        return vec!["libtiff".to_owned()];
+    }
+    let mut found: Vec<&str> = Vec::new();
+    if has("apache license") && has("version 2.0") {
+        found.push("Apache-2.0");
+    }
+    if has("permission is hereby granted") {
+        found.push("MIT");
+    }
+    if has("provided 'as-is'") && has("altered source versions") {
+        found.push("zlib");
+    }
+    if has("redistribution and use in source and binary forms") || has("2-clauses bsd") || has("3-clause bsd") {
+        if has("2-clause") {
+            found.push("BSD 2-Clause");
+        } else if has("neither the name") || has("endorse or promote") || has("3-clause") {
+            found.push("BSD 3-Clause");
+        } else {
+            found.push("BSD 2-Clause");
+        }
+    }
+    if has("public domain") || has("unlicense") {
+        found.push("Public Domain");
+    }
+    if has("happy bunny license") {
+        found.push("Happy Bunny");
+    }
+    if has("freetype license") {
+        found.push("FreeType License");
+    }
+    if has("gnu free documentation license") {
+        found.push("GNU FDL 1.3");
+    }
+    if has("boost software license") {
+        found.push("BSL 1.0");
+    }
+    if has("mozilla public license") {
+        found.push("MPL 2.0");
+    }
+    found.into_iter().map(str::to_owned).collect()
+}
+
+/// The first word-ish token of `text` starting at byte `from` of its normalized, lowercased form: the identifier after an
+/// SPDX tag, kept in the text's own capitalisation.
+fn text_after(text: &str, from: usize) -> String {
+    // `from` indexes the lowercased, whitespace-collapsed copy, which is as long as the original's collapsed form.
+    let collapsed = normalize(text);
+    collapsed
+        .get(from..)
+        .map(|rest| {
+            let rest = rest.trim_start();
+            let end = rest.find(|c: char| c == '\n' || c == '*').unwrap_or(rest.len());
+            rest[..end].split(" Licensed ").next().unwrap_or("").trim().to_owned()
+        })
+        .unwrap_or_default()
+}
 
 /// Vertex's notices plus SturdyEngine5's own list of what it embeds, with projects that share the same licence text
 /// folded into one entry so nothing is shown twice.
@@ -43,32 +140,34 @@ fn notices() -> &'static [Notice] {
     static NOTICES: OnceLock<Vec<Notice>> = OnceLock::new();
     NOTICES.get_or_init(|| {
         let mut notices: Vec<Notice> = Vec::new();
-        let mut add = |name: String, source: String, text: String| {
+        let mut add = |names: Vec<String>, licenses: Vec<String>, source: String, text: String| {
             let key = normalize(&text);
             match notices
                 .iter_mut()
                 .find(|notice| normalize(&notice.text) == key)
             {
                 Some(existing) => {
-                    for part in name.split(", ") {
-                        if !existing
-                            .name
-                            .split(", ")
-                            .any(|known| known.eq_ignore_ascii_case(part))
-                        {
-                            existing.name.push_str(", ");
-                            existing.name.push_str(part);
+                    for name in names {
+                        if !existing.names.iter().any(|known| known.eq_ignore_ascii_case(&name)) {
+                            existing.names.push(name);
                         }
                     }
                 }
-                None => notices.push(Notice { name, source, text }),
+                None => notices.push(Notice { names, licenses, source, text }),
             }
         };
-        for (name, source, text) in BUNDLED {
-            add((*name).to_owned(), (*source).to_owned(), (*text).to_owned());
+        for (names, license, source, text) in BUNDLED {
+            add(
+                names.iter().map(|name| (*name).to_owned()).collect(),
+                vec![(*license).to_owned()],
+                (*source).to_owned(),
+                (*text).to_owned(),
+            );
         }
         for license in vertex_shell::sturdy::images::third_party_licenses() {
-            add(license.project, license.license_file, license.text);
+            let licenses = detect_licenses(&license.text);
+            let names = license.project.split(", ").map(str::to_owned).collect();
+            add(names, licenses, license.license_file, license.text);
         }
         notices
     })
@@ -133,7 +232,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit) {
             );
             kit::label(
                 ui,
-                &notice.name,
+                &notice.title(),
                 &TextStyle {
                     wrap: TextWrap::Words,
                     ..kit.style(TextRole::Strong)

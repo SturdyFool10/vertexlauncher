@@ -297,8 +297,13 @@ where
 {
     logging::forward_engine_logs();
     let translucent = initial.window_transparency().is_translucent();
+    // Ask for the saved API and GPU up front: the engine resolves the request before it creates the device, so it comes
+    // up once on the right one. Where the request cannot be met it starts on its default, and the first-frame applier
+    // (a no-op when the device already matches) reports whatever is left.
+    let device = settings_apply::initial_device_request(&initial);
     bridge.submit(initial);
     let runtime = RuntimeConfig::new(config.title)
+        .device_request(device)
         .app_id(config.app_id)
         .size(config.size.0, config.size.1)
         .decorated(config.decorated)

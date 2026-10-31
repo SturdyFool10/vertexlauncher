@@ -211,6 +211,32 @@ pub fn strip_ansi(line: &str) -> String {
     if line.contains('\x1b') { parse_ansi_annotated(line).text } else { line.to_owned() }
 }
 
+/// `line` as styled runs: split at its ANSI colour codes, and each of those at the Minecraft section-sign codes in it
+/// (see [`crate::mc_text`]). A run's colour of `None` is the line's own colour, and `§r` goes back to what the ANSI
+/// code (or the line) set, not to white.
+pub fn styled_runs(line: &str) -> Vec<crate::mc_text::Span> {
+    let mut runs = Vec::new();
+    for segment in ansi_segments(line) {
+        let base = crate::mc_text::Style {
+            color: segment.foreground,
+            underline: segment.underline,
+            strikethrough: segment.strikethrough,
+            ..Default::default()
+        };
+        runs.extend(crate::mc_text::parse_legacy(&segment.text, base));
+    }
+    runs
+}
+
+/// The text of `line` as it reads once the ANSI escapes and the section-sign codes are taken out: what is shown,
+/// selected and copied.
+pub fn plain_text(line: &str) -> String {
+    if !line.contains('\x1b') && !line.contains('§') {
+        return line.to_owned();
+    }
+    crate::mc_text::plain(&styled_runs(line))
+}
+
 /// xterm's default palette for the 16 named colours, then the 6x6x6 cube and the grey ramp.
 fn ansi_rgb(color: &AnsiColor) -> [u8; 3] {
     match color {
@@ -290,5 +316,18 @@ mod tests {
         assert_eq!(segments[0].foreground, None);
         assert_eq!(segments[1].foreground, Some([0xC5, 0x0F, 0x1F]));
         assert_eq!(strip_ansi("A\x1b[31mB\x1b[0mC"), "ABC");
+    }
+
+    #[test]
+    fn section_codes_in_a_console_line_reset_to_the_lines_own_colour() {
+        let runs = styled_runs("[CHAT] §aGreen§r back");
+        assert_eq!(crate::mc_text::plain(&runs), "[CHAT] Green back");
+        // The line has no ANSI colour, so "back" is the line's own colour (None), not white.
+        assert_eq!(runs.last().unwrap().style.color, None);
+        assert_eq!(plain_text("[CHAT] §aGreen§r back"), "[CHAT] Green back");
+        // With an ANSI colour set, §r returns to that.
+        let runs = styled_runs("\x1b[31m§aGreen§rRed\x1b[0m");
+        assert_eq!(runs[0].style.color, Some([0x55, 0xFF, 0x55]));
+        assert_eq!(runs[1].style.color, ansi_segments("\x1b[31mx\x1b[0m")[0].foreground);
     }
 }

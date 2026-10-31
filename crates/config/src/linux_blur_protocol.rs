@@ -10,13 +10,17 @@ pub enum LinuxBlurProtocol {
     ExtBackgroundEffect,
     /// Request blur through KDE/KWin blur protocols or X11 blur hints.
     KdeBlur,
+    /// Blur by the Better Blur DX KWin effect, on its own: no compositor blur protocol is used. The window stays
+    /// translucent and the effect blurs it because its class is on the effect's window list.
+    BetterBlurDx,
 }
 
 impl LinuxBlurProtocol {
-    pub const ALL: [LinuxBlurProtocol; 3] = [
+    pub const ALL: [LinuxBlurProtocol; 4] = [
         LinuxBlurProtocol::Auto,
         LinuxBlurProtocol::ExtBackgroundEffect,
         LinuxBlurProtocol::KdeBlur,
+        LinuxBlurProtocol::BetterBlurDx,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -24,6 +28,7 @@ impl LinuxBlurProtocol {
             LinuxBlurProtocol::Auto => "Auto",
             LinuxBlurProtocol::ExtBackgroundEffect => "ext_background_effect_v1",
             LinuxBlurProtocol::KdeBlur => "KDE Blur",
+            LinuxBlurProtocol::BetterBlurDx => "Better Blur DX",
         }
     }
 }

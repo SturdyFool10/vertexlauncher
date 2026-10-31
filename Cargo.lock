@@ -2404,7 +2404,6 @@ dependencies = [
  "qrcode",
  "raw-window-handle 0.6.2",
  "resvg",
- "rfd",
  "serde",
  "serde_json",
  "shared_lru",
@@ -2919,17 +2918,6 @@ checksum = "915b1b472bc21c53464d6c8461c9d3af805ba1ef837e1cac254428f4a77177b1"
 dependencies = [
  "malloc_buf",
  "objc_exception",
-]
-
-[[package]]
-name = "objc-foundation"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1add1b659e36c9607c7aab864a76c7a4c2760cd0cd2e120f3fb8b952c7e22bf9"
-dependencies = [
- "block",
- "objc",
- "objc_id",
 ]
 
 [[package]]
@@ -3636,31 +3624,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rfd"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fe664af397d2b6a13a8ba1d172a2b5c87c6c5149039edbf8fa122b98c9ed96f"
-dependencies = [
- "async-io 1.13.0",
- "block",
- "dispatch",
- "futures-util",
- "glib-sys",
- "gobject-sys",
- "gtk-sys",
- "js-sys",
- "log",
- "objc",
- "objc-foundation",
- "objc_id",
- "raw-window-handle 0.5.2",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "windows 0.44.0",
-]
-
-[[package]]
 name = "rgb"
 version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4198,7 +4161,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "sturdy"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0977447f863334e842f02a8a3c33f1d7dba0c8c6#0977447f863334e842f02a8a3c33f1d7dba0c8c6"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
 dependencies = [
  "bytemuck",
  "cxx",
@@ -4214,7 +4177,7 @@ dependencies = [
 [[package]]
 name = "sturdy-macros"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0977447f863334e842f02a8a3c33f1d7dba0c8c6#0977447f863334e842f02a8a3c33f1d7dba0c8c6"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4224,12 +4187,12 @@ dependencies = [
 [[package]]
 name = "sturdy-net"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0977447f863334e842f02a8a3c33f1d7dba0c8c6#0977447f863334e842f02a8a3c33f1d7dba0c8c6"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
 
 [[package]]
 name = "sturdy-script"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0977447f863334e842f02a8a3c33f1d7dba0c8c6#0977447f863334e842f02a8a3c33f1d7dba0c8c6"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
 dependencies = [
  "sturdy-net",
 ]
@@ -4237,7 +4200,7 @@ dependencies = [
 [[package]]
 name = "sturdy-sys"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0977447f863334e842f02a8a3c33f1d7dba0c8c6#0977447f863334e842f02a8a3c33f1d7dba0c8c6"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
 dependencies = [
  "cxx",
  "cxx-gen",
@@ -5034,7 +4997,7 @@ dependencies = [
  "modrinth",
  "objc",
  "raw-window-handle 0.6.2",
- "rfd",
+ "regex",
  "serde",
  "serde_json",
  "sturdy-sys",
@@ -5130,16 +5093,6 @@ dependencies = [
  "rustversion",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
-]
-
-[[package]]
-name = "wasm-bindgen-futures"
-version = "0.4.71"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96492d0d3ffba25305a7dc88720d250b1401d7edca02cc3bcd50633b424673b8"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -5431,15 +5384,6 @@ dependencies = [
  "windows_i686_msvc 0.37.0",
  "windows_x86_64_gnu 0.37.0",
  "windows_x86_64_msvc 0.37.0",
-]
-
-[[package]]
-name = "windows"
-version = "0.44.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e745dab35a0c4c77aa3ce42d595e13d2003d6902d6b08c9ef5fc326d08da12b"
-dependencies = [
- "windows-targets 0.42.2",
 ]
 
 [[package]]

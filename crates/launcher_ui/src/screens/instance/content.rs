@@ -81,7 +81,7 @@ pub(super) fn filter_installed_content_indices(
         .installed_content_search_query
         .trim()
         .to_ascii_lowercase();
-    if query.is_empty() {
+    if query.is_empty() && !state.installed_content_updatable_only {
         return None;
     }
 
@@ -89,10 +89,21 @@ pub(super) fn filter_installed_content_indices(
         files
             .iter()
             .enumerate()
-            .filter(|(_, file)| installed_content_file_matches_search(state, file, query.as_str()))
+            .filter(|(_, file)| {
+                !state.installed_content_updatable_only || installed_content_file_has_update(state, file)
+            })
+            .filter(|(_, file)| query.is_empty() || installed_content_file_matches_search(state, file, query.as_str()))
             .map(|(index, _)| index)
             .collect(),
     )
+}
+
+fn installed_content_file_has_update(state: &InstanceScreenState, file: &InstalledContentFile) -> bool {
+    state
+        .content_metadata_cache
+        .get(&file.lookup_key)
+        .and_then(|resolution| resolution.as_ref())
+        .is_some_and(|resolution| resolution.update.is_some())
 }
 
 fn installed_content_file_matches_search(
@@ -152,8 +163,8 @@ fn contains_ignore_ascii_case(value: &str, query: &str) -> bool {
         .any(|window| window.eq_ignore_ascii_case(query))
 }
 
-pub(super) fn installed_content_count_label(matching: usize, total: usize, query: &str) -> String {
-    if query.trim().is_empty() || matching == total {
+pub(super) fn installed_content_count_label(matching: usize, total: usize, filtered: bool) -> String {
+    if !filtered || matching == total {
         format!("{total} installed")
     } else {
         format!("{matching} matching / {total} installed")

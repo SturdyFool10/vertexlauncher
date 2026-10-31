@@ -12,14 +12,19 @@ mod accounts;
 mod chrome;
 mod create_instance;
 mod flows;
+mod file_dialog;
 mod fonts;
 mod gamepad;
 mod icons;
 mod images;
 mod kit;
+mod mc_text;
 mod link_profile;
 mod screens;
 mod toasts;
+
+/// How long after a graphics-device switch the icon textures are made once more.
+const SVG_SETTLE_DELAY: Duration = Duration::from_millis(600);
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -30,7 +35,7 @@ use config::{Config, ConfigFormat, LoadConfigResult, SettingsDomain, TextRenderi
 use installation::{normalize_path_key, take_finished_instance_processes};
 use instances::{InstanceStore, delete_instance, instance_root_path, load_store};
 use launcher_ui::app_commands::AppCommand;
-use launcher_ui::file_dialog::FileDialogs;
+use crate::app::se5::file_dialog::FileDialogs;
 use launcher_ui::notification;
 use launcher_ui::screens::home_api::HomeSession;
 use launcher_ui::screens::instance_api as api;
@@ -252,6 +257,8 @@ pub struct AppState {
     pub font_options: FontOptions,
     pub console: screens::console::ConsoleView,
     pub settings: screens::settings::SettingsView,
+    /// Whether the Better Blur DX KWin effect is on this machine (Linux), refreshed in the background.
+    pub better_blur: super::better_blur::BetterBlurWatch,
     pub game_settings: Option<screens::game_settings::GameSettingsState>,
     pub gamepad: gamepad::Gamepad,
     pub viewer: screens::viewer::ViewerState,
@@ -415,6 +422,17 @@ impl AppState {
             self.font_scan = None;
         }
         self.poll_obs();
+        self.better_blur.poll();
+        self.better_blur
+            .ensure_covered(self.config.linux_blur_protocol() == config::LinuxBlurProtocol::BetterBlurDx);
+        // The effect is not here (never was, or was removed), so a saved choice of it goes back to Auto: it is not
+        // offered, so it would otherwise sit selected but invisible.
+        if self.better_blur.settled()
+            && !self.better_blur.available()
+            && self.config.linux_blur_protocol() == config::LinuxBlurProtocol::BetterBlurDx
+        {
+            self.config.set_linux_blur_protocol(config::LinuxBlurProtocol::Auto);
+        }
         self.poll_themes();
         let streamer_mode = self.streamer_mode();
         notification::set_streamer_mode(streamer_mode);
@@ -802,6 +820,7 @@ impl App {
             font_options: FontOptions::included_only(),
             console: screens::console::ConsoleView::default(),
             settings: screens::settings::SettingsView::default(),
+            better_blur: Default::default(),
             game_settings: None,
             gamepad: Default::default(),
             viewer: Default::default(),
@@ -977,9 +996,25 @@ impl App {
         // only a 2x raster is filtered cleanly. 3x and 4x skip texels and look worse than no supersampling, so the
         // higher modes stop at 2x (the rasteriser already anti-aliases analytically).
         let supersample = self.state.config.svg_aa_mode().supersample_scale().min(2);
+        // A graphics-device switch (Vertex applies the saved GPU choice on the first frames) rebuilds the engine's
+        // textures, and icons made right around it can draw as solid white blocks. A later switch, once the new device
+        // has settled, always came out right, so the icons are made again: at the switch, and once more a moment after.
+        let generation = ui.engine().device_generation();
+        if generation != self.kit.svg_device_generation {
+            self.kit.svg_device_generation = generation;
+            self.kit.svg_rebuild_at = Some(Instant::now() + SVG_SETTLE_DELAY);
+            vertex_shell::wake_after(SVG_SETTLE_DELAY);
+            ui.clear_svg_cache();
+            icons::forget_textures();
+        } else if self.kit.svg_rebuild_at.is_some_and(|at| Instant::now() >= at) {
+            self.kit.svg_rebuild_at = None;
+            ui.clear_svg_cache();
+            icons::forget_textures();
+        }
         if supersample != self.kit.svg_supersample {
             // Icons are rasterised at a multiple of their drawn size; the cached ones are the wrong size now.
             ui.clear_svg_cache();
+            icons::forget_textures();
             self.kit.svg_supersample = supersample;
         }
         if ui.text_raster_mode() != mode {
@@ -1008,6 +1043,8 @@ impl App {
                 break;
             }
         }
+        mc_text::fonts_changed();
+        self.kit.styled_faces = fonts::register_styled_faces(&mut ui.engine(), &self.state.config);
         self.state.applied_font = Some(signature);
     }
 }

@@ -1,7 +1,7 @@
 //! Skins: the active account's skin, model and cape, with a live 3D preview. The preview is drawn by the launcher's
 //! rasteriser into an engine texture that is updated in place every frame; everything else is ordinary UI.
 
-use launcher_ui::file_dialog::{Dialog as PickerDialog, Pick};
+use crate::app::se5::file_dialog::{Dialog as PickerDialog, Pick};
 use launcher_ui::screens::skins_api::{
     CapeView, MotionMode, PreviewSettings, SkinVariant, SkinsSession,
 };
@@ -391,7 +391,7 @@ fn drop_zone(
     ui: &mut Ui<'_>,
     kit: &mut Kit,
     skins: &mut SkinsSession,
-    file_dialogs: &mut launcher_ui::file_dialog::FileDialogs,
+    file_dialogs: &mut crate::app::se5::file_dialog::FileDialogs,
 ) {
     let zone_id = "skins::dropzone";
     let hovered = ui.hovered(zone_id);
@@ -456,7 +456,7 @@ fn drop_zone(
     }
 }
 
-fn open_picker(file_dialogs: &mut launcher_ui::file_dialog::FileDialogs) {
+fn open_picker(file_dialogs: &mut crate::app::se5::file_dialog::FileDialogs) {
     file_dialogs.open(
         PICK_SLOT,
         Pick::File,

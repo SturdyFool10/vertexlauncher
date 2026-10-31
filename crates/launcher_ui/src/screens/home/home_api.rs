@@ -37,6 +37,9 @@ pub struct EntryView {
     pub kind: EntryKind,
     pub title: String,
     pub meta: String,
+    /// A server's MOTD as the game draws it (one entry per line, each a list of styled runs); empty for worlds and for
+    /// servers that have not answered. When it is not empty, `meta` is only the "last used" part.
+    pub motd: Vec<Vec<crate::mc_text::Span>>,
     pub favorite: bool,
     /// PNG bytes of the world thumbnail or server icon.
     pub icon_png: Option<Arc<[u8]>>,
@@ -104,6 +107,7 @@ impl HomeSession {
                 kind: EntryKind::World,
                 title: world.world_name.clone(),
                 meta: home_api_world_meta(world, now),
+                motd: Vec::new(),
                 favorite: world.favorite,
                 icon_png: world.thumbnail_png.clone(),
                 ping: None,
@@ -120,6 +124,7 @@ impl HomeSession {
                 kind: EntryKind::Server,
                 title: server.server_name.clone(),
                 meta: server_meta_line(server, ping, now),
+                motd: ping.map(|ping| ping.motd.clone()).unwrap_or_default(),
                 favorite: server.favorite,
                 icon_png: server.icon_png.clone(),
                 ping: ping.map(|ping| PingView {

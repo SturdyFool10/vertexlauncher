@@ -71,6 +71,9 @@ pub const UI_OPACITY_PERCENT_MAX: u8 = 100;
 pub const WINDOW_CORNER_RADIUS_MIN: u8 = 0;
 pub const WINDOW_CORNER_RADIUS_MAX: u8 = 28;
 pub const DEFAULT_WINDOW_CORNER_RADIUS: u8 = 12;
+/// How strongly the Windows legacy blur and acrylic backdrops are tinted, in percent. 0 is untinted.
+pub const WINDOWS_BLUR_TINT_OPACITY_MIN: u8 = 0;
+pub const WINDOWS_BLUR_TINT_OPACITY_MAX: u8 = 100;
 pub const UI_FONT_WEIGHT_MIN: i32 = 100;
 pub const UI_FONT_WEIGHT_MAX: i32 = 900;
 pub const UI_FONT_WEIGHT_STEP: i32 = 100;
@@ -306,6 +309,12 @@ pub struct Config {
     ui_opacity_percent: u8,
     #[serde(default = "default_window_corner_radius")]
     window_corner_radius: u8,
+    /// Tint colour (0xRRGGBB) of the Windows legacy blur and legacy acrylic backdrops.
+    #[serde(default)]
+    windows_blur_tint_rgb: u32,
+    /// Strength of that tint, in percent.
+    #[serde(default)]
+    windows_blur_tint_opacity_percent: u8,
     #[serde(default, rename = "windows_transparency_level", skip_serializing)]
     legacy_windows_transparency_level: Option<WindowsTransparencyLevel>,
     linux_set_opengl_driver: bool,
@@ -798,6 +807,23 @@ impl Config {
     }
 
     /// Returns the window's corner radius in logical pixels (used while the window is translucent).
+    pub fn windows_blur_tint_rgb(&self) -> u32 {
+        self.windows_blur_tint_rgb
+    }
+
+    pub fn set_windows_blur_tint_rgb(&mut self, value: u32) {
+        self.windows_blur_tint_rgb = value & 0x00ff_ffff;
+    }
+
+    pub fn windows_blur_tint_opacity_percent(&self) -> u8 {
+        self.windows_blur_tint_opacity_percent
+    }
+
+    pub fn set_windows_blur_tint_opacity_percent(&mut self, value: u8) {
+        self.windows_blur_tint_opacity_percent =
+            value.clamp(WINDOWS_BLUR_TINT_OPACITY_MIN, WINDOWS_BLUR_TINT_OPACITY_MAX);
+    }
+
     pub fn window_corner_radius(&self) -> u8 {
         self.window_corner_radius
     }
@@ -1123,6 +1149,10 @@ impl Config {
         self.window_corner_radius = self
             .window_corner_radius
             .clamp(WINDOW_CORNER_RADIUS_MIN, WINDOW_CORNER_RADIUS_MAX);
+        self.windows_blur_tint_rgb &= 0x00ff_ffff;
+        self.windows_blur_tint_opacity_percent = self
+            .windows_blur_tint_opacity_percent
+            .clamp(WINDOWS_BLUR_TINT_OPACITY_MIN, WINDOWS_BLUR_TINT_OPACITY_MAX);
         self.ui_font_size = self.ui_font_size.clamp(UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX);
         self.notification_fade_out_seconds = if self.notification_fade_out_seconds.is_finite() {
             self.notification_fade_out_seconds.clamp(
@@ -1389,6 +1419,8 @@ impl Default for Config {
             macos_visual_effect_emphasized: false,
             ui_opacity_percent: default_ui_opacity_percent(),
             window_corner_radius: default_window_corner_radius(),
+            windows_blur_tint_rgb: 0,
+            windows_blur_tint_opacity_percent: 0,
             legacy_windows_transparency_level: None,
             linux_set_opengl_driver: false,
             linux_use_zink_driver: false,

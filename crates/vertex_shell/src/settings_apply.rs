@@ -7,7 +7,7 @@ use config::{
     Config, GraphicsAdapterPreferenceType, GraphicsAdapterProfile, GraphicsApiPreference, SettingsDiff, SettingsDomain,
     WindowTransparency,
 };
-use sturdy::device::{Backend, DevicePreference, DeviceRequest, SwitchOutcome};
+use sturdy::device::{Adapter, Backend, DevicePreference, DeviceRequest, SwitchOutcome};
 use sturdy::render::{FrameRateLimit, LinuxBlurProtocol, PresentationSettings, SurfaceHandle, WindowEffectKind, WindowEffectParams};
 use sturdy::Engine;
 
@@ -88,6 +88,30 @@ pub fn device_request(config: &Config, explicit_stable_id: Option<String>) -> De
     }
 }
 
+/// The saved explicit adapter's engine id, if that adapter is still present.
+fn explicit_adapter(config: &Config, adapters: &[Adapter]) -> Option<String> {
+    let hash = config.graphics_adapter_explicit_hash()?;
+    adapters.iter().find(|adapter| adapter_hash(&adapter.stable_id) == hash).map(|adapter| adapter.stable_id.clone())
+}
+
+/// The device request for the saved graphics settings, and the native API it pinned (if any). Auto means the
+/// platform's native API first, with WebGPU only as the way in where neither it nor the other native API can run: the
+/// engine's own default would otherwise be free to pick WebGPU (Dawn) when it is built in.
+fn startup_device_request(config: &Config, adapters: &[Adapter]) -> (DeviceRequest, Option<Backend>) {
+    let request = device_request(config, explicit_adapter(config, adapters));
+    let native = if config.graphics_api_preference() == GraphicsApiPreference::Auto { native_backend() } else { None };
+    match native {
+        Some(native) => (request.backend(native), Some(native)),
+        None => (request, None),
+    }
+}
+
+/// The request to start the engine on, from the saved settings and the machine's GPUs: the same choice the first-frame
+/// applier would make, made before the device exists so the engine comes up once on it. Enumerates headlessly.
+pub fn initial_device_request(config: &Config) -> DeviceRequest {
+    startup_device_request(config, &sturdy::device::enumerate_adapters()).0
+}
+
 pub fn presentation_settings(config: &Config, base: PresentationSettings) -> PresentationSettings {
     let limit = if config.frame_limiter_enabled() && config.frame_limit_fps() > 0 {
         FrameRateLimit::Fps(f64::from(config.frame_limit_fps()))
@@ -119,21 +143,76 @@ pub fn linux_blur_protocol(protocol: config::LinuxBlurProtocol) -> LinuxBlurProt
         config::LinuxBlurProtocol::Auto => LinuxBlurProtocol::Automatic,
         config::LinuxBlurProtocol::ExtBackgroundEffect => LinuxBlurProtocol::ExtBackgroundEffect,
         config::LinuxBlurProtocol::KdeBlur => LinuxBlurProtocol::KdeBlur,
+        // Never sent: Better Blur DX is not a protocol (see `window_effect`), this arm only keeps the match whole.
+        config::LinuxBlurProtocol::BetterBlurDx => LinuxBlurProtocol::Automatic,
+    }
+}
+
+/// The Windows effect behind each backdrop choice.
+pub fn windows_effect_kind(backdrop: config::WindowsBackdropType) -> WindowEffectKind {
+    use config::WindowsBackdropType as B;
+    match backdrop {
+        B::Auto => WindowEffectKind::BackdropAuto,
+        B::None => WindowEffectKind::BackdropNone,
+        B::Mica => WindowEffectKind::Mica,
+        B::Acrylic => WindowEffectKind::Acrylic,
+        B::MicaAlt => WindowEffectKind::MicaAlt,
+        B::LegacyBlur => WindowEffectKind::AccentBlur,
+        B::LegacyAcrylic => WindowEffectKind::AccentAcrylic,
+    }
+}
+
+/// The tint of the Windows accent (legacy) blur and acrylic, as the ARGB the engine takes: the opacity setting is the
+/// alpha, which acrylic honours as tint strength. Zero opacity is no tint at all.
+pub fn windows_tint_argb(config: &Config) -> u32 {
+    let alpha = (u32::from(config.windows_blur_tint_opacity_percent()) * 255 + 50) / 100;
+    (alpha << 24) | (config.windows_blur_tint_rgb() & 0x00ff_ffff)
+}
+
+/// The macOS visual-effect settings. The engine has no "light" or "dark" material, so those two are the window
+/// background material forced to the matching vibrant appearance.
+pub fn mac_visual_effect(config: &Config) -> sturdy::render::MacVisualEffect {
+    use config::{MacosVisualEffectBlendingMode as Blend, MacosVisualEffectMaterial as Material, MacosVisualEffectState as State};
+    use sturdy::render::{MacAppearance, MacBlendingMode, MacEffectState, MacMaterial, MacVisualEffect};
+    let (material, appearance) = match config.macos_visual_effect_material() {
+        Material::AppearanceBased => (MacMaterial::WindowBackground, MacAppearance::Inherit),
+        Material::Light => (MacMaterial::WindowBackground, MacAppearance::VibrantLight),
+        Material::Dark => (MacMaterial::WindowBackground, MacAppearance::VibrantDark),
+        Material::Titlebar => (MacMaterial::Titlebar, MacAppearance::Inherit),
+        Material::Selection => (MacMaterial::Selection, MacAppearance::Inherit),
+        Material::Menu => (MacMaterial::Menu, MacAppearance::Inherit),
+        Material::Popover => (MacMaterial::Popover, MacAppearance::Inherit),
+        Material::Sidebar => (MacMaterial::Sidebar, MacAppearance::Inherit),
+        Material::HeaderView => (MacMaterial::HeaderView, MacAppearance::Inherit),
+        Material::Sheet => (MacMaterial::Sheet, MacAppearance::Inherit),
+        Material::WindowBackground => (MacMaterial::WindowBackground, MacAppearance::Inherit),
+        Material::HudWindow => (MacMaterial::HudWindow, MacAppearance::Inherit),
+        Material::FullScreenUi => (MacMaterial::FullScreenUi, MacAppearance::Inherit),
+        Material::Tooltip => (MacMaterial::ToolTip, MacAppearance::Inherit),
+        Material::ContentBackground => (MacMaterial::ContentBackground, MacAppearance::Inherit),
+        Material::UnderWindowBackground => (MacMaterial::UnderWindowBackground, MacAppearance::Inherit),
+        Material::UnderPageBackground => (MacMaterial::UnderPageBackground, MacAppearance::Inherit),
+    };
+    MacVisualEffect {
+        material,
+        blending: match config.macos_visual_effect_blending_mode() {
+            Blend::BehindWindow => MacBlendingMode::BehindWindow,
+            Blend::WithinWindow => MacBlendingMode::WithinWindow,
+        },
+        state: match config.macos_visual_effect_state() {
+            State::FollowsWindowActiveState => MacEffectState::FollowsWindowActiveState,
+            State::Active => MacEffectState::Active,
+            State::Inactive => MacEffectState::Inactive,
+        },
+        emphasized: config.macos_visual_effect_emphasized(),
+        appearance,
     }
 }
 
 /// The window-effect kind that implements the user's blur choice on this platform.
 pub fn blur_effect_kind(config: &Config) -> WindowEffectKind {
     if cfg!(target_os = "windows") {
-        use config::WindowsBackdropType as B;
-        match config.windows_backdrop_type() {
-            B::Auto => WindowEffectKind::BackdropAuto,
-            B::None => WindowEffectKind::BackdropNone,
-            B::Mica => WindowEffectKind::Mica,
-            B::Acrylic => WindowEffectKind::Acrylic,
-            B::MicaAlt => WindowEffectKind::MicaAlt,
-            B::LegacyBlur => WindowEffectKind::AccentBlur,
-        }
+        windows_effect_kind(config.windows_backdrop_type())
     } else if cfg!(target_os = "macos") {
         WindowEffectKind::VisualEffect
     } else {
@@ -146,6 +225,9 @@ pub struct Appliers {
     surface: SurfaceHandle,
     active_blur: Option<WindowEffectKind>,
     blur_radius: f32,
+    /// The Windows accent tint and macOS material the active blur was requested with, kept for retries.
+    blur_tint_argb: u32,
+    blur_mac: sturdy::render::MacVisualEffect,
     /// Linux blur protocols still worth trying if the compositor refuses the one in use, in order.
     blur_fallbacks: Vec<LinuxBlurProtocol>,
     /// Why the requested protocol was refused, kept to explain a later fallback or final failure.
@@ -156,7 +238,7 @@ pub struct Appliers {
 
 impl Appliers {
     pub fn new(window_id: u64) -> Self {
-        Self { surface: SurfaceHandle::from_window_id(window_id), active_blur: None, blur_radius: 0.0, blur_fallbacks: Vec::new(), blur_refusals: Vec::new(), pending_light_levels: None }
+        Self { surface: SurfaceHandle::from_window_id(window_id), active_blur: None, blur_radius: 0.0, blur_tint_argb: 0, blur_mac: Default::default(), blur_fallbacks: Vec::new(), blur_refusals: Vec::new(), pending_light_levels: None }
     }
 
     /// Applies every domain in `diff`. Returns the failures and degradations, which the caller turns into
@@ -179,16 +261,9 @@ impl Appliers {
     }
 
     fn graphics_device(&mut self, engine: &mut Engine<'_>, config: &Config) -> Applied {
-        let explicit = config.graphics_adapter_explicit_hash().and_then(|hash| {
-            engine.available_adapters().into_iter().find(|adapter| adapter_hash(&adapter.stable_id) == hash).map(|adapter| adapter.stable_id)
-        });
-        let mut request = device_request(config, explicit.clone());
-        // Auto means the platform's native API first, with WebGPU only as the way in where neither it nor the other
-        // native API can run: the engine's own default would otherwise be free to pick WebGPU (Dawn) when it is built in.
-        let native = if config.graphics_api_preference() == GraphicsApiPreference::Auto { native_backend() } else { None };
-        if let Some(native) = native {
-            request = request.backend(native);
-        }
+        let adapters = engine.available_adapters();
+        let explicit = explicit_adapter(config, &adapters);
+        let (request, native) = startup_device_request(config, &adapters);
         let mut switch = engine.switch_device(&request);
         if native.is_some() && matches!(switch.outcome, SwitchOutcome::Failed(_)) {
             switch = engine.switch_device(&device_request(config, explicit));
@@ -205,6 +280,8 @@ impl Appliers {
     fn blur_params(&self, protocol: LinuxBlurProtocol) -> WindowEffectParams {
         let mut params = WindowEffectParams { protocol, ..Default::default() };
         params.options.corner_radius = self.blur_radius;
+        params.options.tint_argb = self.blur_tint_argb;
+        params.options.mac = self.blur_mac;
         params
     }
 
@@ -238,6 +315,12 @@ impl Appliers {
         if config.window_transparency() != WindowTransparency::Blurred {
             return Applied::Ok;
         }
+        // Better Blur DX is a KWin effect of its own: it blurs the windows whose class is on its list, so the window asks
+        // the compositor for nothing (a protocol request would leave it to KWin's own blur, which the effect replaces).
+        // It stays translucent, as set up above, and the effect blurs behind it.
+        if cfg!(target_os = "linux") && config.linux_blur_protocol() == config::LinuxBlurProtocol::BetterBlurDx {
+            return Applied::Ok;
+        }
         let kind = blur_effect_kind(config);
         let protocol = linux_blur_protocol(config.linux_blur_protocol());
         // If the compositor refuses the chosen protocol, try the others rather than failing the whole setting.
@@ -247,6 +330,8 @@ impl Appliers {
             .collect();
         self.blur_refusals.clear();
         self.blur_radius = f32::from(config.window_corner_radius());
+        self.blur_tint_argb = windows_tint_argb(config);
+        self.blur_mac = mac_visual_effect(config);
         let params = self.blur_params(protocol);
         engine.set_window_effect_with(self.surface, kind, true, &params);
         self.active_blur = Some(kind);
@@ -340,6 +425,37 @@ mod tests {
     #[test]
     fn webgpu_is_selectable_directly() {
         assert_eq!(backend_for(GraphicsApiPreference::WebGpu), Some(Backend::WebGpu));
+    }
+
+    #[test]
+    fn every_windows_backdrop_has_an_effect_and_legacy_acrylic_is_the_tintable_one() {
+        for backdrop in config::WindowsBackdropType::ALL {
+            let _ = windows_effect_kind(backdrop);
+        }
+        assert_eq!(windows_effect_kind(config::WindowsBackdropType::LegacyAcrylic), WindowEffectKind::AccentAcrylic);
+        assert_eq!(windows_effect_kind(config::WindowsBackdropType::LegacyBlur), WindowEffectKind::AccentBlur);
+    }
+
+    #[test]
+    fn the_windows_tint_is_the_colour_with_the_opacity_as_alpha() {
+        let mut config = Config::default();
+        assert_eq!(windows_tint_argb(&config) >> 24, 0, "no tint by default");
+        config.set_windows_blur_tint_rgb(0x336699);
+        config.set_windows_blur_tint_opacity_percent(100);
+        assert_eq!(windows_tint_argb(&config), 0xff33_6699);
+        config.set_windows_blur_tint_opacity_percent(50);
+        assert_eq!(windows_tint_argb(&config) & 0x00ff_ffff, 0x33_6699);
+        assert_eq!(windows_tint_argb(&config) >> 24, 128);
+    }
+
+    #[test]
+    fn mac_light_and_dark_force_the_matching_appearance() {
+        use sturdy::render::MacAppearance;
+        let mut config = Config::default();
+        config.set_macos_visual_effect_material(config::MacosVisualEffectMaterial::Dark);
+        assert_eq!(mac_visual_effect(&config).appearance, MacAppearance::VibrantDark);
+        config.set_macos_visual_effect_material(config::MacosVisualEffectMaterial::Sidebar);
+        assert_eq!(mac_visual_effect(&config).appearance, MacAppearance::Inherit);
     }
 
     #[test]

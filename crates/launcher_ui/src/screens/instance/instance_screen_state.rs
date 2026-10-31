@@ -129,6 +129,8 @@ pub struct InstanceScreenState {
     pub installed_content_page_size: usize,
     pub installed_content_page: usize,
     pub installed_content_search_query: String,
+    /// Only list entries with a known available update.
+    pub installed_content_updatable_only: bool,
     pub installed_content_cache: InstalledContentCache,
     pub installed_content_entry_ui_cache: HashMap<String, InstalledContentEntryUiCache>,
     pub content_metadata_cache: HashMap<String, Option<ResolvedInstalledContent>>,
@@ -286,6 +288,7 @@ impl InstanceScreenState {
             installed_content_page_size: INSTALLED_CONTENT_PAGE_SIZES[1],
             installed_content_page: 1,
             installed_content_search_query: String::new(),
+            installed_content_updatable_only: false,
             installed_content_cache: InstalledContentCache::default(),
             installed_content_entry_ui_cache: HashMap::new(),
             content_metadata_cache: HashMap::new(),

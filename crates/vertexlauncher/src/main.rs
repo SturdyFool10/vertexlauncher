@@ -8,7 +8,7 @@ Use the MSVC target (for example: x86_64-pc-windows-msvc) so WebView2 loader lib
 mod app;
 
 fn main() -> std::process::ExitCode {
-    let _ = app::init_tracing();
+    let log_path = app::init_tracing();
 
     match app::maybe_run_webview_helper() {
         Ok(true) => return std::process::ExitCode::SUCCESS,
@@ -27,19 +27,22 @@ fn main() -> std::process::ExitCode {
         }
     }
 
+    // Fatal signals and Windows unhandled exceptions: the engine prints its scopes and native stack into the log.
+    vertex_shell::sturdy::trace::install_crash_handler(log_path.as_deref());
+
     let _single_instance_guard = match app::acquire_single_instance() {
         Ok(guard) => guard,
         Err(app::SingleInstanceError::AlreadyRunning) => {
             report_startup_message(
                 "Vertex Launcher is already running on this machine.",
-                rfd::MessageLevel::Warning,
+                MessageLevel::Warning,
             );
             return std::process::ExitCode::SUCCESS;
         }
         Err(app::SingleInstanceError::Unavailable(err)) => {
             report_startup_message(
                 format!("Vertex Launcher could not verify single-instance startup: {err}"),
-                rfd::MessageLevel::Error,
+                MessageLevel::Error,
             );
             std::process::exit(1);
         }
@@ -51,25 +54,40 @@ fn main() -> std::process::ExitCode {
         Err(app::RunError::RuntimeBootstrap(err)) => {
             report_startup_message(
                 format!("Vertex Launcher could not start its background runtime: {err}"),
-                rfd::MessageLevel::Error,
+                MessageLevel::Error,
             );
             std::process::exit(1);
         }
     }
 }
 
-fn report_startup_message(message: impl Into<String>, level: rfd::MessageLevel) {
+#[derive(Clone, Copy)]
+enum MessageLevel {
+    Warning,
+    Error,
+}
+
+fn report_startup_message(message: impl Into<String>, level: MessageLevel) {
+    use vertex_shell::sturdy::desktop::{MessageBox, MessageBoxKind, message_box};
+
     let message = message.into();
-    match level {
-        rfd::MessageLevel::Info => tracing::info!("{message}"),
-        rfd::MessageLevel::Warning => tracing::warn!("{message}"),
-        rfd::MessageLevel::Error => tracing::error!("{message}"),
-    }
+    let kind = match level {
+        MessageLevel::Warning => {
+            tracing::warn!("{message}");
+            MessageBoxKind::Warning
+        }
+        MessageLevel::Error => {
+            tracing::error!("{message}");
+            MessageBoxKind::Error
+        }
+    };
     eprintln!("{message}");
-    let _ = rfd::MessageDialog::new()
-        .set_title("Vertex Launcher")
-        .set_description(&message)
-        .set_level(level)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
+    let _ = message_box(&MessageBox {
+        kind,
+        title: "Vertex Launcher".to_owned(),
+        message,
+        default_button: 0,
+        escape_button: 0,
+        ..Default::default()
+    });
 }

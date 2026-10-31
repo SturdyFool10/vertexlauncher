@@ -31,6 +31,9 @@ pub const TITLE_BAR_CONTROLS: [&str; 6] = [
     ACTIVE_USER_ID,
 ];
 const TITLE_BAR_HEIGHT: f32 = 42.0;
+/// Window-control icon size. A multiple of 4, so the rasterised texture is exactly the drawn size at 1x (the sidebar's
+/// 22 px icons are scaled from a 24 px raster; the old 14 px here came from a 16 px one).
+const WINDOW_ICON_SIZE: f32 = 16.0;
 pub const SIDEBAR_WIDTH: f32 = 68.0;
 
 /// The height below the title bar, inside the window's border: what the sidebar and the page area have.
@@ -312,7 +315,7 @@ fn window_button(
         kit.palette.text
     };
     match icon {
-        Some(icon) => kit.icon(ui, icon, 14.0, color),
+        Some(icon) => kit.icon(ui, icon, WINDOW_ICON_SIZE, color),
         None => drop(
             ui.element(
                 &ElementDesc::new()

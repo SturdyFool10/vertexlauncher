@@ -128,6 +128,95 @@ pub fn role_font_id(role: config::TextRole) -> u16 {
         .unwrap_or(0) as u16
 }
 
+/// The roles Minecraft-styled text is drawn in: the body text (names), the small text (MOTDs) and the console's code text.
+pub const STYLED_ROLES: [config::TextRole; 3] =
+    [config::TextRole::Body, config::TextRole::Caption, config::TextRole::Code];
+
+/// The faces a styled role can have, in the order of their font ids: bold, italic, bold italic.
+const STYLED_VARIANTS: [(bool, bool); 3] = [(true, false), (false, true), (true, true)];
+
+/// Which of a styled role's three faces (bold, italic, bold italic) the current font really has. A face the font cannot
+/// make is simply not there, and the text is drawn without that attribute (bold still has the game's own double-draw).
+pub type StyledFaces = [[bool; 3]; 3];
+
+fn styled_font_id(slot: usize, variant: usize) -> u16 {
+    1 + config::TextRole::ALL.len() as u16 + (slot * STYLED_VARIANTS.len() + variant) as u16
+}
+
+/// The role slot (an index into [`STYLED_ROLES`]) whose regular font id is `font_id`, if it is one.
+pub fn styled_slot(font_id: u16) -> Option<usize> {
+    STYLED_ROLES.iter().position(|role| role_font_id(*role) == font_id)
+}
+
+/// The engine font id of `slot`'s `variant` face (0 bold, 1 italic, 2 bold italic).
+pub fn styled_face_id(slot: usize, variant: usize) -> u16 {
+    styled_font_id(slot, variant)
+}
+
+/// The stack for the bold and/or italic face of `role`, or `None` when its font cannot make it. Asked of the font, not
+/// assumed: a variable font declares a weight axis (`wght`) and a slant (`slnt`) or italic (`ital`) axis, which are
+/// used within their declared range; an installed family is asked for its own bold/italic face; a static embedded or
+/// file font has neither, so it has no such face.
+fn styled_stack(config: &Config, role: config::TextRole, bold: bool, italic: bool) -> Option<FontStack> {
+    let mut stack = stack_for_role(config, role);
+    let axes = vertex_shell::sturdy::ui::font_variation_axes(&stack.primary).unwrap_or_default();
+    let axis = |tag: &str| axes.iter().find(|axis| axis.tag == tag);
+    let (mut bold_done, mut italic_done) = (!bold, !italic);
+    if bold && let Some(weight) = axis("wght") {
+        stack.variations.retain(|variation| variation.tag != "wght");
+        stack = stack.variation(FontVariation::weight(700.0_f32.clamp(weight.min, weight.max)));
+        bold_done = weight.max >= 600.0;
+    }
+    if italic {
+        if axis("ital").is_some_and(|axis| axis.max >= 1.0) {
+            stack = stack.variation(FontVariation { tag: "ital".into(), value: 1.0 });
+            italic_done = true;
+        } else if let Some(slant) = axis("slnt").filter(|axis| axis.min < 0.0) {
+            // Negative degrees lean right; 12 is a usual italic angle, held to what the font allows.
+            stack = stack.variation(FontVariation::slant((-12.0_f32).clamp(slant.min, slant.max.min(0.0))));
+            italic_done = true;
+        }
+    }
+    // What the axes did not give, an installed family may have as a face of its own.
+    if !(bold_done && italic_done)
+        && let FontSource::System { family, .. } = &stack.primary
+    {
+        stack.primary = FontSource::System {
+            family: family.clone(),
+            bold: bold && !bold_done,
+            italic: italic && !italic_done,
+        };
+        bold_done = true;
+        italic_done = true;
+    }
+    (bold_done && italic_done).then_some(stack)
+}
+
+/// Registers the bold/italic faces the current font supports and says which those are. Faces from a previous font are
+/// removed first, so changing from a variable font to a static one leaves nothing behind.
+pub fn register_styled_faces(
+    engine: &mut vertex_shell::sturdy::Engine<'_>,
+    config: &Config,
+) -> StyledFaces {
+    let mut faces: StyledFaces = [[false; 3]; 3];
+    for (slot, role) in STYLED_ROLES.iter().enumerate() {
+        for (variant, (bold, italic)) in STYLED_VARIANTS.iter().enumerate() {
+            let id = styled_font_id(slot, variant);
+            engine.unregister_ui_font(id);
+            let Some(stack) = styled_stack(config, *role, *bold, *italic) else {
+                continue;
+            };
+            match engine.register_ui_font_stack(id, &stack) {
+                Ok(()) => faces[slot][variant] = true,
+                Err(err) => {
+                    tracing::debug!(target: "vertexlauncher/fonts", "no {} face for {}: {err}", variant, role.label());
+                }
+            }
+        }
+    }
+    faces
+}
+
 /// The stack for one text role: the role's own family/weight/script fonts where set, else the launcher-wide ones.
 pub fn stack_for_role(config: &Config, role: config::TextRole) -> FontStack {
     let resolved = config.typography().resolve(role);

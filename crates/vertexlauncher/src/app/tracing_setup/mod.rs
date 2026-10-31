@@ -168,11 +168,18 @@ fn write_panic_record(panic_info: &std::panic::PanicHookInfo<'_>) {
         .unwrap_or_else(|| "unknown".to_owned());
     let payload = panic_payload_text(panic_info);
     let backtrace = std::backtrace::Backtrace::force_capture();
+    // The engine's side of the stack: its announced call site and scopes, which a Rust backtrace cannot show.
+    let engine_trace = vertex_shell::sturdy::trace::capture();
     let (date, time) = current_date_time_parts();
 
     let summary = format!(
         "[{date}][{time}][ERROR][panic]: thread={thread_name} location={location} message={payload}"
     );
+    let backtrace = if engine_trace.is_empty() {
+        format!("{backtrace}")
+    } else {
+        format!("{backtrace}\nengine stack:\n{engine_trace}")
+    };
 
     match writer.try_lock() {
         Ok(mut guard) => {

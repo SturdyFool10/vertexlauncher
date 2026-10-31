@@ -14,6 +14,7 @@ use launcher_ui::notification;
 use vertex_shell::settings_apply::adapter_hash;
 use vertex_shell::sturdy::ui::{Sizing, TextStyle, TextWrap, Ui};
 
+use super::super::super::better_blur::BetterBlurDx;
 use super::super::kit::{self, ButtonKind, Kit, TextRole};
 use super::super::{AppState, Dialog};
 
@@ -27,6 +28,8 @@ pub struct SettingsView {
     /// Result line of the last "Purge metadata cache" run, and whether one is running.
     purge_status: Option<String>,
     purge_rx: Option<std::sync::mpsc::Receiver<String>>,
+    /// The Windows blur tint colour as typed, so a half-typed value is not reset under the cursor.
+    tint_text: Option<String>,
 }
 
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
@@ -1429,22 +1432,73 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             "Linux",
             "Linux-specific settings that apply across the launcher.",
             |ui, kit| {
+                // Better Blur DX is offered, first, only where the effect exists: otherwise it is not an option at all.
+                let blur_choices: Vec<LinuxBlurProtocol> = LinuxBlurProtocol::ALL
+                    .into_iter()
+                    .filter(|choice| *choice != LinuxBlurProtocol::BetterBlurDx)
+                    .collect();
+                let blur_choices = if state.better_blur.available() {
+                    [&[LinuxBlurProtocol::BetterBlurDx][..], &blur_choices].concat()
+                } else {
+                    blur_choices
+                };
                 if let Some(value) = kit.choice_setting(
                 ui,
                 "settings::linux-blur",
                 "Blur Protocol",
-                Some("Linux compositor blur protocol used when Window Transparency is Blurred. Auto prefers ext_background_effect_v1 and falls back to KDE blur."),
+                Some("Linux compositor blur protocol used when Window Transparency is Blurred. Auto prefers ext_background_effect_v1 and falls back to KDE blur. Better Blur DX, offered only where that KWin effect is installed, is not a protocol: Vertex asks for no blur and the effect blurs the window by its window class."),
                 state.config.linux_blur_protocol(),
-                &LinuxBlurProtocol::ALL,
+                &blur_choices,
                 |value| value.label().to_owned(),
             ) {
                 state.config.set_linux_blur_protocol(value);
             }
-                kit.text(
-                ui,
-                TextRole::Muted,
-                "Linux blur protocols expose only blur regions to clients; Vertex requests a full-window region. Blur strength, radius, saturation, and noise are controlled by the compositor.",
-            );
+                let own_path = state.config.linux_blur_protocol() == LinuxBlurProtocol::BetterBlurDx;
+                match state.better_blur.status() {
+                    BetterBlurDx::Active if own_path => {
+                        kit.text(
+                            ui,
+                            TextRole::Muted,
+                            "Better Blur DX blurs this window itself, by window class: Vertex asks the compositor for no blur. Its strength, noise, saturation, brightness, contrast, corner radius and refraction are settings of the effect, not of any one window.",
+                        );
+                        if state.better_blur.blurs_vertex() {
+                            kit.text(
+                                ui,
+                                TextRole::Muted,
+                                "Vertex's window class (org.sturdyfool10.VertexLauncher) is on the effect's list, so the window is blurred.",
+                            );
+                        } else {
+                            kit.text(
+                                ui,
+                                TextRole::Muted,
+                                "Vertex's window class (org.sturdyfool10.VertexLauncher) is not on the effect's list, so the window stays plain transparent. Vertex adds it when this is chosen; if that did not work, add it here.",
+                            );
+                            if kit.button(ui, "settings::cover-better-blur", "Add Vertex to Better Blur DX's window classes", ButtonKind::Primary, true) {
+                                state.better_blur.cover_vertex();
+                            }
+                        }
+                        if kit.button(ui, "settings::open-better-blur", "Open Desktop Effects (Better Blur DX settings)", ButtonKind::Neutral, true) {
+                            super::super::super::better_blur::open_settings();
+                        }
+                    }
+                    BetterBlurDx::Active => {
+                        kit.text(
+                            ui,
+                            TextRole::Muted,
+                            "Better Blur DX is on, so KWin blurs this window through the protocol above. Choose Better Blur DX as the protocol to let the effect blur it by window class instead.",
+                        );
+                    }
+                    BetterBlurDx::Installed => kit.text(
+                        ui,
+                        TextRole::Muted,
+                        "Better Blur DX is installed but not switched on. Turn it on in System Settings > Window Management > Desktop Effects (and turn KWin's own Blur off); Vertex then needs nothing else.",
+                    ),
+                    BetterBlurDx::NotFound => kit.text(
+                        ui,
+                        TextRole::Muted,
+                        "Linux blur protocols expose only blur regions to clients; Vertex requests a full-window region. Blur strength, radius, saturation, and noise are controlled by the compositor.",
+                    ),
+                }
                 let mut opengl = state.config.linux_set_opengl_driver();
                 if kit.toggle_setting(
                 ui,
@@ -1487,10 +1541,47 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ) {
                 state.config.set_windows_backdrop_type(value);
             }
+                let tintable = matches!(
+                    state.config.windows_backdrop_type(),
+                    WindowsBackdropType::LegacyBlur | WindowsBackdropType::LegacyAcrylic
+                );
+                if let Some(value) = kit.slider_setting_ex(
+                    ui,
+                    "settings::windows-blur-tint-opacity",
+                    "Blur Tint Strength",
+                    Some("How strongly the blur is tinted with the colour below. 0 is no tint. Only the Legacy Blur and Legacy Acrylic backdrops can be tinted."),
+                    f64::from(state.config.windows_blur_tint_opacity_percent()),
+                    f64::from(config::WINDOWS_BLUR_TINT_OPACITY_MIN),
+                    f64::from(config::WINDOWS_BLUR_TINT_OPACITY_MAX),
+                    1.0,
+                    tintable,
+                    |value| format!("{value:.0}%"),
+                ) {
+                    state.config.set_windows_blur_tint_opacity_percent(value.round() as u8);
+                }
+                let tint_text = state
+                    .settings
+                    .tint_text
+                    .get_or_insert_with(|| format!("#{:06x}", state.config.windows_blur_tint_rgb()));
+                if tintable
+                    && kit.text_setting(
+                        ui,
+                        "settings::windows-blur-tint",
+                        "Blur Tint Colour",
+                        Some("The tint colour as #rrggbb. Ignored until it is a complete colour."),
+                        tint_text,
+                        "#000000",
+                        false,
+                    )
+                    && let Some(color) = launcher_ui::account_colors::parse_color(tint_text)
+                {
+                    let rgb = u32::from(color.r()) << 16 | u32::from(color.g()) << 8 | u32::from(color.b());
+                    state.config.set_windows_blur_tint_rgb(rgb);
+                }
                 kit.text(
                 ui,
                 TextRole::Muted,
-                "Applied only when Window Transparency is Blurred. Windows does not expose supported per-window radius, strength, saturation, or noise controls through DWM.",
+                "Applied only when Window Transparency is Blurred. Mica, Mica Alt and the system Acrylic are drawn by Windows with no strength or tint control; the two Legacy backdrops accept a tint.",
             );
             },
         );

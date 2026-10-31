@@ -30,6 +30,7 @@ pub struct ContentView {
     /// What to show instead of the list when it has no rows.
     pub empty_message: Option<String>,
     pub search: String,
+    pub updatable_only: bool,
     pub page: usize,
     pub total_pages: usize,
     pub page_size: usize,
@@ -61,6 +62,7 @@ pub fn view(
         loading: false,
         empty_message: None,
         search: state.installed_content_search_query.clone(),
+        updatable_only: state.installed_content_updatable_only,
         page: state.installed_content_page,
         total_pages: 1,
         page_size: state.installed_content_page_size,
@@ -83,10 +85,16 @@ pub fn view(
 
     let filtered = filter_installed_content_indices(state, files.as_ref());
     let total_items = filtered.as_ref().map_or(files.len(), Vec::len);
-    view.count_label = installed_content_count_label(total_items, files.len(), state.installed_content_search_query.as_str());
+    view.count_label = installed_content_count_label(
+        total_items,
+        files.len(),
+        !state.installed_content_search_query.trim().is_empty() || state.installed_content_updatable_only,
+    );
     if total_items == 0 {
         let query = state.installed_content_search_query.trim();
-        view.empty_message = Some(if query.is_empty() {
+        view.empty_message = Some(if query.is_empty() && state.installed_content_updatable_only {
+            format!("No {} have an update available.", kind.label().to_lowercase())
+        } else if query.is_empty() {
             format!("No {} installed.", kind.label().to_lowercase())
         } else {
             format!("No {} match '{query}'.", kind.label().to_lowercase())
@@ -174,6 +182,13 @@ pub fn select_tab(state: &mut InstanceScreenState, kind: InstalledContentKind) {
 pub fn set_search(state: &mut InstanceScreenState, query: &str) {
     if state.installed_content_search_query != query {
         state.installed_content_search_query = query.to_owned();
+        state.installed_content_page = 1;
+    }
+}
+
+pub fn set_updatable_only(state: &mut InstanceScreenState, updatable_only: bool) {
+    if state.installed_content_updatable_only != updatable_only {
+        state.installed_content_updatable_only = updatable_only;
         state.installed_content_page = 1;
     }
 }

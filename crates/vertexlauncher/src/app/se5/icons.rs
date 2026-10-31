@@ -165,15 +165,29 @@ pub fn draw_turned(
     supersample: u32,
 ) {
     let turn = ((degrees.rem_euclid(360.0) / TURN_STEP_DEGREES).round() as u32 % 48) as u8;
+    let slot = ElementDesc::new()
+        .width(Sizing::Fixed(size))
+        .height(Sizing::Fixed(size));
+    // Until the icon is ready its slot stays empty, so the layout does not move when it appears.
     let Some(path) = ensure_file(icon, turn) else {
+        drop(ui.element(&slot));
         return;
     };
     // Rounded up to a multiple of 4: the engine block-compresses these textures, and WebGPU rejects a BC7 texture
     // whose size is not a whole number of 4x4 blocks (Vulkan tolerates it), which left odd-sized icons invisible.
     let target = ((size * supersample.max(1) as f32 / 4.0).ceil() * 4.0).max(4.0);
     let Ok(texture) = ui.load_svg(&path.to_string_lossy(), target) else {
+        drop(ui.element(&slot));
         return;
     };
+    // A texture that is not on the GPU yet is drawn as a solid block of the tint colour. So the icon waits until the
+    // engine has resources for it, and at least one frame after it was created, then replaces the empty slot.
+    let on_gpu = ui.engine().assets().rhi_texture(texture).is_some();
+    if !texture_seen(&path, target) || !on_gpu {
+        drop(ui.element(&slot));
+        vertex_shell::wake_after(std::time::Duration::from_millis(16));
+        return;
+    }
     ui.svg(
         &ElementDesc::new()
             .width(Sizing::Fixed(size))
@@ -181,4 +195,25 @@ pub fn draw_turned(
             .background(color),
         texture,
     );
+}
+
+/// The textures (file, raster size) that an earlier frame has already asked the engine for. Returns whether this one
+/// was among them, and records it.
+fn texture_seen(path: &std::path::Path, target: f32) -> bool {
+    let mut seen = SEEN_TEXTURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    !seen.insert((path.to_path_buf(), target.to_bits()))
+}
+
+static SEEN_TEXTURES: OnceLock<Mutex<std::collections::HashSet<(PathBuf, u32)>>> = OnceLock::new();
+
+/// Call after the engine's SVG cache is cleared: every texture is gone, so each icon starts over as not yet loaded.
+pub fn forget_textures() {
+    SEEN_TEXTURES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
 }
