@@ -1,5 +1,5 @@
 use launcher_ui::screens::SettingsInfo;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use super::platform;
 
@@ -12,7 +12,8 @@ struct GraphicsInfo {
 }
 
 static BASE_SETTINGS_INFO: OnceLock<SettingsInfo> = OnceLock::new();
-static GRAPHICS_INFO: OnceLock<GraphicsInfo> = OnceLock::new();
+/// The adapter and API the engine is running on right now. Replaced whenever the engine switches device.
+static GRAPHICS_INFO: Mutex<Option<GraphicsInfo>> = Mutex::new(None);
 
 pub fn try_settings_info() -> Option<SettingsInfo> {
     let mut info = BASE_SETTINGS_INFO.get()?.clone();
@@ -25,7 +26,8 @@ pub fn preload_settings_info() {
 }
 
 fn apply_graphics_overrides(info: &mut SettingsInfo) {
-    if let Some(graphics) = GRAPHICS_INFO.get() {
+    let graphics = GRAPHICS_INFO.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    if let Some(graphics) = &graphics {
         if !graphics.gpu.is_empty() {
             info.gpu = graphics.gpu.clone();
         }
@@ -48,7 +50,7 @@ pub fn record_graphics_adapter(
     driver_name: &str,
     driver_version: &str,
 ) {
-    let _ = GRAPHICS_INFO.set(GraphicsInfo {
+    *GRAPHICS_INFO.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(GraphicsInfo {
         gpu: clean_value(gpu),
         graphics_api: clean_value(graphics_api),
         driver_name: clean_value(driver_name),

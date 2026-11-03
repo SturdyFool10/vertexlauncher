@@ -30,10 +30,30 @@ pub struct SettingsView {
     purge_rx: Option<std::sync::mpsc::Receiver<String>>,
     /// The Windows blur tint colour as typed, so a half-typed value is not reset under the cursor.
     tint_text: Option<String>,
+    /// The graphics settings the System info was last read for; a change re-reads which API and GPU are active.
+    graphics_signature: Option<(GraphicsApiPreference, u64, u8)>,
+    /// A device switch lands a frame or two after the setting changes, so the info is re-read until this passes.
+    graphics_refresh_until: Option<std::time::Instant>,
 }
 
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
-    if state.settings.adapters.is_none() {
+    let signature = (
+        state.config.graphics_api_preference(),
+        state.config.graphics_adapter_explicit_hash().unwrap_or(0),
+        state.config.graphics_adapter_profile() as u8 + 16 * state.config.graphics_adapter_preference_type() as u8,
+    );
+    if state.settings.graphics_signature != Some(signature) {
+        // The first time through this only sets the baseline; later it means the user changed a graphics setting.
+        if state.settings.graphics_signature.is_some() {
+            state.settings.graphics_refresh_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        }
+        state.settings.graphics_signature = Some(signature);
+    }
+    let refreshing = state.settings.graphics_refresh_until.is_some_and(|until| std::time::Instant::now() < until);
+    if !refreshing {
+        state.settings.graphics_refresh_until = None;
+    }
+    if state.settings.adapters.is_none() || refreshing {
         let adapters = ui.engine().available_adapters();
         // The GPU the engine is running on, for the System section.
         if let Some((adapter, offer)) = adapters.iter().find_map(|adapter| {
@@ -50,12 +70,17 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 &offer.driver_version,
             );
         }
-        state.settings.adapters = Some(
-            adapters
-                .into_iter()
-                .map(|adapter| (adapter.name, adapter_hash(&adapter.stable_id)))
-                .collect(),
-        );
+        if state.settings.adapters.is_none() {
+            state.settings.adapters = Some(
+                adapters
+                    .into_iter()
+                    .map(|adapter| (adapter.name, adapter_hash(&adapter.stable_id)))
+                    .collect(),
+            );
+        }
+        if refreshing {
+            kit.keep_awake_for(std::time::Duration::from_millis(100));
+        }
     }
     poll_purge(state);
     let _scroll = kit.scroll(ui, "settings::scroll", kit::SPACE_LG, kit::SPACE_XL);

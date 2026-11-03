@@ -8,6 +8,7 @@
 mod logging;
 pub mod palette;
 pub mod settings_apply;
+pub mod watchdog;
 
 pub use settings_apply::Applied;
 use settings_apply::Appliers;
@@ -217,15 +218,22 @@ where
     F: FnMut(&mut Ui<'_>) + Send + 'static,
 {
     fn init(&mut self, engine: &mut Engine<'_>) -> Result<(), Error> {
+        watchdog::step("engine started (device and window created)");
         engine.set_frame_mode(FrameMode::Continuous);
         let _ = REDRAW.set(engine.redraw_handle());
-        if let Some(draw) = self.draw.take() {
-            ui::install_draw_hook(draw);
+        if let Some(mut draw) = self.draw.take() {
+            ui::install_draw_hook(move |ui| {
+                watchdog::frame_begin();
+                draw(ui);
+                watchdog::frame_end();
+            });
         }
+        watchdog::step("draw hook installed");
         Ok(())
     }
 
     fn frame(&mut self, engine: &mut Engine<'_>, frame: &Frame) -> Option<FrameDescription> {
+        watchdog::engine_frame();
         self.apply_pending(engine, frame.window_id);
         let icon = match WANTED_CURSOR.load(std::sync::atomic::Ordering::Relaxed) {
             1 => sturdy::render::CursorIcon::Pointer,
@@ -295,6 +303,8 @@ pub fn run<F>(config: ShellConfig, initial: Config, bridge: Arc<SettingsBridge>,
 where
     F: FnMut(&mut Ui<'_>) + Send + 'static,
 {
+    watchdog::start();
+    watchdog::step("shell run() entered");
     logging::forward_engine_logs();
     let translucent = initial.window_transparency().is_translucent();
     // Ask for the saved API and GPU up front: the engine resolves the request before it creates the device, so it comes
@@ -302,6 +312,7 @@ where
     // (a no-op when the device already matches) reports whatever is left.
     let device = settings_apply::initial_device_request(&initial);
     bridge.submit(initial);
+    watchdog::step("device request chosen, starting the engine");
     let runtime = RuntimeConfig::new(config.title)
         .device_request(device)
         .app_id(config.app_id)
@@ -310,7 +321,9 @@ where
         // The window is created able to become translucent; the applier then sets the real state live.
         .transparent(config.transparent || translucent)
         .transparent_composition(config.transparent || translucent);
-    sturdy::run(runtime, Shell { draw: Some(draw), bridge, applied: None, appliers: None, effect_polls_left: 0, handed_off: false })
+    let code = sturdy::run(runtime, Shell { draw: Some(draw), bridge, applied: None, appliers: None, effect_polls_left: 0, handed_off: false });
+    watchdog::stop();
+    code
 }
 
 #[cfg(test)]

@@ -1237,12 +1237,6 @@ impl Config {
         if !GraphicsApiPreference::ALL.contains(&self.graphics_api_preference) {
             self.graphics_api_preference = GraphicsApiPreference::Auto;
         }
-        #[cfg(target_os = "windows")]
-        if self.window_transparency.is_translucent()
-            && matches!(self.graphics_api_preference, GraphicsApiPreference::Vulkan)
-        {
-            self.graphics_api_preference = GraphicsApiPreference::Dx12;
-        }
     }
 
     /// Visits each toggle setting with mutable access to its backing value.

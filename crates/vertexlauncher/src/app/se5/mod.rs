@@ -64,6 +64,9 @@ use self::kit::Kit;
 
 /// Starts the SE5 front end and runs it until the window closes.
 pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
+    // Before anything slow, so a launcher that never gets going still logs how far it got.
+    vertex_shell::watchdog::start();
+    vertex_shell::watchdog::step("launcher started, loading settings");
     let (mut config, first_run_format) = match config_state {
         LoadConfigResult::Loaded(config) => (config, None),
         LoadConfigResult::Missing { default_format } => {
@@ -78,6 +81,7 @@ pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
     auth::set_insecure_file_storage(config.insecure_file_account_storage());
     apply_curseforge_key(&config);
 
+    vertex_shell::watchdog::step("settings ready, building the app state");
     let bridge = SettingsBridge::new();
     let exit_snapshot = Arc::new(Mutex::new(None));
     let mut app = App::new(
@@ -86,6 +90,7 @@ pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
         bridge.clone(),
         exit_snapshot.clone(),
     );
+    vertex_shell::watchdog::step("app state built (themes, instances, accounts started)");
     launcher_ui::ui_waker::install(vertex_shell::wake);
     vertex_shell::install_game_probe(|| !installation::running_instance_roots().is_empty());
     // CPU-bound work (the skin preview's rasteriser, image decoding) runs on the UI engine's own task scheduler, so it
@@ -748,6 +753,42 @@ impl AppState {
     }
 }
 
+/// Names whatever holds the UI thread. The draw closure runs on it, so anything slow in here is a frozen window;
+/// a frame over [`StallWatch::LIMIT`] logs how long each phase took, which points straight at the offender.
+struct StallWatch {
+    started: Instant,
+    last: Instant,
+    phases: Vec<(&'static str, Duration)>,
+}
+
+impl StallWatch {
+    const LIMIT: Duration = Duration::from_millis(50);
+
+    fn new(now: Instant) -> Self {
+        Self { started: now, last: now, phases: Vec::with_capacity(8) }
+    }
+
+    fn phase(&mut self, name: &'static str) {
+        let now = Instant::now();
+        self.phases.push((name, now.duration_since(self.last)));
+        self.last = now;
+        vertex_shell::watchdog::step(name);
+    }
+
+    fn finish(&self) {
+        let total = self.last.duration_since(self.started);
+        if total >= Self::LIMIT {
+            let breakdown: Vec<String> =
+                self.phases.iter().map(|(name, took)| format!("{name}={took:.1?}")).collect();
+            tracing::warn!(
+                target: "vertexlauncher/se5/stall",
+                "The UI thread spent {total:.1?} in one frame ({}). Move that work to a worker.",
+                breakdown.join(", ")
+            );
+        }
+    }
+}
+
 struct App {
     state: AppState,
     kit: Kit,
@@ -872,9 +913,13 @@ impl App {
         self.kit.delta_seconds = now.duration_since(self.last_frame).as_secs_f32().min(0.25);
         self.last_frame = now;
 
+        let mut stalls = StallWatch::new(now);
         self.state.poll();
+        stalls.phase("poll");
         self.state.handle_commands(ui);
+        stalls.phase("commands");
         gamepad::frame(ui, &mut self.kit, &mut self.state);
+        stalls.phase("gamepad");
         let escape_seen = vertex_shell::take_escape_key();
         let mut closed_a_menu = false;
         if self.kit.back_pressed() && self.state.close_popups(&mut self.kit) {
@@ -898,7 +943,9 @@ impl App {
             }
         }
         vertex_shell::set_handoff(self.state.config.steam_deck_handoff());
+        stalls.phase("shell");
         self.kit.images.pump(&mut ui.engine());
+        stalls.phase("images");
         self.kit.palette = Palette::new(
             &self.state.theme,
             effective_ui_opacity_percent(&self.state.config),
@@ -906,21 +953,27 @@ impl App {
         self.kit.font_size = self.state.config.ui_font_size();
         self.kit.typography = self.state.config.typography().clone();
         self.apply_fonts(ui);
+        stalls.phase("fonts");
         self.kit.keep_alive.update(ui, Duration::from_millis(600));
 
         let maximized = ui
             .engine()
             .primary_window_control()
             .is_some_and(|mut window| window.is_maximized());
+        stalls.phase("setup");
         chrome::window(ui, &mut self.kit, &mut self.state, maximized);
+        stalls.phase("screen");
         toasts::show(ui, &mut self.kit, &self.state.config);
         self.dialogs(ui);
+        stalls.phase("dialogs");
         self.window_feedback.update(ui);
         screens::import::manual_download_dialog(ui, &mut self.kit, &mut self.state);
         update_hit_regions(ui);
         self.kit.resolve_cursor(ui);
 
         self.state.commit(&self.bridge);
+        stalls.phase("commit");
+        stalls.finish();
         if self.state.busy() {
             // Worker results arrive on plain channels; look again shortly.
             vertex_shell::wake_after(Duration::from_millis(100));
