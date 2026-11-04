@@ -99,7 +99,10 @@ fn explicit_adapter(config: &Config, adapters: &[Adapter]) -> Option<String> {
 /// engine's own default would otherwise be free to pick WebGPU (Dawn) when it is built in.
 fn startup_device_request(config: &Config, adapters: &[Adapter]) -> (DeviceRequest, Option<Backend>) {
     let request = device_request(config, explicit_adapter(config, adapters));
-    let native = if config.graphics_api_preference() == GraphicsApiPreference::Auto { native_backend() } else { None };
+    // Only where some GPU really offers it: the engine leaves an API out when it cannot work here (D3D12 on a Windows machine
+    // without DXC, say), and pinning one nothing offers would just be refused.
+    let wanted = if config.graphics_api_preference() == GraphicsApiPreference::Auto { native_backend() } else { None };
+    let native = wanted.filter(|native| adapters.iter().any(|adapter| adapter.backends.iter().any(|offer| offer.backend == *native)));
     match native {
         Some(native) => (request.backend(native), Some(native)),
         None => (request, None),

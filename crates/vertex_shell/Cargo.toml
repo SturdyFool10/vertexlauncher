@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # Pinned by rev: the engine's CMake build lives in OUT_DIR, so a moving branch would rebuild it needlessly.
-sturdy = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "0ffd216ee88744f1a98b3051a4216290f2615e17", features = ["raw-window-handle", "webgpu"] }
+sturdy = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "f3c449aecb4d2e077b53a20d46d21bf7206f656c", features = ["raw-window-handle", "webgpu"] }
 tracing.workspace = true
 config.workspace = true
 vertex_theme.workspace = true
