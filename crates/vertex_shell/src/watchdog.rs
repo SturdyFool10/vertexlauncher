@@ -26,6 +26,8 @@ struct Marks {
     step_at: Instant,
     frame_began: Option<Instant>,
     engine_frame_at: Option<Instant>,
+    /// The engine's most recent errors, oldest first, so a startup that stalls can say what the engine complained about.
+    engine_errors: Vec<String>,
 }
 
 static MARKS: Mutex<Option<Marks>> = Mutex::new(None);
@@ -53,6 +55,7 @@ pub fn start() {
                 step_at: now,
                 frame_began: None,
                 engine_frame_at: None,
+                engine_errors: Vec::new(),
             });
         }
         let spawned = std::thread::Builder::new().name("vertex-watchdog".to_owned()).spawn(watch);
@@ -95,6 +98,20 @@ pub fn frame_end() {
     });
 }
 
+/// The engine logged an error. Only the last few are kept, and only to quote them if the UI never starts.
+pub fn engine_error(message: &str) {
+    const KEEP: usize = 4;
+    with_marks(|marks| {
+        if marks.engine_errors.last().is_some_and(|last| last == message) {
+            return;
+        }
+        if marks.engine_errors.len() == KEEP {
+            marks.engine_errors.remove(0);
+        }
+        marks.engine_errors.push(message.chars().take(300).collect());
+    });
+}
+
 /// The engine called the shell's per-frame callback.
 pub fn engine_frame() {
     let first = ENGINE_FRAMES.fetch_add(1, Ordering::Relaxed) == 0;
@@ -132,6 +149,19 @@ fn watch() {
                     "No frame has been drawn {since_launch:.1?} after launch ({engine_frames} engine frames delivered). Last step reached: \"{}\", {since_step:.1?} ago. What never finished is whatever comes after that step.",
                     marks.step
                 );
+                if engine_frames > 0 {
+                    // The engine is running its loop but never called the launcher's draw: it skips the UI frame when its UI
+                    // renderer could not be created (it tries once), or there is no graphics device.
+                    tracing::warn!(
+                        target: "vertexlauncher/watchdog",
+                        "The engine is delivering frames but never started the UI draw, which means the engine's UI renderer failed to start (it is tried once, so it stays off). {}",
+                        if marks.engine_errors.is_empty() {
+                            "The engine has logged no error; the cause is a failure it does not report.".to_owned()
+                        } else {
+                            format!("Its errors so far: {}", marks.engine_errors.join(" | "))
+                        }
+                    );
+                }
                 // Quickly at first, then less often, so a long hang does not fill the log.
                 let gap = if since_launch < Duration::from_secs(30) { Duration::from_secs(3) } else { Duration::from_secs(20) };
                 next_never_report = since_launch + gap;

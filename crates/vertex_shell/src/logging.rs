@@ -10,6 +10,9 @@ pub(crate) fn forward_engine_logs() {
         LogLevel::Debug => tracing::debug!(target: "sturdy", "{message}"),
         LogLevel::Info => tracing::info!(target: "sturdy", "{message}"),
         LogLevel::Warn => tracing::warn!(target: "sturdy", "{message}"),
-        _ => tracing::error!(target: "sturdy", "{message}"),
+        _ => {
+            crate::watchdog::engine_error(message);
+            tracing::error!(target: "sturdy", "{message}")
+        }
     });
 }

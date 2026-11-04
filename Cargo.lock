@@ -4161,7 +4161,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "sturdy"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0ffd216ee88744f1a98b3051a4216290f2615e17#0ffd216ee88744f1a98b3051a4216290f2615e17"
 dependencies = [
  "bytemuck",
  "cxx",
@@ -4177,7 +4177,7 @@ dependencies = [
 [[package]]
 name = "sturdy-macros"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0ffd216ee88744f1a98b3051a4216290f2615e17#0ffd216ee88744f1a98b3051a4216290f2615e17"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4187,12 +4187,12 @@ dependencies = [
 [[package]]
 name = "sturdy-net"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0ffd216ee88744f1a98b3051a4216290f2615e17#0ffd216ee88744f1a98b3051a4216290f2615e17"
 
 [[package]]
 name = "sturdy-script"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0ffd216ee88744f1a98b3051a4216290f2615e17#0ffd216ee88744f1a98b3051a4216290f2615e17"
 dependencies = [
  "sturdy-net",
 ]
@@ -4200,7 +4200,7 @@ dependencies = [
 [[package]]
 name = "sturdy-sys"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0f1199f0cd4067da114ab5ab90999c3de5e896af#0f1199f0cd4067da114ab5ab90999c3de5e896af"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=0ffd216ee88744f1a98b3051a4216290f2615e17#0ffd216ee88744f1a98b3051a4216290f2615e17"
 dependencies = [
  "cxx",
  "cxx-gen",
