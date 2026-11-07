@@ -227,6 +227,10 @@ pub fn blur_effect_kind(config: &Config) -> WindowEffectKind {
 pub struct Appliers {
     surface: SurfaceHandle,
     active_blur: Option<WindowEffectKind>,
+    /// The Linux protocol the active blur was last requested with (it changes when the compositor refuses one).
+    blur_protocol: LinuxBlurProtocol,
+    /// The window size the blur region was last built for.
+    blur_size: Option<sturdy::glam::UVec2>,
     blur_radius: f32,
     /// The Windows accent tint and macOS material the active blur was requested with, kept for retries.
     blur_tint_argb: u32,
@@ -241,7 +245,7 @@ pub struct Appliers {
 
 impl Appliers {
     pub fn new(window_id: u64) -> Self {
-        Self { surface: SurfaceHandle::from_window_id(window_id), active_blur: None, blur_radius: 0.0, blur_tint_argb: 0, blur_mac: Default::default(), blur_fallbacks: Vec::new(), blur_refusals: Vec::new(), pending_light_levels: None }
+        Self { surface: SurfaceHandle::from_window_id(window_id), active_blur: None, blur_protocol: LinuxBlurProtocol::Automatic, blur_size: None, blur_radius: 0.0, blur_tint_argb: 0, blur_mac: Default::default(), blur_fallbacks: Vec::new(), blur_refusals: Vec::new(), pending_light_levels: None }
     }
 
     /// Applies every domain in `diff`. Returns the failures and degradations, which the caller turns into
@@ -338,8 +342,27 @@ impl Appliers {
         let params = self.blur_params(protocol);
         engine.set_window_effect_with(self.surface, kind, true, &params);
         self.active_blur = Some(kind);
+        self.blur_protocol = protocol;
+        self.blur_size = None;
         // The platform reports its verdict a frame later (`window_effect_status`); `poll_effect_status` reads it.
         Applied::Ok
+    }
+
+    /// Rebuilds the blurred region when the window has changed size. A rounded blur region is a set of rectangles cut for
+    /// one window size, so it has to be cut again for the new one or the blur keeps the old outline. The engine does this
+    /// from the window's resize event; asking again here, a frame later and from the size the window really has now, keeps
+    /// the region right when that event is missed or comes before the compositor has settled on the size.
+    pub fn follow_window_size(&mut self, engine: &mut Engine<'_>, size: sturdy::glam::UVec2) {
+        let Some(kind) = self.active_blur else { return };
+        if !cfg!(target_os = "linux") || self.blur_radius <= 0.0 {
+            return;
+        }
+        let previous = self.blur_size.replace(size);
+        if previous.is_none() || previous == Some(size) {
+            return;
+        }
+        let params = self.blur_params(self.blur_protocol);
+        engine.set_window_effect_with(self.surface, kind, true, &params);
     }
 
     /// Reads the verdict for the blur requested by the last `WindowEffect` apply. Call a frame or two after it.
@@ -361,6 +384,7 @@ impl Appliers {
                 self.blur_refusals.push(status.details);
                 if cfg!(target_os = "linux") && !self.blur_fallbacks.is_empty() {
                     let protocol = self.blur_fallbacks.remove(0);
+                    self.blur_protocol = protocol;
                     let params = self.blur_params(protocol);
                     engine.set_window_effect_with(self.surface, kind, true, &params);
                     return None;

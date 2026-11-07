@@ -258,6 +258,11 @@ where
             }
         }
         let surface = sturdy::render::SurfaceHandle::from_window_id(frame.window_id);
+        if let Some(appliers) = self.appliers.as_mut()
+            && let Some(size) = engine.primary_window_control().and_then(|mut window| window.size())
+        {
+            appliers.follow_window_size(engine, size);
+        }
         engine.set_cursor_icon(surface, icon);
         let wanted = WANTED_FULLSCREEN.swap(NO_REQUEST, std::sync::atomic::Ordering::Relaxed);
         if wanted != NO_REQUEST {
