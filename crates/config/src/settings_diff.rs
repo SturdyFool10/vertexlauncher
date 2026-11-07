@@ -137,6 +137,7 @@ impl Config {
             skin_preview_aa_mode,
             skin_preview_texel_aa_mode,
             svg_aa_mode,
+            console_log_level,
             skin_preview_msaa_samples,
             skin_preview_motion_blur_enabled,
             skin_preview_motion_blur_amount,
@@ -288,6 +289,7 @@ impl Config {
         diff.mark(
             *force_java_21_minimum != new.force_java_21_minimum
                 || *follow_console_on_launch != new.follow_console_on_launch
+                || *console_log_level != new.console_log_level
                 || *steam_deck_handoff != new.steam_deck_handoff
                 || *default_instance_max_memory_mib != new.default_instance_max_memory_mib
                 || *default_instance_cli_args != new.default_instance_cli_args

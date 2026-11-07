@@ -15,6 +15,7 @@ mod setting_specs;
 mod settings_diff;
 mod skin_preview_aa_mode;
 mod skin_preview_texel_aa_mode;
+mod console_log_level;
 mod svg_aa_mode;
 mod text_rendering_path;
 mod typography;
@@ -42,6 +43,7 @@ pub use setting_specs::{
 pub use settings_diff::{SettingsDiff, SettingsDomain};
 pub use skin_preview_aa_mode::SkinPreviewAaMode;
 pub use skin_preview_texel_aa_mode::SkinPreviewTexelAaMode;
+pub use console_log_level::ConsoleLogLevel;
 pub use svg_aa_mode::SvgAaMode;
 pub use text_rendering_path::TextRenderingPath;
 pub use typography::{
@@ -178,6 +180,10 @@ fn default_steam_deck_handoff() -> bool {
 
 const fn default_follow_console_on_launch() -> bool {
     true
+}
+
+const fn default_console_log_level() -> ConsoleLogLevel {
+    ConsoleLogLevel::Info
 }
 
 const fn default_obs_detection_enabled() -> bool {
@@ -367,6 +373,9 @@ pub struct Config {
     drag_scroll_enabled: bool,
     #[serde(default = "default_follow_console_on_launch")]
     follow_console_on_launch: bool,
+    /// The least severe line the console shows.
+    #[serde(default = "default_console_log_level")]
+    console_log_level: ConsoleLogLevel,
     /// Open the launcher fullscreen. Off by default.
     #[serde(default)]
     start_fullscreen: bool,
@@ -588,6 +597,15 @@ impl Config {
 
     pub fn set_skin_preview_texel_aa_mode(&mut self, mode: SkinPreviewTexelAaMode) {
         self.skin_preview_texel_aa_mode = mode;
+    }
+
+    /// The least severe log line the console shows.
+    pub fn console_log_level(&self) -> ConsoleLogLevel {
+        self.console_log_level
+    }
+
+    pub fn set_console_log_level(&mut self, level: ConsoleLogLevel) {
+        self.console_log_level = level;
     }
 
     /// Returns configured SVG rasterization anti-aliasing mode.
@@ -1451,6 +1469,7 @@ impl Default for Config {
             sync_servers_to_all_instances_by_default: false,
             drag_scroll_enabled: true,
             follow_console_on_launch: true,
+            console_log_level: default_console_log_level(),
             start_fullscreen: false,
             // Off here; a first run (and a saved config that predates the setting) turns it on for a Steam Deck.
             steam_deck_handoff: false,

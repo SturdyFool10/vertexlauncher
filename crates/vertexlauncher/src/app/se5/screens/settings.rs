@@ -247,6 +247,18 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                     ToggleSettingId::SteamDeckHandoff,
                 ],
             );
+            if let Some(level) = kit.choice_setting(
+                ui,
+                "settings::console-log-level",
+                "Console Log Level",
+                Some("The least severe line the console shows. The console keeps its recent history, so choosing a more verbose level also shows lines that were hidden when they were logged. Debug lines are always kept; trace lines are only kept while Trace is chosen. Default: Info."),
+                state.config.console_log_level(),
+                &config::ConsoleLogLevel::ALL,
+                |level| level.label().to_owned(),
+            ) {
+                state.config.set_console_log_level(level);
+                crate::app::tracing_setup::apply_console_log_level(level);
+            }
         },
     );
     section(

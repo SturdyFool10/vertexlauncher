@@ -8,8 +8,10 @@
 //!    that repeats as a whole is shown once, followed by `(the previous 3 log lines repeated 5 more times)`.
 //!
 //! Two lines are the same when everything after the date and time is: lines the launcher logs start with
-//! `[date][time]`, which nearly always differs, so it is left out of the comparison. Anything merged is dated by the
-//! latest line it covers, because the lines shown for it are the latest ones.
+//! `[date][time]`, and a game's with `[HH:MM:SS]` or a dated variant of it, which nearly always differ, so they are left
+//! out of the comparison. So are the figures that differ every time a line repeats without it being a different line:
+//! a duration (`198ms 49us`) and a memory address (`0x2924e520790`). Anything merged is dated by the latest line it
+//! covers, because the lines shown for it are the latest ones.
 //!
 //! [`Merger`] does this a frame at a time: each frame it takes only the lines that are new since the last, merges them
 //! into what it already holds, and gives back what to show. It keeps the recent unmerged runs between frames, so a
@@ -17,8 +19,15 @@
 //! burst; only runs old enough that nothing later can change them are settled and let go. [`collapse`] is the same
 //! merge over a whole list at once.
 
-/// The longest pattern, in lines, that is looked for.
-pub const WINDOW: usize = 5;
+/// The longest pattern, in lines, that is looked for. A burst of one frame's worth of engine log (shader compile, its
+/// imports, the timing and the long-frame warning) is already seven.
+pub const WINDOW: usize = 12;
+
+/// The longest cycle the first, nesting passes look for. Short cycles are merged first, to a fixed point, so a group
+/// that repeats inside a larger repeat is shown as such ("a b" twice, inside "a b c d" three times); only then are the
+/// longer cycles up to [`WINDOW`] looked for among what is left. Looking for the long ones straight away would take the
+/// flat cycle that covers the most and lose the nesting.
+const NESTING_WINDOW: usize = 5;
 
 /// How many of the newest runs [`Merger`] always keeps open. A pattern can be made of patterns, and its second
 /// occurrence may still be a long stretch of unmerged runs when the first occurrence is already far back, so what is
@@ -37,19 +46,115 @@ struct Entry<'a> {
     count: usize,
 }
 
-/// `line` without a leading `[date][time]`, when it has one.
+/// Whether `group` (the text between a pair of brackets) is a clock time or a date and time: `13:45:01`, `13:45:01.123`,
+/// `2026-11-06T13:45:01Z`, `06Nov2026 13:45:01.123`. A group that also names a level (`13:45:01 INFO`) is not one: the level is
+/// part of what is compared.
+fn is_time_group(group: &str) -> bool {
+    // The clock is the last token after a space or a `T`; whatever precedes it is a date.
+    let (date, clock) = match group.rfind([' ', 'T']) {
+        Some(at) => (&group[..at], &group[at + 1..]),
+        None => ("", group),
+    };
+    let clock = clock.strip_suffix('Z').unwrap_or(clock).as_bytes();
+    let digit = |at: usize| clock.get(at).is_some_and(u8::is_ascii_digit);
+    let clock_ok = clock.len() >= 8
+        && [0, 1, 3, 4, 6, 7].iter().all(|at| digit(*at))
+        && clock[2] == b':'
+        && clock[5] == b':'
+        && (clock.len() == 8 || (clock[8] == b'.' && clock.len() > 9 && clock[9..].iter().all(u8::is_ascii_digit)));
+    clock_ok && date.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '/' | '.' | ' '))
+}
+
+/// `line` without a leading `[date][time]`, when it has one, or the leading `[time]` / `[date time]` a game writes.
 fn without_stamp(line: &str) -> &str {
-    let mut rest = line;
-    for _ in 0..2 {
-        let Some(after) = rest.strip_prefix('[') else {
-            return line;
-        };
-        let Some(close) = after.find(']') else {
-            return line;
-        };
-        rest = &after[close + 1..];
+    // `[date][time]`, as the launcher writes it.
+    let two_groups = (|| {
+        let mut rest = line;
+        for _ in 0..2 {
+            let after = rest.strip_prefix('[')?;
+            let close = after.find(']')?;
+            rest = &after[close + 1..];
+        }
+        Some(rest)
+    })();
+    if let Some(rest) = two_groups {
+        return rest;
     }
-    rest
+    // One bracketed time, as a game writes it ("[13:45:01] [Render thread/INFO]: ...").
+    if let Some(after) = line.strip_prefix('[')
+        && let Some(close) = after.find(']')
+        && is_time_group(&after[..close])
+    {
+        return after[close + 1..].trim_start();
+    }
+    line
+}
+
+/// `text` with the figures that change from one repeat of a line to the next replaced by placeholders: durations (`198ms`,
+/// `1.5s`, and runs of them like `198ms 49us 300ns`) and hexadecimal addresses (`0x2924e520790`). Everything else, numbers
+/// included, is compared as it is: `file 1 of 10` and `file 2 of 10` are different lines.
+fn normalize_volatile(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    // A figure only counts at the start of a token, so `x264ms` or `abc123s` are left alone.
+    let at_boundary = |i: usize| i == 0 || !chars[i - 1].is_alphanumeric();
+    // Reads `<digits>[.<digits>]<unit>` at `from`; returns where it ends.
+    let duration_at = |from: usize| -> Option<usize> {
+        let mut j = from;
+        while j < chars.len() && chars[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j == from {
+            return None;
+        }
+        if j + 1 < chars.len() && chars[j] == '.' && chars[j + 1].is_ascii_digit() {
+            j += 1;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+        }
+        // The longest unit that fits, so `ms` is not read as `m` + junk.
+        for unit in ["ms", "ns", "us", "\u{b5}s", "s"] {
+            let u: Vec<char> = unit.chars().collect();
+            if chars[j..].starts_with(&u) && !chars.get(j + u.len()).is_some_and(|c| c.is_alphanumeric()) {
+                return Some(j + u.len());
+            }
+        }
+        None
+    };
+    while i < chars.len() {
+        if at_boundary(i) {
+            if chars[i] == '0' && matches!(chars.get(i + 1), Some('x' | 'X')) {
+                let mut j = i + 2;
+                while j < chars.len() && chars[j].is_ascii_hexdigit() {
+                    j += 1;
+                }
+                if j - (i + 2) >= 4 && !chars.get(j).is_some_and(|c| c.is_alphanumeric()) {
+                    out.push_str("<addr>");
+                    i = j;
+                    continue;
+                }
+            }
+            if chars[i].is_ascii_digit()
+                && let Some(mut end) = duration_at(i)
+            {
+                // `198ms 49us 300ns`: further durations after single spaces belong to the same figure.
+                while end + 1 < chars.len() && chars[end] == ' ' && chars[end + 1].is_ascii_digit() {
+                    match duration_at(end + 1) {
+                        Some(next) => end = next,
+                        None => break,
+                    }
+                }
+                out.push_str("<time>");
+                i = end;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 /// The `[date][time]` at the start of `line`, if it has one.
@@ -59,7 +164,7 @@ fn stamp(line: &str) -> &str {
 }
 
 fn key_of(line: &str) -> String {
-    without_stamp(&crate::log_format::strip_ansi(line)).to_owned()
+    normalize_volatile(without_stamp(&crate::log_format::strip_ansi(line)))
 }
 
 /// How severe the `[LEVEL]` after the stamp is (lower is worse), or `None` when the line has none.
@@ -160,13 +265,13 @@ impl<'a> Unit<'a> {
 /// One pass: wherever a cycle of up to WINDOW units repeats right after itself, the cycle and its repeats become one
 /// pattern unit. At each place the cycle covering the most is taken (the shorter on a tie). Whether anything changed
 /// is returned too.
-fn pattern_pass<'a>(units: Vec<Unit<'a>>) -> (Vec<Unit<'a>>, bool) {
+fn pattern_pass<'a>(units: Vec<Unit<'a>>, window: usize) -> (Vec<Unit<'a>>, bool) {
     let mut out = Vec::new();
     let mut changed = false;
     let mut at = 0;
     while at < units.len() {
         let mut best: Option<(usize, usize)> = None;
-        for len in 1..=WINDOW {
+        for len in 1..=window {
             if at + 2 * len > units.len() {
                 break;
             }
@@ -235,12 +340,14 @@ fn merge(entries: &[Entry<'_>]) -> (Vec<(usize, Vec<String>)>, usize) {
         .collect();
     // A pattern is a line to the next pass, so patterns of patterns are found too, until nothing more merges.
     let mut unsettled = entries.len();
-    loop {
-        unsettled = unsettled.min(unsettled_from(&units));
-        let (next, changed) = pattern_pass(units);
-        units = next;
-        if !changed {
-            break;
+    for window in [NESTING_WINDOW, WINDOW] {
+        loop {
+            unsettled = unsettled.min(unsettled_from(&units));
+            let (next, changed) = pattern_pass(units, window);
+            units = next;
+            if !changed {
+                break;
+            }
         }
     }
     let mut covered = 0;
@@ -395,11 +502,11 @@ mod tests {
 
     #[test]
     fn a_cycle_longer_than_the_window_is_not_merged() {
-        let cycle = ["a", "b", "c", "d", "e", "f"];
+        let cycle = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"];
         let mut messages = Vec::new();
         messages.extend(cycle);
         messages.extend(cycle);
-        assert_eq!(shown(&messages).len(), 12);
+        assert_eq!(shown(&messages).len(), 26);
     }
 
     #[test]
@@ -676,5 +783,103 @@ mod tests {
                 assert_eq!(shown, at_once, "case {case}, chunks of {chunk}");
             }
         }
+    }
+
+    /// One frame of engine log, as it appears in the console: a shader compile with its imports, and the long-frame
+    /// warning. Seven lines, whose only differences from one frame to the next are the durations.
+    fn engine_frame(frame: usize, at: usize) -> Vec<String> {
+        let stamped = |level: &str, offset: usize, body: String| {
+            format!("[2026-11-04][07:49:{:02}][{level}][sturdy]: {body}", (at + offset) % 60)
+        };
+        vec![
+            stamped("TRACE", 0, "Slang: 'Shaders/fullscreen_tonemap.slang' not found on disk, using the embedded copy.".into()),
+            stamped("TRACE", 0, "Slang: import 'Shaders/sturdy_common.slang' not found on disk, using the embedded copy.".into()),
+            stamped("TRACE", 0, "Slang: import 'Shaders/sturdy_tonemap_agx.slang' not found on disk, using the embedded copy.".into()),
+            stamped("TRACE", 0, "Slang: import 'Shaders/sturdy_tonemap_hermite.slang' not found on disk, using the embedded copy.".into()),
+            stamped("TRACE", 0, "Slang: import 'Shaders/sturdy_tonemap_psychov.slang' not found on disk, using the embedded copy.".into()),
+            stamped("TRACE", 1, format!("Slang: compiled 'fullscreen_tonemap' (2 entry point(s)) in {}ms {}us {}ns", 190 + frame, 10 + frame * 7, 300 + frame)),
+            stamped("WARN", 1, format!("Long frame detected: {}ms {}us {}ns", 280 + frame, 5 + frame, 100 + frame * 3)),
+        ]
+    }
+
+    #[test]
+    fn durations_and_addresses_do_not_make_lines_different() {
+        let stream: Vec<String> = (0..6).flat_map(|frame| engine_frame(frame, frame * 2)).collect();
+        let merged = collapse(&stream);
+        assert_eq!(merged.len(), 8, "{merged:#?}");
+        assert!(merged[7].ends_with("(the previous 7 log lines repeated 5 more times)"), "{}", merged[7]);
+        // The level of the cycle is its worst line's.
+        assert!(merged[7].contains("[WARN]"), "{}", merged[7]);
+        // Figures that are not a duration stay part of the line.
+        let files = vec!["[2026-11-04][07:49:00][INFO]: file 1 of 10".to_owned(), "[2026-11-04][07:49:01][INFO]: file 2 of 10".to_owned()];
+        assert_eq!(collapse(&files).len(), 2);
+        let addresses = vec![
+            "[2026-11-04][07:49:00][INFO]: window wrapper=0x292450e5440".to_owned(),
+            "[2026-11-04][07:49:01][INFO]: window wrapper=0x7fb1fc061690".to_owned(),
+        ];
+        // The same line twice with different addresses: the line and its "repeated 1 more time", not two lines.
+        assert!(collapse(&addresses)[1].ends_with("(repeated 1 more time)"), "{:?}", collapse(&addresses));
+    }
+
+    #[test]
+    fn a_repeating_pattern_with_changing_figures_merges_the_same_in_any_frames() {
+        let stream: Vec<String> = (0..40).flat_map(|frame| engine_frame(frame, frame)).collect();
+        let at_once = collapse(&stream);
+        assert_eq!(at_once.len(), 8, "{at_once:#?}");
+        for chunk in [1_usize, 2, 3, 5, 7, 11, 50, 280] {
+            let mut merger = Merger::new();
+            let mut shown = Vec::new();
+            let mut taken = 0;
+            while taken < stream.len() {
+                taken = (taken + chunk).min(stream.len());
+                shown = merger.update(&stream[..taken], 0).to_vec();
+            }
+            assert_eq!(shown, at_once, "chunks of {chunk}");
+        }
+    }
+
+    #[test]
+    fn repeats_that_arrive_later_extend_what_was_already_counted() {
+        // A pattern repeated, then later (other frames, with an unrelated line in between) repeated again: each stretch is
+        // counted, and a pattern of those stretches is counted in turn.
+        let mut stream: Vec<String> = Vec::new();
+        let mut merger = Merger::new();
+        let mut shown = Vec::new();
+        for round in 0..4 {
+            for frame in 0..5 {
+                stream.extend(engine_frame(frame, round * 10 + frame));
+                shown = merger.update(&stream, 0).to_vec();
+            }
+            stream.push(format!("[2026-11-04][07:50:{round:02}][INFO][m]: separator"));
+            shown = merger.update(&stream, 0).to_vec();
+        }
+        assert_eq!(shown, collapse(&stream));
+        // Four identical rounds are one pattern of "seven lines x5, then a separator" repeated 3 more times, however many
+        // frames it took to log.
+        let last = shown.last().expect("something is shown");
+        assert!(last.ends_with("(the previous 2 log lines repeated 3 more times)"), "{shown:#?}");
+    }
+
+    #[test]
+    fn a_games_own_time_stamp_is_not_compared() {
+        let game = vec![
+            "[13:45:01] [Render thread/INFO]: Reloading ResourceManager".to_owned(),
+            "[13:45:02] [Render thread/INFO]: Reloading ResourceManager".to_owned(),
+            "[13:45:09] [Render thread/WARN]: Reloading ResourceManager".to_owned(),
+        ];
+        assert_eq!(
+            collapse(&game),
+            [
+                "[13:45:01] [Render thread/INFO]: Reloading ResourceManager",
+                "[13:45:02] [Render thread/INFO]: Reloading ResourceManager (repeated 1 more time)",
+                "[13:45:09] [Render thread/WARN]: Reloading ResourceManager",
+            ]
+        );
+        let dated = vec![
+            "[06Nov2026 13:45:01.123] [main/INFO]: x".to_owned(),
+            "[06Nov2026 13:45:05.999] [main/INFO]: x".to_owned(),
+            "[2026-11-06T13:45:07Z] [main/INFO]: x".to_owned(),
+        ];
+        assert_eq!(collapse(&dated).len(), 2, "{:?}", collapse(&dated));
     }
 }

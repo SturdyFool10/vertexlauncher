@@ -12,13 +12,28 @@ use std::{
 
 use tracing_subscriber::prelude::*;
 
-use crate::app::tracing_setup::app_log_layer::AppLogLayer;
+use crate::app::tracing_setup::app_log_layer::{AppLogLayer, ConsoleLayer, console_captures};
 
 pub(super) type SharedLogWriter = Arc<Mutex<Box<dyn io::Write + Send>>>;
 
 static PANIC_LOG_WRITER: std::sync::OnceLock<SharedLogWriter> = std::sync::OnceLock::new();
 static PANIC_HOOK_INSTALLED: Once = Once::new();
 static ACTIVE_LOG_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
+/// Makes the console remember what `level` shows, and a little more: lines down to debug are kept even when they are
+/// hidden, so choosing a more verbose level afterwards brings back what was logged before. The engine is asked for the
+/// same, so what nothing wants is never produced.
+pub(super) fn apply_console_log_level(level: config::ConsoleLogLevel) {
+    let captured = match level {
+        config::ConsoleLogLevel::Trace => tracing::Level::TRACE,
+        _ => tracing::Level::DEBUG,
+    };
+    app_log_layer::set_console_capture_level(captured);
+    if captured != tracing::Level::TRACE {
+        launcher_ui::console::discard_trace_lines();
+    }
+    vertex_shell::set_engine_log_filter(captured);
+}
 
 pub(super) fn init_tracing() -> Option<PathBuf> {
     ACTIVE_LOG_PATH.get_or_init(initialize_tracing).clone()
@@ -46,9 +61,10 @@ fn initialize_tracing() -> Option<PathBuf> {
 
     let app_layer = AppLogLayer::new(writer);
 
+    // Each layer has its own filter: the file and terminal follow `RUST_LOG`, the console follows its own setting.
     let _ = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(app_layer)
+        .with(app_layer.with_filter(env_filter))
+        .with(ConsoleLayer.with_filter(tracing_subscriber::filter::filter_fn(console_captures)))
         .try_init();
 
     active_log_path

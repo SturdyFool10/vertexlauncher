@@ -79,6 +79,7 @@ impl Config {
             skin_preview_aa_mode: _,
             skin_preview_texel_aa_mode: _,
             svg_aa_mode: _,
+            console_log_level: _,
             skin_preview_msaa_samples,
             skin_preview_motion_blur_enabled: _,
             skin_preview_motion_blur_amount,

@@ -585,7 +585,7 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             .min_by(|a, b| a.1.total_cmp(b.1))
             .map_or(0, |(column, _)| column);
         heights[shortest] +=
-            tile_width * shot.height as f32 / shot.width.max(1) as f32 + 24.0 + gap;
+            tile_width * shot.height as f32 / shot.width.max(1) as f32 + gap;
         buckets[shortest].push(index);
     }
     let mut open = None;
@@ -632,14 +632,12 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                         ),
                     );
                 }
-                kit::label(
-                    ui,
-                    &shot.instance_name,
-                    &TextStyle {
-                        wrap: TextWrap::None,
-                        ..kit.style(TextRole::Small)
-                    },
-                );
+                if ui.hovered(&tile_id)
+                    || ui.hovered(&format!("{tile_id}::copy"))
+                    || ui.hovered(&format!("{tile_id}::delete"))
+                {
+                    screenshot_origin(ui, kit, &tile_id, shot, tile_width);
+                }
                 match super::viewer::tile_actions(ui, kit, &tile_id) {
                     Some(super::viewer::TileAction::Copy) => {
                         launcher_ui::app_commands::push(
@@ -663,6 +661,49 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         state.dialog = Some(Dialog::HomeScreenshot(key));
     } else if let Some(key) = open {
         state.dialog = Some(Dialog::HomeScreenshot(key));
+    }
+}
+
+/// A box in the top left of the gallery tile `tile_id`, shown while it is hovered: the path of the image, and
+/// the instance it came from.
+fn screenshot_origin(
+    ui: &mut Ui<'_>,
+    kit: &Kit,
+    tile_id: &str,
+    shot: &launcher_ui::screens::home_api::ScreenshotView,
+    tile_width: f32,
+) {
+    use vertex_shell::sturdy::glam::Vec2;
+    use vertex_shell::sturdy::ui::{AttachPoint, FloatTarget, Floating};
+    let style = TextStyle {
+        wrap: TextWrap::None,
+        ..kit.style(TextRole::Small)
+    };
+    let room = (tile_width - 32.0).max(40.0);
+    let location = shot.path.display().to_string();
+    let _box = ui.element(
+        &ElementDesc::new()
+            .id(format!("{tile_id}::origin"))
+            .width(Sizing::Fit)
+            .height(Sizing::Fit)
+            .direction(Direction::TopToBottom)
+            .padding(Padding::all(6))
+            .child_gap(2)
+            .background(kit.palette.bg_dark.with_w(0.85))
+            .corner_radius(CornerRadius::all(8.0))
+            .floating(Some(Floating {
+                element_attach_point: AttachPoint::LeftTop,
+                parent_attach_point: AttachPoint::LeftTop,
+                offset: Vec2::new(8.0, 8.0),
+                z_index: 5,
+                capture_pointer: false,
+                clip_to_target: true,
+                ..Floating::new(FloatTarget::Element(tile_id.to_owned()))
+            })),
+    );
+    for line in [location, shot.instance_name.clone()] {
+        let shown = ui.ellipsize(&style, &line, room);
+        kit::label(ui, &shown, &style);
     }
 }
 

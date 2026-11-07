@@ -150,8 +150,9 @@ pub fn request_runtime_launch(
         tab_user_key.as_deref(),
         true,
     );
-    console::push_line_to_tab(
+    console::push_log_to_tab(
         tab_id.as_str(),
+        crate::log_format::LogLevel::Info,
         format!(
             "Launch request: root={} | Minecraft {} | {}{} | max memory={} MiB | {}",
             instance_root_display,
@@ -408,8 +409,9 @@ pub fn poll_runtime_actions(
                         context.instance_root_display.as_str(),
                         outcome.launch.launch_log_path.as_path(),
                     );
-                    console::push_line_to_tab(
+                    console::push_log_to_tab(
                         tab_id.as_str(),
+                        crate::log_format::LogLevel::Info,
                         format!(
                             "Launched Minecraft (pid {}, profile {}).",
                             outcome.launch.pid, outcome.launch.profile_id
@@ -444,7 +446,11 @@ pub fn poll_runtime_actions(
                         context.instance_root_display.as_str(),
                         context.tab_user_key.as_deref(),
                     );
-                    console::push_line_to_tab(tab_id.as_str(), format!("Launch failed: {err}"));
+                    console::push_log_to_tab(
+                        tab_id.as_str(),
+                        crate::log_format::LogLevel::Error,
+                        format!("Launch failed: {err}"),
+                    );
                 }
                 state
                     .status_by_instance

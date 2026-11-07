@@ -79,6 +79,7 @@ pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
     config.normalize();
     // Read by account loading, so it is set before `AuthState::load`.
     auth::set_insecure_file_storage(config.insecure_file_account_storage());
+    crate::app::tracing_setup::apply_console_log_level(config.console_log_level());
     apply_curseforge_key(&config);
 
     vertex_shell::watchdog::step("settings ready, building the app state");

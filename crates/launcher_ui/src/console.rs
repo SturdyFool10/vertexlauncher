@@ -111,6 +111,27 @@ pub fn push_line(line: impl Into<String>) {
     push_line_to_tab(DEFAULT_TAB_ID, line);
 }
 
+/// A message the launcher itself puts in a console tab (a game's own output arrives through its log file, with its own
+/// format), written like its own log: `[date][time][LEVEL]: message`. That is what lets the console show its severity as it
+/// does for every other launcher line, colour it, and merge it with repeats.
+pub fn push_log_to_tab(tab_id: &str, level: crate::log_format::LogLevel, message: impl AsRef<str>) {
+    push_line_to_tab(tab_id, launcher_log_line(level, message.as_ref()));
+}
+
+fn launcher_log_line(level: crate::log_format::LogLevel, message: &str) -> String {
+    use crate::log_format::LogLevel;
+    let name = match level {
+        LogLevel::Trace => "TRACE",
+        LogLevel::Debug => "DEBUG",
+        LogLevel::Info => "INFO",
+        LogLevel::Warn => "WARN",
+        LogLevel::Error | LogLevel::Fatal => "ERROR",
+    };
+    let stamp = humantime::format_rfc3339_seconds(std::time::SystemTime::now()).to_string();
+    let (date, time) = stamp.split_once('T').unwrap_or(("unknown-date", "unknown-time"));
+    format!("[{date}][{}][{name}]: {message}", time.trim_end_matches('Z'))
+}
+
 pub fn push_line_to_tab(tab_id: &str, line: impl Into<String>) {
     let sanitized = sanitize_console_line(line.into());
     let Ok(mut lines) = store().lock() else {
@@ -488,6 +509,34 @@ pub fn close_tab(tab_id: &str) -> bool {
     true
 }
 
+/// Throws away every trace-level line the consoles have kept. Called when trace stops being shown or kept, so those lines
+/// (the bulk of the engine's output) do not sit in memory for a level nobody is using.
+pub fn discard_trace_lines() {
+    use crate::log_format::{LogLevel, resolve_log_levels};
+    let Ok(mut state) = store().lock() else {
+        return;
+    };
+    for tab in &mut state.tabs {
+        let lines = tab.lines.iter().cloned().collect::<Vec<_>>();
+        let levels = resolve_log_levels(&lines);
+        if !levels.contains(&Some(LogLevel::Trace)) {
+            continue;
+        }
+        let before = lines.len() as u64;
+        tab.lines = lines
+            .into_iter()
+            .zip(levels)
+            .filter(|(_, level)| *level != Some(LogLevel::Trace))
+            .map(|(line, _)| line)
+            .collect();
+        // Lines moved, so positions counted before no longer mean anything: count them all as gone and the new ones as
+        // new, which makes the repeat-merging start over from what is left.
+        tab.trimmed_lines += before;
+        tab.lines_generation = tab.lines_generation.saturating_add(1);
+        tab.cached_lines_snapshot = None;
+    }
+}
+
 pub fn snapshot() -> ConsoleSnapshot {
     let Ok(mut state) = store().lock() else {
         return ConsoleSnapshot {
@@ -644,7 +693,12 @@ fn flush_complete_log_lines(tab_id: &str, pending_line: &mut String) {
 
 fn sanitize_console_line(mut line: String) -> String {
     line.retain(|ch| ch == '\t' || !ch.is_control());
-    line
+    // Every line reaches a console through here, so this is where an IP address is kept out of all of them: the launcher's
+    // own log and a Minecraft session's alike.
+    match crate::ip_redaction::redact_ip_addresses(&line) {
+        std::borrow::Cow::Borrowed(_) => line,
+        std::borrow::Cow::Owned(redacted) => redacted,
+    }
 }
 
 fn byte_index_at_char_limit(value: &str, max_chars: usize) -> usize {
@@ -653,4 +707,19 @@ fn byte_index_at_char_limit(value: &str, max_chars: usize) -> usize {
         .nth(max_chars)
         .map(|(index, _)| index)
         .unwrap_or(value.len())
+}
+
+#[cfg(test)]
+mod launcher_line_tests {
+    use super::launcher_log_line;
+    use crate::log_format::{LogLevel, LogParseContext, resolve_log_level};
+
+    #[test]
+    fn a_line_the_launcher_writes_carries_its_severity() {
+        for level in [LogLevel::Info, LogLevel::Warn, LogLevel::Error] {
+            let line = launcher_log_line(level, "Launch failed: no java");
+            assert_eq!(resolve_log_level(&line, &mut LogParseContext::default()), Some(level), "{line}");
+            assert!(line.ends_with("]: Launch failed: no java"), "{line}");
+        }
+    }
 }

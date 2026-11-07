@@ -39,6 +39,8 @@ qrcode.workspace = true
 tar = "0.4"
 xz2 = "0.1"
 vtmpack.workspace = true
+humantime.workspace = true
+regex = "1"
 ansi_escapers = { git = "https://github.com/SturdyFool10/ANSIEscapeRS" }
 colorlab.workspace = true
 zip = { version = "8.6", default-features = false, features = ["deflate"] }

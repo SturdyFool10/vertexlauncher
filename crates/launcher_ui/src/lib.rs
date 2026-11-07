@@ -15,6 +15,7 @@ pub mod desktop;
 pub mod image_memory;
 pub mod geom;
 pub mod install_activity;
+pub mod ip_redaction;
 pub mod java_actions;
 pub mod launch_settings;
 pub mod log_collapse;

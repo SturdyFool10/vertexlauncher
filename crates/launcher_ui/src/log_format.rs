@@ -6,7 +6,7 @@ use ansi_escapers::{
     types::{Color as AnsiColor, SgrAttribute},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -41,6 +41,23 @@ pub fn resolve_log_level(line: &str, context: &mut LogParseContext) -> Option<Lo
         context.in_error_trace = false;
     }
     None
+}
+
+/// The lines of a log that are at least `min` severe. A line with no severity of its own (a continuation, or output that
+/// does not follow a log format) goes with the line before it, so a hidden line takes its trailing detail with it and a
+/// shown one keeps it; lines before the first with a severity are shown.
+pub fn lines_at_least(lines: &[String], levels: &[Option<LogLevel>], min: LogLevel) -> Vec<String> {
+    let mut shown = true;
+    let mut out = Vec::with_capacity(lines.len());
+    for (line, level) in lines.iter().zip(levels) {
+        if let Some(level) = level {
+            shown = *level >= min;
+        }
+        if shown {
+            out.push(line.clone());
+        }
+    }
+    out
 }
 
 /// Severity of every line of a log, in order.
@@ -329,5 +346,28 @@ mod tests {
         let runs = styled_runs("\x1b[31m§aGreen§rRed\x1b[0m");
         assert_eq!(runs[0].style.color, Some([0x55, 0xFF, 0x55]));
         assert_eq!(runs[1].style.color, ansi_segments("\x1b[31mx\x1b[0m")[0].foreground);
+    }
+}
+
+#[cfg(test)]
+mod level_filter_tests {
+    use super::*;
+
+    #[test]
+    fn lines_below_the_minimum_are_dropped_with_their_continuations() {
+        let lines: Vec<String> = [
+            "[10:00:00] [main/INFO]: loading",
+            "  detail of the info",
+            "[10:00:01] [main/WARN]: careful",
+            "[10:00:02] [main/DEBUG]: noise",
+            "  more noise",
+        ]
+        .map(String::from)
+        .into();
+        let levels = resolve_log_levels(&lines);
+        assert_eq!(lines_at_least(&lines, &levels, LogLevel::Trace).len(), 5);
+        assert_eq!(lines_at_least(&lines, &levels, LogLevel::Info).len(), 3);
+        assert_eq!(lines_at_least(&lines, &levels, LogLevel::Warn), vec![lines[2].clone()]);
+        assert!(lines_at_least(&lines, &levels, LogLevel::Error).is_empty());
     }
 }

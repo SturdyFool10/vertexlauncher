@@ -36,6 +36,12 @@ pub const SPACE_MD: u16 = 12;
 pub const SPACE_LG: u16 = 16;
 pub const SPACE_XL: u16 = 24;
 pub const CORNER: f32 = 14.0;
+
+/// How far to inset a clipped area inside a container with `radius` corners so the clip, which is always a rectangle, stays inside
+/// the rounded shape: the corner of a square inset by `radius * (1 - 1/sqrt 2)` touches the arc, and any more keeps it inside.
+pub fn rounded_clip_inset(radius: f32) -> u16 {
+    (radius * (1.0 - std::f32::consts::FRAC_1_SQRT_2)).ceil() as u16
+}
 pub const CONTROL_HEIGHT: f32 = 34.0;
 /// Dropdowns with more options than this get a search box.
 const SEARCHABLE_DROPDOWN_THRESHOLD: usize = 12;
@@ -605,6 +611,8 @@ pub struct Kit {
     pub log_selections: HashMap<String, LogSelection>,
     /// The merge of each console's lines, by viewer id, carried from frame to frame.
     mergers: HashMap<String, launcher_ui::log_collapse::Merger>,
+    /// The merged lines of each console cut to the level it shows, with what that was computed from.
+    leveled: HashMap<String, ((u64, launcher_ui::log_format::LogLevel), Arc<Vec<String>>)>,
     tooltips: HashMap<String, f32>,
     /// Open/closed state and search text of each searchable dropdown.
     searches: HashMap<String, (ui_kit::PopupState, String)>,
@@ -661,6 +669,7 @@ impl Kit {
             levels: HashMap::new(),
             log_selections: HashMap::new(),
             mergers: HashMap::new(),
+            leveled: HashMap::new(),
             tooltips: HashMap::new(),
             searches: HashMap::new(),
             focus: FocusNavigator::default(),
@@ -1017,6 +1026,33 @@ impl Kit {
             .entry(id.to_owned())
             .or_default()
             .update(lines, first_index)
+    }
+
+    /// `lines` (what `merged_log` returned for the console `id`) cut to those at least `min` severe. Recomputed only when
+    /// the lines or the level change, so a frame that changes nothing hands back the same buffer.
+    pub fn leveled_log(
+        &mut self,
+        id: &str,
+        lines: &Arc<Vec<String>>,
+        min: launcher_ui::log_format::LogLevel,
+    ) -> Arc<Vec<String>> {
+        // By content: the merge edits its buffer in place (a repeat count goes up), so neither its address nor its length
+        // says whether it changed.
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            lines.hash(&mut hasher);
+            (hasher.finish(), min)
+        };
+        if let Some((cached, shown)) = self.leveled.get(id)
+            && *cached == key
+        {
+            return Arc::clone(shown);
+        }
+        let levels = launcher_ui::log_format::resolve_log_levels(lines);
+        let shown = Arc::new(launcher_ui::log_format::lines_at_least(lines, &levels, min));
+        self.leveled.insert(id.to_owned(), (key, Arc::clone(&shown)));
+        shown
     }
 
     /// Severity of each line of a log, recomputed only when the lines change (same buffer, same length = same levels).

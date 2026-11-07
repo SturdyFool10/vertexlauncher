@@ -6,6 +6,7 @@
 //! limit when one is set. `wake` is therefore only an extra nudge.
 
 mod logging;
+pub use logging::set_engine_log_filter;
 pub mod palette;
 pub mod settings_apply;
 pub mod watchdog;

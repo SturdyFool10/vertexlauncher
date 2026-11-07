@@ -311,17 +311,20 @@ fn load(source: &ImageSource, key: &str, max_dimension: u32) -> Result<DecodedIm
     if image.width == 0 || image.height == 0 || image.pixels().len() != wanted {
         return Err("the decoded picture is empty or incomplete".to_owned());
     }
-    Ok(fit_texture(image))
+    Ok(fit_texture(image, max_dimension))
 }
 
-/// Shrinks pictures bigger than any screen shows them (4K+ screenshots) on the worker, so the texture the UI thread
-/// has to create and mip is a sane size.
-fn fit_texture(mut image: DecodedImage) -> DecodedImage {
+/// Shrinks pictures bigger than they will be shown on the worker, so the texture the UI thread has to create and mip is
+/// a sane size: to `wanted` on the longest edge when the caller said how big it will be drawn (a thumbnail; the decoder
+/// only skips work for some formats, a PNG screenshot still arrives full size), and in any case to `MAX_TEXTURE_EDGE`.
+/// Creating a full-size texture took over 100 ms of a UI frame per screenshot tile.
+fn fit_texture(mut image: DecodedImage, wanted: u32) -> DecodedImage {
+    let limit = if wanted == 0 { MAX_TEXTURE_EDGE } else { wanted.clamp(64, MAX_TEXTURE_EDGE) };
     let longest = image.width.max(image.height);
-    if longest <= MAX_TEXTURE_EDGE {
+    if longest <= limit {
         return image;
     }
-    let scale = MAX_TEXTURE_EDGE as f32 / longest as f32;
+    let scale = limit as f32 / longest as f32;
     let (width, height) = (
         ((image.width as f32 * scale).round() as u32).max(1),
         ((image.height as f32 * scale).round() as u32).max(1),

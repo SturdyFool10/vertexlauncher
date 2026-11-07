@@ -133,8 +133,9 @@ pub(in super::super) fn request_runtime_prepare(
         tab_user_key.as_deref(),
         true,
     );
-    console::push_line_to_tab(
+    console::push_log_to_tab(
         tab_id.as_str(),
+        crate::log_format::LogLevel::Info,
         match operation {
             RuntimePrepareOperation::Launch => format!(
                 "Launch request: root={} | Minecraft {} | {}{} | max memory={} MiB | {}",
@@ -462,8 +463,9 @@ pub(in super::super) fn poll_runtime_prepare(
                         instance_root_display.as_str(),
                         launch.launch_log_path.as_path(),
                     );
-                    console::push_line_to_tab(
+                    console::push_log_to_tab(
                         tab_id.as_str(),
+                        crate::log_format::LogLevel::Info,
                         format!(
                             "Launched Minecraft {} (pid {}, profile {}).",
                             game_version, launch.pid, launch.profile_id

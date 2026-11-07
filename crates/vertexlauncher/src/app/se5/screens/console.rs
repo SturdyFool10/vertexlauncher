@@ -71,6 +71,13 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     let tab_id = snapshot.active_tab_id.clone();
     // Each console is its own log element, so its scroll position and text selection are its own too.
     let lines_id = format!("{LINES_ID}::{tab_id}");
+    let min_level = match state.config.console_log_level() {
+        config::ConsoleLogLevel::Error => log_format::LogLevel::Error,
+        config::ConsoleLogLevel::Warn => log_format::LogLevel::Warn,
+        config::ConsoleLogLevel::Info => log_format::LogLevel::Info,
+        config::ConsoleLogLevel::Debug => log_format::LogLevel::Debug,
+        config::ConsoleLogLevel::Trace => log_format::LogLevel::Trace,
+    };
     state.console.active_lines_id = lines_id.clone();
     let _page = ui.element(
         &ElementDesc::new()
@@ -164,7 +171,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     }
 
     // Shown with repeats merged, a frame at a time; "Copy all" above still copies every line.
-    let shown_lines = kit.merged_log(&lines_id, &snapshot.active_lines, snapshot.first_line_index);
+    let merged = kit.merged_log(&lines_id, &snapshot.active_lines, snapshot.first_line_index);
+    let shown_lines = kit.leveled_log(&lines_id, &merged, min_level);
     let tab = state.console.tabs.entry(tab_id).or_default();
     let follow = tab.follow;
     let (count, left_bottom, at_bottom) = log_lines_view(
@@ -242,16 +250,30 @@ fn log_lines_view(
     };
     let mut menu_request: Option<(usize, Vec2)> = None;
     {
+        // The engine clips to a rectangle, never to rounded corners, so text that scrolls past the edge would show in the
+        // corner squares outside the rounded shape. The rounded background is therefore its own element, and the clipped
+        // list sits inside it, inset so its corners fall within the arc (see `kit::rounded_clip_inset`). The list's own
+        // padding is reduced by the same amount, so where the text sits does not change.
+        let inset = kit::rounded_clip_inset(kit::CORNER);
+        let _frame = ui.element(
+            &ElementDesc::new()
+                .width(Sizing::Grow)
+                .height(Sizing::Grow)
+                .padding(Padding::all(inset))
+                .background(kit.palette.bg_dark)
+                .corner_radius(CornerRadius::all(kit::CORNER)),
+        );
         let _list = ui.element(
             &ElementDesc::new()
                 .id(id.into())
                 .width(Sizing::Grow)
                 .height(Sizing::Grow)
                 .direction(Direction::TopToBottom)
-                .padding(Padding::symmetric(kit::SPACE_MD, kit::SPACE_SM))
-                .clip(Clip::both())
-                .background(kit.palette.bg_dark)
-                .corner_radius(CornerRadius::all(kit::CORNER)),
+                .padding(Padding::symmetric(
+                    kit::SPACE_MD.saturating_sub(inset),
+                    kit::SPACE_SM.saturating_sub(inset),
+                ))
+                .clip(Clip::both()),
         );
         kit.scrollbar(ui, id);
         // Log lines are selectable text, so the pointer is the text cursor over them, as over text in a web page.
