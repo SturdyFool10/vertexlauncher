@@ -116,6 +116,14 @@ pub fn write(file: &NbtFile) -> Vec<u8> {
     out
 }
 
+/// Serializes an NBT file gzip-compressed, the format `level.dat` uses (the game cannot read it uncompressed).
+pub fn write_gzip(file: &NbtFile) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&write(file)).map_err(|err| err.to_string())?;
+    encoder.finish().map_err(|err| err.to_string())
+}
+
 struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,

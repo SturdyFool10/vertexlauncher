@@ -245,7 +245,6 @@ impl BetterBlurWatch {
                 }
             }
             let _ = tx.send(detect());
-            vertex_shell::wake();
         });
     }
 
@@ -286,10 +285,8 @@ impl BetterBlurWatch {
             let tx = self.results.sender();
             launcher_runtime::spawn_blocking_detached(move || {
                 let _ = tx.send(detect());
-                vertex_shell::wake();
             });
         }
-        vertex_shell::wake_after(RECHECK_EVERY);
     }
 }
 

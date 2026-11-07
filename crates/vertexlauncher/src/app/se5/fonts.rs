@@ -89,7 +89,6 @@ impl FontOptions {
                 }
             }
             let _ = tx.send(Self::from_lists(ui, emoji, cjk));
-            vertex_shell::wake();
         });
         rx
     }

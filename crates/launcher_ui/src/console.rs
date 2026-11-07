@@ -509,14 +509,18 @@ pub fn close_tab(tab_id: &str) -> bool {
     true
 }
 
-/// Throws away every trace-level line the consoles have kept. Called when trace stops being shown or kept, so those lines
-/// (the bulk of the engine's output) do not sit in memory for a level nobody is using.
-pub fn discard_trace_lines() {
+/// Throws away the trace-level lines the consoles have kept: those of the launcher's own console when `launcher` is set, and
+/// of the game consoles when `games` is. Called when trace stops being shown or kept, so those lines (the bulk of the
+/// engine's output) do not sit in memory for a level nobody is using.
+pub fn discard_trace_lines(launcher: bool, games: bool) {
     use crate::log_format::{LogLevel, resolve_log_levels};
     let Ok(mut state) = store().lock() else {
         return;
     };
     for tab in &mut state.tabs {
+        if !(if tab.id == DEFAULT_TAB_ID { launcher } else { games }) {
+            continue;
+        }
         let lines = tab.lines.iter().cloned().collect::<Vec<_>>();
         let levels = resolve_log_levels(&lines);
         if !levels.contains(&Some(LogLevel::Trace)) {

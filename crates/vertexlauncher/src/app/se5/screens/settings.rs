@@ -79,7 +79,6 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             );
         }
         if refreshing {
-            kit.keep_awake_for(std::time::Duration::from_millis(100));
         }
     }
     poll_purge(state);
@@ -247,17 +246,38 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                     ToggleSettingId::SteamDeckHandoff,
                 ],
             );
+        },
+    );
+    section(
+        ui,
+        kit,
+        "logging",
+        "Logging",
+        "How much the console shows. The console keeps its recent history, so choosing a more verbose level also shows lines that were hidden when they were logged.",
+        |ui, kit| {
             if let Some(level) = kit.choice_setting(
                 ui,
-                "settings::console-log-level",
-                "Console Log Level",
-                Some("The least severe line the console shows. The console keeps its recent history, so choosing a more verbose level also shows lines that were hidden when they were logged. Debug lines are always kept; trace lines are only kept while Trace is chosen. Default: Info."),
+                "settings::vertex-log-level",
+                "Vertex Log Level",
+                Some("The least severe line shown in Vertex's own console. Debug lines are always kept; trace lines (the engine's progress and timings) are only kept while Trace is chosen. Default: Info."),
                 state.config.console_log_level(),
                 &config::ConsoleLogLevel::ALL,
                 |level| level.label().to_owned(),
             ) {
                 state.config.set_console_log_level(level);
-                crate::app::tracing_setup::apply_console_log_level(level);
+                apply_log_levels(&state.config);
+            }
+            if let Some(level) = kit.choice_setting(
+                ui,
+                "settings::game-log-level",
+                "Game Log Level",
+                Some("The least severe line shown in a game's console. Default: Info."),
+                state.config.game_console_log_level(),
+                &config::ConsoleLogLevel::ALL,
+                |level| level.label().to_owned(),
+            ) {
+                state.config.set_game_console_log_level(level);
+                apply_log_levels(&state.config);
             }
         },
     );
@@ -287,6 +307,13 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     );
     platform_section(ui, kit, state);
     info_section(ui, kit);
+}
+
+fn apply_log_levels(config: &config::Config) {
+    crate::app::tracing_setup::apply_console_log_levels(
+        config.console_log_level(),
+        config.game_console_log_level(),
+    );
 }
 
 fn section(
@@ -1250,7 +1277,6 @@ fn java_paths(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 .set_java_runtime_path_ref(runtime, Some(path.as_path()));
         }
         if view.in_flight.is_some() {
-            kit.keep_awake_for(std::time::Duration::from_millis(100));
         }
         views.push((runtime, view));
     }
@@ -1379,7 +1405,6 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     }
     let purging = state.settings.purge_rx.is_some();
     if purging {
-        kit.keep_awake_for(std::time::Duration::from_millis(100));
     }
     if kit.button(
         ui,
@@ -1403,7 +1428,6 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 Err(err) => format!("Failed to purge metadata cache: {err}"),
             };
             let _ = tx.send(message);
-            vertex_shell::wake();
         });
     }
     if let Some(message) = &state.settings.purge_status {
@@ -1419,7 +1443,6 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
 
     let limits = launcher_ui::screens::instance_api::settings::override_limits(&state.config);
     if limits.memory_pending {
-        kit.keep_awake_for(std::time::Duration::from_millis(50));
     }
     let max_memory = limits.memory_max_mib;
     let mut memory = state.config.default_instance_max_memory_mib();
@@ -1693,7 +1716,6 @@ fn info_section(ui: &mut Ui<'_>, kit: &mut Kit) {
         |ui, kit| {
             let Some(info) = super::super::super::app_metadata::try_settings_info() else {
                 kit.text(ui, TextRole::Muted, "Collecting system information…");
-                kit.keep_awake_for(std::time::Duration::from_millis(250));
                 return;
             };
             for (label, value) in [

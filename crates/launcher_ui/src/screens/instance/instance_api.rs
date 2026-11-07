@@ -207,10 +207,6 @@ pub fn screenshots_tick(state: &mut InstanceScreenState, instance_root: &Path) {
     }
 }
 
-pub fn screenshot_scan_interval() -> Duration {
-    INSTANCE_SCREENSHOT_SCAN_INTERVAL
-}
-
 pub fn key_of(path: &Path) -> String {
     screenshot_key(path)
 }
@@ -248,11 +244,11 @@ pub const MAX_LOG_LINES: usize = MAX_INSTANCE_LOG_LINES;
 // -- Exports --------------------------------------------------------------------------------------------------------
 
 /// The top-level entries of the instance root the export dialogs offer, kept fresh in the background.
-pub fn root_entries(state: &mut InstanceScreenState, server: bool, root: &Path) -> (Vec<(String, bool)>, bool, bool, Option<Duration>) {
+pub fn root_entries(state: &mut InstanceScreenState, server: bool, root: &Path) -> (Vec<(String, bool)>, bool, bool) {
     let cache = if server { &mut state.export_server_root_entries } else { &mut state.export_vtmpack_root_entries };
-    let (listing, wake) = cache.poll(root);
+    let listing = cache.poll(root);
     let entries = listing.entries.iter().map(|entry| (entry.name.clone(), entry.is_dir)).collect();
-    (entries, listing.loaded, listing.root_exists, wake)
+    (entries, listing.loaded, listing.root_exists)
 }
 
 pub fn sync_vtmpack_options(state: &mut InstanceScreenState, root: &Path) {

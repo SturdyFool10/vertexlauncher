@@ -2,7 +2,6 @@
 //! Settings, exports and moving are dialogs (`instance_dialogs`). The state behind all of it is
 //! `launcher_ui`'s `InstanceSession`, shared with the egui screen.
 
-use std::time::Duration;
 
 use content_resolver::InstalledContentKind;
 use instances::InstanceRecord;
@@ -213,7 +212,6 @@ fn install_progress(ui: &mut Ui<'_>, kit: &mut Kit, progress: &api::InstallProgr
             ),
         );
     }
-    kit.keep_awake_for(Duration::from_millis(100));
 }
 
 fn tabs(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) {
@@ -375,11 +373,7 @@ fn content_tab(
     let Some(session) = state.sessions.get_mut(&id) else {
         return;
     };
-    let (view, wake) = api::content::view(&mut session.state, root, &config);
-    if let Some(wake) = wake {
-        kit.keep_awake_for(wake);
-        vertex_shell::wake_after(wake);
-    }
+    let view = api::content::view(&mut session.state, root, &config);
 
     {
         let _row = kit.row(ui, kit::SPACE_SM);
@@ -745,9 +739,7 @@ fn screenshots_tab(
         return;
     };
     api::screenshots_tick(&mut session.state, root);
-    vertex_shell::wake_after(api::screenshot_scan_interval());
     if session.state.screenshot_scan_in_flight {
-        kit.keep_awake_for(Duration::from_millis(100));
     }
     let shots = session.state.screenshots.clone();
     kit.text(
@@ -861,8 +853,6 @@ fn logs_tab(
         return;
     };
     api::logs_tick(&mut session.state, root);
-    vertex_shell::wake_after(api::logs_scan_interval());
-    kit.keep_awake_for(Duration::from_millis(250));
     kit.text(ui, TextRole::Heading, "Logs");
     kit.text(
         ui,

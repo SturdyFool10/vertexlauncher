@@ -34,11 +34,7 @@ pub fn open(state: &mut AppState, instance_id: &str) {
     let Some(instance) = state.instances.find(instance_id).cloned() else {
         return;
     };
-    let session = Session::open(
-        &instance,
-        state.installations_root().as_path(),
-        vertex_shell::wake,
-    );
+    let session = Session::open(&instance, state.installations_root().as_path());
     state.game_settings = Some(GameSettingsState {
         session,
         tab: Tab::Group(Group::Video),
@@ -66,8 +62,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) ->
         return false;
     }
     gs.frame += 1;
-    let next = gs.session.poll(instances, config);
-    vertex_shell::wake_after(next);
+    gs.session.poll(instances, config);
     let header = gs.session.header(instances, config);
 
     let viewport = ui.viewport_size();
@@ -399,7 +394,6 @@ fn setting(
                 );
             }
             if capturing {
-                kit.keep_awake_for(std::time::Duration::from_millis(50));
                 if let Some(captured) = captured {
                     if let Captured::Binding(name) = captured {
                         gs.session.set_keybind(key, name);
@@ -655,7 +649,6 @@ fn packs_tab(
     }
     kit.gap(ui, f32::from(kit::SPACE_MD));
     let packs = gs.session.packs(instances, config);
-    kit.keep_awake_for(std::time::Duration::from_secs(1));
     if packs.is_empty() {
         kit.text(ui, TextRole::Muted, "No resource packs found.");
         return;

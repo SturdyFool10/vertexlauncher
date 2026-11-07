@@ -44,7 +44,7 @@ pub fn emit(severity: Severity, source: impl Into<String>, message: impl Into<St
             tracing::error!(target: "notification", source = %source, message = %log_text(&message, streamer_mode))
         }
     }
-    if let Err(err) = crate::ui_waker::wake_after_send(center().tx.send(Notification {
+    if let Err(err) = center().tx.send(Notification {
         severity,
         source,
         message,
@@ -55,7 +55,7 @@ pub fn emit(severity: Severity, source: impl Into<String>, message: impl Into<St
         icon: None,
         stack: None,
         when: Instant::now(),
-    })) {
+    }) {
         tracing::error!(
             target: "notification",
             error = %err,
@@ -158,7 +158,7 @@ impl NotificationBuilder {
         let source = sanitize_field(streamer_mode, self.source);
         let message = sanitize_field(streamer_mode, self.message);
         tracing::info!(target: "notification", source = %source, message = %log_text(&message, streamer_mode));
-        if let Err(err) = crate::ui_waker::wake_after_send(center().tx.send(Notification {
+        if let Err(err) = center().tx.send(Notification {
             severity: self.severity,
             source,
             message,
@@ -169,7 +169,7 @@ impl NotificationBuilder {
             icon: self.icon,
             stack: self.stack,
             when: Instant::now(),
-        })) {
+        }) {
             tracing::error!(
                 target: "notification",
                 error = %err,
@@ -184,7 +184,7 @@ impl NotificationBuilder {
 /// showing. Use it when part of what a stacked notification describes stops being true, such as
 /// one of several "renewing..." spinners finishing.
 pub fn retract_from_stack(key: impl Into<String>, items: Vec<String>) {
-    if let Err(err) = crate::ui_waker::wake_after_send(center().tx.send(Notification {
+    if let Err(err) = center().tx.send(Notification {
         severity: Severity::Log,
         source: String::new(),
         message: String::new(),
@@ -200,7 +200,7 @@ pub fn retract_from_stack(key: impl Into<String>, items: Vec<String>) {
             remove: true,
         }),
         when: Instant::now(),
-    })) {
+    }) {
         tracing::error!(
             target: "notification",
             error = %err,
@@ -226,7 +226,7 @@ pub fn emit_progress(
         progress,
         "notification progress update"
     );
-    if let Err(err) = crate::ui_waker::wake_after_send(center().tx.send(Notification {
+    if let Err(err) = center().tx.send(Notification {
         severity,
         source: source.clone(),
         message,
@@ -237,7 +237,7 @@ pub fn emit_progress(
         icon: None,
         stack: None,
         when: Instant::now(),
-    })) {
+    }) {
         tracing::error!(
             target: "notification",
             source = %source,
@@ -266,7 +266,7 @@ pub fn emit_spinner(
         spinner = true,
         "notification spinner update"
     );
-    if let Err(err) = crate::ui_waker::wake_after_send(center().tx.send(Notification {
+    if let Err(err) = center().tx.send(Notification {
         severity,
         source,
         message,
@@ -277,7 +277,7 @@ pub fn emit_spinner(
         icon: None,
         stack: None,
         when: Instant::now(),
-    })) {
+    }) {
         tracing::error!(
             target: "notification",
             error = %err,
@@ -303,7 +303,7 @@ pub fn emit_replace(
         replace_key = %replace_key,
         "notification replacement update"
     );
-    if let Err(err) = crate::ui_waker::wake_after_send(center().tx.send(Notification {
+    if let Err(err) = center().tx.send(Notification {
         severity,
         source,
         message,
@@ -314,7 +314,7 @@ pub fn emit_replace(
         icon: None,
         stack: None,
         when: Instant::now(),
-    })) {
+    }) {
         tracing::error!(
             target: "notification",
             error = %err,

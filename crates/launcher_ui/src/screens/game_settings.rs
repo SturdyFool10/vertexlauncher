@@ -41,7 +41,6 @@ use self::search::*;
 /// Edits are written once they have been idle this long.
 const SAVE_DELAY: Duration = Duration::from_millis(250);
 /// How often to look for outside changes while the dialog is open.
-const WATCH_INTERVAL: Duration = Duration::from_millis(200);
 
 
 

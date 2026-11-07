@@ -21,7 +21,6 @@ pub fn push(command: AppCommand) {
     if let Ok(mut queue) = QUEUE.lock() {
         queue.push(command);
     }
-    crate::ui_waker::wake();
 }
 
 /// Takes every queued command, oldest first.

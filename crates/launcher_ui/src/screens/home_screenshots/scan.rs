@@ -177,7 +177,6 @@ pub(in crate::screens::home) fn refresh_screenshot_state(
     tokio_runtime::spawn_blocking_detached(move || {
         let candidates = collect_screenshot_candidates(&request);
         let _ = tx.send((serial, count, force, candidates));
-        crate::ui_waker::wake();
     });
 }
 

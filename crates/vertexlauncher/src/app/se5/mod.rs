@@ -79,7 +79,10 @@ pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
     config.normalize();
     // Read by account loading, so it is set before `AuthState::load`.
     auth::set_insecure_file_storage(config.insecure_file_account_storage());
-    crate::app::tracing_setup::apply_console_log_level(config.console_log_level());
+    crate::app::tracing_setup::apply_console_log_levels(
+        config.console_log_level(),
+        config.game_console_log_level(),
+    );
     apply_curseforge_key(&config);
 
     vertex_shell::watchdog::step("settings ready, building the app state");
@@ -92,7 +95,6 @@ pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
         exit_snapshot.clone(),
     );
     vertex_shell::watchdog::step("app state built (themes, instances, accounts started)");
-    launcher_ui::ui_waker::install(vertex_shell::wake);
     vertex_shell::install_game_probe(|| !installation::running_instance_roots().is_empty());
     // CPU-bound work (the skin preview's rasteriser, image decoding) runs on the UI engine's own task scheduler, so it
     // uses exactly the machine's cores next to the engine's jobs instead of a second set of threads.
@@ -171,6 +173,8 @@ pub enum Dialog {
     GamepadCalibration,
     ServerSync,
     WorldSync,
+    /// Rename, delete, move or copy a Home world or server card; its state is `AppState::manage`.
+    ManageEntry,
 }
 
 /// Background saves of the config and instance store: at most one write in flight, the newest state wins.
@@ -210,7 +214,6 @@ impl<T: Clone + Send + 'static> Saver<T> {
         self.in_flight = true;
         launcher_runtime::spawn_blocking_detached(move || {
             let _ = tx.send(save(&value));
-            vertex_shell::wake();
         });
     }
 
@@ -229,9 +232,6 @@ impl<T: Clone + Send + 'static> Saver<T> {
         self.start();
     }
 
-    fn busy(&self) -> bool {
-        self.in_flight || self.pending.is_some()
-    }
 }
 
 /// Everything the screens read and change. Plain data; the draw closure owns it.
@@ -273,6 +273,7 @@ pub struct AppState {
     pub skins_view: screens::skins::SkinsView,
     pub server_sync: Option<screens::sync_dialogs::ServerSyncState>,
     pub world_sync: Option<screens::sync_dialogs::WorldSyncState>,
+    pub manage: Option<screens::manage_dialogs::ManageState>,
     pub account_menu: PopupState,
     pub accounts_view: accounts::AccountsView,
     pub link_results: launcher_runtime::WorkerChannel<link_profile::Detected>,
@@ -380,29 +381,12 @@ impl AppState {
             ..
         } = self;
         for session in sessions.values_mut() {
-            let tick = session.tick(config, instances);
-            if tick.busy {
-                vertex_shell::wake_after(Duration::from_millis(100));
-            }
+            session.tick(config, instances);
         }
     }
 
     pub fn initial_install_sender(&mut self) -> mpsc::Sender<InitialInstanceInstallResult> {
         self.initial_install.sender()
-    }
-
-    /// Something in the background needs regular polling (results arrive on channels that cannot wake the UI).
-    fn busy(&self) -> bool {
-        !self.runtime.pending_launches.is_empty()
-            || self.runtime.delete_in_flight
-            || self.create.busy()
-            || self.flows.busy()
-            || self.discover.is_busy()
-            || self.auth.should_request_repaint()
-            || self.config_saver.busy()
-            || self.store_saver.busy()
-            || self.font_scan.is_some()
-            || launcher_ui::install_activity::snapshot().is_some()
     }
 
     fn poll(&mut self) {
@@ -452,11 +436,9 @@ impl AppState {
         const INTERVAL: Duration = Duration::from_secs(1);
         let elapsed = self.theme_watch.1.elapsed();
         if elapsed < INTERVAL {
-            vertex_shell::wake_after(INTERVAL - elapsed);
             return;
         }
         self.theme_watch.1 = std::time::Instant::now();
-        vertex_shell::wake_after(INTERVAL);
         // The folder is looked at on a worker; the UI only ever reads the answer.
         let results = self.theme_scan.drain();
         if let Some((signature, catalog)) = results.items.into_iter().last() {
@@ -475,7 +457,6 @@ impl AppState {
                 let signature = ThemeCatalog::directory_signature();
                 let catalog = (signature != known).then(ThemeCatalog::load);
                 let _ = tx.send((signature, catalog));
-                vertex_shell::wake();
             });
         }
     }
@@ -488,14 +469,13 @@ impl AppState {
                 .active_launch_context()
                 .map(|context| (context.player_uuid, context.player_name))
         };
-        let next = launcher_ui::screenshot_watch::poll(
+        launcher_ui::screenshot_watch::poll(
             &self.instances,
             &self.config,
             playing_as
                 .as_ref()
                 .map(|(id, name)| launcher_ui::account_text::AccountMention { id, name }),
         );
-        vertex_shell::wake_after(next);
     }
 
     /// Reads the image on the launcher runtime; `handle_commands` puts it on the clipboard once it arrives.
@@ -511,7 +491,6 @@ impl AppState {
                 Err("Only PNG screenshots can be copied to the clipboard.".to_owned())
             };
             let _ = tx.send(result);
-            vertex_shell::wake();
         });
     }
 
@@ -871,6 +850,7 @@ impl App {
             skins_view: Default::default(),
             server_sync: None,
             world_sync: None,
+            manage: None,
             account_menu: PopupState::default(),
             accounts_view: Default::default(),
             link_results: Default::default(),
@@ -896,7 +876,7 @@ impl App {
             initial_install: Default::default(),
             image_copies: Default::default(),
             discord: DiscordPresenceManager::default(),
-            obs: ObsWatcher::spawn(vertex_shell::wake, obs_enabled),
+            obs: ObsWatcher::spawn(obs_enabled),
             exit_snapshot,
         };
         Self {
@@ -955,7 +935,6 @@ impl App {
         self.kit.typography = self.state.config.typography().clone();
         self.apply_fonts(ui);
         stalls.phase("fonts");
-        self.kit.keep_alive.update(ui, Duration::from_millis(600));
 
         let maximized = ui
             .engine()
@@ -975,10 +954,6 @@ impl App {
         self.state.commit(&self.bridge);
         stalls.phase("commit");
         stalls.finish();
-        if self.state.busy() {
-            // Worker results arrive on plain channels; look again shortly.
-            vertex_shell::wake_after(Duration::from_millis(100));
-        }
     }
 
     fn dialogs(&mut self, ui: &mut Ui<'_>) {
@@ -1028,6 +1003,9 @@ impl App {
             Dialog::WorldSync => {
                 screens::sync_dialogs::world_dialog(ui, &mut self.kit, &mut self.state)
             }
+            Dialog::ManageEntry => {
+                screens::manage_dialogs::dialog(ui, &mut self.kit, &mut self.state)
+            }
             Dialog::ConfirmInsecureStorage => {
                 screens::settings::confirm_insecure_storage(ui, &mut self.kit, &mut self.state)
             }
@@ -1057,7 +1035,6 @@ impl App {
         if generation != self.kit.svg_device_generation {
             self.kit.svg_device_generation = generation;
             self.kit.svg_rebuild_at = Some(Instant::now() + SVG_SETTLE_DELAY);
-            vertex_shell::wake_after(SVG_SETTLE_DELAY);
             ui.clear_svg_cache();
             icons::forget_textures();
         } else if self.kit.svg_rebuild_at.is_some_and(|at| Instant::now() >= at) {

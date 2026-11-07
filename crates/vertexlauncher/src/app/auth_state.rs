@@ -49,8 +49,6 @@ use self::renewal_notifications::emit_cached_account_renewal_notification;
 use self::renewal_result::RenewalResult;
 use self::sign_in_workers::{run_sign_in_flow, run_system_browser_sign_in_flow};
 
-pub const REPAINT_INTERVAL: Duration = Duration::from_millis(200);
-
 pub struct AuthState {
     accounts_state: CachedAccountsState,
     account_avatars: HashMap<String, Vec<u8>>,
@@ -81,7 +79,6 @@ impl AuthState {
         state.pending_load = Some(rx);
         let _ = tokio_runtime::spawn_blocking_detached(move || {
             let _ = tx.send(Box::new(Self::load_blocking()));
-            launcher_ui::ui_waker::wake();
         });
         state
     }
@@ -132,7 +129,6 @@ impl AuthState {
                     "Persisting cached account state failed."
                 );
                 let _ = tx.send(format!("{failure}: {err}"));
-                launcher_ui::ui_waker::wake();
             }
         });
     }
@@ -353,13 +349,6 @@ impl AuthState {
             notification::error!("auth", "{message}");
             self.status = AuthUiStatus::Error(message);
         }
-    }
-
-    pub fn should_request_repaint(&self) -> bool {
-        self.pending_load.is_some()
-            || self.flow.is_some()
-            || self.renewal.is_some()
-            || !self.avatar_loads_in_flight.is_empty()
     }
 
     pub fn sign_in_in_progress(&self) -> bool {

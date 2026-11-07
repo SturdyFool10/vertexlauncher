@@ -1,7 +1,6 @@
 //! Discover: search Modrinth and CurseForge modpacks, open one, and create an instance from any of its versions.
 //! The search, filtering, paging and install logic is `launcher_ui`'s `discover_api`; this draws it.
 
-use std::time::Duration;
 
 use launcher_ui::screens::{AppScreen, discover_api as api};
 use vertex_shell::sturdy::ui::{
@@ -18,10 +17,7 @@ const SCROLL_ID: &str = "discover::scroll";
 const LOAD_MORE_MARGIN: f32 = 700.0;
 
 pub fn browse(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
-    let busy = api::tick(&mut state.discover);
-    if busy {
-        kit.keep_awake_for(Duration::from_millis(100));
-    }
+    api::tick(&mut state.discover);
     let _scroll = kit.scroll(ui, SCROLL_ID, kit::SPACE_LG, kit::SPACE_XL);
     kit.text(ui, TextRole::Title, "Discover");
     filters(ui, kit, state);
@@ -333,7 +329,6 @@ fn placeholder(ui: &mut Ui<'_>, kit: &Kit, id: &str, size: f32) {
 
 pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if api::detail_tick(&mut state.discover) {
-        kit.keep_awake_for(Duration::from_millis(100));
     }
     let _scroll = kit.scroll(ui, "discover-detail::scroll", kit::SPACE_LG, kit::SPACE_XL);
     let Some(view) = api::detail(&state.discover) else {

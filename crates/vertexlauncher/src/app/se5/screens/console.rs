@@ -1,7 +1,6 @@
 //! Console: the launcher log and one tab per running instance, from `launcher_ui::console` (the same store the egui
 //! console reads). Only the visible lines are built, so huge game logs stay cheap.
 
-use std::time::Duration;
 
 use launcher_ui::console;
 use launcher_ui::log_format::{self, LogLevel};
@@ -60,8 +59,6 @@ impl ConsoleView {
 }
 
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
-    // Console lines arrive constantly while a game runs and do not wake the UI themselves; poll while visible.
-    vertex_shell::wake_after(Duration::from_millis(250));
     let snapshot = console::snapshot();
     // Closed consoles forget their state.
     state
@@ -71,7 +68,12 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     let tab_id = snapshot.active_tab_id.clone();
     // Each console is its own log element, so its scroll position and text selection are its own too.
     let lines_id = format!("{LINES_ID}::{tab_id}");
-    let min_level = match state.config.console_log_level() {
+    let shown_level = if console::is_default_tab(&tab_id) {
+        state.config.console_log_level()
+    } else {
+        state.config.game_console_log_level()
+    };
+    let min_level = match shown_level {
         config::ConsoleLogLevel::Error => log_format::LogLevel::Error,
         config::ConsoleLogLevel::Warn => log_format::LogLevel::Warn,
         config::ConsoleLogLevel::Info => log_format::LogLevel::Info,
@@ -360,7 +362,6 @@ fn log_lines_view(
                 selection.head = Some(point);
                 selection.moved = true;
             }
-            kit.keep_awake_for(Duration::from_millis(16));
         } else {
             selection.dragging = false;
             if !selection.moved {

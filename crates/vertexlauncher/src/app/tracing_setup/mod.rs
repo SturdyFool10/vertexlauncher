@@ -20,19 +20,21 @@ static PANIC_LOG_WRITER: std::sync::OnceLock<SharedLogWriter> = std::sync::OnceL
 static PANIC_HOOK_INSTALLED: Once = Once::new();
 static ACTIVE_LOG_PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
 
-/// Makes the console remember what `level` shows, and a little more: lines down to debug are kept even when they are
-/// hidden, so choosing a more verbose level afterwards brings back what was logged before. The engine is asked for the
-/// same, so what nothing wants is never produced.
-pub(super) fn apply_console_log_level(level: config::ConsoleLogLevel) {
-    let captured = match level {
+/// Makes the console remember what `launcher` shows for Vertex's own log, and a little more: lines down to debug are kept
+/// even when they are hidden, so choosing a more verbose level afterwards brings back what was logged before. The engine
+/// is asked for the same, so what nothing wants is never produced. `game` only decides which kept trace lines to throw away:
+/// a game's output is stored whole, and its level is applied when the console is drawn.
+pub(super) fn apply_console_log_levels(launcher: config::ConsoleLogLevel, game: config::ConsoleLogLevel) {
+    let captured = match launcher {
         config::ConsoleLogLevel::Trace => tracing::Level::TRACE,
         _ => tracing::Level::DEBUG,
     };
     app_log_layer::set_console_capture_level(captured);
-    if captured != tracing::Level::TRACE {
-        launcher_ui::console::discard_trace_lines();
-    }
     vertex_shell::set_engine_log_filter(captured);
+    launcher_ui::console::discard_trace_lines(
+        launcher != config::ConsoleLogLevel::Trace,
+        game != config::ConsoleLogLevel::Trace,
+    );
 }
 
 pub(super) fn init_tracing() -> Option<PathBuf> {

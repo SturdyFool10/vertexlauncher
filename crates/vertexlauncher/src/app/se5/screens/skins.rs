@@ -97,9 +97,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             });
     let busy = state
         .skins
-        .tick(auth.as_ref(), opened, &settings, vertex_shell::wake);
+        .tick(auth.as_ref(), opened, &settings);
     if busy {
-        kit.keep_awake_for(std::time::Duration::from_millis(100));
     }
     if let Some(path) = state
         .file_dialogs
@@ -222,7 +221,6 @@ fn preview(
             view.uploaded = skins.preview_generation();
         }
         // The model turns continuously, so keep drawing while it is on screen.
-        kit.keep_awake_for(std::time::Duration::from_millis(16));
     }
 
     let _canvas = ui.element(

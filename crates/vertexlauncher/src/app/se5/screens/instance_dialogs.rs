@@ -580,15 +580,10 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
         );
     }
     // Override edits save themselves shortly after they stop.
-    let (autosaved, wake) =
+    let (autosaved, _) =
         api::settings::autosave_overrides(&mut session.state, id, instances, &limits);
-    if let Some(wake) = wake {
-        kit.keep_awake_for(wake);
-        vertex_shell::wake_after(wake);
-    }
     let _ = (autosaved, changed);
     if limits.memory_pending {
-        kit.keep_awake_for(std::time::Duration::from_millis(50));
     }
     let done = (response.dismissed || kit.back_pressed()) || close;
     if done {
@@ -681,10 +676,7 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
         return false;
     };
     api::sync_vtmpack_options(&mut session.state, &root);
-    let (entries, loaded, root_exists, wake) = api::root_entries(&mut session.state, false, &root);
-    if let Some(wake) = wake {
-        vertex_shell::wake_after(wake);
-    }
+    let (entries, loaded, root_exists) = api::root_entries(&mut session.state, false, &root);
     let in_flight = session.state.export_vtmpack_in_flight;
     let response = kit::modal(ui, "export-vtmpack", &style, !in_flight, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
@@ -721,7 +713,6 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
                     .then(|| (p.completed_steps as f32 / p.total_steps as f32).clamp(0.0, 1.0))
             });
             kit.progress(ui, "export-vtmpack::progress", fraction, kit::uptime());
-            kit.keep_awake_for(std::time::Duration::from_millis(100));
             return;
         }
         kit.text(
@@ -920,10 +911,7 @@ pub fn export_server(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         return false;
     };
     api::sync_server_options(&mut session.state, &root);
-    let (entries, loaded, root_exists, wake) = api::root_entries(&mut session.state, true, &root);
-    if let Some(wake) = wake {
-        vertex_shell::wake_after(wake);
-    }
+    let (entries, loaded, root_exists) = api::root_entries(&mut session.state, true, &root);
     let in_flight = session.state.export_server_in_flight;
     let response = kit::modal(ui, "export-server", &style, !in_flight, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
@@ -960,7 +948,6 @@ pub fn export_server(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
                     .then(|| (p.completed_steps as f32 / p.total_steps as f32).clamp(0.0, 1.0))
             });
             kit.progress(ui, "export-server::progress", fraction, kit::uptime());
-            kit.keep_awake_for(std::time::Duration::from_millis(100));
             return;
         }
         kit.text(ui, TextRole::Heading, "Auto-generate server zip");
@@ -1115,7 +1102,6 @@ pub fn move_instance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
             } else {
                 kit.progress(ui, "move::progress", None, kit::uptime());
             }
-            kit.keep_awake_for(std::time::Duration::from_millis(100));
             return;
         }
         if let Some(message) = &completion {

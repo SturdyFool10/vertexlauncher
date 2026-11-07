@@ -1,9 +1,10 @@
 //! The SturdyEngine5 host for Vertex: opens the window, owns the engine loop and exposes the pieces the rest of the
-//! launcher needs (a way to wake the UI from any thread, and the per-frame draw hook).
+//! launcher needs (the per-frame draw hook and the settings bridge).
 //!
 //! The UI is immediate-mode. The caller hands [`run`] one draw closure that rebuilds the whole frame, and the engine
 //! draws continuously ([`sturdy::app::FrameMode::Continuous`]): as fast as the GPU allows, or exactly at the frame
-//! limit when one is set. `wake` is therefore only an extra nudge.
+//! limit when one is set. Nothing schedules or requests a frame: state that changes on another thread is simply read
+//! on the next one.
 
 mod logging;
 pub use logging::set_engine_log_filter;
@@ -15,32 +16,15 @@ pub use settings_apply::Applied;
 use settings_apply::Appliers;
 
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use config::{Config, SettingsDiff, SettingsDomain};
 
-use sturdy::app::{FrameMode, RedrawHandle};
+use sturdy::app::FrameMode;
 use sturdy::prelude::*;
 use sturdy::ui::{self, Ui};
 
 pub use sturdy;
-
-static REDRAW: OnceLock<RedrawHandle> = OnceLock::new();
-
-/// Wakes the UI so it renders another frame. Safe from any thread; a no-op until the engine has started.
-pub fn wake() {
-    if let Some(handle) = REDRAW.get() {
-        handle.request_redraw();
-    }
-}
-
-/// Wakes the UI after `delay` (the earliest pending request wins).
-pub fn wake_after(delay: std::time::Duration) {
-    if let Some(handle) = REDRAW.get() {
-        handle.request_redraw_after(delay);
-    }
-}
 
 /// Window-level startup options. Everything here can also change at runtime through the settings appliers.
 #[derive(Clone, Debug)]
@@ -81,7 +65,6 @@ impl SettingsBridge {
 
     pub fn submit(&self, config: Config) {
         *lock(&self.pending) = Some(config);
-        wake();
     }
 
     /// Failures (the caller restores the old value and notifies) and degradations (it just notifies), oldest first.
@@ -197,7 +180,6 @@ impl<F> Shell<F> {
             self.applied = Some(new);
         }
         if appliers.poll_hdr_metadata(engine) {
-            wake_after(Duration::from_millis(50));
         }
         if self.effect_polls_left > 0 {
             // The platform reports blur's verdict a frame or two after the request.
@@ -208,7 +190,6 @@ impl<F> Shell<F> {
                     lock(&self.bridge.results).push((SettingsDomain::WindowEffect, verdict));
                 }
             } else if self.effect_polls_left > 0 {
-                wake_after(Duration::from_millis(50));
             }
         }
     }
@@ -221,7 +202,6 @@ where
     fn init(&mut self, engine: &mut Engine<'_>) -> Result<(), Error> {
         watchdog::step("engine started (device and window created)");
         engine.set_frame_mode(FrameMode::Continuous);
-        let _ = REDRAW.set(engine.redraw_handle());
         if let Some(mut draw) = self.draw.take() {
             ui::install_draw_hook(move |ui| {
                 watchdog::frame_begin();
@@ -254,7 +234,6 @@ where
             }
             if pressed {
                 // Make sure the UI is drawn to act on it.
-                wake();
             }
         }
         let surface = sturdy::render::SurfaceHandle::from_window_id(frame.window_id);

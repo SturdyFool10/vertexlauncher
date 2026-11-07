@@ -4,6 +4,7 @@
 mod command_history;
 mod fs_util;
 mod hotbars;
+mod manage;
 mod mod_configs;
 pub mod nbt;
 mod resource_packs;
@@ -27,6 +28,7 @@ pub fn available_mod_configs() -> Vec<(&'static str, &'static str)> {
         .map(|config| (config.id, config.name))
         .collect()
 }
+pub use manage::{ManageOutcome, ManageRequest, manage};
 pub use worlds::{
     WorldPaths, WorldSyncOutcome, disable_world_sync, enable_world_sync, set_world_members,
 };

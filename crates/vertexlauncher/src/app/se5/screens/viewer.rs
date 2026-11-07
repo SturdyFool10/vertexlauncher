@@ -102,7 +102,6 @@ pub fn picture(
         || zoom.abs() > 0.05
         || pan.length_squared() > 0.0
     {
-        kit.keep_awake_for(std::time::Duration::from_millis(16));
     }
 
     // The visible window is a fixed box; the picture, enlarged by the zoom, slides behind it.

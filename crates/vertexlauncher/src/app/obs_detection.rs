@@ -200,9 +200,8 @@ pub(super) struct ObsWatcher {
 }
 
 impl ObsWatcher {
-    /// Starts the polling thread, scanning from the start if `enabled`. `wake` is called when OBS
-    /// starts or stops, so the change is acted on even while the launcher is idle.
-    pub(super) fn spawn(wake: impl Fn() + Send + 'static, enabled: bool) -> Self {
+    /// Starts the polling thread, scanning from the start if `enabled`.
+    pub(super) fn spawn(enabled: bool) -> Self {
         let enabled = Arc::new(AtomicBool::new(enabled));
         let running = Arc::new(AtomicBool::new(false));
         let thread_enabled = Arc::clone(&enabled);
@@ -212,9 +211,7 @@ impl ObsWatcher {
             .spawn(move || {
                 loop {
                     let found = thread_enabled.load(Ordering::Relaxed) && obs_is_running();
-                    if thread_running.swap(found, Ordering::Relaxed) != found {
-                        wake();
-                    }
+                    thread_running.store(found, Ordering::Relaxed);
                     std::thread::sleep(POLL_INTERVAL);
                 }
             });

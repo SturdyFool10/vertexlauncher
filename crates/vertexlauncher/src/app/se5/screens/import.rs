@@ -250,7 +250,6 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                 .as_deref()
                 .unwrap_or("Inspecting import source in the background...");
             kit.text(ui, TextRole::Muted, message);
-            kit.keep_awake_for(std::time::Duration::from_millis(100));
         }
         if import.import_in_flight {
             let progress = import.import_latest_progress.as_ref();
@@ -479,7 +478,6 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
             cancel = true;
         }
     });
-    kit.keep_awake_for(std::time::Duration::from_millis(400));
     if open_folder && let Err(err) = launcher_ui::desktop::open_in_file_manager(&downloads_dir) {
         launcher_ui::notification::error!(
             "curseforge",

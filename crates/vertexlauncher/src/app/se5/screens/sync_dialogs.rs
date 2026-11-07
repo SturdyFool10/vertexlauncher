@@ -1,7 +1,6 @@
 //! Home's sync dialogs: which instances a multiplayer server is kept in, and sharing a world between instances.
 
 use std::collections::BTreeSet;
-use std::time::Duration;
 
 use instance_sync::compare_game_versions;
 use instances::ServerSyncScope;
@@ -261,7 +260,6 @@ fn poll_world(
         outcome,
     }) = result
     else {
-        vertex_shell::wake_after(Duration::from_millis(100));
         return;
     };
     sync.pending = None;
@@ -361,7 +359,6 @@ pub fn world_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> boo
                 "Working… moving or copying a large world can take a while.",
             );
             kit.progress(ui, "world-sync::progress", None, kit::uptime());
-            kit.keep_awake_for(Duration::from_millis(100));
         } else if let Some((is_error, message)) = &sync.message {
             kit::label(
                 ui,

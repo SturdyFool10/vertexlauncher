@@ -229,7 +229,6 @@ fn shared_store() -> &'static Mutex<AccountColorStore> {
 pub fn warm() {
     launcher_runtime::spawn_blocking_detached(|| {
         shared_store();
-        crate::ui_waker::wake();
     });
 }
 
@@ -262,7 +261,6 @@ pub fn set_color(account_id: &str, color: Option<Color32>) {
             }
             (store.path.clone(), store.to_json())
         };
-        crate::ui_waker::wake();
         if let Err(error) = json.and_then(|json| write_file(&path, &json)) {
             tracing::warn!(
                 target: "vertexlauncher/account_colors",

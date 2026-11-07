@@ -16,5 +16,6 @@ pub mod pending;
 pub mod screenshots;
 pub mod settings;
 pub mod skins;
+pub mod manage_dialogs;
 pub mod sync_dialogs;
 pub mod viewer;

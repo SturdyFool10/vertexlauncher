@@ -205,7 +205,6 @@ impl SkinManagerState {
         launcher_runtime::spawn_blocking_detached(move || {
             let result = auth::load_cached_accounts().map_err(|err| err.to_string());
             let _ = tx.send((profile_id, result));
-            crate::ui_waker::wake();
         });
     }
 
@@ -288,7 +287,7 @@ impl SkinManagerState {
         self.pending_cape_id = None;
     }
 
-    pub(super) fn poll_worker(&mut self, repaint: impl Fn()) {
+    pub(super) fn poll_worker(&mut self) {
         self.poll_snapshot();
         let Some(rx) = self.worker_rx.take() else {
             return;
@@ -394,12 +393,10 @@ impl SkinManagerState {
         }
         if keep_rx {
             self.worker_rx = Some(rx);
-        } else {
-            repaint();
         }
     }
 
-    pub(super) fn poll_pick_skin_result(&mut self, repaint: impl Fn()) {
+    pub(super) fn poll_pick_skin_result(&mut self) {
         let Some(rx) = self.pick_skin_results_rx.as_ref().cloned() else {
             return;
         };
@@ -433,7 +430,6 @@ impl SkinManagerState {
                 notification::error!("skin_manager", "{err}");
             }
         }
-        repaint();
     }
 
     /// Decodes the skin to preview.

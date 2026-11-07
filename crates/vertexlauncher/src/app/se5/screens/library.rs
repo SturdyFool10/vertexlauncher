@@ -487,7 +487,6 @@ pub fn confirm_delete(
         }
         if deleting {
             kit.progress(ui, "library::delete::progress", None, kit::uptime());
-            kit.keep_awake_for(std::time::Duration::from_millis(100));
         }
         let _row = kit.row(ui, kit::SPACE_SM);
         kit.fill(ui);

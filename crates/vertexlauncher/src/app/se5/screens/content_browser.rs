@@ -1,7 +1,6 @@
 //! Content Browser: find mods, resource packs, shaders and data packs for the selected instance and install them.
 //! Search, filtering, paging, installed-state and the install queue are `launcher_ui`'s `content_browser_api`.
 
-use std::time::Duration;
 
 use launcher_ui::screens::AppScreen;
 use launcher_ui::screens::content_browser_api as api;
@@ -36,7 +35,6 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     let root = state.installations_root();
     let instance_root = instances::instance_root_path(root.as_path(), &instance);
     if api::tick(&mut state.content, &instance, root.as_path()) {
-        kit.keep_awake_for(Duration::from_millis(100));
     }
 
     let _scroll = kit.scroll(ui, SCROLL_ID, kit::SPACE_LG, kit::SPACE_XL);

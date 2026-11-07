@@ -615,3 +615,140 @@ mod pack_tests {
         assert!(store.resource_pack_overrides.is_empty());
     }
 }
+
+mod manage_tests {
+    use super::*;
+    use crate::{ManageRequest, manage};
+
+    fn ids(list: &[&str]) -> BTreeSet<String> {
+        list.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    #[test]
+    fn deleting_a_server_keeps_the_next_sync_from_putting_it_back() {
+        let mut fx = Fixture::new("manage-delete-server", &[("a", "1.21"), ("b", "1.21")]);
+        fs::write(fx.path("a", "servers.dat"), servers_file(&[("S", "play.example.com")])).unwrap();
+        fs::write(fx.path("b", "servers.dat"), servers_file(&[("S", "play.example.com")])).unwrap();
+        fx.store.set_server_sync_scope("play.example.com", ServerSyncScope::AllInstances);
+        let root = fx.root.clone();
+        manage(
+            &mut fx.store,
+            &root,
+            &HashSet::new(),
+            false,
+            ManageRequest::DeleteServer { instance_ids: ids(&["a"]), address: "play.example.com".into() },
+        )
+        .unwrap();
+        assert!(server_ips(&fx.path("a", "servers.dat")).is_empty());
+        fx.run(SyncOptions { servers: true, ..SyncOptions::default() }, &[]);
+        assert!(server_ips(&fx.path("a", "servers.dat")).is_empty());
+        assert_eq!(server_ips(&fx.path("b", "servers.dat")), vec!["play.example.com"]);
+    }
+
+    #[test]
+    fn moving_a_server_edits_both_lists_and_follows_it_in_the_scope() {
+        let mut fx = Fixture::new("manage-move-server", &[("a", "1.21"), ("b", "1.21")]);
+        fs::write(fx.path("a", "servers.dat"), servers_file(&[("S", "play.example.com")])).unwrap();
+        let root = fx.root.clone();
+        manage(
+            &mut fx.store,
+            &root,
+            &HashSet::new(),
+            false,
+            ManageRequest::TransferServer {
+                source_id: "a".into(),
+                address: "play.example.com".into(),
+                dest_id: "b".into(),
+                remove_source: true,
+            },
+        )
+        .unwrap();
+        assert!(server_ips(&fx.path("a", "servers.dat")).is_empty());
+        assert_eq!(server_ips(&fx.path("b", "servers.dat")), vec!["play.example.com"]);
+    }
+
+    #[test]
+    fn editing_a_server_renames_it_and_moves_its_scope_to_the_new_address() {
+        let mut fx = Fixture::new("manage-edit-server", &[("a", "1.21")]);
+        fs::write(fx.path("a", "servers.dat"), servers_file(&[("Old", "old.example.com")])).unwrap();
+        fx.store.set_server_sync_scope("old.example.com", ServerSyncScope::AllInstances);
+        let root = fx.root.clone();
+        manage(
+            &mut fx.store,
+            &root,
+            &HashSet::new(),
+            false,
+            ManageRequest::EditServer {
+                instance_ids: ids(&["a"]),
+                address: "old.example.com".into(),
+                new_name: "New".into(),
+                new_address: "new.example.com".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(server_ips(&fx.path("a", "servers.dat")), vec!["new.example.com"]);
+        assert_eq!(fx.store.server_sync_scope("new.example.com"), ServerSyncScope::AllInstances);
+        assert_eq!(fx.store.server_sync_scope("old.example.com"), ServerSyncScope::FollowDefault);
+    }
+
+    #[test]
+    fn a_running_instance_is_left_alone() {
+        let mut fx = Fixture::new("manage-running", &[("a", "1.21")]);
+        fs::write(fx.path("a", "servers.dat"), servers_file(&[("S", "x.example.com")])).unwrap();
+        let root = fx.root.clone();
+        let running = HashSet::from(["a".to_owned()]);
+        let result = manage(
+            &mut fx.store,
+            &root,
+            &running,
+            false,
+            ManageRequest::DeleteServer { instance_ids: ids(&["a"]), address: "x.example.com".into() },
+        );
+        assert!(result.is_err());
+        assert_eq!(server_ips(&fx.path("a", "servers.dat")), vec!["x.example.com"]);
+    }
+
+    #[test]
+    fn a_world_is_renamed_copied_and_deleted() {
+        let mut fx = Fixture::new("manage-world", &[("a", "1.21"), ("b", "1.21")]);
+        let world = fx.path("a", "saves/World");
+        fs::create_dir_all(&world).unwrap();
+        let level = NbtFile {
+            name: String::new(),
+            root: vec![("Data".to_owned(), Tag::Compound(vec![("LevelName".to_owned(), Tag::String(b"World".to_vec()))]))],
+        };
+        fs::write(world.join("level.dat"), nbt::write_gzip(&level).unwrap()).unwrap();
+        let root = fx.root.clone();
+        manage(
+            &mut fx.store,
+            &root,
+            &HashSet::new(),
+            false,
+            ManageRequest::RenameWorld { instance_ids: ids(&["a"]), folder: "World".into(), new_name: "Renamed".into() },
+        )
+        .unwrap();
+        let parsed = nbt::parse(&fs::read(world.join("level.dat")).unwrap()).unwrap();
+        let Some(Tag::Compound(data)) = nbt::get(&parsed.root, "Data") else { panic!("no Data") };
+        assert_eq!(nbt::get(data, "LevelName").and_then(Tag::as_str).as_deref(), Some("Renamed"));
+
+        manage(
+            &mut fx.store,
+            &root,
+            &HashSet::new(),
+            false,
+            ManageRequest::TransferWorld { source_id: "a".into(), folder: "World".into(), dest_id: "b".into(), remove_source: false },
+        )
+        .unwrap();
+        assert!(fx.path("b", "saves/World/level.dat").is_file());
+        manage(
+            &mut fx.store,
+            &root,
+            &HashSet::new(),
+            false,
+            ManageRequest::DeleteWorld { instance_ids: ids(&["a"]), folder: "World".into() },
+        )
+        .unwrap();
+        assert!(!world.exists());
+        assert!(fx.path("b", "saves/World").is_dir());
+    }
+}

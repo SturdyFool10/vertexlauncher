@@ -5,14 +5,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use vertex_shell::sturdy::desktop::{
     FileDialog, FileDialogKind, FileDialogResult, FileFilter, PendingFileDialog,
 };
-
-/// How often an open dialog is checked for an answer when nothing else is drawing.
-const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// What the dialog picks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +99,6 @@ impl FileDialogs {
         match dialog.to_engine(pick).open() {
             Ok(pending) => {
                 state.pending = Some(pending);
-                vertex_shell::wake_after(POLL_INTERVAL);
                 true
             }
             Err(err) => {
@@ -118,7 +113,6 @@ impl FileDialogs {
         let state = self.slots.get_mut(slot)?;
         let result = state.pending.as_ref()?.poll();
         let Some(result) = result else {
-            vertex_shell::wake_after(POLL_INTERVAL);
             return None;
         };
         state.pending = None;

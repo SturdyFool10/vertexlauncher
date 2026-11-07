@@ -32,10 +32,6 @@ pub struct CreateState {
 }
 
 impl CreateState {
-    pub fn busy(&self) -> bool {
-        self.catalog_in_flight || self.create_in_flight
-    }
-
     fn reset(&mut self) {
         let catalog = self.catalog.take();
         let filter = self.catalog_filter.take();
@@ -55,7 +51,6 @@ impl CreateState {
             let result = fetch_version_catalog_with_refresh(filter, force_refresh)
                 .map_err(|err| err.to_string());
             let _ = tx.send((filter, result));
-            vertex_shell::wake();
         });
     }
 }
@@ -345,6 +340,5 @@ fn start_create(state: &mut AppState, spec: NewInstanceSpec) {
             .map(|instance| (store, instance))
             .map_err(|err| err.to_string());
         let _ = tx.send(result);
-        vertex_shell::wake();
     });
 }

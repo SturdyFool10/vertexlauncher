@@ -8,7 +8,7 @@ use crate::fs_util::{modified, write_atomic};
 use crate::nbt::{self, Compound, NbtFile, Tag, TagList};
 use crate::{SyncInstance, SyncReport};
 
-const SERVERS_FILE: &str = "servers.dat";
+pub(crate) const SERVERS_FILE: &str = "servers.dat";
 const NBT_COMPOUND_ID: u8 = 10;
 
 struct LoadedServers {
@@ -17,14 +17,14 @@ struct LoadedServers {
     dirty: bool,
 }
 
-fn server_list(file: &NbtFile) -> &[Tag] {
+pub(crate) fn server_list(file: &NbtFile) -> &[Tag] {
     match nbt::get(&file.root, "servers") {
         Some(Tag::List(list)) => &list.items,
         _ => &[],
     }
 }
 
-fn entry_key(entry: &Tag) -> Option<String> {
+pub(crate) fn entry_key(entry: &Tag) -> Option<String> {
     let Tag::Compound(compound) = entry else {
         return None;
     };
@@ -32,7 +32,7 @@ fn entry_key(entry: &Tag) -> Option<String> {
     (!key.is_empty()).then_some(key)
 }
 
-fn push_entry(file: &mut NbtFile, entry: Compound) {
+pub(crate) fn push_entry(file: &mut NbtFile, entry: Compound) {
     if nbt::get(&file.root, "servers").is_none() {
         file.root.push((
             "servers".to_owned(),

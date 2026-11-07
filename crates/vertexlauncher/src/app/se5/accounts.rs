@@ -560,7 +560,6 @@ pub fn sign_in_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> b
             None if in_progress => {
                 kit.text(ui, TextRole::Body, "Finish signing in in your browser…");
                 kit.progress(ui, "accounts::progress", None, kit::uptime());
-                kit.keep_awake_for(std::time::Duration::from_millis(100));
             }
             None => {
                 kit::label(

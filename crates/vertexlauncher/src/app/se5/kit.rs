@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::icons::{self, Icon};
 use super::images::{ImageCache, ImageSource, Picture};
@@ -18,7 +18,7 @@ use vertex_shell::sturdy::ui::{
     ElementDesc, ElementScope, FloatTarget, Floating, Padding, Sizing, TextStyle, TextWrap, Ui,
 };
 use vertex_shell::sturdy::ui_kit::{
-    self, AnimationKeepAlive, FocusNavigator, ModalStyle, NavInput, PopupStyle,
+    self, FocusNavigator, ModalStyle, NavInput, PopupStyle,
 };
 use vertex_shell::sturdy::widgets::{
     ButtonState, DropdownState, ScrollAreaState, ScrollbarStyle, SliderConfig, SliderInput,
@@ -585,7 +585,6 @@ pub struct Kit {
     /// Base UI font size in pixels (`Config::ui_font_size`).
     pub font_size: f32,
     pub typography: config::TypographySettings,
-    pub keep_alive: AnimationKeepAlive,
     pub delta_seconds: f32,
     pub images: ImageCache,
     /// Icon render scale from the anti-aliasing setting.
@@ -633,6 +632,8 @@ pub struct Kit {
     /// A text field had focus last frame / has focus this frame (arrow keys then belong to its caret).
     text_focused_last: bool,
     text_focused_now: bool,
+    /// The text field being edited this frame, for the next frame's navigation focus.
+    text_focused_id: Option<String>,
     /// Whether the UI is being driven by a controller, so focus rings show without the keyboard.
     pub controller_active: bool,
     /// The controller's context-menu button (X) was pressed this frame.
@@ -647,7 +648,6 @@ impl Kit {
             palette,
             font_size,
             typography: config::TypographySettings::default(),
-            keep_alive: AnimationKeepAlive::default(),
             delta_seconds: 0.016,
             images: ImageCache::default(),
             svg_supersample: 2,
@@ -677,6 +677,7 @@ impl Kit {
             scroll_container: None,
             text_focused_last: false,
             text_focused_now: false,
+            text_focused_id: None,
             controller_active: false,
             context_pressed: false,
             back_consumed: false,
@@ -705,11 +706,20 @@ impl Kit {
             scroll: gamepad.scroll + keyboard.scroll,
         };
         if input.direction.is_some() || input.activate {
-            self.keep_alive.keep_awake_for(Duration::from_millis(50));
+        }
+        // The navigator re-focuses its focused element every frame, which would pull the keyboard away from a text
+        // field being typed in (the typed text then lands nowhere, or the field is reset to its value). While one is
+        // being edited and the controller is not navigating, the field itself is the navigation focus, so what is
+        // re-focused each frame is the field.
+        if let Some(field) = self.text_focused_id.take()
+            && self.text_focused_last
+            && gamepad.direction.is_none()
+            && !gamepad.activate
+        {
+            self.focus.set_focus(Some(&field));
         }
         self.focus.begin_frame(ui, input);
         if self.focus.moved() {
-            self.keep_alive.keep_awake_for(Duration::from_millis(50));
         }
     }
 
@@ -865,10 +875,6 @@ impl Kit {
         }
     }
 
-    /// Keeps frames coming for `duration` (animations, polling a background task).
-    pub fn keep_awake_for(&mut self, duration: Duration) {
-        self.keep_alive.keep_awake_for(duration);
-    }
 
     /// The size of body text in pixels, with the launcher-wide UI font size applied (18 is neutral).
     fn px(&self, scale: f32) -> u16 {
@@ -1098,7 +1104,6 @@ impl Kit {
             Some(picture) => ui.image(&desc, picture.texture),
             None => {
                 if self.images.loading() {
-                    self.keep_alive.keep_awake_for(Duration::from_millis(100));
                 }
                 drop(ui.element(&desc.background(self.palette.bg_light)));
             }
@@ -1214,7 +1219,6 @@ impl Kit {
             let thumb_top = (pointer.y - origin.y - MARGIN - grab).clamp(0.0, travel);
             offset = thumb_top / travel * max_offset;
             ui.set_scroll_offset(id, Vec2::new(0.0, -offset));
-            self.keep_alive.keep_awake_for(Duration::from_millis(50));
         }
         let thumb_top = offset / max_offset * travel;
         let active = self
@@ -1683,7 +1687,6 @@ impl Kit {
             return None;
         }
         if (open && progress < 1.0) || (!open && progress > 0.0) {
-            self.keep_alive.keep_awake_for(Duration::from_millis(32));
         }
         let eased = if progress < 0.5 {
             2.0 * progress * progress
@@ -2264,7 +2267,7 @@ impl Kit {
             .texts
             .entry(id.to_owned())
             .or_insert_with(|| TextEditState::with_text(value));
-        if !state.focused() && state.text() != *value {
+        if !state.focused() && !ui.has_focus(id) && state.text() != *value {
             state.set_text(value);
         }
         if activated {
@@ -2291,6 +2294,7 @@ impl Kit {
         // the UI's keyboard focus, which only `ui.focus` sets): arrows must then move its caret, not the page's focus.
         if result.focused || ui.has_focus(id) {
             self.text_focused_now = true;
+            self.text_focused_id = Some(id.to_owned());
         }
         result
     }
@@ -2391,7 +2395,6 @@ impl Kit {
         }
         let progress = entry.progress;
         if progress != target {
-            self.keep_awake_for(Duration::from_millis(32));
         }
         let eased = if progress < 0.5 {
             2.0 * progress * progress
@@ -2722,9 +2725,6 @@ impl Kit {
         let waited = self.tooltips.entry(anchor_id.to_owned()).or_insert(0.0);
         *waited += self.delta_seconds;
         if *waited < DELAY_SECONDS {
-            self.keep_alive.keep_awake_for(Duration::from_secs_f32(
-                (DELAY_SECONDS - *waited).max(0.016),
-            ));
             return;
         }
 
@@ -2784,7 +2784,6 @@ impl Kit {
             self::label(ui, text, &style);
         }
         // Follows the pointer while it moves over the anchor.
-        self.keep_alive.keep_awake_for(Duration::from_millis(16));
     }
 
     // -- Settings rows --------------------------------------------------------------------------------------------
@@ -3014,9 +3013,7 @@ impl Kit {
             .id(id.into())
             .width(Sizing::Grow)
             .height(Sizing::Fixed(6.0));
-        if let Some(next) = ui_kit::progress_bar(ui, &desc, progress, &style, time_seconds) {
-            self.keep_alive.keep_awake_for(next * 4);
-        }
+        let _ = ui_kit::progress_bar(ui, &desc, progress, &style, time_seconds);
     }
 
     /// Drops widget state for ids that start with `prefix` (a screen or dialog that closed).

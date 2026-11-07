@@ -51,44 +51,6 @@ pub(super) fn bulk_update_button_tooltip(kind: InstalledContentKind) -> String {
     }
 }
 
-pub(super) fn installed_content_lookup_repaint_delay(
-    state: &InstanceScreenState,
-    installed_files: &[InstalledContentFile],
-) -> Option<Duration> {
-    let now = Instant::now();
-    let mut next_retry: Option<Duration> = None;
-
-    for entry in installed_files {
-        if state.content_lookup_in_flight.contains(&entry.lookup_key)
-            || !state.content_metadata_cache.contains_key(&entry.lookup_key)
-        {
-            return Some(CONTENT_LOOKUP_REPAINT_INTERVAL);
-        }
-
-        if state
-            .content_metadata_cache
-            .get(&entry.lookup_key)
-            .is_some_and(|resolution| resolution.is_none())
-        {
-            match state
-                .content_lookup_retry_after_by_key
-                .get(&entry.lookup_key)
-            {
-                Some(retry_at) if *retry_at > now => {
-                    let remaining = retry_at.saturating_duration_since(now);
-                    next_retry = Some(match next_retry {
-                        Some(current) => current.min(remaining),
-                        None => remaining,
-                    });
-                }
-                _ => return Some(CONTENT_LOOKUP_REPAINT_INTERVAL),
-            }
-        }
-    }
-
-    next_retry
-}
-
 pub(super) fn update_all_installed_content(
     instance_root: &Path,
     kind: InstalledContentKind,

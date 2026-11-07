@@ -26,7 +26,6 @@ impl Default for Gamepad {
         let (tx, rx) = std::sync::mpsc::channel();
         launcher_runtime::spawn_blocking_detached(move || {
             let _ = tx.send(GamepadNavigator::new());
-            vertex_shell::wake();
         });
         Self {
             navigator: None,
@@ -128,14 +127,4 @@ pub fn frame(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         calibration.start(device);
         *dialog = Some(Dialog::GamepadCalibration);
     }
-    // Controllers do not wake the window; keep looking while one is connected, and now and then for new ones.
-    let connected = gamepad
-        .navigator
-        .as_ref()
-        .is_some_and(|navigator| navigator.connected() > 0);
-    vertex_shell::wake_after(std::time::Duration::from_millis(if connected {
-        16
-    } else {
-        1000
-    }));
 }

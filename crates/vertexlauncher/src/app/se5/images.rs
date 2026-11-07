@@ -114,10 +114,6 @@ impl ImageCache {
                     let due = entry.failures < MAX_LOAD_ATTEMPTS
                         && entry.retry_at.is_some_and(|at| std::time::Instant::now() >= at);
                     if !due {
-                        // Look again when the pause ends.
-                        if let Some(at) = entry.retry_at.filter(|_| entry.failures < MAX_LOAD_ATTEMPTS) {
-                            vertex_shell::wake_after(at.saturating_duration_since(std::time::Instant::now()));
-                        }
                         return None;
                     }
                     entry.slot = Slot::Loading;
@@ -145,13 +141,11 @@ impl ImageCache {
             launcher_runtime::spawn_blocking_detached(move || {
                 let result = load(&source, &key, max_dimension);
                 let _ = tx.send((key, result));
-                vertex_shell::wake();
             });
         } else {
             drop(launcher_runtime::spawn_compute(async move {
                 let result = load(&source, &key, max_dimension);
                 let _ = tx.send((key, result));
-                vertex_shell::wake();
             }));
         }
         None
@@ -193,7 +187,6 @@ impl ImageCache {
         loop {
             if started.elapsed() > UPLOAD_BUDGET {
                 // Out of time: the rest stay queued; look again next frame.
-                vertex_shell::wake();
                 break;
             }
             let Ok((key, result)) = self.rx.try_recv() else {
@@ -214,7 +207,6 @@ impl ImageCache {
                     // Doubling pause: 1 s, 2 s, 4 s, 8 s, then the picture is given up on.
                     let pause = FIRST_RETRY_DELAY * (1_u32 << (entry.failures - 1).min(8));
                     entry.retry_at = Some(std::time::Instant::now() + pause);
-                    vertex_shell::wake_after(pause);
                     Slot::Failed
                 }
             };

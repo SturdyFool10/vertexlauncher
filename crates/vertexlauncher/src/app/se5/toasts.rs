@@ -32,7 +32,6 @@ pub fn show(ui: &mut Ui<'_>, kit: &mut Kit, config: &Config) {
         return;
     }
     // Expiry bars and fades animate; keep frames coming while any popup is up.
-    kit.keep_awake_for(Duration::from_millis(50));
 
     let _stack = ui.element(
         &ElementDesc::new()

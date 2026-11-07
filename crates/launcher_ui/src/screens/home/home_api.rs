@@ -185,10 +185,6 @@ impl HomeSession {
         state.screenshot_scan_pending || state.candidate_scan_in_flight || state.delete_screenshot_in_flight
     }
 
-    pub fn screenshot_scan_interval() -> Duration {
-        SCREENSHOT_SCAN_INTERVAL
-    }
-
     pub fn screenshots(&self) -> Vec<ScreenshotView> {
         self.state
             .screenshots

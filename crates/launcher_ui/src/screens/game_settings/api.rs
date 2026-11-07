@@ -81,8 +81,8 @@ pub struct Session {
 }
 
 impl Session {
-    /// Opens the live view of the instance's options and starts the audio device lookup. `wake` is called when it ends.
-    pub fn open(instance: &InstanceRecord, installations_root: &Path, wake: impl Fn() + Send + 'static) -> Self {
+    /// Opens the live view of the instance's options and starts the audio device lookup.
+    pub fn open(instance: &InstanceRecord, installations_root: &Path) -> Self {
         let instance_root = instance_root_path(installations_root, instance);
         let path = instance_root.join("options.txt");
         let audio_devices = Arc::new(Mutex::new(None));
@@ -93,7 +93,6 @@ impl Session {
                 if let Ok(mut slot) = audio_devices.lock() {
                     *slot = Some(devices);
                 }
-                wake();
             });
         }
         Self {
@@ -112,13 +111,12 @@ impl Session {
     }
 
     /// Follows the file and flushes edits that have been idle long enough. Returns when to look again.
-    pub fn poll(&mut self, instances: &InstanceStore, config: &Config) -> Duration {
+    pub fn poll(&mut self, instances: &InstanceStore, config: &Config) {
         let polled = self.live.poll(SAVE_DELAY);
         if polled == Poll::Saved && instances.game_settings_sync.instances.contains(&self.instance_id) {
             // Propagate right away instead of waiting for the next launch or exit.
             sync_runner::spawn(instances.clone(), SyncRunConfig::from_config(config));
         }
-        self.live.time_until_save(SAVE_DELAY).map_or(WATCH_INTERVAL, |wait| wait.min(WATCH_INTERVAL))
     }
 
     /// Saves anything still pending; call before dropping the session.

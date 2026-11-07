@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use config::Config;
 use instance_sync::{
-    SyncOptions, SyncReport, WorldPaths, WorldSyncOutcome, disable_world_sync, enable_world_sync,
+    ManageOutcome, ManageRequest, SyncOptions, SyncReport, WorldPaths, WorldSyncOutcome, disable_world_sync, enable_world_sync,
     set_world_members, sync_all,
 };
-use instances::{InstanceStore, SyncedWorld, instance_root_path};
+use instances::{InstanceStore, ServerSyncScope, SyncedWorld, instance_root_path};
 
 /// Settings needed to run a sync pass, captured so it can move to a worker thread.
 #[derive(Clone, Debug)]
@@ -171,4 +171,47 @@ pub fn spawn(store: InstanceStore, run: SyncRunConfig) {
         .spawn(move || {
             run_blocking(&store, &run);
         });
+}
+
+/// Result of a batch of [`ManageRequest`]s: the sync rules to store (a deleted or moved server changes them), and what
+/// happened.
+pub struct ManageResult {
+    pub server_sync_scopes: std::collections::BTreeMap<String, ServerSyncScope>,
+    pub outcome: Result<ManageOutcome, String>,
+}
+
+pub type ManageReceiver = Arc<Mutex<mpsc::Receiver<ManageResult>>>;
+
+/// Runs `requests` in order on a worker thread (copying a world can take a while), stopping at the first that fails.
+pub fn spawn_manage(mut store: InstanceStore, run: &SyncRunConfig, requests: Vec<ManageRequest>) -> ManageReceiver {
+    let (tx, rx) = mpsc::channel();
+    let run = run.clone();
+    let _ = std::thread::Builder::new()
+        .name("entry-manage".to_owned())
+        .spawn(move || {
+            let running = running_instances(&store, &run);
+            let mut messages = Vec::new();
+            let mut outcome = Ok(ManageOutcome::default());
+            for request in requests {
+                match instance_sync::manage(
+                    &mut store,
+                    &run.installations_root,
+                    &running,
+                    run.options.servers_default_all_instances,
+                    request,
+                ) {
+                    Ok(done) => messages.push(done.message),
+                    Err(err) => {
+                        outcome = Err(err);
+                        break;
+                    }
+                }
+            }
+            if outcome.is_ok() {
+                messages.dedup();
+                outcome = Ok(ManageOutcome { message: messages.join(" ") });
+            }
+            let _ = tx.send(ManageResult { server_sync_scopes: store.server_sync_scopes, outcome });
+        });
+    Arc::new(Mutex::new(rx))
 }

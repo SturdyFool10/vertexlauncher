@@ -28,7 +28,6 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             .and_then(|key| navigator.current_left_stick(key))
     });
     // The stick moves while the dialog is open; keep sampling it.
-    kit.keep_awake_for(std::time::Duration::from_millis(50));
 
     let style = ModalStyle {
         background: kit.palette.bg_dark,

@@ -27,4 +27,3 @@ pub mod qr;
 pub mod screens;
 pub mod screenshot_watch;
 pub mod sync_runner;
-pub mod ui_waker;

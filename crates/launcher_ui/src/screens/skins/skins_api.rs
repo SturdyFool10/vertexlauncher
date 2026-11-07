@@ -122,7 +122,6 @@ impl SkinsSession {
         auth: Option<&LaunchAuthContext>,
         opened: bool,
         settings: &PreviewSettings,
-        wake: impl Fn() + Copy,
     ) -> bool {
         let state = &mut self.state;
         state.sync_active_account(auth);
@@ -138,8 +137,8 @@ impl SkinsSession {
         state.preview_motion_blur_sample_count = settings.motion_blur_sample_count.max(1) as usize;
         state.preview_3d_layers_enabled = settings.layers_3d_enabled;
         state.expressions_enabled = settings.expressions_enabled;
-        state.poll_worker(wake);
-        state.poll_pick_skin_result(wake);
+        state.poll_worker();
+        state.poll_pick_skin_result();
         state.try_consume_open_refresh();
         state.ensure_skin_texture();
         state.ensure_default_elytra_texture();

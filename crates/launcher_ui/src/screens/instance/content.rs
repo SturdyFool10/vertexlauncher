@@ -28,14 +28,13 @@ use self::content_hash_cache::*;
 pub(super) use self::content_metadata_lookup::poll_content_lookup_results;
 use self::content_metadata_lookup::*;
 use self::content_updates::{
-    bulk_update_button_label, bulk_update_button_tooltip, installed_content_lookup_repaint_delay,
+    bulk_update_button_label, bulk_update_button_tooltip,
     prefetch_bulk_update_metadata, resolve_installed_content_metadata_batch,
     tab_has_known_available_update,
 };
 use self::installed_entry_display::InstalledEntryDisplay;
 
 const CONTENT_HASH_CACHE_FLUSH_DEBOUNCE: Duration = Duration::from_millis(750);
-const CONTENT_LOOKUP_REPAINT_INTERVAL: Duration = Duration::from_millis(100);
 const CONTENT_LOOKUP_BATCH_SIZE: usize = 24;
 const CONTENT_UPDATE_PREFETCH_BATCH_SIZE: usize = 4;
 const CONTENT_UPDATE_LOG_TARGET: &str = "vertexlauncher/content_update";

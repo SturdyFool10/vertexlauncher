@@ -44,15 +44,6 @@ pub struct Flows {
 }
 
 impl Flows {
-    /// Something here needs the UI to keep polling.
-    pub fn busy(&self) -> bool {
-        self.import.import_in_flight
-            || self.import.preview_in_flight
-            || self.import_preflight_rx.is_some()
-            || self.pending_manual.is_some()
-            || self.discover_preflight_in_flight
-    }
-
     fn manual_or_import_blocked(&self) -> bool {
         self.import.import_in_flight
             || self.import_preflight_rx.is_some()
@@ -96,7 +87,6 @@ impl AppState {
         flows.import_preflight_request = Some(request.clone());
         launcher_runtime::spawn_blocking_detached(move || {
             let _ = tx.send(prepare_curseforge_manual_downloads(&request));
-            vertex_shell::wake();
         });
     }
 
@@ -116,7 +106,6 @@ impl AppState {
                 request,
                 progress_tx,
             ));
-            vertex_shell::wake();
         });
     }
 
@@ -277,7 +266,6 @@ impl AppState {
             let _ = tx.send(prepare_curseforge_manual_download_for_file(
                 project_id, file_id,
             ));
-            vertex_shell::wake();
         });
     }
 
@@ -295,7 +283,6 @@ impl AppState {
                 request,
                 progress_tx,
             ));
-            vertex_shell::wake();
         });
     }
 

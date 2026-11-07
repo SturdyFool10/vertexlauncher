@@ -373,9 +373,12 @@ pub struct Config {
     drag_scroll_enabled: bool,
     #[serde(default = "default_follow_console_on_launch")]
     follow_console_on_launch: bool,
-    /// The least severe line the console shows.
+    /// The least severe line the console shows for Vertex's own log.
     #[serde(default = "default_console_log_level")]
     console_log_level: ConsoleLogLevel,
+    /// The least severe line the console shows for a game's log.
+    #[serde(default = "default_console_log_level")]
+    game_console_log_level: ConsoleLogLevel,
     /// Open the launcher fullscreen. Off by default.
     #[serde(default)]
     start_fullscreen: bool,
@@ -606,6 +609,15 @@ impl Config {
 
     pub fn set_console_log_level(&mut self, level: ConsoleLogLevel) {
         self.console_log_level = level;
+    }
+
+    /// The least severe log line the console shows for a game.
+    pub fn game_console_log_level(&self) -> ConsoleLogLevel {
+        self.game_console_log_level
+    }
+
+    pub fn set_game_console_log_level(&mut self, level: ConsoleLogLevel) {
+        self.game_console_log_level = level;
     }
 
     /// Returns configured SVG rasterization anti-aliasing mode.
@@ -1470,6 +1482,7 @@ impl Default for Config {
             drag_scroll_enabled: true,
             follow_console_on_launch: true,
             console_log_level: default_console_log_level(),
+            game_console_log_level: default_console_log_level(),
             start_fullscreen: false,
             // Off here; a first run (and a saved config that predates the setting) turns it on for a Steam Deck.
             steam_deck_handoff: false,

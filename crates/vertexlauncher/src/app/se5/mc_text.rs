@@ -254,6 +254,5 @@ pub fn draw(ui: &mut Ui<'_>, kit: &Kit, id: &str, spans: &[Span], base: &TextSty
     // The game picks new letters on every frame it draws, so while obfuscated text is on screen, the next frame is asked
     // for as soon as this one is done.
     if animates(spans) {
-        vertex_shell::wake();
     }
 }

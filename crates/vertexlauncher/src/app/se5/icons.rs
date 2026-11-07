@@ -129,7 +129,6 @@ fn ensure_file(icon: Icon, turn: u8) -> Option<PathBuf> {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert((icon, turn), state);
-        vertex_shell::wake();
     });
     None
 }
@@ -185,7 +184,6 @@ pub fn draw_turned(
     let on_gpu = ui.engine().assets().rhi_texture(texture).is_some();
     if !texture_seen(&path, target) || !on_gpu {
         drop(ui.element(&slot));
-        vertex_shell::wake_after(std::time::Duration::from_millis(16));
         return;
     }
     ui.svg(

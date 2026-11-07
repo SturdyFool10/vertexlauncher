@@ -91,7 +91,6 @@ pub fn request_download(runtime: JavaRuntimeVersion) {
     tokio_runtime::spawn_detached(async move {
         let outcome = ensure_openjdk_runtime_async(major).await.map(Outcome::Downloaded).map_err(|err| err.to_string());
         let _ = tx.send(ActionResult { kind: JavaActionKind::Download, outcome });
-        crate::ui_waker::wake();
     });
 }
 
@@ -106,7 +105,6 @@ pub fn request_validation(runtime: JavaRuntimeVersion, path: String) {
     tokio_runtime::spawn_detached(async move {
         let outcome = validate_java_executable(path.as_str()).await.map(Outcome::Validated);
         let _ = tx.send(ActionResult { kind: JavaActionKind::Validate, outcome });
-        crate::ui_waker::wake();
     });
 }
 

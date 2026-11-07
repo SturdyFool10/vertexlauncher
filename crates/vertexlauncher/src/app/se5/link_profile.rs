@@ -52,7 +52,6 @@ pub fn poll(state: &mut AppState) {
                 let detected =
                     detect_instance_versions(path.as_path()).map_err(|err| err.to_string());
                 let _ = tx.send((path, detected));
-                vertex_shell::wake();
             });
         }
     }

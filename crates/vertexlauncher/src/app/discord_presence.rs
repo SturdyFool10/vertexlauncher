@@ -78,7 +78,6 @@ fn worker_loop(commands: std::sync::mpsc::Receiver<Command>, events: std::sync::
         if events.send(event).is_err() {
             break;
         }
-        vertex_shell::wake();
     }
     client.reset();
 }

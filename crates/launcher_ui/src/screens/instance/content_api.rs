@@ -46,7 +46,7 @@ pub fn view(
     state: &mut InstanceScreenState,
     instance_root: &Path,
     config: &Config,
-) -> (ContentView, Option<Duration>) {
+) -> ContentView {
     poll_installed_content_scan_results(state);
     poll_content_hash_cache_load_results(state);
     poll_content_hash_cache_save_results(state);
@@ -55,7 +55,6 @@ pub fn view(
 
     let kind = state.selected_content_tab;
     let kinds = InstalledContentKind::ALL.to_vec();
-    let mut wake: Option<Duration> = None;
     let mut view = ContentView {
         kind,
         kinds,
@@ -76,11 +75,11 @@ pub fn view(
     if state.installed_content_cache.scans_in_flight.contains(&kind) {
         view.loading = true;
         view.empty_message = Some(format!("Loading installed {}...", kind.label().to_lowercase()));
-        return (view, Some(Duration::from_millis(100)));
+        return view;
     }
     if files.is_empty() {
         view.empty_message = Some(format!("No {} installed.", kind.label().to_lowercase()));
-        return (view, None);
+        return view;
     }
 
     let filtered = filter_installed_content_indices(state, files.as_ref());
@@ -99,7 +98,7 @@ pub fn view(
         } else {
             format!("No {} match '{query}'.", kind.label().to_lowercase())
         });
-        return (view, None);
+        return view;
     }
 
     let page_size = if INSTALLED_CONTENT_PAGE_SIZES.contains(&state.installed_content_page_size) {
@@ -119,9 +118,6 @@ pub fn view(
     prefetch_bulk_update_metadata(state, files.as_ref(), kind, game_version.as_str(), modloader.as_str());
     if tab_has_known_available_update(state, files.as_ref()) {
         view.bulk_update = Some((bulk_update_button_label(kind), bulk_update_button_tooltip(kind)));
-    }
-    if let Some(delay) = installed_content_lookup_repaint_delay(state, files.as_ref()) {
-        wake = Some(delay);
     }
 
     let start = (state.installed_content_page - 1) * page_size;
@@ -156,20 +152,9 @@ pub fn view(
             icon_url: display.icon_url,
         });
     }
-    // The hash cache writes itself out shortly after it changes.
-    if state.content_hash_cache_dirty {
-        let wait = state
-            .content_hash_cache_dirty_since
-            .map(|since| CONTENT_HASH_CACHE_FLUSH_DEBOUNCE.saturating_sub(since.elapsed()))
-            .unwrap_or(CONTENT_HASH_CACHE_FLUSH_DEBOUNCE);
-        wake = Some(wake.map_or(wait, |current| current.min(wait)));
-    }
-    if state.content_hash_cache_load_in_flight || state.content_hash_cache_save_in_flight {
-        wake = Some(Duration::from_millis(100));
-    }
     flush_content_hash_cache(state, instance_root);
     let _ = config;
-    (view, wake)
+    view
 }
 
 pub fn select_tab(state: &mut InstanceScreenState, kind: InstalledContentKind) {

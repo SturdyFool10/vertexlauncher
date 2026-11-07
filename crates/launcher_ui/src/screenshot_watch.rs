@@ -55,15 +55,13 @@ fn state() -> &'static Mutex<WatchState> {
 /// `player` should be the account that is playing right now, or `None` when no game is
 /// running (e.g. the file was copied in by hand), in which case the notification stays generic.
 /// The account is mentioned in the notification, so streamer mode hides it when it is drawn.
-///
-/// Returns how long until the next poll is due, so an on-demand UI can schedule a wake-up.
 pub fn poll(
     instances: &InstanceStore,
     config: &Config,
     player: Option<AccountMention<'_>>,
-) -> Duration {
+) {
     let Ok(mut state) = state().lock() else {
-        return POLL_INTERVAL;
+        return;
     };
 
     while let Ok(listings) = state.rx.try_recv() {
@@ -119,7 +117,6 @@ pub fn poll(
             let _ = tx.send(listings);
         });
     }
-    POLL_INTERVAL
 }
 
 fn list_screenshots(dir: &Path) -> Vec<PathBuf> {

@@ -2,10 +2,9 @@
 //! favorites, see server status), and a gallery of every screenshot. Scanning and server pinging are
 //! `launcher_ui`'s `home_api`, shared with the egui screen.
 
-use std::time::Duration;
 
 use instances::InstanceRecord;
-use launcher_ui::screens::home_api::{self as api, EntryKind, EntryView, HomeSession};
+use launcher_ui::screens::home_api::{self as api, EntryKind, EntryView};
 use launcher_ui::screens::{
     QuickLaunchCommandMode, build_quick_launch_command, build_quick_launch_steam_options,
 };
@@ -21,7 +20,7 @@ use super::super::images::ImageSource;
 use super::super::kit::{self, ButtonKind, Kit, MenuEntry, TextRole};
 use super::super::mc_text;
 use super::super::{AppState, Dialog};
-use super::{library, sync_dialogs};
+use super::{library, manage_dialogs, sync_dialogs};
 
 const SCROLL_ID: &str = "home::scroll";
 
@@ -67,9 +66,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
 
 fn activity(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if state.home.tick_activity(&state.instances, &state.config) {
-        kit.keep_awake_for(Duration::from_millis(100));
     }
-    vertex_shell::wake_after(HomeSession::scan_interval());
     usage(ui, kit, state);
 
     let view = state.home.activity();
@@ -116,6 +113,7 @@ fn activity(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 }
             }
             EntryAction::CopyCommand(steam) => copy_command(ui, state, &entry, steam),
+            EntryAction::Manage(mode) => manage_dialogs::open(state, &entry, mode),
             EntryAction::Sync => match entry.kind {
                 EntryKind::World => sync_dialogs::open_world(state, &entry),
                 EntryKind::Server => sync_dialogs::open_server(state, &entry),
@@ -129,6 +127,7 @@ enum EntryAction {
     Launch(usize),
     CopyCommand(bool),
     Sync,
+    Manage(manage_dialogs::ManageMode),
 }
 
 fn launch_entry(state: &mut AppState, entry: &EntryView, instance_id: &str, target: &str) {
@@ -528,17 +527,25 @@ fn entry_row(
         } else {
             "Sync options…"
         };
+        let edit_label = if entry.kind == EntryKind::World { "Rename…" } else { "Edit…" };
         let items = [
             MenuEntry::new("Copy command line").icon(Icon::Terminal),
             MenuEntry::new("Copy Steam launch options").icon(Icon::Steam),
             MenuEntry::new(sync_label).icon(Icon::UsersGroup),
+            MenuEntry::new(edit_label).icon(Icon::Edit),
+            MenuEntry::new("Copy to instance…").icon(Icon::Copy),
+            MenuEntry::new("Move to instance…").icon(Icon::Folder),
+            MenuEntry::new("Delete…").icon(Icon::Trash),
         ];
         if let Some(choice) = kit.context_menu(ui, "home::entry-menu", &mut state.home_menu, &items)
         {
-            result = Some(if choice == 2 {
-                EntryAction::Sync
-            } else {
-                EntryAction::CopyCommand(choice == 1)
+            result = Some(match choice {
+                0 | 1 => EntryAction::CopyCommand(choice == 1),
+                2 => EntryAction::Sync,
+                3 => EntryAction::Manage(manage_dialogs::ManageMode::Edit),
+                4 => EntryAction::Manage(manage_dialogs::ManageMode::Copy),
+                5 => EntryAction::Manage(manage_dialogs::ManageMode::Move),
+                _ => EntryAction::Manage(manage_dialogs::ManageMode::Delete),
             });
         }
         // Keep the target while the menu folds away, or it would vanish instead of animating closed.
@@ -551,9 +558,7 @@ fn entry_row(
 
 fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if state.home.tick_screenshots(&state.instances, &state.config) {
-        kit.keep_awake_for(Duration::from_millis(100));
     }
-    vertex_shell::wake_after(HomeSession::screenshot_scan_interval());
     let shots = state.home.screenshots();
     if shots.is_empty() {
         kit.text(
