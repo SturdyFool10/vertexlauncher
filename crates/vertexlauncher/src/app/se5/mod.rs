@@ -243,6 +243,8 @@ pub struct AppState {
     pub selected_instance_id: Option<String>,
     pub instances: InstanceStore,
     pub auth: AuthState,
+    /// A launch waiting for the active account to be renewed ("Lazy Account Refresh"); see `library::launch_with`.
+    pub deferred_launch: Option<screens::library::DeferredLaunch>,
     pub runtime: LibraryRuntimeState,
     pub create: create_instance::CreateState,
     pub dialog: Option<Dialog>,
@@ -390,7 +392,10 @@ impl AppState {
     }
 
     fn poll(&mut self) {
+        self.auth
+            .set_lazy_refresh(self.config.lazy_account_refresh());
         self.auth.poll();
+        screens::library::poll_deferred_launch(self);
         launcher_ui::screens::poll_library_runtime_actions(
             &mut self.runtime,
             &mut self.config,
@@ -812,6 +817,7 @@ impl App {
             .instances
             .first()
             .map(|instance| instance.id.clone());
+        let lazy_account_refresh = config.lazy_account_refresh();
         let state = AppState {
             submitted: config.clone(),
             before_submit: config.clone(),
@@ -822,7 +828,8 @@ impl App {
             screen: AppScreen::Home,
             selected_instance_id,
             instances,
-            auth: AuthState::load(),
+            auth: AuthState::load(lazy_account_refresh),
+            deferred_launch: None,
             runtime: LibraryRuntimeState::default(),
             create: create_instance::CreateState::default(),
             dialog: first_run_format.map(Dialog::ConfigFormat),

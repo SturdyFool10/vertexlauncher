@@ -93,6 +93,36 @@ pub fn launch_status(state: &AppState, instance: &InstanceRecord) -> LaunchStatu
     }
 }
 
+/// A launch that is waiting for the active account to be renewed first ("Lazy Account Refresh").
+pub struct DeferredLaunch {
+    instance_id: String,
+    quick_play_singleplayer: Option<String>,
+    quick_play_multiplayer: Option<String>,
+    /// The account the launch was asked for; if the active account changes meanwhile the launch is dropped.
+    account: Option<String>,
+}
+
+/// Runs a launch that was waiting for the account renewal, once the account is ready.
+pub fn poll_deferred_launch(state: &mut AppState) {
+    let Some(deferred) = state.deferred_launch.take() else {
+        return;
+    };
+    if state.auth.active_account_key() != deferred.account {
+        notification::warn!("library", "The active account changed, so the launch was cancelled.");
+        return;
+    }
+    if !state.auth.ensure_active_fresh() {
+        state.deferred_launch = Some(deferred);
+        return;
+    }
+    launch_with(
+        state,
+        &deferred.instance_id,
+        deferred.quick_play_singleplayer,
+        deferred.quick_play_multiplayer,
+    );
+}
+
 /// Launches `instance_id` with the active account (no-op with a status message when that is not possible).
 pub fn launch(state: &mut AppState, instance_id: &str) {
     launch_with(state, instance_id, None, None);
@@ -108,6 +138,20 @@ pub fn launch_with(
     let Some(instance) = state.instances.find(instance_id).cloned() else {
         return;
     };
+    // With "Lazy Account Refresh" the active account is renewed now, before the launch uses its token. Only that one
+    // account; the launch goes ahead from `poll_deferred_launch` once it is done.
+    if !state.auth.ensure_active_fresh() {
+        if state.deferred_launch.is_none() {
+            notification::info!("library", "Refreshing your account before launching...");
+        }
+        state.deferred_launch = Some(DeferredLaunch {
+            instance_id: instance_id.to_owned(),
+            quick_play_singleplayer,
+            quick_play_multiplayer,
+            account: state.auth.active_account_key(),
+        });
+        return;
+    }
     let status = launch_status(state, &instance);
     if let Some(reason) = status.blocked {
         notification::warn!("library", "{}", reason);

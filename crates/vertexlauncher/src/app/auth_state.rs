@@ -68,17 +68,21 @@ pub struct AuthState {
     /// Failures of background cache writes, as messages for `poll` to report.
     cache_save_tx: Sender<String>,
     cache_save_rx: Receiver<String>,
+    /// "Lazy Account Refresh": nothing is renewed at startup; the active account is renewed when something needs it.
+    lazy_refresh: bool,
+    /// Profile ids whose renewal has finished this session (successfully or not), so each is renewed once.
+    refreshed: HashSet<String>,
 }
 
 impl AuthState {
     /// Starts with no accounts and reads the saved ones on a worker, so a slow or stuck keyring never holds up the
     /// window. `poll` swaps them in; until then the account list is empty and sign-in actions wait.
-    pub fn load() -> Self {
+    pub fn load(lazy_refresh: bool) -> Self {
         let mut state = Self::empty();
         let (tx, rx) = mpsc::channel();
         state.pending_load = Some(rx);
         let _ = tokio_runtime::spawn_blocking_detached(move || {
-            let _ = tx.send(Box::new(Self::load_blocking()));
+            let _ = tx.send(Box::new(Self::load_blocking(lazy_refresh)));
         });
         state
     }
@@ -103,6 +107,8 @@ impl AuthState {
             pending_load: None,
             cache_save_tx,
             cache_save_rx,
+            lazy_refresh: false,
+            refreshed: HashSet::new(),
         }
     }
 
@@ -133,7 +139,7 @@ impl AuthState {
         });
     }
 
-    fn load_blocking() -> Self {
+    fn load_blocking(lazy_refresh: bool) -> Self {
         let (avatar_result_tx, avatar_result_rx) = mpsc::channel();
         let (cache_save_tx, cache_save_rx) = mpsc::channel();
         let (accounts_state, status) = match auth::load_cached_accounts() {
@@ -170,9 +176,12 @@ impl AuthState {
             pending_load: None,
             cache_save_tx,
             cache_save_rx,
+            lazy_refresh,
+            refreshed: HashSet::new(),
         };
 
-        if !auth_state.accounts_state.accounts.is_empty() {
+        // Lazy mode renews nothing here: the active account is renewed when something needs it.
+        if !lazy_refresh && !auth_state.accounts_state.accounts.is_empty() {
             match microsoft_client_id() {
                 Ok(client_id) => {
                     auth_state
@@ -277,7 +286,10 @@ impl AuthState {
             return;
         }
 
-        self.ensure_active_account_token_ready();
+        // Lazy mode renews the account when something needs it instead of the moment it is picked.
+        if !self.lazy_refresh {
+            self.ensure_active_account_token_ready();
+        }
         self.rebuild_active_avatar_png();
         if !self.auth_busy() && !self.failed_account_errors.contains_key(profile_id) {
             self.status = AuthUiStatus::Idle;
@@ -357,6 +369,61 @@ impl AuthState {
 
     pub fn auth_busy(&self) -> bool {
         self.flow.is_some() || self.device_code_flow.is_some() || self.renewal.is_some()
+    }
+
+    /// Follows the "Lazy Account Refresh" setting.
+    pub fn set_lazy_refresh(&mut self, enabled: bool) {
+        self.lazy_refresh = enabled;
+    }
+
+    /// Whether the active account can be used for something that needs a signed-in session (launching, the skin
+    /// preview). Always true unless "Lazy Account Refresh" is on. When it is on and the active account has not been
+    /// renewed yet this session, this starts renewing that one account (never the others) and returns `false`; call it
+    /// again later (every frame is fine) until it returns `true`. The attempt counts even when it fails, so a failure
+    /// falls back to the cached session instead of retrying forever.
+    pub fn ensure_active_fresh(&mut self) -> bool {
+        if !self.lazy_refresh {
+            return true;
+        }
+        if self.pending_load.is_some() {
+            return false;
+        }
+        let Some(profile_id) = self.active_profile_needing_refresh() else {
+            // Nothing to renew; just let a renewal that is already running (a manual one) finish first.
+            return self.renewal.is_none();
+        };
+        if self.renewal.is_some() || self.flow.is_some() || self.device_code_flow.is_some() {
+            return false;
+        }
+        match microsoft_client_id() {
+            Ok(client_id) => self.spawn_single_account_renewal_worker(client_id, profile_id),
+            Err(err) => {
+                notification::warn!(
+                    "auth",
+                    "Could not renew the active account before use: {err}. Continuing with the cached session."
+                );
+                self.refreshed.insert(profile_id);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether the active account is still waiting for its first renewal of the session (lazy mode only).
+    pub fn active_refresh_pending(&self) -> bool {
+        self.lazy_refresh && (self.pending_load.is_some() || self.active_profile_needing_refresh().is_some())
+    }
+
+    /// The active account's profile id when it has a refresh token and has not been renewed this session.
+    fn active_profile_needing_refresh(&self) -> Option<String> {
+        let account = self.accounts_state.active_account()?;
+        let id = account.minecraft_profile.id.as_str();
+        let renewable = account
+            .microsoft_refresh_token
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|token| !token.is_empty());
+        (renewable && !self.refreshed.contains(id)).then(|| id.to_owned())
     }
 
     pub fn token_refresh_in_progress(&self) -> bool {
@@ -495,7 +562,62 @@ impl AuthState {
 
 #[cfg(test)]
 mod tests {
-    use super::is_nonfatal_account_cache_error;
+    use super::{AuthState, is_nonfatal_account_cache_error};
+
+    fn state_with_accounts(ids: &[&str], lazy: bool) -> AuthState {
+        let mut state = AuthState::empty();
+        for id in ids {
+            let account: auth::CachedAccount = serde_json::from_value(serde_json::json!({
+                "minecraft_profile": { "id": id, "name": format!("name-{id}") },
+                "microsoft_refresh_token": "refresh",
+                "cached_at_unix_secs": 1,
+            }))
+            .expect("account json");
+            state.accounts_state.upsert_and_activate(account);
+        }
+        state.lazy_refresh = lazy;
+        state
+    }
+
+    #[test]
+    fn eager_mode_never_waits_for_a_refresh() {
+        let mut state = state_with_accounts(&["a"], false);
+        assert!(state.ensure_active_fresh());
+        assert!(!state.active_refresh_pending());
+        assert!(state.renewal.is_none());
+    }
+
+    #[test]
+    fn lazy_mode_wants_only_the_active_account_and_only_once() {
+        let mut state = state_with_accounts(&["a", "b"], true);
+        // `b` was added last, so it is the active one; `a` is never asked about.
+        assert_eq!(state.active_profile_needing_refresh().as_deref(), Some("b"));
+        assert!(state.active_refresh_pending());
+
+        state.refreshed.insert("b".to_owned());
+        assert_eq!(state.active_profile_needing_refresh(), None);
+        assert!(state.ensure_active_fresh());
+
+        // Switching to the other account makes that one pending, the first stays done.
+        assert!(state.accounts_state.set_active_profile_id("a"));
+        assert_eq!(state.active_profile_needing_refresh().as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn lazy_mode_without_accounts_has_nothing_to_wait_for() {
+        let mut state = state_with_accounts(&[], true);
+        assert!(state.ensure_active_fresh());
+        assert!(!state.active_refresh_pending());
+    }
+
+    #[test]
+    fn lazy_mode_waits_while_accounts_are_still_loading() {
+        let mut state = state_with_accounts(&[], true);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        state.pending_load = Some(rx);
+        assert!(!state.ensure_active_fresh());
+        assert!(state.active_refresh_pending());
+    }
 
     #[test]
     fn marks_secure_storage_dbus_session_failures_as_nonfatal() {

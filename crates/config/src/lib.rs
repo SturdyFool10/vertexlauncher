@@ -294,6 +294,10 @@ pub struct Config {
     obs_detection_enabled: bool,
     /// Keep sign-in tokens in a plain-text file instead of the OS keyring. Off by default.
     insecure_file_account_storage: bool,
+    /// Renew an account's sign-in only when something needs it (launching, the skin preview, ...) and only for the
+    /// active account, instead of renewing every saved account at startup. Off by default.
+    #[serde(default)]
+    lazy_account_refresh: bool,
     #[serde(default = "default_window_transparency")]
     window_transparency: WindowTransparency,
     #[serde(default = "default_fullscreen_style")]
@@ -466,6 +470,11 @@ impl Config {
     /// Whether sign-in tokens are kept in a plain-text file instead of the OS keyring.
     pub fn insecure_file_account_storage(&self) -> bool {
         self.insecure_file_account_storage
+    }
+
+    /// Whether accounts are renewed on demand (the active one only) instead of all at startup.
+    pub fn lazy_account_refresh(&self) -> bool {
+        self.lazy_account_refresh
     }
 
     pub fn set_insecure_file_account_storage(&mut self, enabled: bool) {
@@ -1285,6 +1294,10 @@ impl Config {
             b.obs_detection_enabled,
         );
         visit(
+            ToggleSettingId::LazyAccountRefresh.spec(),
+            b.lazy_account_refresh,
+        );
+        visit(
             ToggleSettingId::OpenTypeFeaturesEnabled.spec(),
             b.open_type_features_enabled,
         );
@@ -1432,6 +1445,7 @@ impl Default for Config {
             streamer_mode_enabled: false,
             obs_detection_enabled: default_obs_detection_enabled(),
             insecure_file_account_storage: false,
+            lazy_account_refresh: false,
             window_transparency: default_window_transparency(),
             fullscreen_style: default_fullscreen_style(),
             legacy_window_blur_enabled: None,

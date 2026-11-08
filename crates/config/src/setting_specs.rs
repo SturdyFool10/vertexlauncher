@@ -16,6 +16,7 @@ pub enum ToggleSettingId {
     LowPowerGpuPreferred,
     StreamerModeEnabled,
     ObsDetectionEnabled,
+    LazyAccountRefresh,
     OpenTypeFeaturesEnabled,
     NotificationExpiryBarsEmptyLeft,
     SkinPreviewFreshFormatEnabled,
@@ -67,6 +68,13 @@ impl ToggleSettingId {
                 label: "Detect OBS",
                 info_tooltip: Some(
                     "Applies Streamer Mode while OBS is running on this computer, and shows a notification when it starts and when it stops. This is temporary and never changes the Enable Streamer Mode setting: it ends when OBS closes or when you turn this off. OBS is found by its process name. The Flatpak build asks the host for its process list, which uses the host-command permission it ships with (org.freedesktop.Flatpak); a sandbox that hides other programs and has no such permission cannot see OBS. Default: On.",
+                ),
+            },
+            ToggleSettingId::LazyAccountRefresh => ToggleSettingSpec {
+                id: ToggleSettingId::LazyAccountRefresh,
+                label: "Lazy Account Refresh",
+                info_tooltip: Some(
+                    "Renews an account's Microsoft/Minecraft sign-in only when something needs it, and only for the active account: right before launching a game, or when you open something that needs you signed in, such as the Skins screen. Nothing is renewed at startup and your other accounts are left alone until you switch to them. Off renews every saved account when the launcher starts. Renewing the active account yourself from the account menu still works either way. Default: Off.",
                 ),
             },
             ToggleSettingId::OpenTypeFeaturesEnabled => ToggleSettingSpec {

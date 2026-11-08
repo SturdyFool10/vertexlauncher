@@ -593,6 +593,7 @@ fn privacy(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         &[
             ToggleSettingId::StreamerModeEnabled,
             ToggleSettingId::ObsDetectionEnabled,
+            ToggleSettingId::LazyAccountRefresh,
         ],
     );
     kit::label(

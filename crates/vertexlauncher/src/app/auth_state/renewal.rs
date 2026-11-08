@@ -15,6 +15,12 @@ impl AuthState {
                             let active_refresh =
                                 matches!(self.status, AuthUiStatus::RefreshingActiveSession);
                             self.apply_accounts_state(renewed, true);
+                            self.refreshed.extend(
+                                self.accounts_state
+                                    .accounts
+                                    .iter()
+                                    .map(|account| account.minecraft_profile.id.clone()),
+                            );
                             for profile_id in succeeded_profile_ids {
                                 self.failed_account_errors.remove(&profile_id);
                             }
@@ -68,6 +74,7 @@ impl AuthState {
                     self.renewal = None;
                 }
                 Ok(RenewalResult::Single { profile_id, result }) => {
+                    self.refreshed.insert(profile_id.clone());
                     match result {
                         Ok(renewed) => {
                             self.apply_accounts_state(renewed, true);

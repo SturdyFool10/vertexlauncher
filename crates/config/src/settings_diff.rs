@@ -108,6 +108,7 @@ impl Config {
             streamer_mode_enabled,
             obs_detection_enabled,
             insecure_file_account_storage,
+            lazy_account_refresh,
             window_transparency,
             fullscreen_style: _,
             legacy_window_blur_enabled,
@@ -258,7 +259,8 @@ impl Config {
         diff.mark(
             *streamer_mode_enabled != new.streamer_mode_enabled
                 || *obs_detection_enabled != new.obs_detection_enabled
-                || *insecure_file_account_storage != new.insecure_file_account_storage,
+                || *insecure_file_account_storage != new.insecure_file_account_storage
+                || *lazy_account_refresh != new.lazy_account_refresh,
             SettingsDomain::Privacy,
         );
         diff.mark(

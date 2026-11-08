@@ -80,6 +80,13 @@ fn preview_settings(config: &config::Config) -> PreviewSettings {
 }
 
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
+    // "Lazy Account Refresh": the skin service needs a fresh session, so the active account (only it) is renewed first.
+    // Nothing below runs, and the screen does not count as opened, until that is done.
+    if !state.auth.ensure_active_fresh() {
+        kit.text(ui, TextRole::Title, "Skins");
+        kit.text(ui, TextRole::Muted, "Refreshing your account...");
+        return;
+    }
     let opened = !state.skins_view.shown;
     state.skins_view.shown = true;
     let settings = preview_settings(&state.config);
