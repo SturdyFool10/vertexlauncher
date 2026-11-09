@@ -469,7 +469,7 @@ fn sidebar(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, radius: f32) {
                 kit.tooltip(ui, &element_id, &instance.name);
                 if let Some(at) = kit.secondary(ui, &element_id) {
                     state.instance_menu_target = Some(id.clone());
-                    state.instance_menu.open_at(at);
+                    kit.open_context_menu("chrome::instance-menu", &mut state.instance_menu, at);
                 }
             }
         }
@@ -490,13 +490,13 @@ fn profile_actions_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     };
     let mut menu = std::mem::take(&mut state.profile_menu);
     let mut choice = None;
-    ui_kit::popup(
+    kit.animated_popup(
         ui,
         "chrome::profile-menu",
         "nav::create-instance",
         &mut menu,
         &style,
-        |ui, popup| {
+        |kit, ui, popup, live| {
             let _column = ui.element(
                 &ElementDesc::new()
                     .width(Sizing::Fit)
@@ -527,7 +527,8 @@ fn profile_actions_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                     label,
                     false,
                     false,
-                ) {
+                ) && live
+                {
                     choice = Some(index);
                     popup.close();
                 }

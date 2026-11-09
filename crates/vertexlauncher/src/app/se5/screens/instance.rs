@@ -309,13 +309,13 @@ fn content_tab(
         ..PopupStyle::default()
     };
     let mut menu = std::mem::take(&mut state.add_content_menu);
-    ui_kit::popup(
+    kit.animated_popup(
         ui,
         "instance::add-popup",
         "instance::add-menu",
         &mut menu,
         &style,
-        |ui, popup| {
+        |kit, ui, popup, live| {
             let _column = ui.element(
                 &ElementDesc::new()
                     .width(Sizing::Fixed(240.0))
@@ -324,12 +324,16 @@ fn content_tab(
                     .child_gap(kit::SPACE_XS),
             );
             if kit.nav_item(ui, "instance::add-local", None, "Add local file(s)", false) {
-                add_files = true;
-                popup.close();
+                if live {
+                    add_files = true;
+                    popup.close();
+                }
             }
             if kit.nav_item(ui, "instance::add-patch", None, "Apply Patch", false) {
-                apply_patch = true;
-                popup.close();
+                if live {
+                    apply_patch = true;
+                    popup.close();
+                }
             }
             if kit.nav_item(
                 ui,
@@ -338,8 +342,10 @@ fn content_tab(
                 "Refresh local files",
                 false,
             ) {
-                refresh = true;
-                popup.close();
+                if live {
+                    refresh = true;
+                    popup.close();
+                }
             }
         },
     );

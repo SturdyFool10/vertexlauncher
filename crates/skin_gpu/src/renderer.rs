@@ -12,7 +12,7 @@ use sturdy::assets::{
 };
 use sturdy::camera::Camera;
 use sturdy::glam::{Mat4, UVec2, Vec3, Vec4};
-use sturdy::render::{OffscreenTargetDesc, OffscreenTargetHandle, PostProcessAntiAliasing, RenderGraphSettings};
+use sturdy::render::{OffscreenTargetDesc, OffscreenTargetHandle, PostProcessAntiAliasing, RenderGraphSettings, ToneMappingOperator};
 use sturdy::scene::{ModelRenderer, WorldTransform};
 use sturdy::{Engine, Entity, FrameDescription, SceneLighting};
 
@@ -339,7 +339,9 @@ fn frame_description(request: &RenderRequest<'_>, size: UVec2, layer: u32) -> Fr
     graph.shadows.enabled = false;
     graph.ambient_occlusion.enabled = false;
     graph.bloom.enabled = false;
-    graph.tone_mapping.enabled = false;
+    // PsychoV keeps bright, saturated parts of the skin from clipping to white.
+    graph.tone_mapping.enabled = true;
+    graph.tone_mapping.operation = ToneMappingOperator::PsychoV;
     graph.restir_gi.enabled = false;
     apply_anti_aliasing(&mut graph, request.settings);
     if let Some(blur) = request.frame.motion_blur {

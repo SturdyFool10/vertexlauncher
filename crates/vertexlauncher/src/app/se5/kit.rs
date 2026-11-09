@@ -16,6 +16,7 @@ use vertex_shell::sturdy::ui::{
     AlignX, AlignY, AttachPoint, Border, ChildAlignment, Clip, CornerRadius, Direction,
     ElementDesc, ElementScope, FloatTarget, Floating, Padding, Sizing, TextStyle, TextWrap, Ui,
 };
+use vertex_shell::sturdy::Key;
 use vertex_shell::sturdy::ui_kit::{
     self, FocusNavigator, ModalStyle, NavInput, PopupStyle,
 };
@@ -535,10 +536,14 @@ pub enum ButtonKind {
 struct MenuAnim {
     /// 0 = folded away, 1 = fully open.
     progress: f32,
-    /// Where the panel was last drawn, so it can fold away in place after the menu closed.
-    origin: Vec2,
     last_call: f64,
     was_open: bool,
+    /// Frames it has been open; the click that opened it must not also close it.
+    frames: u32,
+    /// Whether it opens above its anchor, decided when it starts to open.
+    up: Option<bool>,
+    /// Where a context menu opens.
+    at: Option<Vec2>,
 }
 
 /// One row of a [`Kit::context_menu`]: a label, an optional icon at the right, and optional danger styling.
@@ -614,6 +619,8 @@ pub struct Kit {
     searches: HashMap<String, (ui_kit::PopupState, String)>,
     /// Open/close progress (0..1) and the last open state of every context menu, for its reveal and fold animation.
     menu_anim: HashMap<String, MenuAnim>,
+    /// The rows each context menu showed last, for the copy of it that folds away when another replaces it.
+    menu_items: HashMap<String, Vec<MenuEntry>>,
     /// Open/close progress of every collapsible section, by id.
     collapsibles: HashMap<String, Collapse>,
     /// What the pointer shows over each interactive element declared this frame (see [`CursorKind`]).
@@ -658,6 +665,7 @@ impl Kit {
             areas: HashMap::new(),
             scroll_drag: None,
             menu_anim: HashMap::new(),
+            menu_items: HashMap::new(),
             collapsibles: HashMap::new(),
             cursor_targets: Vec::new(),
             numbers_editing: std::collections::HashSet::new(),
@@ -1638,11 +1646,197 @@ impl Kit {
         ui.clicked(id) || self.focus.activated(id)
     }
 
-    /// Whether context menu `id` is still on screen, including while it folds away after closing.
+    /// Whether menu `id` is still on screen, including while it folds away after closing.
     pub fn menu_visible(&self, id: &str) -> bool {
-        self.menu_anim
-            .get(id)
-            .is_some_and(|anim| anim.progress > 0.0)
+        let shown = |name: &str| {
+            self.menu_anim
+                .get(name)
+                .is_some_and(|anim| anim.progress > 0.0)
+        };
+        shown(id) || shown(&format!("{id}::fade"))
+    }
+
+    /// Opens context menu `id` at `at`. A menu still showing (open, or folding away) keeps folding away where it is
+    /// while the new one unfolds at `at`.
+    pub fn open_context_menu(&mut self, id: &str, state: &mut ui_kit::PopupState, at: Vec2) {
+        if let Some(current) = self.menu_anim.get(id).copied().filter(|anim| anim.progress > 0.0) {
+            let fade_id = format!("{id}::fade");
+            self.menu_anim.insert(
+                fade_id.clone(),
+                MenuAnim {
+                    was_open: false,
+                    last_call: uptime(),
+                    ..current
+                },
+            );
+            if let Some(items) = self.menu_items.get(id).cloned() {
+                self.menu_items.insert(fade_id, items);
+            }
+        }
+        let entry = self.menu_anim.entry(id.to_owned()).or_default();
+        entry.progress = 0.0;
+        entry.was_open = false;
+        entry.frames = 0;
+        entry.at = Some(at);
+        state.open_at(at);
+    }
+
+    /// A popup that unfolds when it opens and folds away when it closes (also after a click outside or Escape, without
+    /// a frame in between where it is missing). `content(kit, ui, popup, live)` builds the body; `live` is false while
+    /// it folds away, when it must not react to input.
+    ///
+    /// Next to its anchor it opens below it, or above it when its full size does not fit below; that is decided from
+    /// its full size when it starts to open and kept until it is gone, so it grows away from the anchor towards the
+    /// side it is going to end up on instead of flipping half way. A context menu opens at the point given to
+    /// [`Kit::open_context_menu`].
+    pub fn animated_popup(
+        &mut self,
+        ui: &mut Ui<'_>,
+        id: &str,
+        anchor: &str,
+        state: &mut ui_kit::PopupState,
+        style: &PopupStyle,
+        mut content: impl FnMut(&mut Self, &mut Ui<'_>, &mut ui_kit::PopupState, bool),
+    ) {
+        const SLIDE: f32 = 14.0;
+        const COLLAPSED: f32 = 2.0;
+        const OPEN_SECONDS: f32 = 0.16;
+        const CLOSE_SECONDS: f32 = 0.12;
+        let delta = self.delta_seconds.clamp(0.0, 0.1);
+        let now = uptime();
+        let viewport = ui.viewport_size();
+        let body_id = format!("{id}::body");
+        let outer = ui.element_bounds(id).map(|(_, size)| size);
+        let body = ui.element_bounds(&body_id).map(|(_, size)| size);
+        let mut open = state.is_open();
+        let frames = self.menu_anim.get(id).map_or(0, |entry| entry.frames);
+        // The click that opened it must not also close it, so only from the second frame on.
+        if open
+            && frames > 1
+            && (ui.engine().input().key_just_pressed(Key::Escape) || ui.clicked_outside(id))
+        {
+            state.close();
+            open = false;
+        }
+        let entry = self.menu_anim.entry(id.to_owned()).or_default();
+        if open && !entry.was_open && now - entry.last_call > 0.1 {
+            // Opened after it had stopped being drawn: unfold from the start.
+            entry.progress = 0.0;
+        }
+        entry.was_open = open;
+        entry.last_call = now;
+        entry.frames = if open { frames.saturating_add(1) } else { 0 };
+        if open {
+            entry.progress = (entry.progress + delta / OPEN_SECONDS).min(1.0);
+        } else {
+            entry.progress = (entry.progress - delta / CLOSE_SECONDS).max(0.0);
+        }
+        let progress = entry.progress;
+        if !open && progress <= 0.0 {
+            entry.up = None;
+            return;
+        }
+        let eased = if progress < 0.5 {
+            2.0 * progress * progress
+        } else {
+            1.0 - (-2.0 * progress + 2.0).powi(2) / 2.0
+        };
+        let pad = style.padding;
+        let full_outer = body.map(|size| {
+            Vec2::new(
+                size.x + f32::from(pad.left + pad.right) + 2.0,
+                size.y + f32::from(pad.top + pad.bottom) + 2.0,
+            )
+        });
+        let width = outer.map(|size| size.x).or(full_outer.map(|size| size.x)).unwrap_or(200.0);
+        let at = entry.at;
+        let mut up = entry.up;
+        let floating = if let Some(point) = at {
+            let size = full_outer.map_or(Vec2::new(width, 40.0), |size| Vec2::new(width, size.y));
+            let position = ui_kit::clamp_to_viewport(point, size, viewport);
+            let mut floating = Floating::new(FloatTarget::Root);
+            floating.element_attach_point = AttachPoint::LeftTop;
+            floating.parent_attach_point = AttachPoint::LeftTop;
+            floating.offset = position;
+            floating
+        } else {
+            let (anchor_pos, anchor_size) = ui
+                .element_bounds(anchor)
+                .unwrap_or((Vec2::ZERO, Vec2::ZERO));
+            if up.is_none() {
+                if let Some(full) = full_outer {
+                    let below = anchor_pos.y + anchor_size.y + style.gap + full.y;
+                    let above = anchor_pos.y - style.gap - full.y;
+                    up = Some(below > viewport.y && above >= 0.0);
+                }
+            }
+            let x = anchor_pos.x.min(viewport.x - width).max(0.0);
+            let mut floating = Floating::new(FloatTarget::Root);
+            floating.parent_attach_point = AttachPoint::LeftTop;
+            if up == Some(true) {
+                // The bottom edge stays on the anchor while the top edge rises.
+                floating.element_attach_point = AttachPoint::LeftBottom;
+                floating.offset = Vec2::new(x, anchor_pos.y - style.gap);
+            } else {
+                floating.element_attach_point = AttachPoint::LeftTop;
+                let y = anchor_pos.y + anchor_size.y + style.gap;
+                let y = full_outer.map_or(y, |full| y.min(viewport.y - full.y)).max(0.0);
+                floating.offset = Vec2::new(x, y);
+            }
+            floating
+        };
+        if let Some(entry) = self.menu_anim.get_mut(id) {
+            entry.up = up;
+        }
+        let mut floating = floating;
+        floating.z_index = style.z_index;
+        let (height, slide) = if open && progress >= 1.0 {
+            (Sizing::Fit, 0)
+        } else {
+            let full = body.map(|size| size.y);
+            let height = full.map_or(COLLAPSED, |full| COLLAPSED + (full - COLLAPSED).max(0.0) * eased);
+            (Sizing::Fixed(height), ((1.0 - eased) * SLIDE) as u16)
+        };
+        let _panel = ui.element(
+            &ElementDesc::new()
+                .id(id.to_owned())
+                .width(Sizing::Fit)
+                .height(Sizing::Fit)
+                .padding(style.padding)
+                .child_gap(2)
+                .direction(Direction::TopToBottom)
+                .background(style.background)
+                .border(Border::all(style.border, 1))
+                .corner_radius(CornerRadius::all(style.corner_radius))
+                .floating(Some(floating)),
+        );
+        let _clip = ui.element(
+            &ElementDesc::new()
+                .width(Sizing::Fit)
+                .height(height)
+                .direction(Direction::TopToBottom)
+                // The rows slide against the way the panel grows: down into place when it grows upward (pinned to
+                // the bottom edge), up into place when it grows downward.
+                .padding(Padding {
+                    left: 0,
+                    right: 0,
+                    top: if up == Some(true) { 0 } else { slide },
+                    bottom: if up == Some(true) { slide } else { 0 },
+                })
+                .align(ChildAlignment::new(
+                    AlignX::Left,
+                    if up == Some(true) { AlignY::Bottom } else { AlignY::Top },
+                ))
+                .clip(Clip::vertical()),
+        );
+        let _body = ui.element(
+            &ElementDesc::new()
+                .id(body_id)
+                .width(Sizing::Fit)
+                .height(Sizing::Fit)
+                .direction(Direction::TopToBottom),
+        );
+        content(self, ui, state, open);
     }
 
     /// The right-click menu: rows with their icon at the right, danger rows in red, opening at the pointer with the
@@ -1654,56 +1848,6 @@ impl Kit {
         state: &mut ui_kit::PopupState,
         items: &[MenuEntry],
     ) -> Option<usize> {
-        const ROW_HEIGHT: f32 = 30.0;
-        const SEPARATOR_HEIGHT: f32 = 9.0;
-        const SLIDE: f32 = 14.0;
-        const COLLAPSED: f32 = 2.0;
-        const OPEN_SECONDS: f32 = 0.16;
-        const CLOSE_SECONDS: f32 = 0.12;
-        let delta = self.delta_seconds.clamp(0.0, 0.1);
-        let now = uptime();
-        let open = state.is_open();
-        let bounds = ui.element_bounds(id);
-        let entry = self.menu_anim.entry(id.to_owned()).or_default();
-        if open && !entry.was_open && now - entry.last_call > 0.1 {
-            // Opened after the menu had stopped being drawn: unfold from the start.
-            entry.progress = 0.0;
-        }
-        entry.was_open = open;
-        entry.last_call = now;
-        if open {
-            if let Some((origin, _)) = bounds {
-                entry.origin = origin;
-            }
-            entry.progress = (entry.progress + delta / OPEN_SECONDS).min(1.0);
-        } else {
-            entry.progress = (entry.progress - delta / CLOSE_SECONDS).max(0.0);
-        }
-        let (progress, origin) = (entry.progress, entry.origin);
-        if !open && progress <= 0.0 {
-            return None;
-        }
-        if (open && progress < 1.0) || (!open && progress > 0.0) {
-        }
-        let eased = if progress < 0.5 {
-            2.0 * progress * progress
-        } else {
-            1.0 - (-2.0 * progress + 2.0).powi(2) / 2.0
-        };
-        let full: f32 = items
-            .iter()
-            .map(|item| {
-                ROW_HEIGHT
-                    + if item.separator_before {
-                        SEPARATOR_HEIGHT
-                    } else {
-                        0.0
-                    }
-            })
-            .sum();
-        let height = COLLAPSED + (full - COLLAPSED) * eased;
-        let slide = ((1.0 - eased) * SLIDE) as u16;
-
         let style = PopupStyle {
             background: self.palette.bg_dark,
             border: self.palette.border_muted,
@@ -1712,106 +1856,110 @@ impl Kit {
             z_index: Z_POPUP,
             ..PopupStyle::default()
         };
-        // Closing: a fresh popup pinned where the panel was, so it folds away without reacting to clicks.
-        let mut shown = if open {
-            state.clone()
-        } else {
-            let mut ghost = ui_kit::PopupState::default();
-            ghost.open_at(origin);
-            ghost
-        };
+        self.menu_items.insert(id.to_owned(), items.to_vec());
         let mut chosen = None;
-        ui_kit::popup(ui, id, id, &mut shown, &style, |ui, popup| {
-            let _clip = ui.element(
-                &ElementDesc::new()
-                    .width(Sizing::Fit)
-                    .height(Sizing::Fixed(height))
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding {
-                        left: 0,
-                        right: 0,
-                        top: slide,
-                        bottom: 0,
-                    })
-                    .clip(Clip::vertical()),
-            );
-            drop(
-                ui.element(
-                    &ElementDesc::new()
-                        .width(Sizing::Fixed(124.0))
-                        .height(Sizing::Fixed(0.0)),
-                ),
-            );
-            for (index, item) in items.iter().enumerate() {
-                if item.separator_before {
-                    let _gap = ui.element(
-                        &ElementDesc::new()
-                            .width(Sizing::Grow)
-                            .height(Sizing::Fixed(SEPARATOR_HEIGHT))
-                            .align(ChildAlignment::center()),
-                    );
-                    drop(
-                        ui.element(
-                            &ElementDesc::new()
-                                .width(Sizing::Grow)
-                                .height(Sizing::Fixed(1.0))
-                                .background(self.palette.border_muted),
-                        ),
-                    );
-                }
-                let row_id = format!("{id}::{index}");
-                self.cursor_target(&row_id, CursorKind::Pointer);
-                let hovered = open && ui.hovered(&row_id);
-                let ink = if item.danger {
-                    self.palette.danger
-                } else {
-                    self.palette.text
-                };
-                let fill = if !hovered {
-                    Vec4::ZERO
-                } else if item.danger {
-                    self.palette.danger.with_w(0.16)
-                } else {
-                    self.palette.hovered_fill()
-                };
-                {
-                    let _row = ui.element(
-                        &ElementDesc::new()
-                            .id(row_id.clone())
-                            .width(Sizing::Grow)
-                            .height(Sizing::Fixed(ROW_HEIGHT))
-                            .padding(Padding::symmetric(10, 0))
-                            .child_gap(SPACE_MD)
-                            .align(ChildAlignment::new(AlignX::Left, AlignY::Center))
-                            .background(fill)
-                            .corner_radius(CornerRadius::all(6.0)),
-                    );
-                    self::label(
-                        ui,
-                        &item.label,
-                        &TextStyle {
-                            color: ink,
-                            wrap: TextWrap::None,
-                            ..self.style(TextRole::Body)
-                        },
-                    );
-                    self.fill(ui);
-                    if let Some(icon) = item.icon {
-                        self.icon(ui, icon, 16.0, ink);
-                    }
-                }
-                if open && ui.clicked(&row_id) {
-                    chosen = Some(index);
-                    popup.close();
-                }
+        self.animated_popup(ui, id, id, state, &style, |this, ui, popup, live| {
+            let row = this.context_rows(ui, id, items, live);
+            if live && row.is_some() {
+                chosen = row;
+                popup.close();
             }
         });
-        if open {
-            // The popup counts frames since opening (a click is only "outside" after the first), so it must keep its
-            // own state from frame to frame.
-            *state = shown;
-            if chosen.is_some() {
-                state.close();
+        // The menu a new one replaced, still folding away.
+        let fade_id = format!("{id}::fade");
+        if self
+            .menu_anim
+            .get(&fade_id)
+            .is_some_and(|anim| anim.progress > 0.0)
+        {
+            let old = self.menu_items.get(&fade_id).cloned().unwrap_or_default();
+            let mut closed = ui_kit::PopupState::default();
+            self.animated_popup(ui, &fade_id, &fade_id, &mut closed, &style, |this, ui, _, _| {
+                this.context_rows(ui, &fade_id, &old, false);
+            });
+        }
+        chosen
+    }
+
+    fn context_rows(
+        &mut self,
+        ui: &mut Ui<'_>,
+        id: &str,
+        items: &[MenuEntry],
+        live: bool,
+    ) -> Option<usize> {
+        const ROW_HEIGHT: f32 = 30.0;
+        const SEPARATOR_HEIGHT: f32 = 9.0;
+        let mut chosen = None;
+        drop(
+            ui.element(
+                &ElementDesc::new()
+                    .width(Sizing::Fixed(124.0))
+                    .height(Sizing::Fixed(0.0)),
+            ),
+        );
+        for (index, item) in items.iter().enumerate() {
+            if item.separator_before {
+                let _gap = ui.element(
+                    &ElementDesc::new()
+                        .width(Sizing::Grow)
+                        .height(Sizing::Fixed(SEPARATOR_HEIGHT))
+                        .align(ChildAlignment::center()),
+                );
+                drop(
+                    ui.element(
+                        &ElementDesc::new()
+                            .width(Sizing::Grow)
+                            .height(Sizing::Fixed(1.0))
+                            .background(self.palette.border_muted),
+                    ),
+                );
+            }
+            let row_id = format!("{id}::{index}");
+            if live {
+                self.cursor_target(&row_id, CursorKind::Pointer);
+            }
+            let hovered = live && ui.hovered(&row_id);
+            let ink = if item.danger {
+                self.palette.danger
+            } else {
+                self.palette.text
+            };
+            let fill = if !hovered {
+                Vec4::ZERO
+            } else if item.danger {
+                self.palette.danger.with_w(0.16)
+            } else {
+                self.palette.hovered_fill()
+            };
+            {
+                let _row = ui.element(
+                    &ElementDesc::new()
+                        .id(row_id.clone())
+                        .width(Sizing::Grow)
+                        .height(Sizing::Fixed(ROW_HEIGHT))
+                        .padding(Padding::symmetric(10, 0))
+                        .child_gap(SPACE_MD)
+                        .align(ChildAlignment::new(AlignX::Left, AlignY::Center))
+                        .background(fill)
+                        .corner_radius(CornerRadius::all(6.0)),
+                );
+                self::label(
+                    ui,
+                    &item.label,
+                    &TextStyle {
+                        color: ink,
+                        wrap: TextWrap::None,
+                        ..self.style(TextRole::Body)
+                    },
+                );
+                self.fill(ui);
+                if let Some(icon) = item.icon {
+                    self.icon(ui, icon, 16.0, ink);
+                }
+            }
+            if live && ui.clicked(&row_id) {
+                chosen = Some(index);
             }
         }
         chosen
@@ -2073,7 +2221,7 @@ impl Kit {
         };
         let mut chosen = None;
         let popup_id = format!("{id}::popup");
-        ui_kit::popup(ui, &popup_id, &trigger, &mut menu, &style, |ui, popup| {
+        self.animated_popup(ui, &popup_id, &trigger, &mut menu, &style, |this, ui, popup, live| {
             let _column = ui.element(
                 &ElementDesc::new()
                     .width(Sizing::Fixed(width.max(260.0)))
@@ -2083,7 +2231,7 @@ impl Kit {
             );
             let field = format!("{id}::search");
             if searchable {
-                self.text_field(
+                this.text_field(
                     ui,
                     &field,
                     &mut query,
@@ -2091,7 +2239,9 @@ impl Kit {
                     false,
                     Sizing::Grow,
                 );
-                if !was_open || query.is_empty() && !ui.has_focus(&field) && !ui.focused() {
+                if live
+                    && (!was_open || query.is_empty() && !ui.has_focus(&field) && !ui.focused())
+                {
                     ui.focus(&field);
                 }
             }
@@ -2117,9 +2267,9 @@ impl Kit {
                         .direction(Direction::TopToBottom)
                         .clip(Clip::both()),
                 );
-                self.scrollbar(ui, &list_id);
+                this.scrollbar(ui, &list_id);
                 if matches.is_empty() {
-                    self.text(ui, TextRole::Muted, "No matches found.");
+                    this.text(ui, TextRole::Muted, "No matches found.");
                 }
                 let visible = ui_kit::visible_rows(ui, &list_id, ROW_HEIGHT, matches.len(), 4);
                 ui_kit::spacer(ui, visible.before);
@@ -2131,7 +2281,8 @@ impl Kit {
                             .width(Sizing::Grow)
                             .height(Sizing::Fixed(ROW_HEIGHT)),
                     );
-                    if self.nav_item_ex(ui, &item, None, &options[index], index == selected, false)
+                    let clicked = this.nav_item_ex(ui, &item, None, &options[index], index == selected, false);
+                    if live && clicked
                     {
                         chosen = Some(index);
                         popup.close();

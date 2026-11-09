@@ -369,11 +369,11 @@ fn log_lines_view(
             }
         }
     }
+    let menu_id = format!("{id}::menu");
     if let Some((line, at)) = menu_request {
         selection.menu_line = line;
-        selection.menu.open_at(at);
+        kit.open_context_menu(&menu_id, &mut selection.menu, at);
     }
-    let menu_id = format!("{id}::menu");
     let has_selection = selection.range().is_some();
     let items: Vec<MenuEntry> = if has_selection {
         vec![

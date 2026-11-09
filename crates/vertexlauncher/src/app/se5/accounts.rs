@@ -2,7 +2,7 @@
 //! shared with the egui front end.
 
 use vertex_shell::sturdy::ui::{Sizing, TextStyle, TextWrap, Ui};
-use vertex_shell::sturdy::ui_kit::{self, ModalStyle, PopupStyle};
+use vertex_shell::sturdy::ui_kit::{ModalStyle, PopupStyle};
 
 use launcher_ui::account_colors::{self, PaletteColor};
 use launcher_ui::account_text::mention;
@@ -93,13 +93,15 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
     let mut actions = MenuActions::default();
     let mut view = std::mem::take(&mut state.accounts_view);
     let mut menu = std::mem::take(&mut state.account_menu);
-    ui_kit::popup(
+    let mut live_frame = false;
+    kit.animated_popup(
         ui,
         ACCOUNT_MENU_ID,
         anchor_id,
         &mut menu,
         &style,
-        |ui, _popup| {
+        |kit, ui, _popup, live| {
+            live_frame = live;
             let _column = ui.element(
                 &ElementDesc::new()
                     .width(Sizing::Fit)
@@ -323,7 +325,10 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
     );
     state.account_menu = menu;
     state.accounts_view = view;
-    apply_actions(state, actions);
+    // While the menu folds away it must not act on clicks.
+    if live_frame {
+        apply_actions(state, actions);
+    }
 }
 
 fn apply_actions(state: &mut AppState, actions: MenuActions) {

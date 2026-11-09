@@ -83,7 +83,7 @@ fn activity(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if !view.favorites.is_empty() {
         kit.text(ui, TextRole::Body, "Favorites");
         for entry in &view.favorites {
-            if let Some(next) = entry_row(ui, kit, state, entry) {
+            if let Some(next) = entry_row(ui, kit, state, entry, "favorites") {
                 action = Some((entry.clone(), next));
             }
         }
@@ -94,7 +94,7 @@ fn activity(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     } else {
         kit.text(ui, TextRole::Body, "Recent");
         for entry in &view.recent {
-            if let Some(next) = entry_row(ui, kit, state, entry) {
+            if let Some(next) = entry_row(ui, kit, state, entry, "recent") {
                 action = Some((entry.clone(), next));
             }
         }
@@ -333,8 +333,11 @@ fn entry_row(
     kit: &mut Kit,
     state: &mut AppState,
     entry: &EntryView,
+    section: &str,
 ) -> Option<EntryAction> {
-    let id = format!("home::entry::{}", entry.key);
+    // An entry can be in Favorites and in Recent at once, so the section is part of its ids.
+    let id = format!("home::entry::{section}::{}", entry.key);
+    let menu_target = format!("{section}:{}", entry.key);
     let star_id = format!("{id}::star");
     let text_id = format!("{id}::text");
     // Servers are not a button to point at: no hover highlight (a click still launches).
@@ -518,10 +521,10 @@ fn entry_row(
         return Some(EntryAction::Launch(0));
     }
     if let Some(at) = kit.secondary(ui, &id) {
-        state.home_menu_target = Some(entry.key.clone());
-        state.home_menu.open_at(at);
+        state.home_menu_target = Some(menu_target.clone());
+        kit.open_context_menu("home::entry-menu", &mut state.home_menu, at);
     }
-    if state.home_menu_target.as_deref() == Some(entry.key.as_str()) {
+    if state.home_menu_target.as_deref() == Some(menu_target.as_str()) {
         let sync_label = if entry.kind == EntryKind::World {
             "Sync world…"
         } else {
@@ -535,7 +538,7 @@ fn entry_row(
             MenuEntry::new(edit_label).icon(Icon::Edit),
             MenuEntry::new("Copy to instance…").icon(Icon::Copy),
             MenuEntry::new("Move to instance…").icon(Icon::Folder),
-            MenuEntry::new("Delete…").icon(Icon::Trash),
+            MenuEntry::new("Delete…").icon(Icon::Trash).danger(),
         ];
         if let Some(choice) = kit.context_menu(ui, "home::entry-menu", &mut state.home_menu, &items)
         {
