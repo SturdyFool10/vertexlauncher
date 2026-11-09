@@ -19,6 +19,11 @@ pub(super) fn add_voxel_overlay_layer(
     const VOXEL_THICKNESS: f32 = 0.92;
     const VOXEL_GAP: f32 = 0.08;
 
+    // A GPU renderer that already holds this part's voxels asks for the matrix only.
+    if capture_skipping() {
+        return;
+    }
+
     for region in regions {
         for row in 0..region.height {
             for col in 0..region.width {

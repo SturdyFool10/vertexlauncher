@@ -13,12 +13,12 @@ use super::LaunchAuthContext;
 
 #[path = "skins/skins_api.rs"]
 pub mod api;
+#[path = "skins/skins_gpu_scene.rs"]
+pub mod gpu_scene;
 #[path = "skins/image_hash.rs"]
 mod image_hash;
 #[path = "skins_preview_gpu_geometry.rs"]
 mod skins_preview_gpu_geometry;
-#[path = "skins/skins_raster.rs"]
-mod skins_raster;
 #[path = "skins/auth_error_format.rs"]
 mod auth_error_format;
 #[path = "skins/cape_choice.rs"]
@@ -49,7 +49,7 @@ mod skins_state;
 mod worker_event;
 use self::auth_error_format::format_auth_error;
 use self::cape_choice::CapeChoice;
-use self::cape_uv_layout::{cape_outer_face_uv, cape_uv_layout, default_cape_uv_layout};
+use self::cape_uv_layout::{cape_uv_layout, default_cape_uv_layout};
 use self::default_elytra_texture::default_elytra_texture_image;
 use self::loaded_profile::LoadedProfile;
 use self::profile_cache::{fetch_and_cache_profile, update_cached_profile};
@@ -62,11 +62,11 @@ use crate::notification;
 use self::image_hash::hash_preview_image;
 use self::skins_preview_gpu_geometry::{ElytraMotion, add_cape_triangles, add_elytra_triangles};
 use self::skins_state::*;
+use self::gpu_scene::{PartTag, record_quad as capture_quad, set_part as capture_part, skipping_current_part as capture_skipping};
 use self::worker_event::WorkerEvent;
 use self::{preview_motion_mode::PreviewMotionMode, preview_pose::PreviewPose};
 
 const PREVIEW_ORBIT_SECONDS: f64 = 45.0;
-const PREVIEW_TARGET_FPS: f32 = 60.0;
 
 /// Minecraft's walk-animation speed for a player walking on flat ground (≈0.216 blocks per
 /// tick × 4, capped at 1). Drives the preview's walk cycle.
@@ -82,10 +82,6 @@ const UV_EDGE_INSET_OVERLAY_TEXELS: f32 = 0.5;
 /// texel grid (used where panels must meet face texels exactly).
 const FACE_TEXEL_EXACT_INSET_TEXELS: f32 = 0.002;
 
-
-const SKIN_PREVIEW_NEAR: f32 = 1.5;
-
-const MOTION_BLUR_MIN_ANGULAR_SPAN: f32 = 0.015;
 
 
 

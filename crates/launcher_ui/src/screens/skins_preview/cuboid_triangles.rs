@@ -277,6 +277,8 @@ pub(in super::super) fn add_transformed_quad_triangles(
     rect: Rect,
     light_dir: Vec3,
 ) {
+    // A GPU renderer asks the builder for the parts and their quads instead of projected triangles.
+    capture_quad(texture, transform, quad, normal, uv_rect);
     let world_normal = transform.transform_vector(normal).normalized();
     let brightness = 0.58 + world_normal.dot(light_dir).max(0.0) * 0.42;
     let tint = color_with_brightness(Color32::WHITE, brightness);

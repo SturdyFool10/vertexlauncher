@@ -24,7 +24,7 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
     let key = format!("screenshot::{}", path.display());
     let picture = kit
         .images
-        .get(&key, || ImageSource::File(path.to_path_buf()), 0);
+        .get(&mut ui.engine(), &key, || ImageSource::File(path.to_path_buf()), 0);
     let mut close = false;
     let mut delete = false;
     let controller = (state.gamepad.viewer_pan, state.gamepad.viewer_zoom);

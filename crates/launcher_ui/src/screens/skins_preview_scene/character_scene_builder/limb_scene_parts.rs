@@ -50,6 +50,7 @@ fn add_leg_scene_parts(context: &mut CharacterSceneBuildContext) {
         back: uv_rect(28, 52, 4, 12),
     };
 
+    capture_part(PartTag::RightLeg);
     add_leg(
         context,
         context.motion.pose.right_leg,
@@ -57,6 +58,7 @@ fn add_leg_scene_parts(context: &mut CharacterSceneBuildContext) {
         leg_overlay_uv(0, 32),
         leg_overlay_regions(0, 32),
     );
+    capture_part(PartTag::LeftLeg);
     add_leg(
         context,
         context.motion.pose.left_leg,
@@ -132,6 +134,7 @@ fn add_arm(
     overlay_uv: FaceUvs,
     is_left: bool,
 ) {
+    capture_part(if is_left { PartTag::LeftArm } else { PartTag::RightArm });
     let transform = pose.transform(context.model_offset);
     let local_top_center = Vec3::new(center_x, 2.0, 0.0);
     let arm_width = context.motion.arm_width;

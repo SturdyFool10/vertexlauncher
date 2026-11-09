@@ -1,10 +1,9 @@
-//! The launcher's Tabler SVG icons on the engine's SVG pipeline. The engine loads SVGs from files and tints them
-//! by multiplying, so each icon is written once to the cache folder with `currentColor` set to white; drawing
+//! The launcher's Tabler SVG icons on the engine's SVG pipeline. The engine tints an SVG by multiplying, so each icon is
+//! made once with `currentColor` set to white and handed to the engine as text (nothing is written to disk); drawing
 //! passes the theme colour as the element's tint.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use launcher_ui::assets;
 use vertex_shell::sturdy::glam::Vec4;
@@ -71,39 +70,23 @@ icons! {
     Close => ("x", assets::X_SVG),
 }
 
-fn icon_dir() -> PathBuf {
-    app_paths::cache_root().join("icons")
+/// The name the engine knows an icon (turned by `turn` steps, see [`TURN_STEP_DEGREES`]) by.
+fn icon_name(icon: Icon, turn: u8) -> String {
+    if turn == 0 {
+        icon.file().to_owned()
+    } else {
+        format!("{}-t{turn}", icon.file())
+    }
 }
 
-/// Writes the white-on-transparent copy of `icon` if it is not there yet (or the bundled icon changed) and
-/// returns its path.
-///
-/// The check and the write run once per icon on the launcher runtime, never on the UI thread; until the file is ready
-/// this returns `None` and the icon is skipped for a frame.
-fn ensure_file(icon: Icon, turn: u8) -> Option<PathBuf> {
-    enum State {
-        Pending,
-        Ready(PathBuf),
-        Failed,
-    }
-    static STATES: OnceLock<Mutex<HashMap<(Icon, u8), State>>> = OnceLock::new();
-    let mut states = STATES
+/// The white-on-transparent SVG text of `icon` turned by `turn` steps, made the first time it is asked for.
+fn svg_text(icon: Icon, turn: u8) -> Arc<[u8]> {
+    static TEXTS: OnceLock<Mutex<HashMap<(Icon, u8), Arc<[u8]>>>> = OnceLock::new();
+    let mut texts = TEXTS
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    match states.get(&(icon, turn)) {
-        Some(State::Ready(path)) => return Some(path.clone()),
-        Some(State::Pending | State::Failed) => return None,
-        None => {}
-    }
-    states.insert((icon, turn), State::Pending);
-    drop(states);
-    launcher_runtime::spawn_blocking_detached(move || {
-        let path = if turn == 0 {
-            icon_dir().join(format!("{}.svg", icon.file()))
-        } else {
-            icon_dir().join(format!("{}-t{turn}.svg", icon.file()))
-        };
+    Arc::clone(texts.entry((icon, turn)).or_insert_with(|| {
         let mut white = String::from_utf8_lossy(icon.svg()).replace("currentColor", "#ffffff");
         if turn != 0
             && let (Some(open_end), Some(close)) = (white.find('>'), white.rfind("</svg>"))
@@ -113,41 +96,14 @@ fn ensure_file(icon: Icon, turn: u8) -> Option<PathBuf> {
             white.insert_str(close, "</g>");
             white.insert_str(open_end + 1, &format!("<g transform=\"rotate({degrees} 12 12)\">"));
         }
-        let white = white.into_bytes();
-        let written = if std::fs::read(&path).ok().as_deref() == Some(white.as_slice()) {
-            true
-        } else {
-            std::fs::create_dir_all(icon_dir()).is_ok() && std::fs::write(&path, &white).is_ok()
-        };
-        let state = if written {
-            State::Ready(path)
-        } else {
-            State::Failed
-        };
-        STATES
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert((icon, turn), state);
-    });
-    None
+        Arc::from(white.into_bytes())
+    }))
 }
 
 /// Draws `icon` `size` pixels square in `color`. `supersample` renders it larger and scales it down, which is what
 /// the "Icon anti-aliasing" setting controls.
 pub fn draw(ui: &mut Ui<'_>, icon: Icon, size: f32, color: Vec4, supersample: u32) {
     draw_turned(ui, icon, 0.0, size, color, supersample);
-}
-
-/// Starts writing the rotated copies of `icon` between `from` and `to` degrees, so an animation through that range does
-/// not skip frames while their files are made. Cheap to call every frame.
-pub fn warm_turns(icon: Icon, from: f32, to: f32) {
-    let (low, high) = (from.min(to), from.max(to));
-    let first = (low / TURN_STEP_DEGREES).floor() as u32;
-    let last = (high / TURN_STEP_DEGREES).ceil() as u32;
-    for step in first..=last {
-        let _ = ensure_file(icon, (step % 48) as u8);
-    }
 }
 
 /// Degrees between the pre-rotated copies of an icon that [`draw_turned`] picks from.
@@ -167,25 +123,15 @@ pub fn draw_turned(
     let slot = ElementDesc::new()
         .width(Sizing::Fixed(size))
         .height(Sizing::Fixed(size));
-    // Until the icon is ready its slot stays empty, so the layout does not move when it appears.
-    let Some(path) = ensure_file(icon, turn) else {
-        drop(ui.element(&slot));
-        return;
-    };
+    let name = icon_name(icon, turn);
+    let text = svg_text(icon, turn);
     // Rounded up to a multiple of 4: the engine block-compresses these textures, and WebGPU rejects a BC7 texture
     // whose size is not a whole number of 4x4 blocks (Vulkan tolerates it), which left odd-sized icons invisible.
     let target = ((size * supersample.max(1) as f32 / 4.0).ceil() * 4.0).max(4.0);
-    let Ok(texture) = ui.load_svg(&path.to_string_lossy(), target) else {
+    let Ok(texture) = ui.load_svg_data(&name, &text, target) else {
         drop(ui.element(&slot));
         return;
     };
-    // A texture that is not on the GPU yet is drawn as a solid block of the tint colour. So the icon waits until the
-    // engine has resources for it, and at least one frame after it was created, then replaces the empty slot.
-    let on_gpu = ui.engine().assets().rhi_texture(texture).is_some();
-    if !texture_seen(&path, target) || !on_gpu {
-        drop(ui.element(&slot));
-        return;
-    }
     ui.svg(
         &ElementDesc::new()
             .width(Sizing::Fixed(size))
@@ -193,25 +139,4 @@ pub fn draw_turned(
             .background(color),
         texture,
     );
-}
-
-/// The textures (file, raster size) that an earlier frame has already asked the engine for. Returns whether this one
-/// was among them, and records it.
-fn texture_seen(path: &std::path::Path, target: f32) -> bool {
-    let mut seen = SEEN_TEXTURES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    !seen.insert((path.to_path_buf(), target.to_bits()))
-}
-
-static SEEN_TEXTURES: OnceLock<Mutex<std::collections::HashSet<(PathBuf, u32)>>> = OnceLock::new();
-
-/// Call after the engine's SVG cache is cleared: every texture is gone, so each icon starts over as not yet loaded.
-pub fn forget_textures() {
-    SEEN_TEXTURES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clear();
 }

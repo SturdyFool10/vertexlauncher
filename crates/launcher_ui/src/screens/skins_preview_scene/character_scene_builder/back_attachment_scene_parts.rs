@@ -23,6 +23,7 @@ pub(super) fn add_back_attachment_scene_parts(
             0.0,
             -pose.cape_rz,
         ));
+        capture_part(PartTag::Cape);
         add_cape_triangles(
             scene_tris,
             TriangleTexture::Cape,

@@ -21,6 +21,7 @@ instances.workspace = true
 installation.workspace = true
 launcher_runtime.workspace = true
 launcher_ui.workspace = true
+skin_gpu.workspace = true
 managed_content.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -45,7 +46,7 @@ regex = "1"
 vertex_shell.workspace = true
 vertex_theme.workspace = true
 # The binary forwards the engine's native link directives to Cargo so they reach the final link.
-sturdy-sys = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "548cd4cfde91a81f6d75a33ec0a90d3d8a256d5f", features = ["prebuilt-deps"] }
+sturdy-sys = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "458a3d62701442244edcda232a493b971cfa0977", features = ["prebuilt-deps"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wry = "=0.31.1"

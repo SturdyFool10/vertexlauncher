@@ -24,7 +24,7 @@ use self::limb_scene_parts::add_limb_scene_parts;
 use self::player_motion_pose::{
     McPartPose, PlayerMotionInput, PlayerMotionPose, player_motion_pose,
 };
-use self::scene_camera::build_character_scene_camera;
+pub(in crate::screens) use self::scene_camera::build_character_scene_camera;
 
 /// Builds the full preview scene for the current pose and render options.
 ///

@@ -3,7 +3,7 @@
 
 use instances::InstanceRecord;
 use launcher_ui::screens::AppScreen;
-use vertex_shell::sturdy::glam::Vec4;
+use vertex_shell::sturdy::glam::{UVec2, Vec4};
 use vertex_shell::sturdy::ui::{
     AlignX, AlignY, AttachPoint, Border, ChildAlignment, CornerRadius, Direction, ElementDesc,
     FloatTarget, Floating, Padding, Sizing, Ui,
@@ -346,25 +346,43 @@ fn account_button(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 })
                 .corner_radius(CornerRadius::all(10.0)),
         );
-        if let Some(avatar) = state
-            .auth
-            .avatar_png()
-            .filter(|_| !state.streamer_mode())
-            .map(std::sync::Arc::<[u8]>::from)
-        {
-            let key = format!(
-                "avatar::{}",
-                state.auth.active_account_key().unwrap_or_default()
-            );
-            kit.image(
-                ui,
-                "chrome::avatar",
-                &key,
-                || ImageSource::Bytes(avatar),
-                22.0,
-                22.0,
-                5.0,
-            );
+        if !state.streamer_mode() {
+            // The head is drawn by the engine from the skin; until that is ready (or if it cannot be), the flat avatar
+            // picture stands in.
+            let head = state.auth.active_skin_url().and_then(|url| {
+                kit.heads.head(&mut ui.engine(), &url, UVec2::new(88, 88))
+            });
+            match head {
+                Some(texture) => ui.image(
+                    &ElementDesc::new()
+                        .id("chrome::avatar".into())
+                        .width(Sizing::Fixed(22.0))
+                        .height(Sizing::Fixed(22.0))
+                        .corner_radius(CornerRadius::all(5.0)),
+                    texture,
+                ),
+                None => {
+                    if let Some(avatar) = state
+                        .auth
+                        .avatar_png()
+                        .map(std::sync::Arc::<[u8]>::from)
+                    {
+                        let key = format!(
+                            "avatar::{}",
+                            state.auth.active_account_key().unwrap_or_default()
+                        );
+                        kit.image(
+                            ui,
+                            "chrome::avatar",
+                            &key,
+                            || ImageSource::Bytes(avatar),
+                            22.0,
+                            22.0,
+                            5.0,
+                        );
+                    }
+                }
+            }
         }
         kit.text_clipped(ui, TextRole::Body, &label, 220.0);
     }

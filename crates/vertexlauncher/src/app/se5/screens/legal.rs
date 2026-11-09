@@ -221,7 +221,6 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit) {
             );
             // Right when closed, a clockwise quarter-turn to down when open (the down chevron turned 270 degrees points
             // right), so both resting states are the plain chevrons.
-            icons::warm_turns(Icon::ChevronDown, 270.0, 360.0);
             icons::draw_turned(
                 ui,
                 Icon::ChevronDown,

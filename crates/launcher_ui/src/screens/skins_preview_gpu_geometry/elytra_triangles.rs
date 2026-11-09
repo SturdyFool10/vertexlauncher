@@ -75,7 +75,9 @@ pub(in super::super::super) fn add_elytra_triangles(
 ) {
     let _ = VANILLA_ELYTRA_POSE_SNEAKING;
     let _ = VANILLA_ELYTRA_POSE_GLIDE_OPEN;
-    for (wing, cube) in elytra_wing_parts(body_transform, motion) {
+    for (index, (wing, cube)) in elytra_wing_parts(body_transform, motion).into_iter().enumerate() {
+        // `elytra_wing_parts` returns the left wing first.
+        capture_part(if index == 0 { PartTag::ElytraLeft } else { PartTag::ElytraRight });
         add_minecraft_box_triangles(
             out, texture, wing, cube, camera, projection, rect, light_dir,
         );

@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::icons::{self, Icon};
 use super::images::{ImageCache, ImageSource, Picture};
@@ -587,14 +586,12 @@ pub struct Kit {
     pub typography: config::TypographySettings,
     pub delta_seconds: f32,
     pub images: ImageCache,
+    /// The heads drawn by the engine (the sign-in button's avatar).
+    pub heads: super::avatar::AvatarHeads,
     /// Icon render scale from the anti-aliasing setting.
     pub svg_supersample: u32,
-    /// The graphics device generation the icon textures were made on; a switch invalidates them.
-    pub svg_device_generation: u64,
     /// Which bold/italic faces the current font has, per styled role (see `fonts::StyledFaces`).
     pub styled_faces: super::fonts::StyledFaces,
-    /// When the icons are made once more after a device switch; see `apply_fonts`.
-    pub svg_rebuild_at: Option<Instant>,
     buttons: HashMap<String, ButtonState>,
     toggles: HashMap<String, ToggleState>,
     sliders: HashMap<String, SliderState>,
@@ -650,10 +647,9 @@ impl Kit {
             typography: config::TypographySettings::default(),
             delta_seconds: 0.016,
             images: ImageCache::default(),
+            heads: Default::default(),
             svg_supersample: 2,
-            svg_device_generation: 0,
             styled_faces: Default::default(),
-            svg_rebuild_at: None,
             buttons: HashMap::new(),
             toggles: HashMap::new(),
             sliders: HashMap::new(),
@@ -1092,9 +1088,12 @@ impl Kit {
         height: f32,
         radius: f32,
     ) {
-        let picture: Option<Picture> =
-            self.images
-                .get(key, source, (width.max(height) * 2.0) as u32);
+        let picture: Option<Picture> = self.images.get(
+            &mut ui.engine(),
+            key,
+            source,
+            (width.max(height) * 2.0) as u32,
+        );
         let desc = ElementDesc::new()
             .id(id.into())
             .width(Sizing::Fixed(width))
@@ -1103,8 +1102,6 @@ impl Kit {
         match picture {
             Some(picture) => ui.image(&desc, picture.texture),
             None => {
-                if self.images.loading() {
-                }
                 drop(ui.element(&desc.background(self.palette.bg_light)));
             }
         }
@@ -2351,7 +2348,6 @@ impl Kit {
             // Pointing right when closed, turning clockwise a quarter-turn to point down when open. The down chevron
             // turned 270 degrees clockwise points right; 360 is down again.
             let degrees = 270.0 + 90.0 * eased;
-            icons::warm_turns(Icon::ChevronDown, 270.0, 360.0);
             icons::draw_turned(
                 ui,
                 Icon::ChevronDown,

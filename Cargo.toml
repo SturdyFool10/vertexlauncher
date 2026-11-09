@@ -22,6 +22,7 @@ members = [
     "crates/shared_lru",
     "crates/vertex_constants",
     "crates/vtmpack",
+    "crates/skin_gpu",
     "crates/vertex_shell",
     "crates/vertex_theme",
 ]
@@ -69,6 +70,7 @@ log_redaction = { path = "crates/log_redaction" }
 logged_fs = { path = "crates/logged_fs" }
 launcher_runtime = { path = "crates/launcher_runtime" }
 launcher_ui = { path = "crates/launcher_ui" }
+skin_gpu = { path = "crates/skin_gpu" }
 managed_content = { path = "crates/managed_content" }
 modrinth = { path = "crates/modrinth" }
 modprovider = { path = "crates/modprovider" }

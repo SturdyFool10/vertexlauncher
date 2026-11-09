@@ -1,13 +1,11 @@
-//! Skins: the active account's skin, model and cape, with a live 3D preview. The preview is drawn by the launcher's
-//! rasteriser into an engine texture that is updated in place every frame; everything else is ordinary UI.
+//! Skins: the active account's skin, model and cape, with a live 3D preview. The preview is drawn by the engine on the
+//! GPU every frame (`skin_gpu`) into an offscreen target that is shown as an image. Everything else is ordinary UI.
 
 use crate::app::se5::file_dialog::{Dialog as PickerDialog, Pick};
 use launcher_ui::screens::skins_api::{
     CapeView, MotionMode, PreviewSettings, SkinVariant, SkinsSession,
 };
-use vertex_shell::sturdy::assets::{
-    Asset, RendererTextureHandle, TextureColorSpace, TextureKind, TexturePixelFormat,
-};
+use vertex_shell::sturdy::assets::RendererTextureHandle;
 use vertex_shell::sturdy::glam::Vec2;
 use vertex_shell::sturdy::ui::{
     AlignX, AlignY, AttachPoint, Border, ChildAlignment, Clip, CornerRadius, Direction,
@@ -18,37 +16,30 @@ use super::super::AppState;
 use super::super::kit::{self, ButtonKind, Kit, TextRole};
 
 const PREVIEW_HEIGHT: f32 = 460.0;
-/// The model stands in the middle of the canvas, so only this much of its width is drawn (centred): the rest is empty
-/// and drawing it on the CPU every frame is what made the preview slow.
+/// The model stands in the middle of the canvas, so only this much of its width is drawn (centred).
 const MAX_PREVIEW_WIDTH: u32 = 600;
 const CANVAS_ID: &str = "skins::canvas";
 const PICK_SLOT: &str = "skins::pick";
 const CAPE_TILE_WIDTH: f32 = 140.0;
 const CAPE_TILE_HEIGHT: f32 = 186.0;
 
-struct PreviewTexture {
-    asset: Asset,
-    handle: RendererTextureHandle,
-    width: u32,
-    height: u32,
-}
-
 /// Per-screen UI state; the profile and preview state live in the `SkinsSession`.
 #[derive(Default)]
 pub struct SkinsView {
-    texture: Option<PreviewTexture>,
     /// The screen was drawn last frame, so entering it again counts as opening it.
     shown: bool,
     pointer_was_down: bool,
     dragging: bool,
     last_pointer_x: f32,
-    /// The preview generation last uploaded.
-    uploaded: u64,
-    /// Preview textures replaced by one of a new size that the engine would not release yet (a frame still using
-    /// them), to be released later rather than forgotten.
-    retired: Vec<Asset>,
-    /// How many preview textures have been created, so each has its own name.
-    created: u64,
+    /// The GPU preview, made on first use and dropped when the screen is left.
+    gpu: Option<skin_gpu::PreviewRenderer>,
+    /// The GPU preview could not start (or failed): the screen says so instead of showing a picture.
+    gpu_failed: bool,
+    /// Physical pixels per layout unit of the display the window is on (0 = not asked yet), and when it was asked.
+    display_scale: f32,
+    display_scale_checked: f64,
+    /// The window position and size `display_scale` was worked out for.
+    display_scale_key: Option<(i32, i32, u32, u32)>,
 }
 
 impl SkinsView {
@@ -57,9 +48,8 @@ impl SkinsView {
         if self.shown {
             self.shown = false;
             self.dragging = false;
-            let assets = self.texture.take().map(|texture| texture.asset);
-            for asset in assets.into_iter().chain(std::mem::take(&mut self.retired)) {
-                let _ = ui.engine().assets().unload(asset);
+            if let Some(mut renderer) = self.gpu.take() {
+                renderer.destroy(&mut ui.engine());
             }
         }
     }
@@ -197,6 +187,8 @@ fn preview(
         PREVIEW_HEIGHT as u32,
     );
 
+    let scale = display_scale(ui, view, now);
+
     // Camera: drag to turn the model; it keeps turning with the drag's speed and eases to a stop.
     // The engine only learns of a release that happens over the window, so a button let go elsewhere would leave the
     // drag running. Treat the cursor leaving the window as the end of the drag.
@@ -221,14 +213,14 @@ fn preview(
     view.pointer_was_down = ui.pointer_down();
     view.last_pointer_x = pointer_x;
 
-    let frame = skins.render_preview(frame_w, frame_h, now, settings);
-    if let Some(frame) = &frame {
-        if view.uploaded != skins.preview_generation() || view.texture.is_none() {
-            upload(ui, view, frame);
-            view.uploaded = skins.preview_generation();
-        }
-        // The model turns continuously, so keep drawing while it is on screen.
-    }
+    // The picture to show and its size, or `None` while there is no skin (or no GPU preview).
+    let picture: Option<(RendererTextureHandle, u32, u32)> =
+        match gpu_picture(ui, skins, view, settings, now, frame_w, frame_h, scale) {
+            // Drawn at the layout size whatever resolution the picture was rendered at.
+            GpuPicture::Shown(handle) => Some((handle, frame_w, frame_h)),
+            GpuPicture::NoSkin | GpuPicture::Unavailable => None,
+        };
+    let unavailable = view.gpu_failed;
 
     let _canvas = ui.element(
         &ElementDesc::new()
@@ -241,12 +233,12 @@ fn preview(
             .border(Border::all(kit.palette.border_muted, 1))
             .clip(Clip::both()),
     );
-    match (&frame, &view.texture) {
-        (Some(_), Some(texture)) => ui.image(
+    match picture {
+        Some((handle, width, height)) => ui.image(
             // Floating, so the picture takes no part in the layout and the canvas always follows the window.
             &ElementDesc::new()
-                .width(Sizing::Fixed(texture.width as f32))
-                .height(Sizing::Fixed(texture.height as f32))
+                .width(Sizing::Fixed(width as f32))
+                .height(Sizing::Fixed(height as f32))
                 .floating(Some(Floating {
                     element_attach_point: AttachPoint::CenterCenter,
                     parent_attach_point: AttachPoint::CenterCenter,
@@ -255,9 +247,14 @@ fn preview(
                     clip_to_target: true,
                     ..Floating::new(FloatTarget::Parent)
                 })),
-            texture.handle,
+            handle,
         ),
-        _ => kit.text(ui, TextRole::Muted, "No skin loaded"),
+        None if unavailable => kit.text(
+            ui,
+            TextRole::Muted,
+            "The skin preview needs GPU rendering, which could not start.",
+        ),
+        None => kit.text(ui, TextRole::Muted, "No skin loaded"),
     }
 
     // Controls floating over the bottom-left corner.
@@ -330,63 +327,111 @@ fn cursor_outside_window(ui: &mut Ui<'_>) -> bool {
     local.x < 0 || local.y < 0 || local.x >= size.x as i32 || local.y >= size.y as i32
 }
 
-/// Puts `frame` on the preview texture, creating it (or replacing it when the size changed) as needed.
-fn upload(ui: &mut Ui<'_>, view: &mut SkinsView, frame: &image::RgbaImage) {
-    let (width, height) = (frame.width(), frame.height());
+/// Physical pixels per layout unit of the display the window is on, from the display list. The list is only read when
+/// the window has moved or been resized since the last time (and every half minute): enumerating displays is not free,
+/// and the answer changes only when the window changes monitor. 1 when it cannot be told.
+fn display_scale(ui: &mut Ui<'_>, view: &mut SkinsView, now: f64) -> f32 {
     let mut engine = ui.engine();
-    if let Some(texture) = &view.texture
-        && (texture.width, texture.height) == (width, height)
-    {
-        if engine
-            .assets()
-            .update_texture(texture.asset, frame.as_raw())
-            .is_err()
-        {
-            tracing::debug!(target: "vertexlauncher/se5/skins", "Could not update the preview texture.");
-        }
-        return;
+    let Some(mut window) = engine.primary_window_control() else {
+        return if view.display_scale > 0.0 { view.display_scale } else { 1.0 };
+    };
+    let placement = window.position().zip(window.size());
+    let key = placement.map(|(position, size)| (position.x, position.y, size.x, size.y));
+    if view.display_scale > 0.0 && key == view.display_scale_key && now - view.display_scale_checked < 30.0 {
+        return view.display_scale;
     }
-    let mut assets = engine.assets();
-    // Release what could not be released earlier, then the texture being replaced; whatever the engine still holds
-    // is kept and tried again on the next upload.
-    let mut pending = std::mem::take(&mut view.retired);
-    pending.extend(view.texture.take().map(|old| old.asset));
-    for asset in pending {
-        if assets.unload(asset).is_err() && assets.contains(asset) {
-            view.retired.push(asset);
+    view.display_scale_checked = now;
+    view.display_scale_key = key;
+    let center = placement.map(|(position, size)| (position.x + size.x as i32 / 2, position.y + size.y as i32 / 2));
+    let displays = window.displays();
+    let containing = center.and_then(|(x, y)| {
+        displays.iter().find(|display| {
+            let bounds = &display.bounds;
+            x >= bounds.x && y >= bounds.y && x < bounds.x + bounds.width as i32 && y < bounds.y + bounds.height as i32
+        })
+    });
+    let scale = containing
+        .or_else(|| displays.iter().find(|display| display.primary))
+        .map_or(1.0, |display| display.content_scale);
+    view.display_scale = if scale.is_finite() { scale.clamp(1.0, 4.0) } else { 1.0 };
+    view.display_scale
+}
+
+enum GpuPicture {
+    Shown(RendererTextureHandle),
+    NoSkin,
+    /// The GPU renderer is not running.
+    Unavailable,
+}
+
+/// Draws the preview on the GPU for this frame, creating the renderer on first use.
+#[allow(clippy::too_many_arguments)]
+fn gpu_picture(
+    ui: &mut Ui<'_>,
+    skins: &mut SkinsSession,
+    view: &mut SkinsView,
+    settings: &PreviewSettings,
+    now: f64,
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> GpuPicture {
+    if view.gpu_failed {
+        return GpuPicture::Unavailable;
+    }
+    if view.gpu.is_none() {
+        match skin_gpu::PreviewRenderer::new(&mut ui.engine()) {
+            Ok(renderer) => {
+                view.gpu = Some(renderer);
+                // A new renderer has none of the geometry the session believes it handed out.
+                skins.gpu_resend_all();
+            }
+            Err(err) => {
+                tracing::warn!(target: "vertexlauncher/se5/skins", "The GPU skin preview could not start ({err}); no preview is shown.");
+                view.gpu_failed = true;
+                return GpuPicture::Unavailable;
+            }
         }
     }
-    // A name of its own: resizing quickly replaces the texture again and again, and a new texture with the name of
-    // one the engine has not finished releasing can be refused, which left the canvas without a picture.
-    view.created += 1;
-    let label = format!("skins/preview/{}", view.created);
-    // Per-frame textures are created uncompressed and without mips, as `update_texture` requires.
-    let created = assets
-        .create_texture_sampled(
-            frame.as_raw(),
-            width,
-            height,
-            TexturePixelFormat::Rgba8,
-            TextureColorSpace::Srgb,
-            TextureKind::ColorAlpha,
-            &label,
-            false,
-            false,
-            true,
-        )
-        .and_then(|asset| {
-            assets.texture_handle(asset).map(|handle| PreviewTexture {
-                asset,
-                handle,
-                width,
-                height,
-            })
-        });
-    match created {
-        Ok(texture) => view.texture = Some(texture),
+    let Some(frame) = skins.gpu_frame(now, settings) else {
+        return GpuPicture::NoSkin;
+    };
+    let Some(renderer) = view.gpu.as_mut() else {
+        return GpuPicture::Unavailable;
+    };
+    let request = skin_gpu::RenderRequest {
+        frame: &frame,
+        // Rendered at the display's real resolution (layout units are logical, so a scaled display shows the picture
+        // larger than `width` x `height` pixels), so the anti-aliasing works on the pixels that reach the screen.
+        size: vertex_shell::sturdy::glam::UVec2::new(
+            ((width as f32 * scale).round() as u32).clamp(16, 4096),
+            ((height as f32 * scale).round() as u32).clamp(16, 4096),
+        ),
+        settings: skin_gpu::RenderSettings {
+            aa_mode: settings.aa_mode,
+            msaa_samples: settings.msaa_samples,
+            texel_boundary_aa: settings.texel_aa_mode == config::SkinPreviewTexelAaMode::TexelBoundary,
+        },
+    };
+    let rendered = renderer.render(&mut ui.engine(), &request);
+    match rendered {
+        Ok(missing_geometry) => {
+            if missing_geometry {
+                skins.gpu_resend_all();
+            }
+        }
         Err(err) => {
-            tracing::warn!(target: "vertexlauncher/se5/skins", "Could not create the preview texture: {err:?}")
+            tracing::warn!(target: "vertexlauncher/se5/skins", "The GPU skin preview failed ({err}); no preview is shown.");
+            view.gpu_failed = true;
+            if let Some(mut renderer) = view.gpu.take() {
+                renderer.destroy(&mut ui.engine());
+            }
+            return GpuPicture::Unavailable;
         }
+    }
+    match renderer.texture(&mut ui.engine()) {
+        Some((handle, _size)) => GpuPicture::Shown(handle),
+        None => GpuPicture::Unavailable,
     }
 }
 

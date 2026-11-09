@@ -9,6 +9,7 @@
 //! egui front end.
 
 mod accounts;
+mod avatar;
 mod chrome;
 mod create_instance;
 mod flows;
@@ -24,7 +25,6 @@ mod screens;
 mod toasts;
 
 /// How long after a graphics-device switch the icon textures are made once more.
-const SVG_SETTLE_DELAY: Duration = Duration::from_millis(600);
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -933,6 +933,7 @@ impl App {
         vertex_shell::set_handoff(self.state.config.steam_deck_handoff());
         stalls.phase("shell");
         self.kit.images.pump(&mut ui.engine());
+        self.kit.heads.pump();
         stalls.phase("images");
         self.kit.palette = Palette::new(
             &self.state.theme,
@@ -1035,26 +1036,9 @@ impl App {
         // only a 2x raster is filtered cleanly. 3x and 4x skip texels and look worse than no supersampling, so the
         // higher modes stop at 2x (the rasteriser already anti-aliases analytically).
         let supersample = self.state.config.svg_aa_mode().supersample_scale().min(2);
-        // A graphics-device switch (Vertex applies the saved GPU choice on the first frames) rebuilds the engine's
-        // textures, and icons made right around it can draw as solid white blocks. A later switch, once the new device
-        // has settled, always came out right, so the icons are made again: at the switch, and once more a moment after.
-        let generation = ui.engine().device_generation();
-        if generation != self.kit.svg_device_generation {
-            self.kit.svg_device_generation = generation;
-            self.kit.svg_rebuild_at = Some(Instant::now() + SVG_SETTLE_DELAY);
-            ui.clear_svg_cache();
-            icons::forget_textures();
-        } else if self.kit.svg_rebuild_at.is_some_and(|at| Instant::now() >= at) {
-            self.kit.svg_rebuild_at = None;
-            ui.clear_svg_cache();
-            icons::forget_textures();
-        }
-        if supersample != self.kit.svg_supersample {
-            // Icons are rasterised at a multiple of their drawn size; the cached ones are the wrong size now.
-            ui.clear_svg_cache();
-            icons::forget_textures();
-            self.kit.svg_supersample = supersample;
-        }
+        // Icons are managed assets: the engine regrows their rasters when drawn bigger and rebuilds them on a graphics
+        // device switch, so a change of the setting only needs to be remembered for the next draw.
+        self.kit.svg_supersample = supersample;
         if ui.text_raster_mode() != mode {
             ui.set_text_raster_mode(mode);
         }

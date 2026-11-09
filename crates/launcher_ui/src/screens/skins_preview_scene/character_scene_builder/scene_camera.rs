@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn build_character_scene_camera(yaw: f32) -> (Camera, Projection, Vec3, Vec3) {
+pub(in crate::screens) fn build_character_scene_camera(yaw: f32) -> (Camera, Projection, Vec3, Vec3) {
     let target = Vec3::new(0.0, 19.5, 0.0);
     let camera_radius = 56.0;
     let camera_pos = Vec3::new(

@@ -1,0 +1,16 @@
+[package]
+name = "skin_gpu"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+# Pinned by rev, like vertex_shell: the engine's CMake build lives in OUT_DIR.
+sturdy = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "458a3d62701442244edcda232a493b971cfa0977", features = ["raw-window-handle", "webgpu", "prebuilt-deps"] }
+launcher_ui.workspace = true
+config.workspace = true
+image.workspace = true
+tracing.workspace = true
+app_paths.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+cxx = { version = "1", features = ["c++20"] }

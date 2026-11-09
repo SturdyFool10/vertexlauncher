@@ -128,6 +128,18 @@ impl Default for SkinManagerState {
 }
 
 impl SkinManagerState {
+    pub(super) fn apply_preview_settings(&mut self, settings: &super::api::PreviewSettings) {
+        self.preview_msaa_samples = settings.msaa_samples.max(1);
+        self.preview_aa_mode = settings.aa_mode;
+        self.preview_texel_aa_mode = settings.texel_aa_mode;
+        self.preview_motion_blur_enabled = settings.motion_blur_enabled;
+        self.preview_motion_blur_amount = settings.motion_blur_amount.clamp(0.0, 1.0);
+        self.preview_motion_blur_shutter_frames = settings.motion_blur_shutter_frames.max(0.0);
+        self.preview_motion_blur_sample_count = settings.motion_blur_sample_count.max(1) as usize;
+        self.preview_3d_layers_enabled = settings.layers_3d_enabled;
+        self.expressions_enabled = settings.expressions_enabled;
+    }
+
     pub(super) fn sync_active_account(&mut self, active_launch_auth: Option<&LaunchAuthContext>) {
         let Some(auth) = active_launch_auth else {
             if self.active_profile_id.is_some() {

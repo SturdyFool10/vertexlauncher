@@ -22,8 +22,6 @@ mod triangle_texture;
 mod uv_rects;
 #[path = "skins_preview/vec3.rs"]
 mod vec3;
-#[path = "skins_preview/weighted_preview_scene.rs"]
-mod weighted_preview_scene;
 
 pub(crate) use self::camera::Camera;
 pub(super) use self::cuboid_triangles::{
@@ -35,8 +33,9 @@ pub(crate) use self::model_transform::ModelTransform;
 pub(crate) use self::projection::Projection;
 pub(crate) use self::render_triangle::RenderTriangle;
 pub(super) use self::skins_preview_expressions::{compatibility_score, eye_lid_rects};
-pub(in crate::screens) use self::skins_preview_scene::{build_character_scene, build_motion_blur_scene_samples};
+pub(in crate::screens) use self::skins_preview_scene::{
+    build_character_scene, build_character_scene_camera,
+};
 pub(crate) use self::triangle_texture::TriangleTexture;
 pub(super) use self::uv_rects::{uv_rect, uv_rect_overlay, uv_rect_with_inset};
 pub(crate) use self::vec3::Vec3;
-pub(crate) use self::weighted_preview_scene::WeightedPreviewScene;

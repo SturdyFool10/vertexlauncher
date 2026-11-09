@@ -7,7 +7,7 @@ use vertex_shell::sturdy::ui_kit::{self, ModalStyle, PopupStyle};
 use launcher_ui::account_colors::{self, PaletteColor};
 use launcher_ui::account_text::mention;
 use launcher_ui::geom::Color32;
-use vertex_shell::sturdy::glam::Vec4;
+use vertex_shell::sturdy::glam::{UVec2, Vec4};
 use vertex_shell::sturdy::ui::{
     Border, ChildAlignment, CornerRadius, Direction, ElementDesc,
 };
@@ -174,6 +174,21 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                     let mut open_editor = false;
                     {
                         let _row = kit.row(ui, kit::SPACE_XS);
+                        // The account's head, drawn by the engine from its skin (nothing in streamer mode).
+                        if !streamer
+                            && let Some(texture) = entry.skin_url.as_deref().and_then(|url| {
+                                kit.heads.head(&mut ui.engine(), url, UVec2::new(88, 88))
+                            })
+                        {
+                            ui.image(
+                                &ElementDesc::new()
+                                    .id(format!("{ACCOUNT_MENU_ID}::head::{}", entry.profile_id))
+                                    .width(Sizing::Fixed(24.0))
+                                    .height(Sizing::Fixed(24.0))
+                                    .corner_radius(CornerRadius::all(5.0)),
+                                texture,
+                            );
+                        }
                         if let Some(color) = tint {
                             // A coloured row: the account's colour behind its name, readable on top.
                             let ink = vec4(account_colors::contrasting_color(color));

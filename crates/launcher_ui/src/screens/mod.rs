@@ -40,6 +40,7 @@ pub use menu_presence_context::MenuPresenceContext;
 pub use quick_launch_command_mode::QuickLaunchCommandMode;
 pub use settings_info::{SettingsGraphicsAdapterInfo, SettingsInfo};
 pub use skins::api as skins_api;
+pub use skins::gpu_scene as skins_gpu_scene;
 
 
 pub fn build_quick_launch_command(

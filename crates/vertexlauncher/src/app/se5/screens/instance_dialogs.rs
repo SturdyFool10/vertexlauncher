@@ -1231,7 +1231,7 @@ pub fn screenshot(
     let key = format!("viewer::{}", path.display());
     let picture = kit
         .images
-        .get(&key, || ImageSource::File(path.to_path_buf()), 0);
+        .get(&mut ui.engine(), &key, || ImageSource::File(path.to_path_buf()), 0);
     let confirm_id = format!("viewer-confirm::{}", path.display());
     let confirming = state.confirming_screenshot_delete.as_deref() == Some(confirm_id.as_str());
     let deleting = state

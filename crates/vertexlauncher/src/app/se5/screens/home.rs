@@ -734,7 +734,8 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, key: &str) -
     };
     let image_key = format!("viewer::{}", shot.path.display());
     let path = shot.path.clone();
-    let picture = kit.images.get(&image_key, || ImageSource::File(path), 0);
+    let picture = kit.images
+        .get(&mut ui.engine(), &image_key, || ImageSource::File(path), 0);
     let confirming = state.confirming_screenshot_delete.as_deref() == Some(key);
     let deleting = state.home.delete_in_flight();
     let (mut close, mut copy, mut ask, mut delete, mut cancel) =

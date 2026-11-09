@@ -1,15 +1,13 @@
 //! Toolkit-free view API for the Skins screen. A [`SkinsSession`] owns the profile state (skin, variant, capes, save
 //! and refresh workers) and the preview camera and animation; the front end draws the controls and shows the
-//! image [`SkinsSession::render_preview`] returns.
+//! frame [`SkinsSession::gpu_frame`] describes (drawn by the engine on the GPU).
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::skins_raster::{RasterSettings, render_scenes_async};
 use super::*;
 
 pub use auth::MinecraftSkinVariant as SkinVariant;
-pub use super::skins_raster::RasterSettings as PreviewRaster;
 
 /// Preview options taken from the launcher settings each frame.
 #[derive(Clone, Copy, Debug)]
@@ -44,64 +42,54 @@ pub struct SkinsSession {
     cape_faces: std::collections::HashMap<String, Option<Arc<[u8]>>>,
     gamepad_orbit: f32,
     drag_dx: f32,
-    raster: RasterPipe,
+    /// Geometry hash of each part as last handed out by `gpu_frame`.
+    gpu_sent: std::collections::HashMap<super::gpu_scene::PartTag, u64>,
+    /// What the geometry in `gpu_sent` was built from; while it is unchanged the parts are not generated again.
+    gpu_key: Option<GpuGeometryKey>,
+    /// The skin image last hashed, so a frame does not hash it again.
+    gpu_skin_hash: Option<(Arc<RgbaImage>, u64)>,
 }
 
-/// A frame to draw off the UI thread.
-struct RasterJob {
-    scenes: Vec<(f32, Vec<RenderTriangle>)>,
-    skin: Arc<RgbaImage>,
-    cape: Option<Arc<RgbaImage>>,
-    settings: RasterSettings,
+#[derive(Clone, PartialEq, Eq)]
+struct GpuGeometryKey {
+    skin: u64,
+    cape: Option<u64>,
+    variant: u8,
+    layers_3d: bool,
+    elytra: bool,
 }
 
-/// Draws the preview on the compute backend (the UI engine's task scheduler), one frame at a time, and hands the UI
-/// each finished frame once.
-///
-/// The UI thread only advances the camera and the animation (every frame, by the real time since the last one) and
-/// builds the scene; the rasteriser, whose cost varies with the window size, anti-aliasing and motion blur, runs beside
-/// it, split into bands across every core. So a slow frame makes the preview update less often but never stalls the
-/// rest of the UI, and the poses it draws are still spaced by real time. While a frame is being drawn the UI keeps
-/// showing the last finished one and does not queue another, so there is no backlog and the preview never falls behind
-/// the animation.
-struct RasterPipe {
-    last: Option<Arc<RgbaImage>>,
-    /// Bumped for every finished frame, so the UI uploads each one once.
-    generation: u64,
-    pending: Option<launcher_runtime::ComputeHandle<RgbaImage>>,
+/// One part of the character for a GPU renderer; see [`SkinsSession::gpu_frame`].
+#[derive(Clone, Debug)]
+pub struct GpuPart {
+    pub tag: super::gpu_scene::PartTag,
+    /// Column-major matrix placing the part in the world this frame.
+    pub transform: [f32; 16],
+    pub geometry_hash: u64,
+    /// The part's quads in its own space; `None` when unchanged since the previous frame.
+    pub quads: Option<Vec<super::gpu_scene::SceneQuad>>,
 }
 
-impl RasterPipe {
-    fn new() -> Self {
-        Self { last: None, generation: 0, pending: None }
-    }
+#[derive(Clone, Copy, Debug)]
+pub struct GpuMotionBlur {
+    pub amount: f32,
+    pub shutter_frames: f32,
+    pub samples: usize,
+}
 
-    /// Takes the frame being drawn if it has finished. True when nothing is being drawn, so the next can start.
-    fn poll(&mut self) -> bool {
-        let Some(pending) = self.pending.as_mut() else {
-            return true;
-        };
-        match pending.try_take() {
-            None => false,
-            Some(Ok(image)) => {
-                self.pending = None;
-                self.last = Some(Arc::new(image));
-                self.generation += 1;
-                true
-            }
-            Some(Err(err)) => {
-                tracing::error!(target: "vertexlauncher/skins", "The skin preview frame failed: {err}");
-                self.pending = None;
-                true
-            }
-        }
-    }
-
-    /// Starts drawing `job`; the result shows up through a later `poll`.
-    fn submit(&mut self, job: RasterJob) {
-        let RasterJob { scenes, skin, cape, settings } = job;
-        self.pending = Some(launcher_runtime::spawn_compute(render_scenes_async(Arc::new(scenes), skin, cape, settings)));
-    }
+/// The character and camera for one frame of the GPU preview.
+#[derive(Clone)]
+pub struct GpuFrame {
+    pub camera: super::gpu_scene::SceneCamera,
+    /// How fast the camera is orbiting (radians a second), for motion blur.
+    pub yaw_velocity: f32,
+    pub parts: Vec<GpuPart>,
+    pub skin: Arc<RgbaImage>,
+    pub skin_hash: u64,
+    /// The image cape and elytra quads sample (the chosen cape, or the stock elytra texture).
+    pub cape: Option<Arc<RgbaImage>>,
+    pub cape_hash: Option<u64>,
+    pub motion_blur: Option<GpuMotionBlur>,
 }
 
 impl Default for SkinsSession {
@@ -112,7 +100,7 @@ impl Default for SkinsSession {
 
 impl SkinsSession {
     pub fn new() -> Self {
-        Self { state: SkinManagerState::default(), cape_faces: Default::default(), gamepad_orbit: 0.0, drag_dx: 0.0, raster: RasterPipe::new() }
+        Self { state: SkinManagerState::default(), cape_faces: Default::default(), gamepad_orbit: 0.0, drag_dx: 0.0, gpu_sent: Default::default(), gpu_key: None, gpu_skin_hash: None }
     }
 
     /// Follows the active account and the background workers; call once per frame while the screen is showing.
@@ -128,15 +116,7 @@ impl SkinsSession {
         if opened {
             state.refresh_on_open_pending = true;
         }
-        state.preview_msaa_samples = settings.msaa_samples.max(1);
-        state.preview_aa_mode = settings.aa_mode;
-        state.preview_texel_aa_mode = settings.texel_aa_mode;
-        state.preview_motion_blur_enabled = settings.motion_blur_enabled;
-        state.preview_motion_blur_amount = settings.motion_blur_amount.clamp(0.0, 1.0);
-        state.preview_motion_blur_shutter_frames = settings.motion_blur_shutter_frames.max(0.0);
-        state.preview_motion_blur_sample_count = settings.motion_blur_sample_count.max(1) as usize;
-        state.preview_3d_layers_enabled = settings.layers_3d_enabled;
-        state.expressions_enabled = settings.expressions_enabled;
+        state.apply_preview_settings(settings);
         state.poll_worker();
         state.poll_pick_skin_result();
         state.try_consume_open_refresh();
@@ -144,6 +124,11 @@ impl SkinsSession {
         state.ensure_default_elytra_texture();
         state.ensure_cape_texture();
         state.refresh_in_progress || state.save_in_progress || state.pick_skin_in_progress
+    }
+
+    /// Takes the preview options without following an account; [`tick`](Self::tick) does this every frame.
+    pub fn set_preview_settings(&mut self, settings: &PreviewSettings) {
+        self.state.apply_preview_settings(settings);
     }
 
     /// The active account's profile id and name, or `None` when nobody is signed in.
@@ -284,12 +269,11 @@ impl SkinsSession {
         self.gamepad_orbit = input.clamp(-1.0, 1.0);
     }
 
-    /// Advances the camera and the walk animation to `now` (seconds) and draws a `width` x `height` frame, or
-    /// `None` while there is no skin to show. The preview animates continuously, so keep drawing while it shows.
-    pub fn render_preview(&mut self, width: u32, height: u32, now: f64, settings: &PreviewSettings) -> Option<Arc<RgbaImage>> {
+    /// Advances the camera and the walk animation to `now` and returns the real time since the previous call and the
+    /// pose to draw.
+    fn animate(&mut self, now: f64) -> (f32, PreviewPose) {
         let dt = self.state.consume_frame_dt(now);
         self.advance_camera(now, dt);
-        let worker_free = self.raster.poll();
         let state = &mut self.state;
 
         let blend_target = match state.preview_motion_mode {
@@ -309,13 +293,12 @@ impl SkinsSession {
             limb_swing: state.preview_limb_swing,
         };
         state.refresh_expression_layout_cache();
+        (dt, pose)
+    }
 
-        let skin = state.skin_sample.clone()?;
-        if !worker_free {
-            // The previous frame is still being drawn: the animation above has advanced, and the next frame
-            // is built from it as soon as the worker is free.
-            return self.raster.last.clone();
-        }
+    /// The orbit angle and its speed at `now`, for the camera.
+    fn orbit(&self, now: f64) -> (f32, f32) {
+        let state = &self.state;
         let orbit_time = state.effective_orbit_time(now);
         let yaw = ((orbit_time / PREVIEW_ORBIT_SECONDS) as f32) * std::f32::consts::TAU + state.camera_yaw_offset;
         let yaw_velocity = if state.camera_drag_active {
@@ -325,82 +308,115 @@ impl SkinsSession {
         } else {
             std::f32::consts::TAU / PREVIEW_ORBIT_SECONDS as f32
         };
+        (yaw, yaw_velocity)
+    }
 
-        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(width as f32, height as f32));
-        let cape_sample = state.cape_sample.clone();
-        let elytra = state.default_elytra_sample.clone();
-        let variant = state.pending_variant;
-        let expressions = state.expressions_enabled;
-        let layout = state.cached_expression_layout;
-        let layers = settings.layers_3d_enabled;
-
-        let blur = if state.preview_motion_blur_enabled {
-            build_motion_blur_scene_samples(
-                rect,
-                state.cape_uv,
-                yaw,
-                yaw_velocity,
-                pose,
-                state.preview_motion_blur_shutter_frames,
-                state.preview_motion_blur_sample_count,
-                variant,
-                layers,
-                state.show_elytra,
-                expressions,
-                layout,
-                Some(Arc::clone(&skin)),
-                cape_sample.clone(),
-                elytra.clone(),
-                state.preview_motion_blur_amount,
-            )
+    /// Advances the preview to `now` and returns the character for a GPU renderer to draw this very frame. `None` while there is no skin.
+    ///
+    /// Parts come with their matrix every call; their quads only when they differ from what the previous call handed
+    /// out (`quads` is `None` otherwise), so a renderer keeps a mesh per part and only moves it.
+    pub fn gpu_frame(&mut self, now: f64, settings: &PreviewSettings) -> Option<GpuFrame> {
+        let (_dt, pose) = self.animate(now);
+        let (yaw, yaw_velocity) = self.orbit(now);
+        let state = &self.state;
+        let skin = state.skin_sample.clone()?;
+        let input = super::gpu_scene::SceneInput {
+            pose,
+            variant: state.pending_variant,
+            layers_3d: settings.layers_3d_enabled,
+            show_elytra: state.show_elytra,
+            expressions: state.expressions_enabled,
+            expression_layout: state.cached_expression_layout,
+            skin: Arc::clone(&skin),
+            cape: state.cape_sample.clone(),
+            default_elytra: state.default_elytra_sample.clone(),
+            cape_uv: state.cape_uv,
+        };
+        let skin_hash = match &self.gpu_skin_hash {
+            Some((image, hash)) if Arc::ptr_eq(image, &skin) => *hash,
+            _ => {
+                let hash = hash_preview_image(&skin);
+                self.gpu_skin_hash = Some((Arc::clone(&skin), hash));
+                hash
+            }
+        };
+        let cape_hash_of = |image: &Option<Arc<RgbaImage>>| image.as_deref().map(hash_preview_image);
+        let key = GpuGeometryKey {
+            skin: skin_hash,
+            cape: cape_hash_of(&input.cape).or_else(|| cape_hash_of(&input.default_elytra)),
+            variant: match input.variant {
+                MinecraftSkinVariant::Slim => 1,
+                _ => 0,
+            },
+            layers_3d: input.layers_3d,
+            elytra: input.show_elytra,
+        };
+        // While nothing the geometry depends on changed, the parts the renderer holds are not generated again (the
+        // voxel layers cost milliseconds); the face animates, so it is always generated.
+        let skip: Vec<super::gpu_scene::PartTag> = if self.gpu_key.as_ref() == Some(&key) {
+            self.gpu_sent.keys().copied().filter(|tag| *tag != super::gpu_scene::PartTag::Face).collect()
         } else {
             Vec::new()
         };
-        let raster = RasterSettings::for_modes(width, height, settings.aa_mode, settings.msaa_samples, settings.texel_aa_mode);
-        if !blur.is_empty() {
-            // The cape texture is whatever the first sample resolved; samples differ only in pose.
-            let cape = build_character_scene(
-                rect,
-                state.cape_uv,
-                yaw,
-                pose,
-                variant,
-                layers,
-                state.show_elytra,
-                expressions,
-                layout,
-                Some(Arc::clone(&skin)),
-                cape_sample.clone(),
-                elytra.clone(),
-            )
-            .cape_render_sample;
-            let scenes = blur.into_iter().map(|s| (s.weight, s.triangles)).collect();
-            self.raster.submit(RasterJob { scenes, skin, cape, settings: raster });
-            return self.raster.last.clone();
+        let (scene_parts, cape_sample) = super::gpu_scene::capture_scene_with_cape(&input, &skip);
+        let mut parts = Vec::with_capacity(scene_parts.len());
+        let mut sent = std::mem::take(&mut self.gpu_sent);
+        let mut next = std::collections::HashMap::new();
+        for part in scene_parts {
+            if part.skipped {
+                if let Some(hash) = sent.remove(&part.tag) {
+                    next.insert(part.tag, hash);
+                    parts.push(GpuPart { tag: part.tag, transform: part.transform, geometry_hash: hash, quads: None });
+                    continue;
+                }
+            }
+            let hash = super::gpu_scene::local_geometry_hash(&part);
+            let changed = sent.remove(&part.tag) != Some(hash);
+            next.insert(part.tag, hash);
+            parts.push(GpuPart {
+                tag: part.tag,
+                transform: part.transform,
+                geometry_hash: hash,
+                quads: changed.then_some(part.quads),
+            });
         }
-        let scene = build_character_scene(
-            rect,
-            state.cape_uv,
-            yaw,
-            pose,
-            variant,
-            layers,
-            state.show_elytra,
-            expressions,
-            layout,
-            Some(Arc::clone(&skin)),
-            cape_sample,
-            elytra,
-        );
-        let scenes = vec![(1.0, scene.triangles)];
-        let cape = scene.cape_render_sample;
-        self.raster.submit(RasterJob { scenes, skin, cape, settings: raster });
-        self.raster.last.clone()
+        self.gpu_sent = next;
+        self.gpu_key = Some(key);
+        let cape_hash = cape_sample.as_deref().map(hash_preview_image);
+        Some(GpuFrame {
+            camera: super::gpu_scene::scene_camera(yaw),
+            yaw_velocity,
+            parts,
+            skin,
+            skin_hash,
+            cape: cape_sample,
+            cape_hash,
+            motion_blur: state.preview_motion_blur_enabled.then_some(GpuMotionBlur {
+                amount: state.preview_motion_blur_amount,
+                shutter_frames: state.preview_motion_blur_shutter_frames,
+                samples: state.preview_motion_blur_sample_count,
+            }),
+        })
     }
 
-    /// Changes whenever `render_preview` has a new frame to show.
-    pub fn preview_generation(&self) -> u64 {
-        self.raster.generation
+    /// Shows `skin` as the preview's character without any account or profile behind it. For tools and tests.
+    pub fn set_preview_skin(&mut self, skin: RgbaImage, variant: SkinVariant) {
+        self.state.skin_sample = Some(Arc::new(skin));
+        self.state.pending_variant = variant;
+        self.state.ensure_default_elytra_texture();
+    }
+
+    /// Puts `cape` on the preview character. For tools and tests.
+    pub fn set_preview_cape(&mut self, cape: RgbaImage) {
+        self.state.cape_uv = cape_uv_layout([cape.width(), cape.height()]).unwrap_or_else(default_cape_uv_layout);
+        self.state.cape_sample = Some(Arc::new(cape));
+    }
+
+    /// Forgets which geometry was handed to the renderer, so the next [`gpu_frame`](Self::gpu_frame) sends all of it
+    /// (the renderer was recreated, or lost its meshes).
+    pub fn gpu_resend_all(&mut self) {
+        self.gpu_sent.clear();
+        self.gpu_key = None;
     }
 
     fn advance_camera(&mut self, now: f64, dt: f32) {
@@ -453,6 +469,109 @@ impl SkinsSession {
     }
 }
 
+/// `matrix` (column-major, affine) turned by `radians` about the vertical axis through `pivot`, anticlockwise seen from
+/// above (a turn to the left for a character facing away from you).
+fn turn_about_vertical_axis(matrix: [f32; 16], pivot: [f32; 3], radians: f32) -> [f32; 16] {
+    let (sin, cos) = radians.sin_cos();
+    let rotate = |x: f32, y: f32, z: f32| [cos * x + sin * z, y, -sin * x + cos * z];
+    let mut out = matrix;
+    for column in 0..3 {
+        let turned = rotate(matrix[column * 4], matrix[column * 4 + 1], matrix[column * 4 + 2]);
+        out[column * 4..column * 4 + 3].copy_from_slice(&turned);
+    }
+    let offset = rotate(matrix[12] - pivot[0], matrix[13] - pivot[1], matrix[14] - pivot[2]);
+    out[12] = pivot[0] + offset[0];
+    out[13] = pivot[1] + offset[1];
+    out[14] = pivot[2] + offset[2];
+    out
+}
+
+/// A fingerprint of a skin image, to tell when it changed.
+pub fn hash_skin(skin: &RgbaImage) -> u64 {
+    hash_preview_image(skin)
+}
+
+/// The head of `skin` for a GPU renderer: just the head part (with its second layer), and a camera framing it from the
+/// front, a little turned. For small avatars, such as the sign-in button's.
+pub fn head_frame(skin: Arc<RgbaImage>) -> Option<GpuFrame> {
+    use super::gpu_scene::PartTag;
+    let input = super::gpu_scene::SceneInput {
+        pose: PreviewPose { time_seconds: 0.0, locomotion_blend: 0.0, limb_swing: 0.0 },
+        variant: MinecraftSkinVariant::Classic,
+        layers_3d: true,
+        show_elytra: false,
+        expressions: false,
+        expression_layout: None,
+        skin: Arc::clone(&skin),
+        cape: None,
+        default_elytra: None,
+        cape_uv: default_cape_uv_layout(),
+    };
+    // Everything but the head is skipped, so only its geometry is generated.
+    let skip = [
+        PartTag::Body,
+        PartTag::Face,
+        PartTag::RightArm,
+        PartTag::LeftArm,
+        PartTag::RightLeg,
+        PartTag::LeftLeg,
+        PartTag::Cape,
+        PartTag::ElytraLeft,
+        PartTag::ElytraRight,
+    ];
+    let (scene_parts, _) = super::gpu_scene::capture_scene_with_cape(&input, &skip);
+    let head = scene_parts.into_iter().find(|part| part.tag == PartTag::Head && !part.skipped)?;
+
+    // The head's centre in the world: the middle of its local bounding box, placed by the part's matrix.
+    let (mut low, mut high) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for quad in &head.quads {
+        for vertex in quad.vertices {
+            for axis in 0..3 {
+                low[axis] = low[axis].min(vertex[axis]);
+                high[axis] = high[axis].max(vertex[axis]);
+            }
+        }
+    }
+    let local_centre = [(low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0, (low[2] + high[2]) / 2.0];
+    let m = head.transform;
+    let centre = [
+        m[0] * local_centre[0] + m[4] * local_centre[1] + m[8] * local_centre[2] + m[12],
+        m[1] * local_centre[0] + m[5] * local_centre[1] + m[9] * local_centre[2] + m[13],
+        m[2] * local_centre[0] + m[6] * local_centre[1] + m[10] * local_centre[2] + m[14],
+    ];
+
+    // The preview camera at a slight angle gives the direction the character is seen from; keep that direction, but
+    // aim at the head and come in until it fills the picture.
+    let mut camera = super::gpu_scene::scene_camera(0.5);
+    let toward = [camera.eye[0] - camera.target[0], 0.0, camera.eye[2] - camera.target[2]];
+    let length = (toward[0] * toward[0] + toward[2] * toward[2]).sqrt().max(1e-6);
+    // The head with its second layer is about 10 units across (14 on the diagonal of a three-quarter view).
+    let distance = 7.4 / (camera.vertical_fov_radians / 2.0).tan();
+    camera.target = centre;
+    camera.eye = [
+        centre[0] + toward[0] / length * distance,
+        centre[1] + distance * 0.12,
+        centre[2] + toward[2] / length * distance,
+    ];
+
+    // The head is turned a quarter turn to its left (anticlockwise seen from above), about the vertical axis through its
+    // centre, so its face looks at the camera.
+    let transform = turn_about_vertical_axis(head.transform, centre, std::f32::consts::FRAC_PI_2);
+
+    let skin_hash = hash_preview_image(&skin);
+    let geometry_hash = super::gpu_scene::local_geometry_hash(&head);
+    Some(GpuFrame {
+        camera,
+        yaw_velocity: 0.0,
+        parts: vec![GpuPart { tag: head.tag, transform, geometry_hash, quads: Some(head.quads) }],
+        skin,
+        skin_hash,
+        cape: None,
+        cape_hash: None,
+        motion_blur: None,
+    })
+}
+
 /// The outer face of a cape texture, cut out and enlarged with nearest sampling so a tile shows crisp pixels.
 fn cape_face_png(bytes: &[u8]) -> Option<Arc<[u8]>> {
     let image = decode_generic_rgba(bytes)?;
@@ -492,50 +611,73 @@ mod tests {
     }
 
     #[test]
-    fn a_skin_renders_a_character_in_the_middle_of_the_frame() {
-        let mut session = SkinsSession::new();
-        session.state.skin_sample = Some(Arc::new(RgbaImage::from_pixel(64, 64, image::Rgba([200, 120, 80, 255]))));
-        session.state.ensure_default_elytra_texture();
-        // The frame is drawn on a worker thread, so it arrives on a later call.
-        let mut frame = None;
-        for step in 0..500 {
-            frame = session.render_preview(240, 280, 1.0 + f64::from(step) * 0.016, &settings());
-            if frame.is_some() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let frame = frame.expect("a skin is loaded");
-        assert_eq!((frame.width(), frame.height()), (240, 280));
-        assert!(frame.get_pixel(120, 140).0[3] > 0, "the body is opaque in the middle");
-        assert_eq!(frame.get_pixel(2, 2).0[3], 0, "the corner is empty");
-    }
-
-    #[test]
-    #[ignore = "timing probe: cargo test -p launcher_ui --release timing -- --ignored --nocapture"]
-    fn timing_probe() {
-        for samples in [1u32, 4, 8] {
+    #[ignore = "timing probe: cargo test -p launcher_ui --release gpu_frame_timing -- --ignored --nocapture"]
+    fn gpu_frame_timing() {
+        for layers in [false, true] {
             let mut session = SkinsSession::new();
-            session.state.skin_sample = Some(Arc::new(RgbaImage::from_pixel(64, 64, image::Rgba([200, 120, 80, 255]))));
-            session.state.ensure_default_elytra_texture();
-            let mut preview = PreviewSettings { msaa_samples: samples, layers_3d_enabled: true, expressions_enabled: true, ..settings() };
-            preview.aa_mode = SkinPreviewAaMode::Msaa;
-            session.state.pending_variant = session.state.pending_variant;
-            let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 460.0));
+            session.set_preview_skin(RgbaImage::from_pixel(64, 64, image::Rgba([200, 120, 80, 255])), SkinVariant::Classic);
+            let preview = PreviewSettings { layers_3d_enabled: layers, ..settings() };
+            session.set_preview_settings(&preview);
+            let _ = session.gpu_frame(0.0, &preview);
             let started = std::time::Instant::now();
-            let scene = build_character_scene(rect, session.state.cape_uv, 0.5, PreviewPose { time_seconds: 1.0, locomotion_blend: 0.0, limb_swing: 0.0 }, session.state.pending_variant, true, false, true, session.state.cached_expression_layout, session.state.skin_sample.clone(), None, None);
-            let built = started.elapsed();
-            let raster = RasterSettings::for_modes(1000, 460, preview.aa_mode, preview.msaa_samples, preview.texel_aa_mode);
-            let started = std::time::Instant::now();
-            let skin = session.state.skin_sample.clone().unwrap();
-            let _ = super::super::skins_raster::render_scenes(&[(1.0, scene.triangles.as_slice())], &skin, None, raster);
-            println!("msaa {samples}: {} tris, scene {built:?}, raster {:?}", scene.triangles.len(), started.elapsed());
+            let frames = 200;
+            for step in 0..frames {
+                let _ = session.gpu_frame(1.0 + f64::from(step) * 0.007, &preview).expect("a skin is set");
+            }
+            println!("layers {layers}: {:?} per gpu_frame", started.elapsed() / frames);
         }
     }
 
     #[test]
-    fn nothing_renders_without_a_skin() {
+    fn gpu_frames_hand_out_geometry_once_and_only_move_it_afterwards() {
         let mut session = SkinsSession::new();
-        assert!(session.render_preview(64, 64, 0.0, &settings()).is_none());
+        session.set_preview_skin(RgbaImage::from_pixel(64, 64, image::Rgba([200, 120, 80, 255])), SkinVariant::Classic);
+        let preview = PreviewSettings { layers_3d_enabled: true, ..settings() };
+        session.set_preview_settings(&preview);
+
+        let first = session.gpu_frame(1.0, &preview).expect("a skin is set");
+        assert!(first.parts.iter().all(|part| part.quads.is_some()), "the first frame carries every part's quads");
+        let voxels = first.parts.iter().map(|part| part.quads.as_ref().map_or(0, Vec::len)).sum::<usize>();
+        assert!(voxels > 1000, "an opaque skin's voxel layers are thousands of quads, got {voxels}");
+
+        let second = session.gpu_frame(1.3, &preview).expect("a skin is set");
+        assert_eq!(first.parts.len(), second.parts.len());
+        for (a, b) in first.parts.iter().zip(&second.parts) {
+            assert_eq!(a.tag, b.tag);
+            assert_eq!(a.geometry_hash, b.geometry_hash, "{:?}", a.tag);
+            assert!(b.quads.is_none(), "{:?}'s geometry is not sent again", a.tag);
+        }
+        assert_eq!(first.skin_hash, second.skin_hash);
+
+        // Something the geometry depends on changed: everything is sent again.
+        let flat = PreviewSettings { layers_3d_enabled: false, ..preview };
+        let third = session.gpu_frame(1.6, &flat).expect("a skin is set");
+        assert!(third.parts.iter().all(|part| part.quads.is_some()));
+
+        // A renderer that lost its meshes asks for everything.
+        session.gpu_resend_all();
+        let fourth = session.gpu_frame(1.9, &flat).expect("a skin is set");
+        assert!(fourth.parts.iter().all(|part| part.quads.is_some()));
+    }
+
+    #[test]
+    fn a_head_frame_is_only_the_head_looked_at_from_the_front() {
+        let skin = Arc::new(RgbaImage::from_pixel(64, 64, image::Rgba([200, 120, 80, 255])));
+        let frame = head_frame(skin).expect("a skin gives a head");
+        assert_eq!(frame.parts.len(), 1);
+        assert_eq!(frame.parts[0].tag, super::super::gpu_scene::PartTag::Head);
+        assert!(frame.parts[0].quads.as_ref().is_some_and(|quads| quads.len() >= 6));
+        // The camera looks at the head, which is high up, and from a short distance.
+        let (eye, target) = (frame.camera.eye, frame.camera.target);
+        assert!(target[1] > 20.0, "the head is above the middle of the body, got {target:?}");
+        let distance = ((eye[0] - target[0]).powi(2) + (eye[1] - target[1]).powi(2) + (eye[2] - target[2]).powi(2)).sqrt();
+        assert!((10.0..40.0).contains(&distance), "close to the head, got {distance}");
+    }
+
+    #[test]
+    fn no_frame_without_a_skin() {
+        let mut session = SkinsSession::new();
+        assert!(session.gpu_frame(0.0, &settings()).is_none());
     }
 }
+

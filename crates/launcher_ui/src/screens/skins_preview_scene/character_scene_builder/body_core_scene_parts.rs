@@ -24,6 +24,7 @@ fn add_torso_scene_parts(context: &mut CharacterSceneBuildContext) {
         back: uv_rect_overlay(32, 36, 8, 12),
     };
 
+    capture_part(PartTag::Body);
     let transform = context.motion.pose.body.transform(context.model_offset);
     let local_top_center = Vec3::new(0.0, 0.0, 0.0);
     add_transformed_cuboid_triangles(
@@ -137,6 +138,7 @@ fn add_head_scene_parts(context: &mut CharacterSceneBuildContext) {
         front: uv_rect_overlay(40, 8, 8, 8),
         back: uv_rect_overlay(56, 8, 8, 8),
     };
+    capture_part(PartTag::Head);
     let transform = context.motion.pose.head.transform(context.model_offset);
     let local_top_center = Vec3::new(0.0, 8.0, 0.0);
     add_transformed_cuboid_triangles(
@@ -237,6 +239,7 @@ fn add_expression_scene_parts(context: &mut CharacterSceneBuildContext) {
     let Some(layout) = context.expression_layout else {
         return;
     };
+    capture_part(PartTag::Face);
     let head_transform = context.motion.pose.head.transform(context.model_offset);
     let face_pose = compute_face_pose(FaceAnimationInput {
         age_ticks: context.motion.age_ticks,

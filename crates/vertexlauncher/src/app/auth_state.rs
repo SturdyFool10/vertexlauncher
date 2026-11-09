@@ -501,6 +501,17 @@ impl AuthState {
         })
     }
 
+    /// Where the active account's skin can be downloaded from, if known.
+    pub fn active_skin_url(&self) -> Option<String> {
+        self.accounts_state
+            .active_account()?
+            .avatar_source_skin_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .map(str::to_owned)
+    }
+
     pub fn avatar_png(&self) -> Option<&[u8]> {
         self.active_avatar_png.as_deref()
     }
@@ -546,6 +557,12 @@ impl AuthState {
                 is_failed: self
                     .failed_account_errors
                     .contains_key(&account.minecraft_profile.id),
+                skin_url: account
+                    .avatar_source_skin_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|url| !url.is_empty())
+                    .map(str::to_owned),
             })
             .collect::<Vec<_>>();
 
