@@ -100,7 +100,7 @@ fn browse(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &
         kit.text_wrapped(ui, TextRole::Muted, api::empty_message(&state.content));
     }
     let mut open = None;
-    let mut install = None;
+    let mut install = Vec::new();
     for group in &groups {
         kit.text(ui, TextRole::Heading, &group.heading);
         for tile in &group.tiles {
@@ -109,11 +109,11 @@ fn browse(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &
                 open = Some(tile.key.clone());
             }
             if quick {
-                install = Some(tile.key.clone());
+                install.push(tile.key.clone());
             }
         }
     }
-    if let Some(key) = install {
+    for key in install {
         api::quick_install(&mut state.content, &key);
     }
     if let Some(key) = open {
@@ -245,6 +245,8 @@ fn result_tile(ui: &mut Ui<'_>, kit: &mut Kit, tile: &api::TileView) -> (bool, b
             icon_button(ui, kit, &info_id, Icon::Settings, true);
             if tile.downloading {
                 kit.progress(ui, &format!("{id}::progress"), None, kit::uptime());
+            } else if tile.queued {
+                icon_button(ui, kit, &install_id, Icon::Download, false);
             } else {
                 icon_button(
                     ui,
@@ -261,7 +263,9 @@ fn result_tile(ui: &mut Ui<'_>, kit: &mut Kit, tile: &api::TileView) -> (bool, b
         }
     }
     kit.tooltip(ui, &info_id, "Open mod details");
-    if !tile.downloading {
+    if tile.queued && !tile.downloading {
+        kit.tooltip(ui, &install_id, "Queued: installs after the downloads ahead of it");
+    } else if !tile.downloading {
         match &tile.installed {
             Some(installed) => kit.tooltip(
                 ui,
@@ -271,7 +275,7 @@ fn result_tile(ui: &mut Ui<'_>, kit: &mut Kit, tile: &api::TileView) -> (bool, b
             None => kit.tooltip(ui, &install_id, "Quick install latest compatible version"),
         }
     }
-    let install = tile.installed.is_none() && !tile.downloading && kit.clicked(ui, &install_id);
+    let install = tile.installed.is_none() && !tile.downloading && !tile.queued && kit.clicked(ui, &install_id);
     let open =
         kit.clicked(ui, &info_id) || (kit.clicked(ui, &id) && !install && !ui.hovered(&install_id));
     (open, install)

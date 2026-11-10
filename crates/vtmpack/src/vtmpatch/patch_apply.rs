@@ -131,16 +131,10 @@ pub fn apply_vtmpatch_to_instance(
             count = patch_manifest.downloadable_entries.len(),
             "downloading provider-resolved files"
         );
-        for entry in &patch_manifest.downloadable_entries {
-            tracing::debug!(
-                target: LOG,
-                name = %entry.name,
-                file_path = %entry.file_path.display(),
-                source = ?entry.selected_source,
-                version_id = ?entry.selected_version_id,
-                "downloading entry"
-            );
-            match download_downloadable_entry(entry, instance_root) {
+        let entries: Vec<&VtmpackDownloadableEntry> = patch_manifest.downloadable_entries.iter().collect();
+        let results = download_downloadable_entries(&entries, instance_root);
+        for (entry, result) in entries.into_iter().zip(results) {
+            match result {
                 Ok(()) => {
                     tracing::debug!(
                         target: LOG,
@@ -190,14 +184,15 @@ pub fn apply_vtmpatch_to_instance(
     if let Ok(raw) = fs::read_to_string(&manifest_path) {
         if let Ok(manifest) = toml::from_str::<ContentInstallManifest>(&raw) {
             let mut gap_fills = 0usize;
+            let mut gap_entries = Vec::new();
             for project in manifest.projects.values() {
                 if project.selected_source != Some(ManagedContentSource::Modrinth) {
                     continue;
                 }
-                let version_id = match project.selected_version_id.as_deref() {
-                    Some(v) if !v.trim().is_empty() => v,
+                match project.selected_version_id.as_deref() {
+                    Some(v) if !v.trim().is_empty() => {}
                     _ => continue,
-                };
+                }
                 let dest = instance_root.join(project.file_path.as_path());
                 if dest.is_file() {
                     continue; // Already present — nothing to do.
@@ -206,10 +201,9 @@ pub fn apply_vtmpatch_to_instance(
                     target: LOG,
                     name = %project.name,
                     file_path = %project.file_path.display(),
-                    version_id,
                     "manifest lists a managed mod absent from disk — downloading"
                 );
-                let entry = VtmpackDownloadableEntry {
+                gap_entries.push(VtmpackDownloadableEntry {
                     project_key: project.project_key.clone(),
                     name: project.name.clone(),
                     file_path: normalize_pack_path(project.file_path.as_path()),
@@ -220,27 +214,26 @@ pub fn apply_vtmpatch_to_instance(
                     selected_version_name: project.selected_version_name.clone(),
                     selected_file_sha1: project.selected_file_sha1.clone(),
                     selected_file_sha512: project.selected_file_sha512.clone(),
-                };
-                match download_downloadable_entry(&entry, instance_root) {
+                });
+            }
+            let gap_refs: Vec<&VtmpackDownloadableEntry> = gap_entries.iter().collect();
+            for (entry, result) in gap_refs.iter().zip(download_downloadable_entries(&gap_refs, instance_root)) {
+                match result {
                     Ok(()) => {
-                        tracing::debug!(
-                            target: LOG,
-                            name = %project.name,
-                            "gap-fill download succeeded"
-                        );
+                        tracing::debug!(target: LOG, name = %entry.name, "gap-fill download succeeded");
                         downloaded += 1;
                         gap_fills += 1;
                     }
                     Err(err) => {
                         tracing::warn!(
                             target: LOG,
-                            name = %project.name,
-                            file_path = %project.file_path.display(),
+                            name = %entry.name,
+                            file_path = %entry.file_path.display(),
                             error = %err,
                             "gap-fill download failed"
                         );
                         download_failures
-                            .push(format!("{} (gap fill): {err}", project.file_path.display()));
+                            .push(format!("{} (gap fill): {err}", entry.file_path.display()));
                     }
                 }
             }

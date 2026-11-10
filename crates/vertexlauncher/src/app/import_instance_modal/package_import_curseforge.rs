@@ -401,6 +401,37 @@ pub(super) fn download_curseforge_plans_concurrently(
     fs_create_dir_all_logged(staging_dir.as_path())
         .map_err(|err| format!("failed to create CurseForge staging directory: {err}"))?;
     let total_downloads = plans.len();
+    // First try everything as one batch under the user's download limits (concurrent transfers and speed limit). Only
+    // if that fails as a whole are the mods tried one at a time below, so each one that cannot be fetched can be
+    // reported for manual download.
+    let staged_path_for = |plan: &CurseForgeDownloadPlan| {
+        staging_dir.join(format!("{}-{}", plan.requirement.file_id, plan.requirement.file_name))
+    };
+    let tasks: Vec<installation::DownloadBatchTask> = plans
+        .iter()
+        .map(|plan| installation::DownloadBatchTask {
+            url: plan.download_url.clone(),
+            destination: staged_path_for(plan),
+            expected_size: None,
+        })
+        .collect();
+    let mut policy = installation::shared_download_policy();
+    policy.max_concurrent_downloads = policy.max_concurrent_downloads.min(max_concurrent_downloads.max(1) as u32);
+    if installation::download_batch(tasks, &policy).is_ok() {
+        let staged_files = plans
+            .iter()
+            .map(|plan| (plan.requirement.file_id, staged_path_for(plan)))
+            .collect();
+        progress(import_progress(
+            &format!("Downloaded {total_downloads} mods"),
+            2 + total_downloads,
+            total_steps,
+        ));
+        return Ok(CurseForgeConcurrentDownloadResult {
+            staged_files,
+            failed_requirements: Vec::new(),
+        });
+    }
     let queue = Arc::new(Mutex::new(VecDeque::from(plans)));
     let (tx, rx) = mpsc::channel::<(
         CurseForgeManualDownloadRequirement,

@@ -80,6 +80,10 @@ pub(crate) fn populate_vtmpack_instance(
         progress,
     )?;
 
+    // Each file's download URL is worked out first, then all are downloaded together under the user's download
+    // limits, and the hashes are checked afterwards.
+    let mut tasks = Vec::new();
+    let mut to_verify = Vec::new();
     for downloadable in &manifest.downloadable_content {
         if downloadable.file_path.as_os_str().is_empty() {
             continue;
@@ -95,11 +99,31 @@ pub(crate) fn populate_vtmpack_instance(
         }
         completed_steps += 1;
         progress(import_progress(
-            &format!("Downloading {}", downloadable.name),
+            &format!("Resolving {}", downloadable.name),
             completed_steps,
             total_steps,
         ));
-        download_vtmpack_entry(downloadable, destination.as_path())?;
+        let (url, verify) = resolve_vtmpack_entry_download(downloadable)?;
+        if verify {
+            to_verify.push((downloadable, destination.clone()));
+        }
+        tasks.push(installation::DownloadBatchTask {
+            url,
+            destination,
+            expected_size: None,
+        });
+    }
+    if !tasks.is_empty() {
+        progress(import_progress(
+            &format!("Downloading {} files...", tasks.len()),
+            completed_steps,
+            total_steps,
+        ));
+        installation::download_batch(tasks, &installation::shared_download_policy())
+            .map_err(|err| format!("failed to download pack files: {err}"))?;
+        for (downloadable, destination) in to_verify {
+            verify_vtmpack_download_hash(downloadable, destination.as_path())?;
+        }
     }
 
     Ok(())
@@ -243,10 +267,10 @@ fn extract_vtmpack_payload_from_archive(
     Ok(())
 }
 
-pub(crate) fn download_vtmpack_entry(
+/// The URL `entry` downloads from, and whether the downloaded file's hash should be checked against the pack.
+pub(crate) fn resolve_vtmpack_entry_download(
     entry: &VtmpackDownloadableEntry,
-    destination: &Path,
-) -> Result<(), String> {
+) -> Result<(String, bool), String> {
     match normalize_source_name(entry.selected_source.as_deref()) {
         Some(ManagedSource::Modrinth) => {
             let version_id = entry
@@ -257,8 +281,7 @@ pub(crate) fn download_vtmpack_entry(
                 .get_version(version_id)
                 .map_err(|err| format!("failed to fetch Modrinth version {version_id}: {err}"))?;
             let file = select_vtmpack_modrinth_file(entry, &version)?;
-            download_file(file.url.as_str(), destination)?;
-            verify_vtmpack_download_hash(entry, destination)
+            Ok((file.url.clone(), true))
         }
         Some(ManagedSource::CurseForge) => {
             let project_id = entry
@@ -278,7 +301,7 @@ pub(crate) fn download_vtmpack_entry(
             let download_url = file.download_url.ok_or_else(|| {
                 format!("CurseForge file {file_id} for project {project_id} has no download URL")
             })?;
-            download_file(download_url.as_str(), destination)
+            Ok((download_url, false))
         }
         None => {
             if let Some(version_id) = entry.selected_version_id.as_deref() {
@@ -288,8 +311,7 @@ pub(crate) fn download_vtmpack_entry(
                         format!("failed to fetch Modrinth fallback version {version_id}: {err}")
                     })?;
                 let file = select_vtmpack_modrinth_file(entry, &version)?;
-                download_file(file.url.as_str(), destination)?;
-                return verify_vtmpack_download_hash(entry, destination);
+                return Ok((file.url.clone(), true));
             }
             Err(format!(
                 "download source for {} could not be determined from the pack metadata",

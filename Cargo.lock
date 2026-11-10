@@ -5040,6 +5040,7 @@ name = "vtmpack"
 version = "0.1.25-Alpha"
 dependencies = [
  "curseforge",
+ "installation",
  "managed_content",
  "modrinth",
  "serde",

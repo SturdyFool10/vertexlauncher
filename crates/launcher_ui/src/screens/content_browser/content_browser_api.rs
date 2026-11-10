@@ -15,6 +15,8 @@ pub struct TileView {
     /// The installed version's name (or "Installed") when this project is already in the instance.
     pub installed: Option<String>,
     pub downloading: bool,
+    /// Waiting in the install queue behind the running download.
+    pub queued: bool,
 }
 
 impl TileView {
@@ -38,7 +40,8 @@ impl TileView {
                     .unwrap_or("Installed")
                     .to_owned()
             }),
-            downloading: state.active_download.as_ref().is_some_and(|active| active.dedupe_key == entry.dedupe_key),
+            downloading: state.active_downloads.iter().any(|active| active.dedupe_key == entry.dedupe_key),
+            queued: state.download_queue.iter().any(|queued| queued_dedupe_key(&queued.request) == entry.dedupe_key),
         }
     }
 }
@@ -76,7 +79,7 @@ fn ensure_instance(state: &mut ContentBrowserState, instance: &InstanceRecord) {
     state.mod_sort_mode = ModSortMode::Popularity;
     state.download_queue.clear();
     state.download_in_flight = false;
-    state.active_download = None;
+    state.active_downloads.clear();
     state.cached_manifest = None;
     state.manifest_dirty = true;
     state.current_page = 1;
@@ -98,6 +101,30 @@ fn ensure_instance(state: &mut ContentBrowserState, instance: &InstanceRecord) {
     state.auto_populated_instance_id = None;
 }
 
+fn queued_dedupe_key(request: &ContentInstallRequest) -> &str {
+    match request {
+        ContentInstallRequest::Latest { entry, .. } | ContentInstallRequest::Exact { entry, .. } => entry.dedupe_key.as_str(),
+    }
+}
+
+/// Sets the download limits (concurrent transfers, speed limit) the install queue runs under.
+pub fn set_download_policy(state: &mut ContentBrowserState, policy: installation::DownloadPolicy) {
+    state.download_policy = policy;
+}
+
+/// Keeps the install queue draining while the Content Browser is not on screen: finished downloads are collected and the
+/// next queued one starts. Call every frame; it does nothing when nothing is queued or running.
+pub fn pump_background(state: &mut ContentBrowserState) {
+    if !state.download_in_flight && state.download_queue.is_empty() {
+        return;
+    }
+    poll_downloads(state);
+    let (Some(name), Some(root)) = (state.active_instance_name.clone(), state.active_instance_root.clone()) else {
+        return;
+    };
+    maybe_start_queued_download(state, name.as_str(), root.as_path());
+}
+
 /// Polls background work and keeps the browser pointed at `instance`. Call every frame while the screen is visible;
 /// returns whether something is in flight (the caller should look again soon).
 pub fn tick(state: &mut ContentBrowserState, instance: &InstanceRecord, installations_root: &Path) -> bool {
@@ -108,6 +135,7 @@ pub fn tick(state: &mut ContentBrowserState, instance: &InstanceRecord, installa
     poll_identify_results(state);
     ensure_instance(state, instance);
     let instance_root = instance_root_path(installations_root, instance);
+    state.active_instance_root = Some(instance_root.clone());
     request_version_catalog(state);
     apply_pending_external_detail_open(state);
     maybe_start_queued_download(state, instance.name.as_str(), instance_root.as_path());
@@ -315,6 +343,10 @@ pub fn go_to_page(state: &mut ContentBrowserState, page: u32) {
 /// Queues the latest compatible version of result `key` for install.
 pub fn quick_install(state: &mut ContentBrowserState, key: &str) {
     let Some(entry) = state.results.entries.iter().find(|entry| entry.dedupe_key == key).cloned() else { return };
+    let active = state.active_downloads.iter().any(|active| active.dedupe_key == key);
+    if active || state.download_queue.iter().any(|queued| queued_dedupe_key(&queued.request) == key) {
+        return;
+    }
     state.download_queue.push_back(QueuedContentDownload {
         request: ContentInstallRequest::Latest {
             entry: entry.clone(),
@@ -443,6 +475,13 @@ pub fn set_detail_filters(state: &mut ContentBrowserState, loader: usize, versio
 pub fn queue_version(state: &mut ContentBrowserState, version_id: &str, action: RowAction) {
     let Some(entry) = state.detail_entry.clone() else { return };
     let Some(version) = state.detail_versions.iter().find(|version| version.version_id == version_id).cloned() else { return };
+    let already = |request: &ContentInstallRequest| {
+        matches!(request, ContentInstallRequest::Exact { entry: queued, version: queued_version, .. }
+            if queued.dedupe_key == entry.dedupe_key && queued_version.version_id == version.version_id)
+    };
+    if state.download_queue.iter().any(|queued| already(&queued.request)) {
+        return;
+    }
     let game_version = if state.detail_minecraft_version_filter.trim().is_empty() {
         state.minecraft_version_filter.clone()
     } else {

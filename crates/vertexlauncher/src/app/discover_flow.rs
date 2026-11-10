@@ -25,7 +25,7 @@ pub(super) fn install_discover_modpack_in_background(
                 instance_name: instance_name.clone(),
                 manual_curseforge_files: HashMap::new(),
                 manual_curseforge_staging_dir: None,
-                max_concurrent_downloads: 4,
+                max_concurrent_downloads: installation::shared_download_policy().max_concurrent_downloads,
             };
             let result = import_package_in_background(
                 store,
@@ -81,7 +81,7 @@ pub(super) fn install_discover_modpack_in_background(
                 instance_name: instance_name.clone(),
                 manual_curseforge_files: HashMap::new(),
                 manual_curseforge_staging_dir: None,
-                max_concurrent_downloads: 4,
+                max_concurrent_downloads: installation::shared_download_policy().max_concurrent_downloads,
             };
             let result = import_package_in_background(
                 store,

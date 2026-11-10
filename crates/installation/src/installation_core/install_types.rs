@@ -58,6 +58,23 @@ pub struct DownloadBatchTask {
     pub expected_size: Option<u64>,
 }
 
+static SHARED_DOWNLOAD_POLICY: std::sync::Mutex<Option<DownloadPolicy>> = std::sync::Mutex::new(None);
+
+/// Sets the download limits (concurrent transfers, speed limit) from the user's settings for code that has no config
+/// of its own at hand, such as the importers. The app refreshes it whenever the settings are read.
+pub fn set_shared_download_policy(policy: DownloadPolicy) {
+    *SHARED_DOWNLOAD_POLICY.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(policy);
+}
+
+/// The limits last given to [`set_shared_download_policy`], or the defaults before that.
+pub fn shared_download_policy() -> DownloadPolicy {
+    SHARED_DOWNLOAD_POLICY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+        .unwrap_or_default()
+}
+
 impl Default for DownloadPolicy {
     fn default() -> Self {
         Self {

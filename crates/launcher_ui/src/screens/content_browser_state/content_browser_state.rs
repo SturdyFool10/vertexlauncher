@@ -10,6 +10,8 @@ pub struct ContentBrowserState {
     pub(crate) loader: BrowserLoader,
     pub(crate) active_instance_id: Option<String>,
     pub(crate) active_instance_name: Option<String>,
+    /// Where the queued installs go, remembered so the queue keeps draining while the screen is not shown.
+    pub(crate) active_instance_root: Option<std::path::PathBuf>,
     pub(crate) auto_populated_instance_id: Option<String>,
     pub(crate) current_page: u32,
     pub(crate) current_view: ContentBrowserPage,
@@ -39,8 +41,12 @@ pub struct ContentBrowserState {
     pub(crate) search: launcher_runtime::WorkerChannel<SearchUpdate>,
     pub(crate) download_queue: VecDeque<QueuedContentDownload>,
     pub(crate) download_in_flight: bool,
-    pub(crate) active_download: Option<ActiveContentDownload>,
-    pub(crate) download: launcher_runtime::WorkerChannel<Result<ContentDownloadOutcome, String>>,
+    /// Everything in the batch being downloaded and installed right now.
+    pub(crate) active_downloads: Vec<ActiveContentDownload>,
+    /// Concurrent transfers and speed limit the install queue downloads under.
+    pub(crate) download_policy: DownloadPolicy,
+    /// Each finished request's dedupe key with how it went.
+    pub(crate) download: launcher_runtime::WorkerChannel<(String, Result<ContentDownloadOutcome, String>)>,
     pub(crate) identify_in_flight: bool,
     pub(crate) identify:
         launcher_runtime::WorkerChannel<(PathBuf, Result<UnifiedContentEntry, String>)>,
@@ -64,6 +70,7 @@ impl Default for ContentBrowserState {
             loader: BrowserLoader::Any,
             active_instance_id: None,
             active_instance_name: None,
+            active_instance_root: None,
             auto_populated_instance_id: None,
             current_page: 1,
             current_view: ContentBrowserPage::Browse,
@@ -91,7 +98,8 @@ impl Default for ContentBrowserState {
             search: Default::default(),
             download_queue: VecDeque::new(),
             download_in_flight: false,
-            active_download: None,
+            active_downloads: Vec::new(),
+            download_policy: DownloadPolicy::default(),
             download: Default::default(),
             identify_in_flight: false,
             identify: Default::default(),
@@ -126,7 +134,7 @@ impl ContentBrowserState {
         self.search.reset();
         self.download_queue.clear();
         self.download_in_flight = false;
-        self.active_download = None;
+        self.active_downloads.clear();
         self.download.reset();
         self.identify_in_flight = false;
         self.identify.reset();

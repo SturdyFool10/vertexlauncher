@@ -406,6 +406,15 @@ impl AppState {
         self.poll_flows();
         link_profile::poll(self);
         self.tick_sessions();
+        // Queued mod installs keep going when the Content Browser is not the open screen.
+        let download_policy = installation::DownloadPolicy {
+            max_concurrent_downloads: self.config.download_max_concurrent().max(1),
+            max_download_bps: self.config.parsed_download_speed_limit_bps(),
+        };
+        // Importers and other code without a config at hand read the limits from here.
+        installation::set_shared_download_policy(download_policy.clone());
+        launcher_ui::screens::content_browser_api::set_download_policy(&mut self.content, download_policy);
+        launcher_ui::screens::content_browser_api::pump_background(&mut self.content);
         self.poll_initial_installs();
         self.poll_finished_processes();
         self.config_saver.poll();

@@ -265,6 +265,8 @@ pub(crate) fn populate_mrpack_instance(
         &mut completed_steps,
         progress,
     )?;
+    // Every file is resolved first, then all are downloaded together under the user's download limits.
+    let mut tasks = Vec::new();
     for file in manifest.files {
         if matches!(
             file.env.as_ref().and_then(|env| env.client.as_deref()),
@@ -287,13 +289,27 @@ pub(crate) fn populate_mrpack_instance(
                 file.path.display()
             )
         })?;
-        completed_steps += 1;
+        tasks.push(installation::DownloadBatchTask {
+            url: download_url,
+            destination,
+            expected_size: None,
+        });
+    }
+    if !tasks.is_empty() {
         progress(import_progress(
-            &format!("Downloading {}", file.path.display()),
+            &format!("Downloading {} files...", tasks.len()),
+            completed_steps + 1,
+            total_steps,
+        ));
+        let count = tasks.len();
+        installation::download_batch(tasks, &installation::shared_download_policy())
+            .map_err(|err| format!("failed to download pack files: {err}"))?;
+        completed_steps += count;
+        progress(import_progress(
+            "Downloaded pack files.",
             completed_steps,
             total_steps,
         ));
-        download_file(download_url.as_str(), destination.as_path())?;
     }
     Ok(())
 }

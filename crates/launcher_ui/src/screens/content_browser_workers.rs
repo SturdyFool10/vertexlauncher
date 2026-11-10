@@ -1081,17 +1081,16 @@ pub(super) fn maybe_start_queued_download(
     instance_name: &str,
     instance_root: &Path,
 ) {
-    if state.download_in_flight {
+    if state.download_in_flight || state.download_queue.is_empty() {
         return;
     }
-    let Some(next) = state.download_queue.pop_front() else {
-        return;
-    };
+    // Everything queued so far goes in one batch, so its files download together under the download limits.
+    let requests: Vec<ContentInstallRequest> = state.download_queue.drain(..).map(|queued| queued.request).collect();
 
     let tx = state.download.sender();
 
     state.download_in_flight = true;
-    state.active_download = Some(active_download_from_request(&next.request));
+    state.active_downloads = requests.iter().map(active_download_from_request).collect();
     state.download_notification_active = true;
     install_activity::set_status(
         instance_name,
@@ -1105,8 +1104,7 @@ pub(super) fn maybe_start_queued_download(
         "Resolving dependencies..."
     );
     let root = instance_root.to_path_buf();
-    let request = next.request.clone();
-    let queued_after = state.download_queue.len();
+    let policy = state.download_policy.clone();
     let activity_instance = instance_name.to_owned();
     // Shown in the top-right notification and, via install activity, on the instance screen.
     let sink: InstallReportSink = Arc::new(move |progress, fraction| {
@@ -1119,25 +1117,28 @@ pub(super) fn maybe_start_queued_download(
         );
     });
 
+    let keys: Vec<String> = state.active_downloads.iter().map(|active| active.dedupe_key.clone()).collect();
     let _ = tokio_runtime::spawn_detached(async move {
         let join = tokio_runtime::spawn_blocking(move || {
-            apply_content_install_request_with_live_progress(
-                root.as_path(),
-                request,
-                queued_after,
-                sink,
-            )
+            apply_content_install_requests_parallel(root.as_path(), requests, &policy, sink)
         });
-        let result = match join.await {
-            Ok(r) => r,
-            Err(err) => Err(format!("content install worker panicked: {err}")),
-        };
-        if let Err(err) = tx.send(result) {
-            tracing::error!(
-                target: "vertexlauncher/content_browser",
-                error = %err,
-                "Failed to deliver queued content operation result."
-            );
+        match join.await {
+            Ok(results) => {
+                for result in results {
+                    if let Err(err) = tx.send(result) {
+                        tracing::error!(
+                            target: "vertexlauncher/content_browser",
+                            error = %err,
+                            "Failed to deliver queued content operation result."
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                for key in keys {
+                    let _ = tx.send((key, Err(format!("content install worker panicked: {err}"))));
+                }
+            }
         }
     });
 }
@@ -1149,21 +1150,22 @@ pub(super) fn poll_downloads(state: &mut ContentBrowserState) {
     if drained.disconnected {
         tracing::error!(target: "vertexlauncher/content_browser", "download worker channel stopped unexpectedly.");
         state.download_in_flight = false;
-        state.active_download = None;
+        state.active_downloads.clear();
         if let Some(instance_name) = state.active_instance_name.as_deref() {
             install_activity::clear_instance(instance_name);
         }
         state.status_message = Some("Content download worker stopped unexpectedly.".to_owned());
     }
 
-    for update in updates {
-        state.download_in_flight = false;
-        state.active_download = None;
-        if state.download_notification_active {
+    for (key, update) in updates {
+        state.active_downloads.retain(|active| active.dedupe_key != key);
+        // The batch is over once its last request has reported.
+        if state.active_downloads.is_empty() {
+            state.download_in_flight = false;
             state.download_notification_active = false;
-        }
-        if let Some(instance_name) = state.active_instance_name.as_deref() {
-            install_activity::clear_instance(instance_name);
+            if let Some(instance_name) = state.active_instance_name.as_deref() {
+                install_activity::clear_instance(instance_name);
+            }
         }
         match update {
             Ok(result) => {

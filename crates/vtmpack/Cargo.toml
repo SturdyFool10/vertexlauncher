@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 curseforge.workspace = true
+installation.workspace = true
 managed_content.workspace = true
 modrinth.workspace = true
 ureq.workspace = true

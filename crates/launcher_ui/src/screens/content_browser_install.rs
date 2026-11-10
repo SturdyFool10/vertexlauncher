@@ -8,9 +8,7 @@ mod install_reporter;
 mod resolved_download;
 
 pub(super) use self::dependency_ref::DependencyRef;
-pub(super) use self::install_reporter::{
-    InstallReportSink, InstallReporter, with_install_reporter,
-};
+pub(super) use self::install_reporter::InstallReportSink;
 use self::install_reporter::{report_begin_file, report_file_bytes, report_finish_file};
 pub(super) use self::resolved_download::ResolvedDownload;
 
@@ -29,38 +27,106 @@ pub(super) fn active_download_from_request(
     }
 }
 
-pub(super) fn apply_content_install_request(
-    instance_root: &Path,
-    request: ContentInstallRequest,
-) -> Result<ContentDownloadOutcome, String> {
-    apply_content_install_request_with_prefetched_downloads(
-        instance_root,
-        request,
-        &HashMap::new(),
-        &[],
-    )
+/// One file an install will download, worked out before anything is fetched.
+#[derive(Clone, Debug)]
+struct PlannedFile {
+    url: String,
+    target_path: PathBuf,
+    content_type: BrowserContentType,
 }
 
-/// Installs `request` while reporting live progress through `sink`.
+/// Installs every request in `requests`, downloading all their files together first.
 ///
-/// The project and all of its not-yet-installed dependencies are resolved first so the whole
-/// queue is known up front, then downloaded one file at a time with byte-level progress.
-pub(super) fn apply_content_install_request_with_live_progress(
+/// The projects and all their not-yet-installed dependencies are resolved up front so every file is known, then the
+/// files are fetched in one batch that honours `policy` (concurrent transfers and the speed limit), and only then is
+/// each request applied, one after another, from the downloaded files. Applying is the only part that touches the
+/// instance's content manifest, which is why it is not parallel. Returns each request's dedupe key with its result,
+/// in the order given.
+pub(super) fn apply_content_install_requests_parallel(
     instance_root: &Path,
-    request: ContentInstallRequest,
-    queued_after: usize,
+    requests: Vec<ContentInstallRequest>,
+    policy: &DownloadPolicy,
     sink: InstallReportSink,
-) -> Result<ContentDownloadOutcome, String> {
-    let names = plan_install_queue(instance_root, &request);
-    let reporter = InstallReporter::new(sink, names, queued_after);
-    with_install_reporter(reporter, || {
-        apply_content_install_request(instance_root, request)
-    })
+) -> Vec<(String, Result<ContentDownloadOutcome, String>)> {
+    let mut planned: Vec<PlannedFile> = Vec::new();
+    for request in &requests {
+        for file in plan_install_downloads(instance_root, request) {
+            if !planned.iter().any(|existing| existing.target_path == file.target_path) {
+                planned.push(file);
+            }
+        }
+    }
+
+    let mut prefetched: HashMap<PathBuf, PathBuf> = HashMap::new();
+    if !planned.is_empty() {
+        let progress_sink = sink.clone();
+        let progress: InstallProgressCallback = Arc::new(move |progress| {
+            let fraction = match progress.total_bytes {
+                Some(total) if total > 0 => (progress.downloaded_bytes as f32 / total as f32).clamp(0.0, 1.0),
+                _ => progress.downloaded_files as f32 / progress.total_files.max(1) as f32,
+            };
+            progress_sink(&progress, fraction.min(0.99));
+        });
+        let task_for = |file: &PlannedFile| DownloadBatchTask {
+            url: file.url.clone(),
+            destination: prefetched_target_path(instance_root, file.content_type, file.target_path.as_path()),
+            expected_size: None,
+        };
+        let all: Vec<DownloadBatchTask> = planned.iter().map(task_for).collect();
+        let downloaded: Vec<&PlannedFile> = match download_batch_with_progress(
+            all,
+            policy,
+            InstallStage::DownloadingCore,
+            Some(&progress),
+        ) {
+            Ok(_) => planned.iter().collect(),
+            Err(batch_err) => {
+                // One bad file must not sink the rest: try them one at a time and keep what arrives. A file that
+                // cannot be fetched is left out, and its install then downloads it itself and reports the error.
+                tracing::warn!(
+                    target: CONTENT_UPDATE_LOG_TARGET,
+                    "downloading the queued content together failed ({batch_err}); trying the files one at a time"
+                );
+                planned
+                    .iter()
+                    .filter(|file| {
+                        download_batch_with_progress(
+                            vec![task_for(file)],
+                            policy,
+                            InstallStage::DownloadingCore,
+                            Some(&progress),
+                        )
+                        .is_ok()
+                    })
+                    .collect()
+            }
+        };
+        for file in downloaded {
+            prefetched.insert(
+                file.target_path.clone(),
+                prefetched_target_path(instance_root, file.content_type, file.target_path.as_path()),
+            );
+        }
+    }
+
+    let results = requests
+        .into_iter()
+        .map(|request| {
+            let key = active_download_from_request(&request).dedupe_key;
+            let result =
+                apply_content_install_request_with_prefetched_downloads(instance_root, request, &prefetched, &[]);
+            (key, result)
+        })
+        .collect();
+    if !prefetched.is_empty() {
+        let _ = cleanup_prefetched_downloads(instance_root);
+    }
+    results
 }
 
-/// Names of everything `request` will download, root first, dependencies after. Best effort:
-/// a project that cannot be resolved here is left out and reported by the real install.
-fn plan_install_queue(instance_root: &Path, request: &ContentInstallRequest) -> Vec<String> {
+/// The files `request` will download: the project and its not-yet-installed dependencies. Best effort: a project that
+/// cannot be resolved here is left out and reported by the real install.
+fn plan_install_downloads(instance_root: &Path, request: &ContentInstallRequest) -> Vec<PlannedFile> {
     let modrinth = ModrinthClient::default();
     let curseforge = CurseForgeClient::from_env();
     let manifest = load_content_manifest(instance_root);
@@ -94,7 +160,7 @@ fn plan_install_queue(instance_root: &Path, request: &ContentInstallRequest) -> 
         ),
     };
     let mut visited = HashSet::new();
-    let mut names = Vec::new();
+    let mut planned = Vec::new();
     plan_project(
         &manifest,
         entry,
@@ -104,9 +170,10 @@ fn plan_install_queue(instance_root: &Path, request: &ContentInstallRequest) -> 
         &modrinth,
         curseforge.as_ref(),
         &mut visited,
-        &mut names,
+        instance_root,
+        &mut planned,
     );
-    names
+    planned
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -119,7 +186,8 @@ fn plan_project(
     modrinth: &ModrinthClient,
     curseforge: Option<&CurseForgeClient>,
     visited: &mut HashSet<String>,
-    names: &mut Vec<String>,
+    instance_root: &Path,
+    planned: &mut Vec<PlannedFile>,
 ) {
     if !visited.insert(entry.dedupe_key.clone()) {
         return;
@@ -132,7 +200,11 @@ fn plan_project(
     if already_installed {
         return;
     }
-    names.push(entry.name.clone());
+    planned.push(PlannedFile {
+        url: resolved.file_url.clone(),
+        target_path: content_target_path_for_resolved_download(instance_root, entry, resolved),
+        content_type: entry.content_type,
+    });
     let Ok(dependencies) =
         dependency_to_browser_entries(resolved.dependencies.as_slice(), modrinth, curseforge)
     else {
@@ -153,7 +225,8 @@ fn plan_project(
             modrinth,
             curseforge,
             visited,
-            names,
+            instance_root,
+            planned,
         );
     }
 }

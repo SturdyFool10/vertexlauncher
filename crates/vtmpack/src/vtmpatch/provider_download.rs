@@ -2,41 +2,176 @@ use super::*;
 
 // ── Apply helpers ─────────────────────────────────────────────────────────────
 
-pub(super) fn download_downloadable_entry(
-    entry: &VtmpackDownloadableEntry,
-    instance_root: &Path,
-) -> Result<(), String> {
-    if entry
+/// Where one entry's file comes from and goes to, worked out before anything is downloaded.
+struct ResolvedFile {
+    url: String,
+    destination: PathBuf,
+    /// Checked after the download when the pack recorded it.
+    expected_sha512: Option<String>,
+    display_name: String,
+}
+
+fn is_curseforge_entry(entry: &VtmpackDownloadableEntry) -> bool {
+    entry
         .selected_source
         .as_deref()
         .is_some_and(|source| source.eq_ignore_ascii_case("CurseForge"))
         || entry.curseforge_project_id.is_some() && entry.modrinth_project_id.is_none()
-    {
-        return download_curseforge_entry(entry, instance_root);
-    }
-    download_modrinth_entry(entry, instance_root)
 }
 
-/// Download a single Modrinth-tracked file and write it to the instance.
-pub(super) fn download_modrinth_entry(
-    entry: &VtmpackDownloadableEntry,
+/// Downloads every entry together: the download URLs are resolved first (Modrinth versions in one batched request,
+/// CurseForge ones in parallel), then all files are fetched concurrently under the user's download limits. Returns one
+/// result per entry, in the order given, so a file that fails does not stop the others.
+pub(super) fn download_downloadable_entries(
+    entries: &[&VtmpackDownloadableEntry],
     instance_root: &Path,
-) -> Result<(), String> {
-    let client = modrinth::Client::default();
+) -> Vec<Result<(), String>> {
+    let policy = installation::shared_download_policy();
+    let workers = policy.max_concurrent_downloads.clamp(1, 64) as usize;
+    let mut resolved: Vec<Option<Result<ResolvedFile, String>>> = entries.iter().map(|_| None).collect();
+
+    // Modrinth: one request for all the versions instead of one each.
+    let modrinth_indices: Vec<usize> = (0..entries.len()).filter(|&i| !is_curseforge_entry(entries[i])).collect();
+    let version_ids: Vec<String> = modrinth_indices
+        .iter()
+        .filter_map(|&i| entries[i].selected_version_id.as_deref())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let versions: HashMap<String, modrinth::ProjectVersion> = modrinth::Client::default()
+        .get_versions(&version_ids)
+        .map(|versions| versions.into_iter().map(|version| (version.id.clone(), version)).collect())
+        .unwrap_or_default();
+    for &index in &modrinth_indices {
+        resolved[index] = Some(resolve_modrinth_entry(entries[index], &versions, instance_root));
+    }
+
+    // CurseForge: each URL is its own request, so they are resolved by several workers at once.
+    let curseforge_indices: Vec<usize> = (0..entries.len()).filter(|&i| is_curseforge_entry(entries[i])).collect();
+    if !curseforge_indices.is_empty() {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let results = std::sync::Mutex::new(Vec::new());
+        std::thread::scope(|scope| {
+            for _ in 0..workers.min(curseforge_indices.len()) {
+                scope.spawn(|| {
+                    loop {
+                        let slot = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(&index) = curseforge_indices.get(slot) else { return };
+                        let result = resolve_curseforge_entry(entries[index], instance_root);
+                        results.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((index, result));
+                    }
+                });
+            }
+        });
+        for (index, result) in results.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+            resolved[index] = Some(result);
+        }
+    }
+
+    // Everything that resolved goes in one batch.
+    let mut results: Vec<Result<(), String>> = Vec::with_capacity(entries.len());
+    let mut to_download: Vec<(usize, &ResolvedFile)> = Vec::new();
+    for (index, slot) in resolved.iter().enumerate() {
+        match slot {
+            Some(Ok(file)) => {
+                if let Some(parent) = file.destination.parent()
+                    && let Err(err) = fs::create_dir_all(parent)
+                {
+                    results.push(Err(format!("failed to create {}: {err}", parent.display())));
+                    continue;
+                }
+                to_download.push((index, file));
+                results.push(Ok(()));
+            }
+            Some(Err(err)) => results.push(Err(err.clone())),
+            None => results.push(Err("entry was not resolved".to_owned())),
+        }
+    }
+    let task_for = |file: &ResolvedFile| installation::DownloadBatchTask {
+        url: file.url.clone(),
+        destination: file.destination.clone(),
+        expected_size: None,
+    };
+    if !to_download.is_empty() {
+        let batch: Vec<_> = to_download.iter().map(|(_, file)| task_for(file)).collect();
+        if let Err(batch_err) = installation::download_batch(batch, &policy) {
+            // One bad file must not sink the rest: retry each on its own (several at a time) so only the files that
+            // really cannot be fetched are reported.
+            tracing::warn!(
+                target: "vertexlauncher/vtmpatch",
+                error = %batch_err,
+                "downloading the patch files together failed; retrying them one by one"
+            );
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let failures = std::sync::Mutex::new(Vec::new());
+            std::thread::scope(|scope| {
+                for _ in 0..workers.min(to_download.len()) {
+                    scope.spawn(|| {
+                        loop {
+                            let slot = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some((index, file)) = to_download.get(slot) else { return };
+                            if let Err(err) = installation::download_batch(vec![task_for(file)], &policy) {
+                                failures
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                    .push((*index, format!("download failed for {}: {err}", file.url)));
+                            }
+                        }
+                    });
+                }
+            });
+            for (index, err) in failures.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+                results[index] = Err(err);
+            }
+        }
+    }
+
+    // Hash check for the files that arrived.
+    for (index, file) in &to_download {
+        if results[*index].is_err() {
+            continue;
+        }
+        let Some(expected) = file.expected_sha512.as_deref() else { continue };
+        match modrinth::hash_file_sha512_hex(file.destination.as_path()) {
+            Ok(actual) if actual.eq_ignore_ascii_case(expected) => {}
+            Ok(actual) => {
+                let _ = fs::remove_file(file.destination.as_path());
+                results[*index] = Err(format!(
+                    "SHA-512 mismatch for {} (expected {expected}, got {actual})",
+                    file.display_name
+                ));
+            }
+            Err(err) => {
+                results[*index] = Err(format!(
+                    "failed to hash downloaded file {}: {err}",
+                    file.destination.display()
+                ));
+            }
+        }
+    }
+    results
+}
+
+fn resolve_modrinth_entry(
+    entry: &VtmpackDownloadableEntry,
+    versions: &HashMap<String, modrinth::ProjectVersion>,
+    instance_root: &Path,
+) -> Result<ResolvedFile, String> {
     let version_id = entry
         .selected_version_id
         .as_deref()
-        .filter(|s| !s.trim().is_empty())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
         .ok_or_else(|| {
             format!(
                 "downloadable entry {} has no version_id",
                 entry.file_path.display()
             )
         })?;
-
-    let version = client
-        .get_version(version_id)
-        .map_err(|err| format!("failed to fetch Modrinth version {version_id}: {err}"))?;
+    let version = versions
+        .get(version_id)
+        .ok_or_else(|| format!("failed to fetch Modrinth version {version_id}"))?;
 
     // Prefer the file whose sha512 matches the manifest; fall back to primary.
     let file = version
@@ -55,48 +190,18 @@ pub(super) fn download_modrinth_entry(
         .or_else(|| version.files.iter().find(|f| f.primary))
         .or_else(|| version.files.first())
         .ok_or_else(|| format!("no downloadable files for Modrinth version {version_id}"))?;
-
-    let mut response = ureq::get(&file.url)
-        .call()
-        .map_err(|err| format!("HTTP request to {} failed: {err}", file.url))?;
-    let mut reader = response.body_mut().as_reader();
-    let mut bytes = Vec::new();
-    reader
-        .read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read response body from {}: {err}", file.url))?;
-
-    let destination = instance_root.join(entry.file_path.as_path());
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
-    }
-    fs::write(&destination, &bytes)
-        .map_err(|err| format!("failed to write {}: {err}", destination.display()))?;
-
-    // Verify the hash if we have it.
-    if let Some(expected_sha512) = &entry.selected_file_sha512 {
-        let actual = modrinth::hash_file_sha512_hex(destination.as_path()).map_err(|err| {
-            format!(
-                "failed to hash downloaded file {}: {err}",
-                destination.display()
-            )
-        })?;
-        if !actual.eq_ignore_ascii_case(expected_sha512) {
-            let _ = fs::remove_file(destination.as_path());
-            return Err(format!(
-                "SHA-512 mismatch for {} (expected {expected_sha512}, got {actual})",
-                file.filename
-            ));
-        }
-    }
-
-    Ok(())
+    Ok(ResolvedFile {
+        url: file.url.clone(),
+        destination: instance_root.join(entry.file_path.as_path()),
+        expected_sha512: entry.selected_file_sha512.clone(),
+        display_name: file.filename.clone(),
+    })
 }
 
-pub(super) fn download_curseforge_entry(
+fn resolve_curseforge_entry(
     entry: &VtmpackDownloadableEntry,
     instance_root: &Path,
-) -> Result<(), String> {
+) -> Result<ResolvedFile, String> {
     let project_id = entry.curseforge_project_id.ok_or_else(|| {
         format!(
             "downloadable entry {} has no CurseForge project id",
@@ -127,19 +232,10 @@ pub(super) fn download_curseforge_entry(
         .ok_or_else(|| {
             format!("CurseForge file {file_id} for project {project_id} has no download URL")
         })?;
-    let mut response = ureq::get(download_url.as_str())
-        .call()
-        .map_err(|err| format!("HTTP request to {download_url} failed: {err}"))?;
-    let mut reader = response.body_mut().as_reader();
-    let mut bytes = Vec::new();
-    reader
-        .read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read response body from {download_url}: {err}"))?;
-    let destination = instance_root.join(entry.file_path.as_path());
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
-    }
-    fs::write(&destination, &bytes)
-        .map_err(|err| format!("failed to write {}: {err}", destination.display()))
+    Ok(ResolvedFile {
+        url: download_url,
+        destination: instance_root.join(entry.file_path.as_path()),
+        expected_sha512: None,
+        display_name: entry.name.clone(),
+    })
 }
