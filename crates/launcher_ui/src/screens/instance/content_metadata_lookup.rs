@@ -235,34 +235,35 @@ pub(super) fn hash_cache_diff_updates(
         .collect()
 }
 
+/// Rescans `kind` after a change and forgets what was resolved for `changed_lookup_keys` only; every other file keeps
+/// its resolved metadata (and its entry in the hash cache), since nothing about it changed.
 pub(super) fn refresh_cached_metadata_after_apply(
     state: &mut InstanceScreenState,
     instance_root: &Path,
     kind: InstalledContentKind,
-    focus_lookup_keys: &[String],
+    changed_lookup_keys: &[String],
 ) {
-    let key_prefix = format!("{}::", kind.folder_name());
-    let focus_keys = focus_lookup_keys.iter().cloned().collect::<HashSet<_>>();
+    let changed_keys = changed_lookup_keys.iter().cloned().collect::<HashSet<_>>();
 
     state.installed_content_cache.files_by_tab.remove(&kind);
     state
         .content_metadata_cache
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
+        .retain(|key, _| !changed_keys.contains(key));
     state
         .installed_content_entry_ui_cache
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
+        .retain(|key, _| !changed_keys.contains(key));
     state
         .content_lookup_in_flight
-        .retain(|key| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
+        .retain(|key| !changed_keys.contains(key));
     state
         .content_lookup_latest_serial_by_key
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
+        .retain(|key, _| !changed_keys.contains(key));
     state
         .content_lookup_retry_after_by_key
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
+        .retain(|key, _| !changed_keys.contains(key));
     state
         .content_lookup_failure_count_by_key
-        .retain(|key, _| !key.starts_with(key_prefix.as_str()) || focus_keys.contains(key));
+        .retain(|key, _| !changed_keys.contains(key));
 
     request_installed_content_scan(state, instance_root, kind);
 }

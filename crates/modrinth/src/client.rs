@@ -46,10 +46,60 @@ pub struct Client {
     user_agent: String,
 }
 
+/// One agent for every client: clones share its connection pool, so requests reuse the TLS connection instead of
+/// opening a new one per `Client::default()`.
+fn shared_agent() -> ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(ureq::Agent::new_with_defaults).clone()
+}
+
+/// How many hashes go in one `/version_files` request.
+const HASH_BATCH_SIZE: usize = 200;
+/// How many ids go in one `/projects` or `/versions` request (they travel in the query string).
+const ID_BATCH_SIZE: usize = 100;
+/// A version never changes under its hash, so a hit is kept long; a miss may be uploaded later, so it is kept briefly.
+const HASH_HIT_TTL: Duration = Duration::from_secs(60 * 60);
+const HASH_MISS_TTL: Duration = Duration::from_secs(10 * 60);
+/// "Latest compatible version" changes when the project publishes, so it is kept for a short while only.
+const LATEST_TTL: Duration = Duration::from_secs(10 * 60);
+
+type TimedVersion = (Option<ProjectVersion>, Instant);
+
+fn version_by_hash_cache() -> &'static Mutex<HashMap<(&'static str, String), TimedVersion>> {
+    static CACHE: OnceLock<Mutex<HashMap<(&'static str, String), TimedVersion>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+fn latest_by_hash_cache() -> &'static Mutex<HashMap<String, TimedVersion>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, TimedVersion>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Splits `wanted` into answers still fresh in `cache` and the keys that must be asked for.
+fn split_cached<K: Clone + Eq + std::hash::Hash>(
+    cache: &Mutex<HashMap<K, TimedVersion>>,
+    wanted: &[K],
+    ttl: impl Fn(bool) -> Duration,
+) -> (Vec<(K, Option<ProjectVersion>)>, Vec<K>) {
+    let now = Instant::now();
+    let mut fresh = Vec::new();
+    let mut missing = Vec::new();
+    let cache = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for key in wanted {
+        match cache.get(key) {
+            Some((value, at)) if now.duration_since(*at) < ttl(value.is_some()) => {
+                fresh.push((key.clone(), value.clone()));
+            }
+            _ => missing.push(key.clone()),
+        }
+    }
+    (fresh, missing)
+}
+
 impl Default for Client {
     fn default() -> Self {
         Self {
-            agent: ureq::Agent::new_with_defaults(),
+            agent: shared_agent(),
             base_url: DEFAULT_MODRINTH_API_BASE_URL.to_owned(),
             user_agent: DEFAULT_USER_AGENT.to_owned(),
         }
@@ -211,12 +261,13 @@ impl Client {
             projects = ids.len(),
             "fetching Modrinth projects in batch"
         );
-        let ids_json = serde_json::to_string(&ids).map_err(ModrinthError::Json)?;
-        let records: Vec<ProjectRecord> = self.get_json("/projects", &[("ids", ids_json)])?;
-        Ok(records
-            .into_iter()
-            .map(ProjectRecord::into_project)
-            .collect())
+        let mut projects = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(ID_BATCH_SIZE) {
+            let ids_json = serde_json::to_string(chunk).map_err(ModrinthError::Json)?;
+            let records: Vec<ProjectRecord> = self.get_json("/projects", &[("ids", ids_json)])?;
+            projects.extend(records.into_iter().map(ProjectRecord::into_project));
+        }
+        Ok(projects)
     }
 
     /// Lists compatible versions for a project.
@@ -294,13 +345,18 @@ impl Client {
             versions = ids.len(),
             "fetching Modrinth versions in batch"
         );
-        let ids_json = serde_json::to_string(&ids).map_err(ModrinthError::Json)?;
-        let records: Vec<ProjectVersionRecord> =
-            self.get_json("/versions", &[("ids", ids_json)])?;
-        Ok(records
-            .into_iter()
-            .map(ProjectVersionRecord::into_project_version)
-            .collect())
+        let mut versions = Vec::with_capacity(ids.len());
+        for chunk in ids.chunks(ID_BATCH_SIZE) {
+            let ids_json = serde_json::to_string(chunk).map_err(ModrinthError::Json)?;
+            let records: Vec<ProjectVersionRecord> =
+                self.get_json("/versions", &[("ids", ids_json)])?;
+            versions.extend(
+                records
+                    .into_iter()
+                    .map(ProjectVersionRecord::into_project_version),
+            );
+        }
+        Ok(versions)
     }
 
     pub fn get_versions_from_hashes(
@@ -321,14 +377,45 @@ impl Client {
             "looking up Modrinth versions from file hashes"
         );
 
-        let response: HashMap<String, ProjectVersionRecord> = self.post_json(
-            "/version_files",
-            &VersionFileLookupRequest {
-                hashes: prepared_hashes.as_slice(),
-                algorithm,
-            },
-        )?;
-        if response.is_empty() {
+        let wanted: Vec<(&'static str, String)> = {
+            let mut seen = std::collections::HashSet::new();
+            prepared_hashes
+                .iter()
+                .filter(|hash| seen.insert((*hash).clone()))
+                .map(|hash| (algorithm, hash.clone()))
+                .collect()
+        };
+        let (fresh, missing) = split_cached(version_by_hash_cache(), &wanted, |hit| {
+            if hit { HASH_HIT_TTL } else { HASH_MISS_TTL }
+        });
+        let mut found: HashMap<String, ProjectVersion> = fresh
+            .into_iter()
+            .filter_map(|((_, hash), version)| version.map(|version| (hash, version)))
+            .collect();
+        for chunk in missing.chunks(HASH_BATCH_SIZE) {
+            let chunk_hashes: Vec<String> = chunk.iter().map(|(_, hash)| hash.clone()).collect();
+            let mut response: HashMap<String, ProjectVersionRecord> = self.post_json(
+                "/version_files",
+                &VersionFileLookupRequest {
+                    hashes: chunk_hashes.as_slice(),
+                    algorithm,
+                },
+            )?;
+            let now = Instant::now();
+            let mut cache = version_by_hash_cache()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for hash in &chunk_hashes {
+                let version = response
+                    .remove(hash.as_str())
+                    .map(ProjectVersionRecord::into_project_version);
+                if let Some(version) = &version {
+                    found.insert(hash.clone(), version.clone());
+                }
+                cache.insert((algorithm, hash.clone()), (version, now));
+            }
+        }
+        if found.is_empty() {
             debug!(
                 target: "vertexlauncher/modrinth",
                 algorithm,
@@ -336,11 +423,7 @@ impl Client {
                 "Modrinth version-file lookup returned no matches (files may not be on Modrinth)"
             );
         }
-
-        Ok(response
-            .into_iter()
-            .map(|(hash, version)| (hash, version.into_project_version()))
-            .collect())
+        Ok(found)
     }
 
     pub fn get_version_from_hash(
@@ -395,16 +478,48 @@ impl Client {
             "looking up latest compatible Modrinth versions from file hashes"
         );
 
-        let response: HashMap<String, ProjectVersionRecord> = self.post_json(
-            "/version_files/update",
-            &VersionFileUpdateRequest {
-                hashes: prepared_hashes.as_slice(),
-                algorithm,
-                loaders,
-                game_versions,
-            },
-        )?;
-        if response.is_empty() {
+        let scope = format!("{algorithm}|{}|{}", loaders.join(","), game_versions.join(","));
+        let wanted: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            prepared_hashes
+                .iter()
+                .filter(|hash| seen.insert((*hash).clone()))
+                .map(|hash| format!("{scope}|{hash}"))
+                .collect()
+        };
+        let (fresh, missing) = split_cached(latest_by_hash_cache(), &wanted, |_| LATEST_TTL);
+        let prefix_len = scope.len() + 1;
+        let mut found: HashMap<String, ProjectVersion> = fresh
+            .into_iter()
+            .filter_map(|(key, version)| version.map(|version| (key[prefix_len..].to_owned(), version)))
+            .collect();
+        for chunk in missing.chunks(HASH_BATCH_SIZE) {
+            let chunk_hashes: Vec<String> =
+                chunk.iter().map(|key| key[prefix_len..].to_owned()).collect();
+            let mut response: HashMap<String, ProjectVersionRecord> = self.post_json(
+                "/version_files/update",
+                &VersionFileUpdateRequest {
+                    hashes: chunk_hashes.as_slice(),
+                    algorithm,
+                    loaders,
+                    game_versions,
+                },
+            )?;
+            let now = Instant::now();
+            let mut cache = latest_by_hash_cache()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for hash in &chunk_hashes {
+                let version = response
+                    .remove(hash.as_str())
+                    .map(ProjectVersionRecord::into_project_version);
+                if let Some(version) = &version {
+                    found.insert(hash.clone(), version.clone());
+                }
+                cache.insert(format!("{scope}|{hash}"), (version, now));
+            }
+        }
+        if found.is_empty() {
             debug!(
                 target: "vertexlauncher/modrinth",
                 algorithm,
@@ -412,11 +527,7 @@ impl Client {
                 "Modrinth version-file update lookup returned no matches (no newer versions or files not on Modrinth)"
             );
         }
-
-        Ok(response
-            .into_iter()
-            .map(|(hash, version)| (hash, version.into_project_version()))
-            .collect())
+        Ok(found)
     }
 
     pub fn get_latest_version_from_hash(

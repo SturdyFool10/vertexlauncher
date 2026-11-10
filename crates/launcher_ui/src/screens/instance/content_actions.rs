@@ -113,16 +113,23 @@ pub(super) fn request_content_update(
 
 
 
-pub(super) fn refresh_installed_content_state(
-    state: &mut InstanceScreenState,
-    instance_root: &Path,
-) {
+/// Forgets everything resolved in memory so the lists rescan and re-resolve. The hash cache is kept: it is keyed by file
+/// hash, so it stays right however the files changed, and keeping it makes the re-resolve cheap.
+pub(super) fn invalidate_installed_content_state(state: &mut InstanceScreenState) {
     state.invalidate_installed_content_cache();
     state.content_metadata_cache.clear();
     state.content_lookup_in_flight.clear();
     state.content_lookup_latest_serial_by_key.clear();
     state.content_lookup_retry_after_by_key.clear();
     state.content_lookup_failure_count_by_key.clear();
+}
+
+/// The explicit "refresh" action: [`invalidate_installed_content_state`] and also throws the hash cache away.
+pub(super) fn refresh_installed_content_state(
+    state: &mut InstanceScreenState,
+    instance_root: &Path,
+) {
+    invalidate_installed_content_state(state);
     super::clear_content_hash_cache(state, instance_root);
 }
 
@@ -587,7 +594,7 @@ pub(super) fn request_bulk_content_update(
         if let Err(err) = tx.send(ContentApplyResult {
             kind,
             focus_lookup_keys: Vec::new(),
-            refresh_all_content: false,
+            refresh_all_content: true,
             status_message: result,
         }) {
             tracing::error!(
@@ -619,9 +626,11 @@ pub(super) fn poll_content_apply_results(state: &mut InstanceScreenState, instan
         match result.status_message {
             Ok(message) => {
                 if result.refresh_all_content {
-                    refresh_installed_content_state(state, instance_root);
+                    invalidate_installed_content_state(state);
                 } else {
-                    state.invalidate_installed_content_cache();
+                    // Only the file lists and managed identities are rescanned; the resolved metadata of every file
+                    // that did not change is kept.
+                    state.installed_content_cache.clear();
                     super::refresh_cached_metadata_after_apply(
                         state,
                         instance_root,
@@ -633,7 +642,7 @@ pub(super) fn poll_content_apply_results(state: &mut InstanceScreenState, instan
             }
             Err(err) => {
                 if result.refresh_all_content {
-                    refresh_installed_content_state(state, instance_root);
+                    invalidate_installed_content_state(state);
                 }
                 tracing::error!(
                     target: "vertexlauncher/instance_content",

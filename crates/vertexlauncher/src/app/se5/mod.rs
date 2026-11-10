@@ -1032,12 +1032,15 @@ impl App {
             TextRenderingPath::AlphaMask | TextRenderingPath::Sdf => TextRasterMode::Sdf,
             TextRenderingPath::Msdf => TextRasterMode::Msdf,
         };
-        // Icons are scaled down by the GPU's bilinear filter, which has no mipmaps here: it averages 2x2 texels, so
-        // only a 2x raster is filtered cleanly. 3x and 4x skip texels and look worse than no supersampling, so the
-        // higher modes stop at 2x (the rasteriser already anti-aliases analytically).
-        let supersample = self.state.config.svg_aa_mode().supersample_scale().min(2);
-        // Icons are managed assets: the engine regrows their rasters when drawn bigger and rebuilds them on a graphics
-        // device switch, so a change of the setting only needs to be remembered for the next draw.
+        // The engine rasterises each icon with a mip chain, so every supersample step (2x, 3x, 4x) is filtered cleanly
+        // when drawn smaller.
+        let supersample = self.state.config.svg_aa_mode().supersample_scale();
+        // Rasters only ever grow when asked for a larger size, so a lower setting would keep the old raster and a
+        // changed one would not be applied evenly: start a new sizing epoch and every icon is re-rasterised at exactly
+        // the size the next draw asks for. Nothing is unloaded, so no icon is ever missing for a frame.
+        if self.kit.svg_supersample != supersample {
+            ui.clear_svg_cache();
+        }
         self.kit.svg_supersample = supersample;
         if ui.text_raster_mode() != mode {
             ui.set_text_raster_mode(mode);

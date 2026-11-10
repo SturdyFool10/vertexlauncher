@@ -537,7 +537,6 @@ fn prefetch_modrinth_hash_updates(
     };
     let game_versions = normalized_game_versions_for_update_prefetch(game_version);
     let mut pending_sha512 = Vec::new();
-    let mut pending_sha1 = Vec::new();
     let mut cached_sha512 = Vec::new();
     let mut cached_sha1 = Vec::new();
     let mut cache_updates = Vec::new();
@@ -573,10 +572,11 @@ fn prefetch_modrinth_hash_updates(
             sha1,
             sha512,
         };
+        // Modrinth indexes every file under both hashes, so a sha512 miss is a miss; asking again by sha1 would only
+        // spend a request.
+        let _ = sha1_missing;
         if sha512_missing {
             pending_sha512.push(item);
-        } else if sha1_missing {
-            pending_sha1.push(item);
         } else {
             cache_updates.push(content_resolver::InstalledContentHashCacheUpdate {
                 hash_key: sha512_key,
@@ -627,7 +627,6 @@ fn prefetch_modrinth_hash_updates(
         prefetched[index] = Some(resolution);
     }
 
-    let mut pending_sha1_from_sha512 = Vec::new();
     if !pending_sha512.is_empty()
         && let Ok(versions_by_hash) = modrinth.get_versions_from_hashes(
             &pending_sha512
@@ -676,69 +675,14 @@ fn prefetch_modrinth_hash_updates(
                 prefetched[item.index] = Some(resolution);
                 continue;
             }
-            pending_sha1_from_sha512.push(item);
-        }
-    } else {
-        pending_sha1_from_sha512 = pending_sha512;
-    }
-    pending_sha1.extend(pending_sha1_from_sha512);
-
-    if !pending_sha1.is_empty()
-        && let Ok(versions_by_hash) = modrinth.get_versions_from_hashes(
-            &pending_sha1
-                .iter()
-                .map(|item| item.sha1.clone())
-                .collect::<Vec<_>>(),
-            "sha1",
-        )
-    {
-        let projects_by_id = modrinth_projects_by_id_prefetch(
-            &modrinth,
-            versions_by_hash
-                .values()
-                .map(|version| version.project_id.clone())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-        let latest_by_hash = modrinth
-            .get_latest_versions_from_hashes(
-                &pending_sha1
-                    .iter()
-                    .map(|item| item.sha1.clone())
-                    .collect::<Vec<_>>(),
-                "sha1",
-                loaders.as_slice(),
-                game_versions.as_slice(),
-            )
-            .unwrap_or_default();
-        for item in pending_sha1 {
-            if let Some(version) = versions_by_hash.get(item.sha1.as_str())
-                && let Some(project) = projects_by_id.get(version.project_id.as_str())
-            {
-                let resolution = modrinth_resolution_from_prefetched_hash(
-                    project,
-                    version,
-                    latest_by_hash.get(item.sha1.as_str()),
-                );
-                cache_updates.push(content_resolver::InstalledContentHashCacheUpdate {
-                    hash_key: format!("sha512:{}", item.sha512),
-                    resolution: Some(hash_cache_resolution_without_update_prefetch(&resolution)),
-                });
-                cache_updates.push(content_resolver::InstalledContentHashCacheUpdate {
-                    hash_key: format!("sha1:{}", item.sha1),
-                    resolution: Some(hash_cache_resolution_without_update_prefetch(&resolution)),
-                });
-                prefetched[item.index] = Some(resolution);
-            } else {
-                cache_updates.push(content_resolver::InstalledContentHashCacheUpdate {
-                    hash_key: format!("sha512:{}", item.sha512),
-                    resolution: None,
-                });
-                cache_updates.push(content_resolver::InstalledContentHashCacheUpdate {
-                    hash_key: format!("sha1:{}", item.sha1),
-                    resolution: None,
-                });
-            }
+            cache_updates.push(content_resolver::InstalledContentHashCacheUpdate {
+                hash_key: format!("sha512:{}", item.sha512),
+                resolution: None,
+            });
+            cache_updates.push(content_resolver::InstalledContentHashCacheUpdate {
+                hash_key: format!("sha1:{}", item.sha1),
+                resolution: None,
+            });
         }
     }
 
@@ -1158,7 +1102,15 @@ fn supports_modrinth_hash_prefetch(kind: InstalledContentKind, path: &Path) -> b
     };
 
     match kind {
-        InstalledContentKind::Mods => extension.eq_ignore_ascii_case("jar"),
+        // A disabled mod is the same jar under a `.jar.disabled` name, so it hashes and resolves the same.
+        InstalledContentKind::Mods => {
+            extension.eq_ignore_ascii_case("jar")
+                || (extension.eq_ignore_ascii_case("disabled")
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.to_ascii_lowercase().ends_with(".jar.disabled")))
+        }
         InstalledContentKind::ResourcePacks
         | InstalledContentKind::ShaderPacks
         | InstalledContentKind::DataPacks => extension.eq_ignore_ascii_case("zip"),

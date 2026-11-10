@@ -316,7 +316,9 @@ fn resolve_modrinth_hash_metadata(
     let game_versions = normalized_game_versions(game_version);
     let mut saw_transient_error = false;
 
-    for (algorithm, hash) in [("sha512", sha512.as_str()), ("sha1", sha1.as_str())] {
+    // Modrinth indexes every file under both hashes, so one lookup by sha512 settles it; a second by sha1 would only
+    // spend a request.
+    for (algorithm, hash) in [("sha512", sha512.as_str())] {
         let hash_key = format!("{algorithm}:{hash}");
         if let Some(cached) = hash_cache.entries.get(hash_key.as_str()) {
             if let Some(mut cached_resolution) = cached.clone() {
@@ -950,7 +952,15 @@ fn supports_modrinth_hash_resolution(kind: InstalledContentKind, path: &Path) ->
     };
 
     match kind {
-        InstalledContentKind::Mods => extension.eq_ignore_ascii_case("jar"),
+        // A disabled mod is the same jar under a `.jar.disabled` name; its hash is the same, so it resolves the same.
+        InstalledContentKind::Mods => {
+            extension.eq_ignore_ascii_case("jar")
+                || (extension.eq_ignore_ascii_case("disabled")
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.to_ascii_lowercase().ends_with(".jar.disabled")))
+        }
         InstalledContentKind::ResourcePacks
         | InstalledContentKind::ShaderPacks
         | InstalledContentKind::DataPacks => extension.eq_ignore_ascii_case("zip"),
