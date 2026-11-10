@@ -299,6 +299,9 @@ where
     bridge.submit(initial);
     watchdog::step("device request chosen, starting the engine");
     let runtime = RuntimeConfig::new(config.title)
+        // Start-up shader discovery only pre-reflects shaders (every one is compiled on first use anyway), so it covers
+        // just the ones the launcher's UI draws with and leaves the 3D renderer's ~100 others alone.
+        .only_shaders(["text_sdf", "ui_quad", "ui_stroke", "ui_sector"])
         .device_request(device)
         .app_id(config.app_id)
         .size(config.size.0, config.size.1)
@@ -314,6 +317,17 @@ where
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
+
+    /// A font handed over as static bytes is used in place and behaves like the same font handed over as a copy.
+    #[test]
+    fn static_font_bytes_load_like_copied_ones() {
+        use sturdy::ui::FontSource;
+        static MAPLE: &[u8] = include_bytes!("../../vertexlauncher/src/included_fonts/MapleMono-NF-Regular.ttf");
+        let copied = sturdy::ui::font_variation_axes(&FontSource::Bytes(MAPLE.to_vec())).expect("copied font loads");
+        let in_place = sturdy::ui::font_variation_axes(&FontSource::Static(MAPLE)).expect("static font loads");
+        assert_eq!(copied, in_place);
+        assert!(sturdy::ui::font_variation_axes(&FontSource::Static(&[])).is_err());
+    }
 
     /// The launcher's waits ride on the engine's timer; it has to work with no window or GPU session.
     #[test]

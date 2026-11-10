@@ -88,13 +88,6 @@ pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
     vertex_shell::watchdog::step("settings ready, building the app state");
     let bridge = SettingsBridge::new();
     let exit_snapshot = Arc::new(Mutex::new(None));
-    let mut app = App::new(
-        config.clone(),
-        first_run_format,
-        bridge.clone(),
-        exit_snapshot.clone(),
-    );
-    vertex_shell::watchdog::step("app state built (themes, instances, accounts started)");
     vertex_shell::install_game_probe(|| !installation::running_instance_roots().is_empty());
     // CPU-bound work (the skin preview's rasteriser, image decoding) runs on the UI engine's own task scheduler, so it
     // uses exactly the machine's cores next to the engine's jobs instead of a second set of threads.
@@ -112,13 +105,44 @@ pub(super) fn run(config_state: LoadConfigResult) -> ExitCode {
             Box::pin(async move { vertex_shell::sturdy::net::sleep(duration).await.is_ok() })
         },
     });
+    // The app state (themes, instances, accounts) is built on its own thread while this one brings up the window and
+    // the graphics device, which only the main thread can do: the two used to run one after the other, so the window
+    // waited for the state. The first frame takes the finished state (or waits for it if it is not done yet).
+    let (state_tx, state_rx) = mpsc::channel();
+    {
+        let config = config.clone();
+        let bridge = bridge.clone();
+        let exit_snapshot = exit_snapshot.clone();
+        let built = std::thread::Builder::new().name("vertex-app-state".to_owned()).spawn(move || {
+            let app = App::new(config, first_run_format, bridge, exit_snapshot);
+            vertex_shell::watchdog::step("app state built (themes, instances, accounts started)");
+            let _ = state_tx.send(app);
+        });
+        if let Err(err) = built {
+            tracing::error!(target: "vertexlauncher/se5", "Could not start the app-state thread: {err}");
+            return ExitCode::FAILURE;
+        }
+    }
     #[cfg(target_os = "macos")]
     super::app_icon::apply_macos_dock_icon();
 
     let mut shell = ShellConfig::new("Vertex Launcher", "org.sturdyfool10.VertexLauncher");
     shell.size = (1280, 820);
     tracing::info!(target: "vertexlauncher/se5", "Starting the SturdyEngine5 front end.");
-    let code = vertex_shell::run(shell, config, bridge, move |ui| app.draw(ui));
+    let mut app: Option<App> = None;
+    let code = vertex_shell::run(shell, config, bridge, move |ui| {
+        let app = match &mut app {
+            Some(app) => app,
+            empty => match state_rx.recv() {
+                Ok(built) => empty.insert(built),
+                Err(_) => {
+                    tracing::error!(target: "vertexlauncher/se5", "The app state could not be built; nothing to draw.");
+                    return;
+                }
+            },
+        };
+        app.draw(ui)
+    });
     save_on_exit(&exit_snapshot);
     code
 }

@@ -22,6 +22,8 @@ const TICK: Duration = Duration::from_millis(500);
 
 struct Marks {
     started: Instant,
+    /// Every step reached and how long after launch, kept to log one startup timeline once the first frame is out.
+    timeline: Vec<(&'static str, Duration)>,
     step: &'static str,
     step_at: Instant,
     frame_began: Option<Instant>,
@@ -51,6 +53,7 @@ pub fn start() {
         if let Ok(mut marks) = MARKS.lock() {
             *marks = Some(Marks {
                 started: now,
+                timeline: Vec::new(),
                 step: "watchdog started",
                 step_at: now,
                 frame_began: None,
@@ -75,6 +78,9 @@ pub fn step(name: &'static str) {
     with_marks(|marks| {
         marks.step = name;
         marks.step_at = Instant::now();
+        if marks.timeline.len() < 64 {
+            marks.timeline.push((name, marks.step_at.duration_since(marks.started)));
+        }
     });
 }
 
@@ -90,11 +96,30 @@ pub fn frame_begin() {
 
 /// The draw closure returned.
 pub fn frame_end() {
-    FRAMES_DONE.fetch_add(1, Ordering::Relaxed);
+    let first = FRAMES_DONE.fetch_add(1, Ordering::Relaxed) == 0;
     with_marks(|marks| {
         marks.frame_began = None;
         marks.step = "frame finished";
         marks.step_at = Instant::now();
+        if first {
+            let total = marks.step_at.duration_since(marks.started);
+            let mut previous = Duration::ZERO;
+            let steps: Vec<String> = marks
+                .timeline
+                .iter()
+                .map(|(name, at)| {
+                    let took = at.saturating_sub(previous);
+                    previous = *at;
+                    format!("{name} @{:.1}ms (+{:.1}ms)", at.as_secs_f64() * 1000.0, took.as_secs_f64() * 1000.0)
+                })
+                .collect();
+            tracing::info!(
+                target: "vertexlauncher/startup",
+                "First frame drawn {:.1}ms after launch (a 60 Hz display frame is 16.7ms): {}",
+                total.as_secs_f64() * 1000.0,
+                steps.join("; ")
+            );
+        }
     });
 }
 

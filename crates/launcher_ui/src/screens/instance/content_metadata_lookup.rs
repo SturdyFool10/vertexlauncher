@@ -245,7 +245,8 @@ pub(super) fn refresh_cached_metadata_after_apply(
 ) {
     let changed_keys = changed_lookup_keys.iter().cloned().collect::<HashSet<_>>();
 
-    state.installed_content_cache.files_by_tab.remove(&kind);
+    // The list stays on screen until the rescan below replaces it.
+    state.installed_content_cache.stale_tabs.insert(kind);
     state
         .content_metadata_cache
         .retain(|key, _| !changed_keys.contains(key));

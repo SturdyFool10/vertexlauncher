@@ -116,7 +116,8 @@ pub(super) fn request_content_update(
 /// Forgets everything resolved in memory so the lists rescan and re-resolve. The hash cache is kept: it is keyed by file
 /// hash, so it stays right however the files changed, and keeping it makes the re-resolve cheap.
 pub(super) fn invalidate_installed_content_state(state: &mut InstanceScreenState) {
-    state.invalidate_installed_content_cache();
+    state.installed_content_cache.mark_stale();
+    state.installed_content_entry_ui_cache.clear();
     state.content_metadata_cache.clear();
     state.content_lookup_in_flight.clear();
     state.content_lookup_latest_serial_by_key.clear();
@@ -630,7 +631,7 @@ pub(super) fn poll_content_apply_results(state: &mut InstanceScreenState, instan
                 } else {
                     // Only the file lists and managed identities are rescanned; the resolved metadata of every file
                     // that did not change is kept.
-                    state.installed_content_cache.clear();
+                    state.installed_content_cache.mark_stale();
                     super::refresh_cached_metadata_after_apply(
                         state,
                         instance_root,

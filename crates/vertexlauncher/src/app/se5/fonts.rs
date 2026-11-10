@@ -222,7 +222,7 @@ pub fn stack_for_role(config: &Config, role: config::TextRole) -> FontStack {
     let ui = config.ui_font_family();
     let primary = match resolved.font_family.as_deref() {
         Some(name) => FontSource::system(name),
-        None if ui.is_included_default() => FontSource::Bytes(MAPLE_MONO_NF_REGULAR_TTF.to_vec()),
+        None if ui.is_included_default() => FontSource::Static(MAPLE_MONO_NF_REGULAR_TTF),
         None => FontSource::system(ui.label()),
     };
     let emoji = match resolved.emoji_font_family.as_deref() {
@@ -234,7 +234,7 @@ pub fn stack_for_role(config: &Config, role: config::TextRole) -> FontStack {
         None => cjk_source(config),
     };
     let mut stack = FontStack::new(primary).emoji(emoji).fallback(cjk);
-    stack = stack.fallback(FontSource::Bytes(MAPLE_MONO_NF_REGULAR_TTF.to_vec()));
+    stack = stack.fallback(FontSource::Static(MAPLE_MONO_NF_REGULAR_TTF));
     stack.features = open_type_features(config);
     // The UI-wide weight stacks on the role's own (400 is neutral).
     let weight = (i32::from(resolved.weight) + config.ui_font_weight() - 400).clamp(100, 900);
@@ -244,7 +244,7 @@ pub fn stack_for_role(config: &Config, role: config::TextRole) -> FontStack {
 fn emoji_source(config: &Config) -> FontSource {
     let family = config.ui_emoji_font_family();
     if family.is_included_default() {
-        FontSource::Bytes(NOTO_COLOR_EMOJI_TTF.to_vec())
+        FontSource::Static(NOTO_COLOR_EMOJI_TTF)
     } else {
         FontSource::system(family.family_name())
     }
@@ -253,7 +253,7 @@ fn emoji_source(config: &Config) -> FontSource {
 fn cjk_source(config: &Config) -> FontSource {
     let family = config.ui_cjk_font_family();
     if family.is_included_default() {
-        FontSource::Bytes(MAPLE_MONO_NF_CN_REGULAR_TTF.to_vec())
+        FontSource::Static(MAPLE_MONO_NF_CN_REGULAR_TTF)
     } else {
         FontSource::system(family.family_name())
     }
@@ -264,26 +264,26 @@ fn cjk_source(config: &Config) -> FontSource {
 pub fn stack_for(config: &Config) -> FontStack {
     let ui = config.ui_font_family();
     let primary = if ui.is_included_default() {
-        FontSource::Bytes(MAPLE_MONO_NF_REGULAR_TTF.to_vec())
+        FontSource::Static(MAPLE_MONO_NF_REGULAR_TTF)
     } else {
         FontSource::system(ui.label())
     };
     let emoji_family = config.ui_emoji_font_family();
     let emoji = if emoji_family.is_included_default() {
-        FontSource::Bytes(NOTO_COLOR_EMOJI_TTF.to_vec())
+        FontSource::Static(NOTO_COLOR_EMOJI_TTF)
     } else {
         FontSource::system(emoji_family.family_name())
     };
     let cjk_family = config.ui_cjk_font_family();
     let cjk = if cjk_family.is_included_default() {
-        FontSource::Bytes(MAPLE_MONO_NF_CN_REGULAR_TTF.to_vec())
+        FontSource::Static(MAPLE_MONO_NF_CN_REGULAR_TTF)
     } else {
         FontSource::system(cjk_family.family_name())
     };
     let mut stack = FontStack::new(primary).emoji(emoji).fallback(cjk);
     if !ui.is_included_default() {
         // The bundled face backs up a system font that lacks a glyph.
-        stack = stack.fallback(FontSource::Bytes(MAPLE_MONO_NF_REGULAR_TTF.to_vec()));
+        stack = stack.fallback(FontSource::Static(MAPLE_MONO_NF_REGULAR_TTF));
     }
     stack.features = open_type_features(config);
     stack.variation(FontVariation::weight(config.ui_font_weight() as f32))

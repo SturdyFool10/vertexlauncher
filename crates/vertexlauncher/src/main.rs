@@ -8,7 +8,10 @@ Use the MSVC target (for example: x86_64-pc-windows-msvc) so WebView2 loader lib
 mod app;
 
 fn main() -> std::process::ExitCode {
+    // First, so the startup timeline (logged when the first frame is out) counts from the start of `main`.
+    vertex_shell::watchdog::start();
     let log_path = app::init_tracing();
+    vertex_shell::watchdog::step("logging ready");
 
     match app::maybe_run_webview_helper() {
         Ok(true) => return std::process::ExitCode::SUCCESS,

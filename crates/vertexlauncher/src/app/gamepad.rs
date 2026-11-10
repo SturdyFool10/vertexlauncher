@@ -164,11 +164,21 @@ pub struct GamepadNavigator {
     linux_access_warning_emitted: bool,
     #[cfg(target_os = "linux")]
     linux_probe_logged: bool,
+    /// Why no controller can be opened, worked out when the navigator is made (off the UI thread): finding out opens
+    /// every input device, which takes a couple of hundred milliseconds.
+    #[cfg(target_os = "linux")]
+    linux_access_warning: Option<String>,
 }
 
 impl GamepadNavigator {
     /// Try to create a navigator. Returns `None` if no gamepad subsystem is available.
     pub fn new() -> Option<Self> {
+        // The diagnostics below open and describe every input device, so they run here, where the navigator is made
+        // (a worker), and not on the first frame of the UI.
+        #[cfg(target_os = "linux")]
+        log_linux_input_probe();
+        #[cfg(target_os = "linux")]
+        let linux_access_warning = linux_input_access_warning();
         match Gilrs::new() {
             Ok(gilrs) => Some(Self {
                 gilrs,
@@ -181,7 +191,9 @@ impl GamepadNavigator {
                 #[cfg(target_os = "linux")]
                 linux_access_warning_emitted: false,
                 #[cfg(target_os = "linux")]
-                linux_probe_logged: false,
+                linux_probe_logged: true,
+                #[cfg(target_os = "linux")]
+                linux_access_warning,
             }),
             Err(err) => {
                 tracing::warn!(
@@ -821,7 +833,7 @@ impl GamepadNavigator {
             if self.startup_scan_complete
                 && self.known_gamepads.is_empty()
                 && !self.linux_access_warning_emitted
-                && let Some(message) = linux_input_access_warning()
+                && let Some(message) = self.linux_access_warning.clone()
             {
                 self.linux_access_warning_emitted = true;
                 tracing::warn!(

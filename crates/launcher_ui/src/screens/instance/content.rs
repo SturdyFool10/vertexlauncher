@@ -188,6 +188,7 @@ pub(super) fn poll_installed_content_scan_results(state: &mut InstanceScreenStat
             .installed_content_cache
             .files_by_tab
             .insert(result.kind, result.files);
+        state.installed_content_cache.stale_tabs.remove(&result.kind);
     }
 }
 
@@ -242,8 +243,11 @@ pub(super) fn installed_content_files_for_tab(
     instance_root: &Path,
     tab: InstalledContentKind,
 ) -> Arc<[InstalledContentFile]> {
-    if let Some(files) = state.installed_content_cache.files_by_tab.get(&tab) {
-        return files.clone();
+    if let Some(files) = state.installed_content_cache.files_by_tab.get(&tab).cloned() {
+        if state.installed_content_cache.stale_tabs.contains(&tab) {
+            request_installed_content_scan(state, instance_root, tab);
+        }
+        return files;
     }
 
     request_installed_content_scan(state, instance_root, tab);

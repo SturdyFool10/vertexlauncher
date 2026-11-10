@@ -72,7 +72,8 @@ pub fn view(
     };
 
     let files = installed_content_files_for_tab(state, instance_root, kind);
-    if state.installed_content_cache.scans_in_flight.contains(&kind) {
+    // A rescan of a list already on screen keeps showing it; only a first scan has nothing to show but "loading".
+    if files.is_empty() && state.installed_content_cache.scans_in_flight.contains(&kind) {
         view.loading = true;
         view.empty_message = Some(format!("Loading installed {}...", kind.label().to_lowercase()));
         return view;
