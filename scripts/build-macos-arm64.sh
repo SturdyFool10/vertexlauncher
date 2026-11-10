@@ -46,7 +46,7 @@ for define in _LIBCPP_ABI_VERSION=1 _LIBCPP_ABI_NAMESPACE=__1 _LIBCPP_HAS_THREAD
     _LIBCPP_HAS_TERMINAL _LIBCPP_HAS_MUSL_LIBC=0 _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS \
     _LIBCPP_HAS_VENDOR_AVAILABILITY_ANNOTATIONS=0 _LIBCPP_HAS_FILESYSTEM=1 _LIBCPP_HAS_RANDOM_DEVICE _LIBCPP_HAS_LOCALIZATION \
     _LIBCPP_HAS_UNICODE _LIBCPP_HAS_WIDE_CHARACTERS _LIBCPP_HAS_NO_STD_MODULES _LIBCPP_PSTL_BACKEND_SERIAL \
-    _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE; do
+    _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE _LIBCPP_ASSERTION_SEMANTIC_DEFAULT=_LIBCPP_ASSERTION_SEMANTIC_IGNORE; do
     LIBCXX_FLAGS+=" -D${define}"
 done
 
@@ -72,14 +72,20 @@ set(CMAKE_C_COMPILER_TARGET arm64-apple-macos${MACOS_DEPLOYMENT_TARGET})
 set(CMAKE_CXX_COMPILER_TARGET arm64-apple-macos${MACOS_DEPLOYMENT_TARGET})
 set(CMAKE_OBJC_COMPILER_TARGET arm64-apple-macos${MACOS_DEPLOYMENT_TARGET})
 set(CMAKE_OBJCXX_COMPILER_TARGET arm64-apple-macos${MACOS_DEPLOYMENT_TARGET})
+# Assembly (Boost.Context's context switch) is assembled by clang too, and must be told the target or it assembles for this machine.
+set(CMAKE_ASM_COMPILER ${CLANG_BIN}/clang)
+set(CMAKE_ASM_COMPILER_TARGET arm64-apple-macos${MACOS_DEPLOYMENT_TARGET})
 set(CMAKE_AR llvm-ar CACHE FILEPATH "")
 set(CMAKE_RANLIB llvm-ranlib CACHE FILEPATH "")
 set(CMAKE_INSTALL_NAME_TOOL llvm-install-name-tool CACHE FILEPATH "")
 set(CMAKE_OBJCXX_FLAGS_INIT "${LIBCXX_FLAGS}")
 # sturdy-sys passes -DCMAKE_CXX_FLAGS=..., which would shadow CMAKE_CXX_FLAGS_INIT, so append to the cache entry itself.
-string(FIND "\${CMAKE_CXX_FLAGS}" "-nostdinc++" _sturdy_libcxx_pos)
+# The libc++ flags are always the tail of the entry, so a build directory left by an older version of this script (other defines)
+# has them replaced rather than kept or doubled.
+string(FIND "\${CMAKE_CXX_FLAGS}" "${LIBCXX_FLAGS}" _sturdy_libcxx_pos)
 if(_sturdy_libcxx_pos EQUAL -1)
-  set(CMAKE_CXX_FLAGS "\${CMAKE_CXX_FLAGS} ${LIBCXX_FLAGS}" CACHE STRING "" FORCE)
+  string(REGEX REPLACE [=[ ?-nostdinc\+\+.*\$]=] "" _sturdy_cxx_base "\${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "\${_sturdy_cxx_base} ${LIBCXX_FLAGS}" CACHE STRING "" FORCE)
 endif()
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")
@@ -91,6 +97,9 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 EOF
 export CMAKE_TOOLCHAIN_FILE_aarch64_apple_darwin="${TOOLCHAIN_FILE}"
+# zig's libc++ (a LLVM 22/23 snapshot) recurses in C++26 mode when a std::deque holds something built on std::expected
+# ("satisfaction of constraint ... depends on itself" in <expected>), so the engine is built as C++23 for this target.
+export STURDY_RS_CMAKE_ARGS="${STURDY_RS_CMAKE_ARGS:-} -DSTURDY_CPP_STANDARD=23"
 export MACOSX_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET}"
 
 env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CC -u CXX -u AR -u RANLIB -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \

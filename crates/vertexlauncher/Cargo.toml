@@ -46,7 +46,7 @@ regex = "1"
 vertex_shell.workspace = true
 vertex_theme.workspace = true
 # The binary forwards the engine's native link directives to Cargo so they reach the final link.
-sturdy-sys = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "d8046607319e2ed43ea973b3f3546fecfaa84e5e", features = ["prebuilt-deps"] }
+sturdy-sys = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "0442a6204336f1558c4b8d8a4a0d1b0b27080a04", features = ["prebuilt-deps"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wry = "=0.31.1"
