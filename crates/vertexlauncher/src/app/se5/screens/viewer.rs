@@ -1,13 +1,16 @@
 //! A zoomable, pannable picture for the screenshot viewers: the wheel zooms, dragging pans, and a controller's right
 //! stick and triggers do the same.
 
+use std::path::Path;
+
+use config::DisplayedTime;
 use vertex_shell::sturdy::glam::Vec2;
 use vertex_shell::sturdy::ui::{
-    AttachPoint, Clip, CornerRadius, ElementDesc, FloatTarget, Floating, Sizing, Ui,
+    AttachPoint, Border, Clip, CornerRadius, Direction, ElementDesc, FloatTarget, Floating, Padding, Sizing, Ui,
 };
 
 use super::super::images::Picture;
-use super::super::kit::Kit;
+use super::super::kit::{self, Kit, TextRole};
 
 const MIN_ZOOM: f32 = 1.0;
 const MAX_ZOOM: f32 = 8.0;
@@ -24,13 +27,16 @@ pub struct ViewerState {
     pan: Vec2,
     last_pointer: Vec2,
     dragging: bool,
+    /// When the picture on show was taken, in Unix seconds; read once per picture.
+    taken: Option<i64>,
 }
 
 impl ViewerState {
     /// Starts over when a different picture is shown.
-    fn show(&mut self, key: &str) {
+    fn show(&mut self, key: &str, path: &Path) {
         if self.key != key {
             self.key = key.to_owned();
+            self.taken = config::screenshot_taken_at(path);
             self.zoom = MIN_ZOOM;
             self.pan = Vec2::ZERO;
             self.dragging = false;
@@ -45,7 +51,7 @@ impl ViewerState {
 }
 
 /// Draws `picture` scaled to fit `max_width` x `max_height`, zoomed and panned by `view`. `controller` is the right
-/// stick pan and trigger zoom.
+/// stick pan and trigger zoom. `path` is the screenshot's file, for the "Taken at" card the `time` settings describe.
 #[allow(clippy::too_many_arguments)]
 pub fn picture(
     ui: &mut Ui<'_>,
@@ -54,11 +60,13 @@ pub fn picture(
     controller: (Vec2, f32),
     id: &str,
     key: &str,
+    path: &Path,
+    time: &DisplayedTime,
     picture: Picture,
     max_width: f32,
     max_height: f32,
 ) {
-    view.show(key);
+    view.show(key, path);
     let fit = (max_width / picture.width as f32).min(max_height / picture.height as f32);
     let size = Vec2::new(picture.width as f32 * fit, picture.height as f32 * fit);
     let dt = kit.delta_seconds.clamp(1.0 / 240.0, 0.05);
@@ -133,6 +141,48 @@ pub fn picture(
             })),
         picture.texture,
     );
+    if time.show_screenshot_info
+        && let Some(taken) = view.taken
+    {
+        taken_card(ui, kit, time, taken, "viewer::taken".to_owned(), FloatTarget::Parent, 2002);
+    }
+}
+
+/// The small card over the picture's bottom-left corner: when it was taken, and how long ago that was.
+fn taken_card(
+    ui: &mut Ui<'_>,
+    kit: &Kit,
+    time: &DisplayedTime,
+    taken: i64,
+    id: String,
+    target: FloatTarget,
+    z_index: i16,
+) {
+    let _card = ui.element(
+        &ElementDesc::new()
+            .id(id)
+            .width(Sizing::Fit)
+            .height(Sizing::Fit)
+            .direction(Direction::TopToBottom)
+            .child_gap(2)
+            .padding(Padding::all(8))
+            .background(kit.palette.bg_dark.with_w(0.85))
+            .corner_radius(CornerRadius::all(8.0))
+            .border(Border::all(kit.palette.border_muted, 1))
+            .floating(Some(Floating {
+                element_attach_point: AttachPoint::LeftBottom,
+                parent_attach_point: AttachPoint::LeftBottom,
+                offset: Vec2::new(12.0, -12.0),
+                z_index,
+                capture_pointer: false,
+                clip_to_target: true,
+                ..Floating::new(target)
+            })),
+    );
+    kit.text(ui, TextRole::Small, &time.taken_at(taken));
+    if time.show_relative {
+        kit.text(ui, TextRole::Small, &time.time_ago(taken, config::unix_now()));
+    }
 }
 
 /// What a gallery tile's hover buttons asked for.
@@ -216,5 +266,30 @@ pub fn tile_actions(ui: &mut Ui<'_>, kit: &mut Kit, tile_id: &str) -> Option<Til
         Some(TileAction::Delete)
     } else {
         None
+    }
+}
+
+/// The "Taken at" card over the bottom-left corner of the gallery tile `tile_id` while the pointer is on it (or on its
+/// buttons). Call it right after drawing the tile.
+pub fn tile_taken(ui: &mut Ui<'_>, kit: &Kit, tile_id: &str, path: &Path, time: &DisplayedTime) {
+    if !time.show_screenshot_info {
+        return;
+    }
+    let hovered = ui.hovered(tile_id)
+        || ui.hovered(&format!("{tile_id}::copy"))
+        || ui.hovered(&format!("{tile_id}::delete"));
+    if !hovered {
+        return;
+    }
+    if let Some(taken) = config::screenshot_taken_at(path) {
+        taken_card(
+            ui,
+            kit,
+            time,
+            taken,
+            format!("{tile_id}::taken"),
+            FloatTarget::Element(tile_id.to_owned()),
+            5,
+        );
     }
 }

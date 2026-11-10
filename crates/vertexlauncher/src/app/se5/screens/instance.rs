@@ -741,6 +741,7 @@ fn screenshots_tab(
     id: &str,
     root: &std::path::Path,
 ) {
+    let displayed_time = state.config.displayed_time().clone();
     let Some(session) = state.sessions.get_mut(id) else {
         return;
     };
@@ -820,6 +821,7 @@ fn screenshots_tab(
                         ),
                     );
                 }
+                super::viewer::tile_taken(ui, kit, &tile_id, &shot.path, &displayed_time);
                 match super::viewer::tile_actions(ui, kit, &tile_id) {
                     Some(super::viewer::TileAction::Copy) => {
                         launcher_ui::app_commands::push(

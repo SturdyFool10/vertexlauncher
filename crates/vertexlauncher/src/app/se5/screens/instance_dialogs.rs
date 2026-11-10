@@ -1244,6 +1244,7 @@ pub fn screenshot(
     let mut ask = false;
     let mut cancel_confirm = false;
     let controller = (state.gamepad.viewer_pan, state.gamepad.viewer_zoom);
+    let displayed_time = state.config.displayed_time().clone();
     let viewer = &mut state.viewer;
     let response = kit::modal(ui, "instance-screenshot", &style, !deleting, |ui| {
         let _column = ui.element(
@@ -1262,6 +1263,8 @@ pub fn screenshot(
                     controller,
                     "instance-screenshot::image",
                     &key,
+                    path,
+                    &displayed_time,
                     picture,
                     max_width,
                     max_height,

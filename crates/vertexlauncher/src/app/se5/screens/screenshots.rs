@@ -28,6 +28,7 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
     let mut close = false;
     let mut delete = false;
     let controller = (state.gamepad.viewer_pan, state.gamepad.viewer_zoom);
+    let displayed_time = state.config.displayed_time().clone();
     let viewer = &mut state.viewer;
     let response = kit::modal(ui, "screenshot-viewer", &style, true, |ui| {
         let _column = ui.element(
@@ -46,6 +47,8 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
                     controller,
                     "screenshot-viewer::image",
                     &key,
+                    path,
+                    &displayed_time,
                     picture,
                     max_width,
                     max_height,

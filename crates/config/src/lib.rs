@@ -5,6 +5,7 @@ mod gamepad_calibration;
 mod graphics_adapter_preference;
 mod graphics_api_preference;
 mod java_runtime_version;
+mod displayed_time;
 mod hdr_color_space;
 mod linux_blur_protocol;
 mod macos_visual_effect_blending_mode;
@@ -30,6 +31,7 @@ pub use gamepad_calibration::GamepadCalibration;
 pub use graphics_adapter_preference::{GraphicsAdapterPreferenceType, GraphicsAdapterProfile};
 pub use graphics_api_preference::GraphicsApiPreference;
 pub use java_runtime_version::JavaRuntimeVersion;
+pub use displayed_time::*;
 pub use hdr_color_space::HdrColorSpace;
 pub use linux_blur_protocol::LinuxBlurProtocol;
 pub use macos_visual_effect_blending_mode::MacosVisualEffectBlendingMode;
@@ -400,6 +402,9 @@ pub struct Config {
     /// default on a Steam Deck.
     #[serde(default = "default_steam_deck_handoff")]
     steam_deck_handoff: bool,
+    /// How dates, times and "how long ago" are shown.
+    #[serde(default)]
+    displayed_time: DisplayedTime,
     /// Debug: a frames-per-second readout over the launcher.
     #[serde(default)]
     debug_fps_counter: bool,
@@ -545,6 +550,14 @@ impl Config {
     }
 
     /// Whether the launcher's window is hidden while a game runs.
+    pub fn displayed_time(&self) -> &DisplayedTime {
+        &self.displayed_time
+    }
+
+    pub fn displayed_time_mut(&mut self) -> &mut DisplayedTime {
+        &mut self.displayed_time
+    }
+
     pub fn debug_fps_counter(&self) -> bool {
         self.debug_fps_counter
     }
@@ -1536,6 +1549,7 @@ impl Default for Config {
             start_fullscreen: false,
             // Off here; a first run (and a saved config that predates the setting) turns it on for a Steam Deck.
             steam_deck_handoff: false,
+            displayed_time: DisplayedTime::default(),
             debug_fps_counter: false,
             debug_framegraph: false,
             frame_limit_fps: 120,

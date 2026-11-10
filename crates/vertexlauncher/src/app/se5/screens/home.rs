@@ -562,6 +562,7 @@ fn entry_row(
 fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if state.home.tick_screenshots(&state.instances, &state.config) {
     }
+    let displayed_time = state.config.displayed_time().clone();
     let shots = state.home.screenshots();
     if shots.is_empty() {
         kit.text(
@@ -646,6 +647,7 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 {
                     screenshot_origin(ui, kit, &tile_id, shot, tile_width);
                 }
+                super::viewer::tile_taken(ui, kit, &tile_id, &shot.path, &displayed_time);
                 match super::viewer::tile_actions(ui, kit, &tile_id) {
                     Some(super::viewer::TileAction::Copy) => {
                         launcher_ui::app_commands::push(
@@ -744,6 +746,7 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, key: &str) -
     let (mut close, mut copy, mut ask, mut delete, mut cancel) =
         (false, false, false, false, false);
     let controller = (state.gamepad.viewer_pan, state.gamepad.viewer_zoom);
+    let displayed_time = state.config.displayed_time().clone();
     let viewer = &mut state.viewer;
     let response = kit::modal(ui, "home-screenshot", &style, !deleting, |ui| {
         let _column = ui.element(
@@ -762,6 +765,8 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, key: &str) -
                     controller,
                     "home-screenshot::image",
                     &image_key,
+                    &shot.path,
+                    &displayed_time,
                     picture,
                     max_width,
                     max_height,

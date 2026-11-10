@@ -309,6 +309,14 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     section(
         ui,
         kit,
+        "displayed-time",
+        "Displayed Time",
+        "How dates, times and \"how long ago\" are written, such as on screenshots.",
+        |ui, kit| displayed_time(ui, kit, &mut state.config),
+    );
+    section(
+        ui,
+        kit,
         "debug",
         "Debug",
         "Live performance readouts drawn over the launcher.",
@@ -322,6 +330,207 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         },
     );
     info_section(ui, kit);
+}
+
+/// Every date and time format setting, with a live example under them.
+fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
+    use config::{
+        ClockStyle, DateFormat, DateOrder, DateSeparator, DisplayTimeZone, MeridiemStyle, MonthStyle,
+        RELATIVE_MAX_UNITS_MAX, RELATIVE_MAX_UNITS_MIN, TimeSeparator,
+    };
+    let mut settings = config.displayed_time().clone();
+    kit.toggle_setting(
+        ui,
+        "settings::time::screenshot-info",
+        "Show Screenshot Time Card",
+        Some("Shows when a screenshot was taken, and how long ago, in the corner of the screenshot viewer. The time comes from the screenshot's file name when it has one, otherwise from the file's modified time. Default: On."),
+        &mut settings.show_screenshot_info,
+    );
+    if let Some(value) = kit.choice_setting(
+        ui,
+        "settings::time::zone",
+        "Time Zone",
+        Some("Which time zone times are shown in. Default: this computer's."),
+        settings.time_zone,
+        DisplayTimeZone::ALL,
+        |value| value.label().to_owned(),
+    ) {
+        settings.time_zone = value;
+    }
+    if let Some(value) = kit.choice_setting(
+        ui,
+        "settings::time::date-format",
+        "Date Format",
+        Some("A ready-made date layout from around the world, or Custom to build your own from the settings below. Default: Custom."),
+        settings.date_format,
+        DateFormat::ALL,
+        |value| value.label().to_owned(),
+    ) {
+        settings.date_format = value;
+    }
+    if settings.date_format == DateFormat::Custom {
+        if let Some(value) = kit.choice_setting(
+            ui,
+            "settings::time::date-order",
+            "Date Order",
+            Some("The order the day, month and year come in. Default: Month, day, year."),
+            settings.date_order,
+            DateOrder::ALL,
+            |value| value.label().to_owned(),
+        ) {
+            settings.date_order = value;
+        }
+        if let Some(value) = kit.choice_setting(
+            ui,
+            "settings::time::month-style",
+            "Month Style",
+            Some("Write the month as a number or as a name. Default: Number."),
+            settings.month_style,
+            MonthStyle::ALL,
+            |value| value.label().to_owned(),
+        ) {
+            settings.month_style = value;
+        }
+        if settings.month_style == MonthStyle::Numeric {
+            if let Some(value) = kit.choice_setting(
+                ui,
+                "settings::time::date-separator",
+                "Date Separator",
+                Some("What goes between the numbers of a date. Default: Dash."),
+                settings.date_separator,
+                DateSeparator::ALL,
+                |value| value.label().to_owned(),
+            ) {
+                settings.date_separator = value;
+            }
+        }
+        kit.toggle_setting(
+            ui,
+            "settings::time::four-digit-year",
+            "Four-Digit Year",
+            Some("2026 rather than 26. Default: On."),
+            &mut settings.four_digit_year,
+        );
+        kit.toggle_setting(
+            ui,
+            "settings::time::pad-date",
+            "Pad Day and Month With Zeros",
+            Some("03 rather than 3 (for a numeric month and the day). Default: On."),
+            &mut settings.pad_date,
+        );
+    }
+    if settings.date_format.keeps_gregorian_year() {
+        kit.toggle_setting(
+            ui,
+            "settings::time::human-era",
+            "Human Era Years",
+            Some("Counts years in the Human Era (Holocene) calendar and marks them HE, so 2026 becomes 12026 HE. It adds 10,000 to the year, a big commitment for a calendar whose main feature is a leading 1. Also a nice way to show some love for your favorite infographics channel with the cheerful little birds, the one that makes humanity's whole story look like a tidy timeline. Not available for layouts that already count years their own way (Thailand, Taiwan). Default: Off."),
+            &mut settings.human_era,
+        );
+    }
+    kit.toggle_setting(
+        ui,
+        "settings::time::weekday",
+        "Show Day of the Week",
+        Some("Puts Mon, Tue... in front of the date. Default: Off."),
+        &mut settings.show_weekday,
+    );
+    if let Some(value) = kit.choice_setting(
+        ui,
+        "settings::time::clock",
+        "Clock",
+        Some("A 12-hour clock with AM and PM, or a 24-hour clock. Default: 12-hour."),
+        settings.clock,
+        ClockStyle::ALL,
+        |value| value.label().to_owned(),
+    ) {
+        settings.clock = value;
+    }
+    if settings.clock == ClockStyle::Hour12 {
+        if let Some(value) = kit.choice_setting(
+            ui,
+            "settings::time::meridiem",
+            "AM / PM Style",
+            Some("How AM and PM are written. Default: AM / PM."),
+            settings.meridiem,
+            MeridiemStyle::ALL,
+            |value| value.label().to_owned(),
+        ) {
+            settings.meridiem = value;
+        }
+    }
+    kit.toggle_setting(
+        ui,
+        "settings::time::pad-hour",
+        "Pad Hour With a Zero",
+        Some("09:05 rather than 9:05. Default: On."),
+        &mut settings.pad_hour,
+    );
+    kit.toggle_setting(
+        ui,
+        "settings::time::seconds",
+        "Show Seconds",
+        Some("Include seconds in the time. Default: On."),
+        &mut settings.show_seconds,
+    );
+    if let Some(value) = kit.choice_setting(
+        ui,
+        "settings::time::time-separator",
+        "Time Separator",
+        Some("What goes between hours, minutes and seconds. Default: Colon."),
+        settings.time_separator,
+        TimeSeparator::ALL,
+        |value| value.label().to_owned(),
+    ) {
+        settings.time_separator = value;
+    }
+    kit.toggle_setting(
+        ui,
+        "settings::time::relative",
+        "Show How Long Ago",
+        Some("A second line saying how long ago it was, or how far in the future if the clock was set ahead. Default: On."),
+        &mut settings.show_relative,
+    );
+    if settings.show_relative {
+        if let Some(value) = kit.slider_setting(
+            ui,
+            "settings::time::relative-units",
+            "Most Units Shown",
+            Some("The most units the \"how long ago\" line shows, largest first: years, days, hours, minutes, seconds. Default: 5."),
+            f64::from(settings.relative_max_units),
+            f64::from(RELATIVE_MAX_UNITS_MIN),
+            f64::from(RELATIVE_MAX_UNITS_MAX),
+            1.0,
+            |value| format!("{value:.0}"),
+        ) {
+            settings.relative_max_units = value.round() as u8;
+        }
+        kit.toggle_setting(
+            ui,
+            "settings::time::relative-hide-zero",
+            "Hide Zero Units",
+            Some("Leave out units that are zero, so 1 hour 4 seconds is not 1 hour 0 minutes 4 seconds. Default: On."),
+            &mut settings.relative_hide_zero,
+        );
+        kit.toggle_setting(
+            ui,
+            "settings::time::relative-abbreviate",
+            "Abbreviate Units",
+            Some("1y 2d 3h rather than 1 year 2 days 3 hours. Default: Off."),
+            &mut settings.relative_abbreviate,
+        );
+    }
+    // A fixed example moment, so the effect of each setting is visible without a screenshot.
+    let now = config::unix_now();
+    let example = now - (400 * 86_400 + 3 * 3_600 + 25 * 60 + 12);
+    kit.text(ui, TextRole::Muted, "Example");
+    kit.text(ui, TextRole::Body, &settings.taken_at(example));
+    if settings.show_relative {
+        kit.text(ui, TextRole::Body, &settings.time_ago(example, now));
+    }
+    if settings != *config.displayed_time() {
+        *config.displayed_time_mut() = settings;
+    }
 }
 
 fn apply_log_levels(config: &config::Config) {
