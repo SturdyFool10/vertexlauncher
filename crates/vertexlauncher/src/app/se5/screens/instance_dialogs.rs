@@ -2,6 +2,7 @@
 //! server zip, moving the instance, and the screenshot viewer. They edit the instance's `InstanceSession`, shared
 //! with the egui screen, and save through the same code.
 
+use vertex_i18n::tr;
 use std::path::PathBuf;
 
 use crate::app::se5::file_dialog::{Dialog as PickerDialog, Pick};
@@ -82,8 +83,8 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
     let mut pick_thumbnail = false;
     let response = kit::modal(ui, "instance-settings", &style, true, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Instance Settings");
-        kit.text(ui, TextRole::Muted, "Manage this profile's metadata, version stack, runtime overrides, and maintenance actions.");
+        kit.text(ui, TextRole::Heading, &tr!("Instance Settings"));
+        kit.text(ui, TextRole::Muted, &tr!("Manage this profile's metadata, version stack, runtime overrides, and maintenance actions."));
         if let Some(status) = &session.state.status_message {
             kit::label(
                 ui,
@@ -96,21 +97,21 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
         }
         scrolled(ui, kit, "instance-settings::scroll", 620.0, |ui, kit| {
             // Metadata.
-            kit.text(ui, TextRole::Heading, "Metadata & Versions");
+            kit.text(ui, TextRole::Heading, &tr!("Metadata & Versions"));
             kit.text_setting(
                 ui,
                 "instance-settings::name",
-                "Name",
-                Some("Display name shown in the sidebar."),
+                &tr!("Name"),
+                Some(&tr!("Display name shown in the sidebar.")),
                 &mut session.state.name_input,
-                "Name",
+                &tr!("Name"),
                 false,
             );
             kit.text_setting(
                 ui,
                 "instance-settings::description",
-                "Description (optional)",
-                Some("Optional note shown in library instance tiles."),
+                &tr!("Description (optional)"),
+                Some(&tr!("Optional note shown in library instance tiles.")),
                 &mut session.state.description_input,
                 "",
                 false,
@@ -119,14 +120,14 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             kit.setting_row(
                 ui,
                 "instance-settings::thumbnail-row",
-                "Thumbnail path (optional)",
-                Some("Local image path for this instance."),
+                &tr!("Thumbnail path (optional)"),
+                Some(&tr!("Local image path for this instance.")),
                 |kit, ui| {
                     if kit.text_field(
                         ui,
                         "instance-settings::thumbnail",
                         &mut thumbnail,
-                        "Path to an image",
+                        &tr!("Path to an image"),
                         false,
                         Sizing::Fixed(260.0),
                     ) {
@@ -139,7 +140,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                     if kit.button(
                         ui,
                         "instance-settings::thumbnail-pick",
-                        "Choose…",
+                        &tr!("Choose…"),
                         ButtonKind::Neutral,
                         true,
                     ) {
@@ -153,7 +154,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 if kit.button(
                     ui,
                     "instance-settings::refresh-versions",
-                    "Refresh version list",
+                    &tr!("Refresh version list"),
                     ButtonKind::Neutral,
                     true,
                 ) {
@@ -162,7 +163,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 if kit.button(
                     ui,
                     "instance-settings::detect",
-                    "Auto-detect installed versions",
+                    &tr!("Auto-detect installed versions"),
                     ButtonKind::Neutral,
                     true,
                 ) {
@@ -171,7 +172,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 }
             }
             if controls.catalog_loading {
-                kit.text(ui, TextRole::Muted, "Fetching version catalog...");
+                kit.text(ui, TextRole::Muted, &tr!("Fetching version catalog..."));
             }
             if let Some(error) = &controls.catalog_error {
                 kit::label(
@@ -184,13 +185,13 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 );
             }
             if controls.game_versions.is_empty() {
-                kit.text(ui, TextRole::Muted, "No game versions available yet.");
+                kit.text(ui, TextRole::Muted, &tr!("No game versions available yet."));
             } else {
                 kit.setting_row(
                     ui,
                     "instance-settings::game-version-row",
-                    "Minecraft game version",
-                    Some("Pick from available Minecraft versions."),
+                    &tr!("Minecraft game version"),
+                    Some(&tr!("Pick from available Minecraft versions.")),
                     |kit, ui| {
                         if let Some(index) = kit.dropdown(
                             ui,
@@ -209,7 +210,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 .iter()
                 .map(|choice| {
                     if choice.unavailable.is_some() {
-                        format!("{} (unavailable)", choice.label)
+                        tr!("{label} (unavailable)", label = choice.label).into_owned()
                     } else {
                         choice.label.to_owned()
                     }
@@ -218,8 +219,8 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             kit.setting_row(
                 ui,
                 "instance-settings::loader-row",
-                "Modloader",
-                Some("Loaders marked unavailable do not support the selected Minecraft version."),
+                &tr!("Modloader"),
+                Some(&tr!("Loaders marked unavailable do not support the selected Minecraft version.")),
                 |kit, ui| {
                     if let Some(index) = kit.dropdown(
                         ui,
@@ -247,8 +248,8 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 kit.text_setting(
                     ui,
                     "instance-settings::custom-loader",
-                    "Custom modloader id",
-                    Some("Use any custom modloader name."),
+                    &tr!("Custom modloader id"),
+                    Some(&tr!("Use any custom modloader name.")),
                     &mut session.state.custom_modloader,
                     "",
                     false,
@@ -256,7 +257,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             }
             if controls.loader != 0 {
                 if controls.loader_versions_loading {
-                    kit.text(ui, TextRole::Muted, "Fetching modloader versions...");
+                    kit.text(ui, TextRole::Muted, &tr!("Fetching modloader versions..."));
                 }
                 if let Some((status, is_error)) = &controls.loader_status {
                     kit.text(
@@ -271,15 +272,15 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 }
                 if controls.loader_versions.is_empty() {
                     if !controls.custom_loader {
-                        kit.text(ui, TextRole::Muted, "No cataloged modloader versions were found for this Minecraft version.");
+                        kit.text(ui, TextRole::Muted, &tr!("No cataloged modloader versions were found for this Minecraft version."));
                     }
                 } else {
                     kit.setting_row(
                         ui,
                         "instance-settings::loader-version-row",
-                        "Modloader version",
+                        &tr!("Modloader version"),
                         Some(
-                            "Cataloged by loader+Minecraft compatibility and cached once per day.",
+                            &tr!("Cataloged by loader+Minecraft compatibility and cached once per day."),
                         ),
                         |kit, ui| {
                             if let Some(index) = kit.dropdown(
@@ -302,7 +303,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                     && kit.button(
                         ui,
                         "instance-settings::refresh-loader",
-                        "Refresh modloader versions",
+                        &tr!("Refresh modloader versions"),
                         ButtonKind::Neutral,
                         !controls.loader_versions_loading,
                     )
@@ -325,7 +326,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 if kit.button(
                     ui,
                     "instance-settings::save-versions",
-                    "Save metadata & versions",
+                    &tr!("Save metadata & versions"),
                     ButtonKind::Primary,
                     controls.validation_error.is_none(),
                 ) {
@@ -337,7 +338,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 if kit.button(
                     ui,
                     "instance-settings::reinstall",
-                    "Reinstall Profile",
+                    &tr!("Reinstall Profile"),
                     ButtonKind::Danger,
                     can_reinstall,
                 ) {
@@ -347,17 +348,17 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
 
             // Runtime overrides.
             kit.separator(ui);
-            kit.text(ui, TextRole::Heading, "Runtime Overrides");
+            kit.text(ui, TextRole::Heading, &tr!("Runtime Overrides"));
             kit.text(
                 ui,
                 TextRole::Muted,
-                "Per-instance overrides for memory, JVM arguments, and Java runtime selection.",
+                &tr!("Per-instance overrides for memory, JVM arguments, and Java runtime selection."),
             );
             kit.toggle_setting(
                 ui,
                 "instance-settings::memory-override",
-                "Override max memory for this instance",
-                Some("When disabled, launcher instance default memory is used."),
+                &tr!("Override max memory for this instance"),
+                Some(&tr!("When disabled, launcher instance default memory is used.")),
                 &mut session.state.memory_override_enabled,
             );
             if session.state.memory_override_enabled {
@@ -372,13 +373,13 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                 if let Some(next) = kit.slider_setting(
                     ui,
                     "instance-settings::memory",
-                    "Max memory allocation (MiB)",
-                    Some("Per-instance memory limit."),
+                    &tr!("Max memory allocation (MiB)"),
+                    Some(&tr!("Per-instance memory limit.")),
                     value,
                     config::INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN as f64,
                     max as f64,
                     config::INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP as f64,
-                    |value| format!("{value:.0} MiB"),
+                    |value| tr!("{value:.0} MiB", value = value).into_owned(),
                 ) {
                     session.state.memory_override_mib = next as u128;
                 }
@@ -386,38 +387,38 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             kit.text_setting(
                 ui,
                 "instance-settings::jvm-args",
-                "JVM args override (optional)",
-                Some("Leave blank to use launcher instance default JVM args."),
+                &tr!("JVM args override (optional)"),
+                Some(&tr!("Leave blank to use launcher instance default JVM args.")),
                 &mut session.state.cli_args_input,
                 "",
                 false,
             );
-            kit.text(ui, TextRole::Body, "Environment variables (optional)");
-            kit.text(ui, TextRole::Small, "One KEY=value per line. Blank lines and # comments are ignored. Values are not written to launch logs.");
+            kit.text(ui, TextRole::Body, &tr!("Environment variables (optional)"));
+            kit.text(ui, TextRole::Small, &tr!("One KEY=value per line. Blank lines and # comments are ignored. Values are not written to launch logs."));
             kit.text_area(
                 ui,
                 "instance-settings::env",
                 &mut session.state.env_vars_input,
-                "VK_INSTANCE_LAYERS=\nMESA_VK_WSI_PRESENT_MODE=mailbox",
+                &tr!("VK_INSTANCE_LAYERS=\nMESA_VK_WSI_PRESENT_MODE=mailbox"),
                 4,
             );
             kit.toggle_setting(
                 ui,
                 "instance-settings::rpc-mod",
-                "This modpack has a rich presence mod",
-                Some("When enabled, Vertex clears its own Discord Rich Presence for this instance after launch so the mod inside Minecraft can take over."),
+                &tr!("This modpack has a rich presence mod"),
+                Some(&tr!("When enabled, Vertex clears its own Discord Rich Presence for this instance after launch so the mod inside Minecraft can take over.")),
                 &mut session.state.discord_rich_presence_mod_installed,
             );
             kit.toggle_setting(
                 ui,
                 "instance-settings::java-override",
-                "Override Java runtime for this instance",
-                Some("When enabled, this instance will use the selected configured global Java path."),
+                &tr!("Override Java runtime for this instance"),
+                Some(&tr!("When enabled, this instance will use the selected configured global Java path.")),
                 &mut session.state.java_override_enabled,
             );
             if session.state.java_override_enabled {
                 if limits.java_options.is_empty() {
-                    kit.text(ui, TextRole::Danger, "No configured global Java paths found. Add at least one Java path in Settings first.");
+                    kit.text(ui, TextRole::Danger, &tr!("No configured global Java paths found. Add at least one Java path in Settings first."));
                 } else {
                     if session
                         .state
@@ -442,8 +443,8 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
                     kit.setting_row(
                         ui,
                         "instance-settings::java-row",
-                        "Java path override",
-                        Some("Select which configured Java path this instance should use."),
+                        &tr!("Java path override"),
+                        Some(&tr!("Select which configured Java path this instance should use.")),
                         |kit, ui| {
                             if let Some(index) =
                                 kit.dropdown(ui, "instance-settings::java", current, &labels, 360.0)
@@ -458,38 +459,38 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             // Platform-specific launch compatibility.
             let platform = if cfg!(target_os = "linux") {
                 Some((
-                    "Linux",
-                    "Linux-specific launch compatibility settings for this instance.",
+                    tr!("Linux"),
+                    tr!("Linux-specific launch compatibility settings for this instance."),
                 ))
             } else if cfg!(target_os = "windows") {
                 Some((
-                    "Windows",
-                    "Reserved for Windows-specific instance settings.",
+                    tr!("Windows"),
+                    tr!("Reserved for Windows-specific instance settings."),
                 ))
             } else if cfg!(target_os = "macos") {
-                Some(("macOS", "Reserved for macOS-specific instance settings."))
+                Some((tr!("macOS"), tr!("Reserved for macOS-specific instance settings.")))
             } else {
                 None
             };
             if let Some((heading, description)) = platform {
                 kit.separator(ui);
-                kit.text(ui, TextRole::Heading, heading);
-                kit.text(ui, TextRole::Muted, description);
+                kit.text(ui, TextRole::Heading, &heading);
+                kit.text(ui, TextRole::Muted, &description);
             }
             if cfg!(target_os = "linux") {
                 kit.toggle_setting(
                     ui,
                     "instance-settings::opengl",
-                    "Set Linux OpenGL Driver",
-                    Some("Linux-only. When enabled, this instance uses the Zink toggle below instead of the launcher-wide Linux OpenGL driver behavior. When disabled, this instance falls back to the launcher-wide Linux graphics settings. Versions using Vulkan directly should ignore it."),
+                    &tr!("Set Linux OpenGL Driver"),
+                    Some(&tr!("Linux-only. When enabled, this instance uses the Zink toggle below instead of the launcher-wide Linux OpenGL driver behavior. When disabled, this instance falls back to the launcher-wide Linux graphics settings. Versions using Vulkan directly should ignore it.")),
                     &mut session.state.linux_set_opengl_driver,
                 );
                 let zink_enabled = session.state.linux_set_opengl_driver;
                 kit.toggle_setting_ex(
                     ui,
                     "instance-settings::zink",
-                    "Use Zink Driver (Experimental)",
-                    Some("Linux-only. Experimental. When the setting above is enabled, this toggle decides whether this instance forces Mesa Zink so OpenGL runs over Vulkan. When the setting above is disabled, the launcher-wide Zink setting is used instead. Versions using Vulkan directly should ignore it."),
+                    &tr!("Use Zink Driver (Experimental)"),
+                    Some(&tr!("Linux-only. Experimental. When the setting above is enabled, this toggle decides whether this instance forces Mesa Zink so OpenGL runs over Vulkan. When the setting above is disabled, the launcher-wide Zink setting is used instead. Versions using Vulkan directly should ignore it.")),
                     &mut session.state.linux_use_zink_driver,
                     zink_enabled,
                 );
@@ -497,16 +498,16 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
 
             // Maintenance.
             kit.separator(ui);
-            kit.text(ui, TextRole::Heading, "Maintenance & Actions");
+            kit.text(ui, TextRole::Heading, &tr!("Maintenance & Actions"));
             kit.text(
                 ui,
                 TextRole::Muted,
-                "Open the instance folder and commit any metadata or runtime changes.",
+                &tr!("Open the instance folder and commit any metadata or runtime changes."),
             );
             if kit.button(
                 ui,
                 "instance-settings::open-folder",
-                "Open Instance Folder",
+                &tr!("Open Instance Folder"),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -515,7 +516,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             if kit.button(
                 ui,
                 "instance-settings::export-pack",
-                "Export .vtmpack...",
+                &tr!("Export .vtmpack..."),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -524,7 +525,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             if kit.button(
                 ui,
                 "instance-settings::export-patch",
-                "Generate Patch...",
+                &tr!("Generate Patch..."),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -533,7 +534,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             if kit.button(
                 ui,
                 "instance-settings::export-server",
-                "Auto-generate server zip...",
+                &tr!("Auto-generate server zip..."),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -542,7 +543,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             if kit.button(
                 ui,
                 "instance-settings::move",
-                "Move Instance...",
+                &tr!("Move Instance..."),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -554,7 +555,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
         if kit.button(
             ui,
             "instance-settings::save",
-            "Save instance settings",
+            &tr!("Save instance settings"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -563,7 +564,7 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
         if kit.button(
             ui,
             "instance-settings::done",
-            "Done",
+            &tr!("Done"),
             ButtonKind::Primary,
             true,
         ) {
@@ -575,8 +576,8 @@ pub fn settings(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) 
             "instance-settings::thumbnail",
             Pick::File,
             PickerDialog::new()
-                .title("Choose thumbnail")
-                .filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "gif"]),
+                .title(tr!("Choose thumbnail"))
+                .filter(tr!("Images"), &["png", "jpg", "jpeg", "webp", "bmp", "gif"]),
         );
     }
     // Override edits save themselves shortly after they stop.
@@ -646,9 +647,9 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
             patch_out,
             Pick::SaveFile,
             PickerDialog::new()
-                .title("Generate Patch")
+                .title(tr!("Generate Patch"))
                 .file_name(api::default_vtmpatch_name(&instance.name))
-                .filter("Vertex Modpack Patch", &[vtmpack::VTMPATCH_EXTENSION]),
+                .filter(tr!("Vertex Modpack Patch"), &[vtmpack::VTMPATCH_EXTENSION]),
         );
     }
     if let Some(session) = state.sessions.get_mut(id) {
@@ -682,30 +683,26 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
         let _column = kit.column(ui, kit::SPACE_MD);
         if in_flight {
             let progress = session.state.export_vtmpack_latest_progress.as_ref();
-            kit.text(ui, TextRole::Heading, "Export in progress");
+            kit.text(ui, TextRole::Heading, &tr!("Export in progress"));
             kit.text(
                 ui,
                 TextRole::Body,
-                progress.map_or("Starting export...", |p| p.message.as_str()),
+                progress.map_or(&tr!("Starting export..."), |p| p.message.as_str()),
             );
             kit.text(
                 ui,
                 TextRole::Muted,
                 &progress
                     .map(|p| {
-                        format!(
-                            "{} of {} steps complete",
-                            p.completed_steps.min(p.total_steps),
-                            p.total_steps
-                        )
+                        tr!("{done} of {total_steps} steps complete", done = p.completed_steps.min(p.total_steps), total_steps = p.total_steps).into_owned()
                     })
-                    .unwrap_or_else(|| "Preparing export task...".to_owned()),
+                    .unwrap_or_else(|| tr!("Preparing export task...").into_owned()),
             );
             if let Some(path) = &session.state.export_vtmpack_output_path {
                 kit.text(
                     ui,
                     TextRole::Small,
-                    &format!("Destination: {}", path.display()),
+                    &tr!("Destination: {path}", path = path.display()),
                 );
             }
             let fraction = progress.and_then(|p| {
@@ -718,18 +715,18 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
         kit.text(
             ui,
             TextRole::Heading,
-            if patch_mode {
-                "Generate .vtmpatch"
+            &if patch_mode {
+                tr!("Generate .vtmpatch")
             } else {
-                "Export .vtmpack"
+                tr!("Export .vtmpack")
             },
         );
         kit::label(
             ui,
-            if patch_mode {
-                "Choose what to include in the patch. After clicking Choose files, you will be prompted for the base .vtmpack to compare against, then where to save the generated .vtmpatch."
+            &if patch_mode {
+                tr!("Choose what to include in the patch. After clicking Choose files, you will be prompted for the base .vtmpack to compare against, then where to save the generated .vtmpatch.")
             } else {
-                "Choose whether the exported pack may reference CurseForge metadata directly, then select which top-level files and folders from the Minecraft root should be bundled into the pack."
+                tr!("Choose whether the exported pack may reference CurseForge metadata directly, then select which top-level files and folders from the Minecraft root should be bundled into the pack.")
             },
             &TextStyle {
                 wrap: TextWrap::Words,
@@ -743,7 +740,7 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
             if kit.radio(
                 ui,
                 &format!("export-vtmpack::provider::{}", mode.label()),
-                mode.label(),
+                &vertex_i18n::t(mode.label()),
                 session.state.export_vtmpack_options.provider_mode == mode,
             ) {
                 session.state.export_vtmpack_options.provider_mode = mode;
@@ -752,14 +749,14 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
         kit.text(
             ui,
             TextRole::Small,
-            match session.state.export_vtmpack_options.provider_mode {
-                VtmpackProviderMode::IncludeCurseForge => "Managed CurseForge entries stay downloadable in the pack manifest.",
+            &match session.state.export_vtmpack_options.provider_mode {
+                VtmpackProviderMode::IncludeCurseForge => tr!("Managed CurseForge entries stay downloadable in the pack manifest."),
                 VtmpackProviderMode::ExcludeCurseForge => {
-                    "CurseForge metadata is removed from the export. CurseForge-managed files are bundled into the pack unless they already use Modrinth as the selected source."
+                    tr!("CurseForge metadata is removed from the export. CurseForge-managed files are bundled into the pack unless they already use Modrinth as the selected source.")
                 }
             },
         );
-        kit.text(ui, TextRole::Heading, "Compression");
+        kit.text(ui, TextRole::Heading, &tr!("Compression"));
         for mode in [
             VtmpackCompressionMode::Standard,
             VtmpackCompressionMode::Extreme,
@@ -767,7 +764,7 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
             if kit.radio(
                 ui,
                 &format!("export-vtmpack::compression::{}", mode.label()),
-                mode.label(),
+                &vertex_i18n::t(mode.label()),
                 session.state.export_vtmpack_options.compression_mode == mode,
             ) {
                 session.state.export_vtmpack_options.compression_mode = mode;
@@ -776,32 +773,32 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
         kit.text(
             ui,
             TextRole::Small,
-            match session.state.export_vtmpack_options.compression_mode {
-                VtmpackCompressionMode::Standard => "Uses the standard XZ compression preset for a balanced export.",
+            &match session.state.export_vtmpack_options.compression_mode {
+                VtmpackCompressionMode::Standard => tr!("Uses the standard XZ compression preset for a balanced export."),
                 VtmpackCompressionMode::Extreme => {
-                    "Uses the maximum XZ preset with the extreme flag. Exports take longer and may use more memory, but prioritize the smallest archive."
+                    tr!("Uses the maximum XZ preset with the extreme flag. Exports take longer and may use more memory, but prioritize the smallest archive.")
                 }
             },
         );
         kit.text(
             ui,
             TextRole::Heading,
-            "Include top-level entries from the Minecraft root",
+            &tr!("Include top-level entries from the Minecraft root"),
         );
-        kit.text(ui, TextRole::Small, "Defaults to mods, resourcepacks, shaderpacks, and config. You can also include any other top-level files or folders found in the instance root.");
+        kit.text(ui, TextRole::Small, &tr!("Defaults to mods, resourcepacks, shaderpacks, and config. You can also include any other top-level files or folders found in the instance root."));
         if loaded && !root_exists {
             kit.text(
                 ui,
                 TextRole::Danger,
-                &format!("Instance root directory not found: {}", root.display()),
+                &tr!("Instance root directory not found: {root}", root = root.display()),
             );
         } else if !loaded {
-            kit.text(ui, TextRole::Muted, "Reading instance files...");
+            kit.text(ui, TextRole::Muted, &tr!("Reading instance files..."));
         } else if entries.is_empty() {
             kit.text(
                 ui,
                 TextRole::Muted,
-                "No files or folders found in the instance root.",
+                &tr!("No files or folders found in the instance root."),
             );
         } else {
             scrolled(ui, kit, "export-vtmpack::entries", 300.0, |ui, kit| {
@@ -833,7 +830,7 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
         if kit.button(
             ui,
             "export-vtmpack::cancel",
-            "Cancel",
+            &tr!("Cancel"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -842,10 +839,10 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
         if kit.button(
             ui,
             "export-vtmpack::choose",
-            if patch_mode {
-                "Choose files"
+            &if patch_mode {
+                tr!("Choose files")
             } else {
-                "Choose file"
+                tr!("Choose file")
             },
             ButtonKind::Primary,
             true,
@@ -859,17 +856,17 @@ pub fn export_pack(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &st
                 base_slot,
                 Pick::File,
                 PickerDialog::new()
-                    .title("Choose Base Modpack")
-                    .filter("Vertex Modpack", &[vtmpack::VTMPACK_EXTENSION]),
+                    .title(tr!("Choose Base Modpack"))
+                    .filter(tr!("Vertex Modpack"), &[vtmpack::VTMPACK_EXTENSION]),
             );
         } else {
             state.file_dialogs.open(
                 pack_out,
                 Pick::SaveFile,
                 PickerDialog::new()
-                    .title("Export Modpack")
+                    .title(tr!("Export Modpack"))
                     .file_name(api::default_vtmpack_name(&instance.name))
-                    .filter("Vertex Modpack", &[vtmpack::VTMPACK_EXTENSION]),
+                    .filter(tr!("Vertex Modpack"), &[vtmpack::VTMPACK_EXTENSION]),
             );
         }
     }
@@ -917,30 +914,26 @@ pub fn export_server(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         let _column = kit.column(ui, kit::SPACE_MD);
         if in_flight {
             let progress = session.state.export_server_latest_progress.as_ref();
-            kit.text(ui, TextRole::Heading, "Building server zip");
+            kit.text(ui, TextRole::Heading, &tr!("Building server zip"));
             kit.text(
                 ui,
                 TextRole::Body,
-                progress.map_or("Starting export...", |p| p.message.as_str()),
+                progress.map_or(&tr!("Starting export..."), |p| p.message.as_str()),
             );
             kit.text(
                 ui,
                 TextRole::Muted,
                 &progress
                     .map(|p| {
-                        format!(
-                            "{} of {} steps complete",
-                            p.completed_steps.min(p.total_steps),
-                            p.total_steps
-                        )
+                        tr!("{done} of {total_steps} steps complete", done = p.completed_steps.min(p.total_steps), total_steps = p.total_steps).into_owned()
                     })
-                    .unwrap_or_else(|| "Preparing export task...".to_owned()),
+                    .unwrap_or_else(|| tr!("Preparing export task...").into_owned()),
             );
             if let Some(path) = &session.state.export_server_output_path {
                 kit.text(
                     ui,
                     TextRole::Small,
-                    &format!("Destination: {}", path.display()),
+                    &tr!("Destination: {path}", path = path.display()),
                 );
             }
             let fraction = progress.and_then(|p| {
@@ -950,10 +943,10 @@ pub fn export_server(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
             kit.progress(ui, "export-server::progress", fraction, kit::uptime());
             return;
         }
-        kit.text(ui, TextRole::Heading, "Auto-generate server zip");
+        kit.text(ui, TextRole::Heading, &tr!("Auto-generate server zip"));
         kit::label(
             ui,
-            "Builds a portable server package in your Downloads folder using this instance's files. CurseForge-managed mods that cannot be resolved on Modrinth by hash are listed as unknowns in the report.",
+            &tr!("Builds a portable server package in your Downloads folder using this instance's files. CurseForge-managed mods that cannot be resolved on Modrinth by hash are listed as unknowns in the report."),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Muted)
@@ -962,16 +955,16 @@ pub fn export_server(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         kit.text(
             ui,
             TextRole::Heading,
-            "Include top-level entries from the Minecraft root",
+            &tr!("Include top-level entries from the Minecraft root"),
         );
         if loaded && !root_exists {
             kit.text(
                 ui,
                 TextRole::Danger,
-                &format!("Instance root directory not found: {}", root.display()),
+                &tr!("Instance root directory not found: {root}", root = root.display()),
             );
         } else if !loaded {
-            kit.text(ui, TextRole::Muted, "Reading instance files...");
+            kit.text(ui, TextRole::Muted, &tr!("Reading instance files..."));
         } else {
             scrolled(ui, kit, "export-server::entries", 320.0, |ui, kit| {
                 for (name, is_dir) in &entries {
@@ -1001,7 +994,7 @@ pub fn export_server(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         if kit.button(
             ui,
             "export-server::cancel",
-            "Cancel",
+            &tr!("Cancel"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -1010,7 +1003,7 @@ pub fn export_server(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         if kit.button(
             ui,
             "export-server::start",
-            "Build zip in Downloads",
+            &tr!("Build zip in Downloads"),
             ButtonKind::Primary,
             true,
         ) {
@@ -1066,20 +1059,20 @@ pub fn move_instance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         kit.text(
             ui,
             TextRole::Heading,
-            if in_flight {
-                "Moving Instance"
+            &if in_flight {
+                tr!("Moving Instance")
             } else if completion.is_some() {
                 if failed {
-                    "Move Failed"
+                    tr!("Move Failed")
                 } else {
-                    "Move Complete"
+                    tr!("Move Complete")
                 }
             } else {
-                "Move Instance"
+                tr!("Move Instance")
             },
         );
         if in_flight {
-            kit.text(ui, TextRole::Muted, "Vertex is moving this instance now.");
+            kit.text(ui, TextRole::Muted, &tr!("Vertex is moving this instance now."));
             if let Some(progress) = &session.state.move_instance_latest_progress {
                 let fraction = (progress.total_bytes > 0).then(|| {
                     (progress.bytes_done as f32 / progress.total_bytes as f32).clamp(0.0, 1.0)
@@ -1088,13 +1081,7 @@ pub fn move_instance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
                 kit.text(
                     ui,
                     TextRole::Small,
-                    &format!(
-                        "{} of {} · {} of {} files",
-                        api::move_bytes_label(progress.bytes_done),
-                        api::move_bytes_label(progress.total_bytes),
-                        progress.files_done,
-                        progress.total_files
-                    ),
+                    &tr!("{moved} of {total} · {files_done} of {total_files} files", moved = api::move_bytes_label(progress.bytes_done), total = api::move_bytes_label(progress.total_bytes), files_done = progress.files_done, total_files = progress.total_files),
                 );
                 for file in progress.active_files.iter().take(4) {
                     kit.text_clipped(ui, TextRole::Small, file, 520.0);
@@ -1119,12 +1106,12 @@ pub fn move_instance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
             );
             let _row = kit.row(ui, kit::SPACE_SM);
             kit.fill(ui);
-            if kit.button(ui, "move::close", "Close", ButtonKind::Primary, true) {
+            if kit.button(ui, "move::close", &tr!("Close"), ButtonKind::Primary, true) {
                 cancel = true;
             }
             return;
         }
-        kit.text(ui, TextRole::Muted, "Choose a destination folder. It can be an empty existing folder or a new path that will be created.");
+        kit.text(ui, TextRole::Muted, &tr!("Choose a destination folder. It can be an empty existing folder or a new path that will be created."));
         let mut text = session.state.move_instance_dest_input.clone();
         {
             let _row = kit.row(ui, kit::SPACE_SM);
@@ -1132,14 +1119,14 @@ pub fn move_instance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
                 ui,
                 "move::dest",
                 &mut text,
-                "Choose an empty folder or enter a new destination path",
+                &tr!("Choose an empty folder or enter a new destination path"),
                 false,
                 Sizing::Grow,
             ) {
                 session.state.move_instance_dest_input = text;
                 revalidate(session);
             }
-            if kit.button(ui, "move::browse", "Browse...", ButtonKind::Neutral, true) {
+            if kit.button(ui, "move::browse", &tr!("Browse..."), ButtonKind::Neutral, true) {
                 pick = true;
             }
         }
@@ -1155,13 +1142,13 @@ pub fn move_instance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         }
         let _row = kit.row(ui, kit::SPACE_SM);
         kit.fill(ui);
-        if kit.button(ui, "move::cancel", "Cancel", ButtonKind::Neutral, true) {
+        if kit.button(ui, "move::cancel", &tr!("Cancel"), ButtonKind::Neutral, true) {
             cancel = true;
         }
         if kit.button(
             ui,
             "move::start",
-            "Move Instance",
+            &tr!("Move Instance"),
             ButtonKind::Primary,
             session.state.move_instance_dest_valid,
         ) {
@@ -1172,7 +1159,7 @@ pub fn move_instance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &
         state.file_dialogs.open(
             "move::destination",
             Pick::Folder,
-            PickerDialog::new().title("Choose Destination Folder"),
+            PickerDialog::new().title(tr!("Choose Destination Folder")),
         );
     }
     if let Some(destination) = start
@@ -1271,9 +1258,9 @@ pub fn screenshot(
                 );
             }
             None if kit.images.failed(&key) => {
-                kit.text(ui, TextRole::Danger, "This screenshot could not be opened.")
+                kit.text(ui, TextRole::Danger, &tr!("This screenshot could not be opened."))
             }
-            None => kit.text(ui, TextRole::Muted, "Loading…"),
+            None => kit.text(ui, TextRole::Muted, &tr!("Loading…")),
         }
         kit.text(
             ui,
@@ -1286,7 +1273,7 @@ pub fn screenshot(
         if confirming {
             kit::label(
                 ui,
-                "Delete this screenshot from disk? This permanently removes it.",
+                &tr!("Delete this screenshot from disk? This permanently removes it."),
                 &TextStyle {
                     wrap: TextWrap::Words,
                     ..kit.style(TextRole::Danger)
@@ -1297,7 +1284,7 @@ pub fn screenshot(
             if kit.button(
                 ui,
                 "instance-screenshot::no",
-                "Cancel",
+                &tr!("Cancel"),
                 ButtonKind::Neutral,
                 !deleting,
             ) {
@@ -1306,7 +1293,7 @@ pub fn screenshot(
             if kit.button(
                 ui,
                 "instance-screenshot::yes",
-                if deleting { "Deleting…" } else { "Delete" },
+                &if deleting { tr!("Deleting…") } else { tr!("Delete") },
                 ButtonKind::Danger,
                 !deleting,
             ) {
@@ -1317,7 +1304,7 @@ pub fn screenshot(
             if kit.button(
                 ui,
                 "instance-screenshot::copy",
-                "Copy",
+                &tr!("Copy"),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -1326,23 +1313,19 @@ pub fn screenshot(
             if kit.button(
                 ui,
                 "instance-screenshot::folder",
-                "Show in folder",
+                &tr!("Show in folder"),
                 ButtonKind::Neutral,
                 true,
             ) && let Some(parent) = path.parent()
                 && let Err(err) = launcher_ui::desktop::open_in_file_manager(parent)
             {
-                launcher_ui::notification::error!(
-                    "screenshots",
-                    "Failed to open the folder: {}",
-                    err
-                );
+                launcher_ui::notification::error!("screenshots", "Failed to open the folder: {err}", err = err);
             }
             kit.fill(ui);
             if kit.button(
                 ui,
                 "instance-screenshot::delete",
-                "Delete",
+                &tr!("Delete"),
                 ButtonKind::Danger,
                 true,
             ) {
@@ -1351,7 +1334,7 @@ pub fn screenshot(
             if kit.button(
                 ui,
                 "instance-screenshot::close",
-                "Close",
+                &tr!("Close"),
                 ButtonKind::Neutral,
                 true,
             ) {

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use config::GamepadCalibration;
 
 use crate::app::gamepad::{GamepadDeviceIdentity, GamepadStickSample};
@@ -45,16 +46,16 @@ impl GamepadCalibrationState {
     }
 
     /// What the user should do now, or `None` when no calibration is running.
-    pub fn instructions(&self) -> Option<&'static str> {
+    pub fn instructions(&self) -> Option<std::borrow::Cow<'static, str>> {
         self.step.map(step_description)
     }
 
     /// The label of the main button for the current step.
-    pub fn primary_label(&self) -> &'static str {
+    pub fn primary_label(&self) -> std::borrow::Cow<'static, str> {
         match self.step {
-            Some(CalibrationStep::Neutral) => "Use current neutral",
-            Some(CalibrationStep::Review) => "Save calibration",
-            _ => "Capture current position",
+            Some(CalibrationStep::Neutral) => tr!("Use current neutral"),
+            Some(CalibrationStep::Review) => tr!("Save calibration"),
+            _ => tr!("Capture current position"),
         }
     }
 
@@ -75,8 +76,8 @@ impl GamepadCalibrationState {
                 },
                 None => {
                     self.error = Some(
-                        "Calibration is incomplete or the captured values are inconsistent."
-                            .to_owned(),
+                        tr!("Calibration is incomplete or the captured values are inconsistent.")
+                            .into_owned(),
                     );
                     ModalAction::None
                 }
@@ -88,7 +89,7 @@ impl GamepadCalibrationState {
                 }
                 None => {
                     self.error =
-                        Some("Move the stick so Vertex can see live input first.".to_owned());
+                        Some(tr!("Move the stick so Vertex can see live input first.").into_owned());
                     ModalAction::None
                 }
             },
@@ -106,17 +107,17 @@ pub enum ModalAction {
     },
 }
 
-fn step_description(step: CalibrationStep) -> &'static str {
+fn step_description(step: CalibrationStep) -> std::borrow::Cow<'static, str> {
     match step {
         CalibrationStep::Neutral => {
-            "Leave the left stick untouched, then capture its neutral resting position."
+            tr!("Leave the left stick untouched, then capture its neutral resting position.")
         }
-        CalibrationStep::Up => "Push the left stick upward and capture it.",
-        CalibrationStep::Down => "Push the left stick downward and capture it.",
-        CalibrationStep::Left => "Push the left stick left and capture it.",
-        CalibrationStep::Right => "Push the left stick right and capture it.",
+        CalibrationStep::Up => tr!("Push the left stick upward and capture it."),
+        CalibrationStep::Down => tr!("Push the left stick downward and capture it."),
+        CalibrationStep::Left => tr!("Push the left stick left and capture it."),
+        CalibrationStep::Right => tr!("Push the left stick right and capture it."),
         CalibrationStep::Review => {
-            "Review complete. Save the calibration to use this controller automatically next time."
+            tr!("Review complete. Save the calibration to use this controller automatically next time.")
         }
     }
 }

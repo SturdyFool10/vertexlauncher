@@ -1,6 +1,7 @@
 //! "Link existing Vertex profile": pick a folder, detect its Minecraft and loader versions on a worker, and register it
 //! as an instance that keeps living where it is.
 
+use vertex_i18n::tr;
 use std::path::PathBuf;
 
 use installation::display_user_path;
@@ -21,7 +22,7 @@ pub fn start(state: &mut AppState) {
     state.file_dialogs.open(
         SLOT,
         Pick::Folder,
-        PickerDialog::new().title("Link Existing Vertex Profile"),
+        PickerDialog::new().title(tr!("Link Existing Vertex Profile")),
     );
 }
 
@@ -41,10 +42,7 @@ pub fn poll(state: &mut AppState) {
                 || instance_root_path(&installations_root, instance) == path
         });
         if registered {
-            notification::warn!(
-                "instance_link",
-                "That profile folder is already registered in Vertex."
-            );
+            notification::warn!("instance_link", "That profile folder is already registered in Vertex.");
         } else {
             // Reading the profile's version files is filesystem work; keep it off the UI thread.
             let tx = state.link_results.sender();
@@ -72,24 +70,15 @@ fn finish(state: &mut AppState, path: PathBuf, detected: Result<DetectedInstance
         Ok(detected) => Some(detected),
         Err(err) => {
             tracing::warn!(target: "vertexlauncher/instances", root = %path.display(), error = %err, "Failed to auto-detect linked instance versions; using fallback metadata.");
-            notification::warn!(
-                "instance_link",
-                "Linked profile version detection failed; using fallback version metadata. You can run auto-detect from Instance Settings."
-            );
+            notification::warn!("instance_link", "Linked profile version detection failed; using fallback version metadata. You can run auto-detect from Instance Settings.");
             None
         }
     };
     let summary = detected.as_ref().map(|detected| {
         if detected.modloader_version.trim().is_empty() {
-            format!(
-                "{} for Minecraft {}",
-                detected.modloader, detected.game_version
-            )
+            tr!("{modloader} for Minecraft {game_version}", modloader = detected.modloader, game_version = detected.game_version).into_owned()
         } else {
-            format!(
-                "{} {} for Minecraft {}",
-                detected.modloader, detected.modloader_version, detected.game_version
-            )
+            tr!("{modloader} {modloader_version} for Minecraft {game_version}", modloader = detected.modloader, modloader_version = detected.modloader_version, game_version = detected.game_version).into_owned()
         }
     });
     let (modloader, game_version, modloader_version) = detected
@@ -111,10 +100,7 @@ fn finish(state: &mut AppState, path: PathBuf, detected: Result<DetectedInstance
         LinkedInstanceSpec {
             name,
             root_path: path.clone(),
-            description: Some(format!(
-                "Linked existing profile at {}.",
-                display_user_path(path.as_path())
-            )),
+            description: Some(tr!("Linked existing profile at {path}.", path = display_user_path(path.as_path())).into_owned()),
             thumbnail_path: None,
             modloader,
             game_version,
@@ -125,21 +111,10 @@ fn finish(state: &mut AppState, path: PathBuf, detected: Result<DetectedInstance
             state.selected_instance_id = Some(instance.id.clone());
             state.screen = AppScreen::Instance;
             match summary {
-                Some(summary) => notification::info!(
-                    "instance_link",
-                    "Linked existing profile '{}' and detected {summary}.",
-                    instance.name
-                ),
-                None => notification::info!(
-                    "instance_link",
-                    "Linked existing profile '{}'. You can adjust Minecraft/version settings from the profile screen.",
-                    instance.name
-                ),
+                Some(summary) => notification::info!("instance_link", "Linked existing profile '{name}' and detected {summary}.", name = instance.name, summary = summary),
+                None => notification::info!("instance_link", "Linked existing profile '{name}'. You can adjust Minecraft/version settings from the profile screen.", name = instance.name),
             }
         }
-        Err(err) => notification::error!(
-            "instance_link",
-            "Failed to link existing profile folder: {err}"
-        ),
+        Err(err) => notification::error!("instance_link", "Failed to link existing profile folder: {err}", err = err),
     }
 }

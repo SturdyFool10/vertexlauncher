@@ -1,6 +1,7 @@
 //! The controller calibration dialog: capture the left stick at rest and pushed up, down, left and right, then save
 //! the thresholds so navigation matches this particular controller.
 
+use vertex_i18n::tr;
 use vertex_shell::sturdy::ui::{Sizing, TextStyle, TextWrap, Ui};
 use vertex_shell::sturdy::ui_kit::ModalStyle;
 
@@ -39,10 +40,10 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
     let mut action = ModalAction::None;
     let response = kit::modal(ui, "gamepad-calibration", &style, true, |ui| {
         let _column = kit.column(ui, kit::SPACE_SM);
-        kit.text(ui, TextRole::Heading, "Calibrate Gamepad");
+        kit.text(ui, TextRole::Heading, &tr!("Calibrate Gamepad"));
         kit::label(
             ui,
-            &format!("Device: {}", device.name),
+            &tr!("Device: {name}", name = device.name),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Muted)
@@ -50,7 +51,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
         );
         kit::label(
             ui,
-            instructions,
+            &instructions,
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Muted)
@@ -61,12 +62,12 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             Some(sample) => kit.text(
                 ui,
                 TextRole::Muted,
-                &format!("Live left stick: x={:.3}, y={:.3}", sample.x, sample.y),
+                &tr!("Live left stick: x={x:.3}, y={y:.3}", x = sample.x, y = sample.y),
             ),
             None => kit.text(
                 ui,
                 TextRole::Muted,
-                "No live left-stick sample is available from this device yet.",
+                &tr!("No live left-stick sample is available from this device yet."),
             ),
         }
         if let Some(error) = calibration.error() {
@@ -84,14 +85,14 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
         cancel = kit.button(
             ui,
             "gamepad-calibration::cancel",
-            "Cancel",
+            &tr!("Cancel"),
             ButtonKind::Neutral,
             true,
         );
         if kit.button(
             ui,
             "gamepad-calibration::primary",
-            calibration.primary_label(),
+            &calibration.primary_label(),
             ButtonKind::Primary,
             true,
         ) {

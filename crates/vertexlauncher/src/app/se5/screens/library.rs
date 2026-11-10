@@ -2,6 +2,7 @@
 //! sidebar menu and the instance screen use. Launching goes through `launcher_ui`'s library runtime, the same code
 //! the egui library uses.
 
+use vertex_i18n::tr;
 use std::path::PathBuf;
 
 use installation::{
@@ -55,7 +56,7 @@ pub struct LaunchStatus {
     pub launching: bool,
     pub installing: bool,
     /// Why launch is unavailable, if it is.
-    pub blocked: Option<&'static str>,
+    pub blocked: Option<std::borrow::Cow<'static, str>>,
 }
 
 pub fn launch_status(state: &AppState, instance: &InstanceRecord) -> LaunchStatus {
@@ -73,11 +74,11 @@ pub fn launch_status(state: &AppState, instance: &InstanceRecord) -> LaunchStatu
     let blocked = if running_for_account {
         None
     } else if state.auth.active_launch_context().is_none() {
-        Some("Sign in with an account that owns Minecraft to launch.")
+        Some(tr!("Sign in with an account that owns Minecraft to launch."))
     } else if state.auth.token_refresh_in_progress() {
-        Some("Waiting for account token refresh...")
+        Some(tr!("Waiting for account token refresh..."))
     } else if other_running {
-        Some("This account is already running another instance.")
+        Some(tr!("This account is already running another instance."))
     } else {
         None
     };
@@ -154,7 +155,7 @@ pub fn launch_with(
     }
     let status = launch_status(state, &instance);
     if let Some(reason) = status.blocked {
-        notification::warn!("library", "{}", reason);
+        notification::emit(notification::Severity::Warn, "library", reason.into_owned());
         return;
     }
     let root = instance_root_path(state.installations_root().as_path(), &instance);
@@ -176,7 +177,7 @@ pub fn launch_with(
     if !requested {
         state.runtime.status_by_instance.insert(
             instance.id.clone(),
-            "Launch is already in progress.".to_owned(),
+            tr!("Launch is already in progress.").into_owned(),
         );
     }
 }
@@ -193,9 +194,9 @@ pub fn stop(state: &mut AppState, instance_id: &str) {
     state.runtime.status_by_instance.insert(
         instance.id.clone(),
         if stopped {
-            "Stopped instance runtime.".to_owned()
+            tr!("Stopped instance runtime.").into_owned()
         } else {
-            "Instance runtime was not running for this account.".to_owned()
+            tr!("Instance runtime was not running for this account.").into_owned()
         },
     );
 }
@@ -205,7 +206,7 @@ pub fn open_folder(state: &mut AppState, instance_id: &str) {
         return;
     };
     if let Err(err) = desktop::open_in_file_manager(root.as_path()) {
-        notification::error!("library", "Failed to open instance folder: {}", err);
+        notification::error!("library", "Failed to open instance folder: {err}", err = err);
     }
 }
 
@@ -249,9 +250,9 @@ pub fn loader_label(instance: &InstanceRecord) -> String {
     let loader = instance.modloader.trim();
     let version = instance.modloader_version.trim();
     match (loader, version) {
-        ("" | "Vanilla", _) => format!("Minecraft {}", instance.game_version),
-        (loader, "") => format!("{loader} · Minecraft {}", instance.game_version),
-        (loader, version) => format!("{loader} {version} · Minecraft {}", instance.game_version),
+        ("" | "Vanilla", _) => tr!("Minecraft {game_version}", game_version = instance.game_version).into_owned(),
+        (loader, "") => tr!("{loader} · Minecraft {game_version}", loader = loader, game_version = instance.game_version).into_owned(),
+        (loader, version) => tr!("{loader} {version} · Minecraft {game_version}", loader = loader, version = version, game_version = instance.game_version).into_owned(),
     }
 }
 
@@ -265,16 +266,16 @@ pub fn launch_button(
 ) {
     let status = launch_status(state, instance);
     if status.running_for_account {
-        if kit.button(ui, id, "Stop", ButtonKind::Danger, true) {
+        if kit.button(ui, id, &tr!("Stop"), ButtonKind::Danger, true) {
             stop(state, &instance.id);
         }
     } else {
         let label = if status.launching {
-            "Launching…"
+            &tr!("Launching…")
         } else if status.installing {
-            "Installing…"
+            &tr!("Installing…")
         } else {
-            "Launch"
+            &tr!("Launch")
         };
         let enabled = status.blocked.is_none() && !status.launching && !status.installing;
         if kit.button_icon_right(
@@ -289,7 +290,7 @@ pub fn launch_button(
             launch(state, &instance.id);
         }
         if let Some(reason) = status.blocked {
-            kit.tooltip(ui, id, reason);
+            kit.tooltip(ui, id, &reason);
         }
     }
 }
@@ -298,15 +299,15 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     let _scroll = kit.scroll(ui, "library::scroll", kit::SPACE_LG, kit::SPACE_XL as u16);
     {
         let _header = kit.row(ui, kit::SPACE_SM);
-        kit.text(ui, TextRole::Title, "Library");
+        kit.text(ui, TextRole::Title, &tr!("Library"));
         kit.fill(ui);
-        if kit.button(ui, "library::import", "Import", ButtonKind::Neutral, true) {
+        if kit.button(ui, "library::import", &tr!("Import"), ButtonKind::Neutral, true) {
             state.open_import_dialog();
         }
         if kit.button(
             ui,
             "library::create",
-            "Create instance",
+            &tr!("Create instance"),
             ButtonKind::Primary,
             true,
         ) {
@@ -314,7 +315,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         }
     }
     if state.instances.instances.is_empty() {
-        kit.text(ui, TextRole::Muted, "No instances created yet.");
+        kit.text(ui, TextRole::Muted, &tr!("No instances created yet."));
         return;
     }
 
@@ -419,7 +420,7 @@ fn card(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance: &Instanc
             if kit.button(
                 ui,
                 &format!("{id}::folder"),
-                "Folder",
+                &tr!("Folder"),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -427,11 +428,11 @@ fn card(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance: &Instanc
             }
             // The folder cannot be deleted while something is using it; hovering says why.
             let delete_reason = if status.installing {
-                Some("Wait for installation to finish before deleting this instance.")
+                Some(tr!("Wait for installation to finish before deleting this instance."))
             } else if status.launching {
-                Some("Wait for launch preparation to finish before deleting this instance.")
+                Some(tr!("Wait for launch preparation to finish before deleting this instance."))
             } else if status.running_any {
-                Some("Stop the running instance before deleting its folder.")
+                Some(tr!("Stop the running instance before deleting its folder."))
             } else {
                 None
             };
@@ -439,7 +440,7 @@ fn card(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance: &Instanc
             if kit.button(
                 ui,
                 &delete_id,
-                "Delete",
+                &tr!("Delete"),
                 ButtonKind::Danger,
                 delete_reason.is_none(),
             ) {
@@ -448,11 +449,11 @@ fn card(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance: &Instanc
             kit.tooltip(
                 ui,
                 &delete_id,
-                delete_reason.unwrap_or("Delete This Instance"),
+                &delete_reason.unwrap_or_else(|| tr!("Delete This Instance")),
             );
         }
         if let Some(reason) = status.blocked {
-            kit.text(ui, TextRole::Muted, reason);
+            kit.text(ui, TextRole::Muted, &reason);
         }
     }
     // A click on the card itself (not one of its buttons) opens the instance.
@@ -492,13 +493,10 @@ pub fn confirm_delete(
     let error = state.runtime.delete_error.clone();
     let response = kit::modal(ui, "library::delete", &style, !deleting, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text_colored(ui, "Delete Instance Folder?", kit.palette.danger, 1.3);
+        kit.text_colored(ui, &tr!("Delete Instance Folder?"), kit.palette.danger, 1.3);
         kit::label(
             ui,
-            &format!(
-                "Delete the whole folder for \"{}\". This permanently removes installed content and personal files, including worlds.",
-                instance.name
-            ),
+            &tr!("Delete the whole folder for \"{name}\". This permanently removes installed content and personal files, including worlds.", name = instance.name),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Body)
@@ -506,7 +504,7 @@ pub fn confirm_delete(
         );
         kit::label(
             ui,
-            &format!("Folder: {}", root.display()),
+            &tr!("Folder: {root}", root = root.display()),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Muted)
@@ -516,7 +514,7 @@ pub fn confirm_delete(
             kit.text(
                 ui,
                 TextRole::Danger,
-                "Stop the running instance before deleting its folder.",
+                &tr!("Stop the running instance before deleting its folder."),
             );
         }
         if let Some(error) = &error {
@@ -538,7 +536,7 @@ pub fn confirm_delete(
         if kit.button(
             ui,
             "library::delete::cancel",
-            "Cancel",
+            &tr!("Cancel"),
             ButtonKind::Primary,
             !deleting,
         ) {
@@ -547,7 +545,7 @@ pub fn confirm_delete(
         if kit.button(
             ui,
             "library::delete::confirm",
-            "Delete Folder",
+            &tr!("Delete Folder"),
             ButtonKind::Danger,
             !running && !deleting,
         ) {
@@ -577,15 +575,11 @@ pub fn copy_quick_launch(ui: &mut Ui<'_>, state: &mut AppState, instance_id: &st
         .filter(|value| !value.trim().is_empty())
         .or_else(|| state.auth.display_name().map(str::to_owned));
     let Some(user) = user else {
-        launcher_ui::notification::warn!(
-            "instance/quick_launch",
-            "{}",
-            if steam {
-                "Sign in before copying Steam launch options."
-            } else {
-                "Sign in before copying an instance command line."
-            }
-        );
+        if steam {
+        launcher_ui::notification::warn!("instance/quick_launch", "Sign in before copying Steam launch options.");
+    } else {
+        launcher_ui::notification::warn!("instance/quick_launch", "Sign in before copying an instance command line.");
+    }
         return;
     };
     let text = if steam {
@@ -603,13 +597,9 @@ pub fn copy_quick_launch(ui: &mut Ui<'_>, state: &mut AppState, instance_id: &st
         .engine()
         .primary_window_control()
         .map(|mut window| window.set_clipboard_text(&text));
-    launcher_ui::notification::info!(
-        "instance/quick_launch",
-        "{}",
-        if steam {
-            "Copied Steam launch options to clipboard."
-        } else {
-            "Copied instance command line to clipboard."
-        }
-    );
+    if steam {
+        launcher_ui::notification::info!("instance/quick_launch", "Copied Steam launch options to clipboard.");
+    } else {
+        launcher_ui::notification::info!("instance/quick_launch", "Copied instance command line to clipboard.");
+    }
 }

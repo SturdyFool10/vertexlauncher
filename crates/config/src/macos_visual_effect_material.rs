@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// NSVisualEffectView material selection for macOS blur/backdrop effects.
@@ -46,23 +47,23 @@ impl MacosVisualEffectMaterial {
 
     pub const fn label(self) -> &'static str {
         match self {
-            MacosVisualEffectMaterial::AppearanceBased => "Appearance Based",
-            MacosVisualEffectMaterial::Light => "Light",
-            MacosVisualEffectMaterial::Dark => "Dark",
-            MacosVisualEffectMaterial::Titlebar => "Titlebar",
-            MacosVisualEffectMaterial::Selection => "Selection",
-            MacosVisualEffectMaterial::Menu => "Menu",
-            MacosVisualEffectMaterial::Popover => "Popover",
-            MacosVisualEffectMaterial::Sidebar => "Sidebar",
-            MacosVisualEffectMaterial::HeaderView => "Header View",
-            MacosVisualEffectMaterial::Sheet => "Sheet",
-            MacosVisualEffectMaterial::WindowBackground => "Window Background",
-            MacosVisualEffectMaterial::HudWindow => "HUD Window",
-            MacosVisualEffectMaterial::FullScreenUi => "Full Screen UI",
-            MacosVisualEffectMaterial::Tooltip => "Tooltip",
-            MacosVisualEffectMaterial::ContentBackground => "Content Background",
-            MacosVisualEffectMaterial::UnderWindowBackground => "Under Window Background",
-            MacosVisualEffectMaterial::UnderPageBackground => "Under Page Background",
+            MacosVisualEffectMaterial::AppearanceBased => src!("Appearance Based"),
+            MacosVisualEffectMaterial::Light => src!("Light"),
+            MacosVisualEffectMaterial::Dark => src!("Dark"),
+            MacosVisualEffectMaterial::Titlebar => src!("Titlebar"),
+            MacosVisualEffectMaterial::Selection => src!("Selection"),
+            MacosVisualEffectMaterial::Menu => src!("Menu"),
+            MacosVisualEffectMaterial::Popover => src!("Popover"),
+            MacosVisualEffectMaterial::Sidebar => src!("Sidebar"),
+            MacosVisualEffectMaterial::HeaderView => src!("Header View"),
+            MacosVisualEffectMaterial::Sheet => src!("Sheet"),
+            MacosVisualEffectMaterial::WindowBackground => src!("Window Background"),
+            MacosVisualEffectMaterial::HudWindow => src!("HUD Window"),
+            MacosVisualEffectMaterial::FullScreenUi => src!("Full Screen UI"),
+            MacosVisualEffectMaterial::Tooltip => src!("Tooltip"),
+            MacosVisualEffectMaterial::ContentBackground => src!("Content Background"),
+            MacosVisualEffectMaterial::UnderWindowBackground => src!("Under Window Background"),
+            MacosVisualEffectMaterial::UnderPageBackground => src!("Under Page Background"),
         }
     }
 }

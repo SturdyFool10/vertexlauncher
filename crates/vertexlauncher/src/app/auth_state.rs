@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use auth::{
     CachedAccount, CachedAccountRenewalEvent, CachedAccountsState, DeviceCodeLoginFlow,
     DeviceCodePrompt, LoginEvent,
@@ -134,7 +135,7 @@ impl AuthState {
                     error = %err,
                     "Persisting cached account state failed."
                 );
-                let _ = tx.send(format!("{failure}: {err}"));
+                let _ = tx.send(tr!("{failure}: {err}", failure = failure, err = err).into_owned());
             }
         });
     }
@@ -152,7 +153,7 @@ impl AuthState {
                 );
                 (
                     CachedAccountsState::default(),
-                    AuthUiStatus::Error(format!("Failed to load cached account state: {err}")),
+                    AuthUiStatus::Error(tr!("Failed to load cached account state: {err}", err = err).into_owned()),
                 )
             }
         };
@@ -194,9 +195,7 @@ impl AuthState {
                         account_count = auth_state.accounts_state.accounts.len(),
                         "Skipping cached-account renewal during startup."
                     );
-                    auth_state.status = AuthUiStatus::Error(format!(
-                        "Loaded cached accounts, but token renewal was skipped: {err}"
-                    ));
+                    auth_state.status = AuthUiStatus::Error(tr!("Loaded cached accounts, but token renewal was skipped: {err}", err = err).into_owned());
                 }
             }
         }
@@ -331,10 +330,7 @@ impl AuthState {
             .map(str::trim)
             .is_some_and(|token| !token.is_empty());
         if !has_refresh_token {
-            let message = format!(
-                "Account '{}' has no renewable Microsoft refresh token.",
-                account.minecraft_profile.name
-            );
+            let message = tr!("Account '{name}' has no renewable Microsoft refresh token.", name = account.minecraft_profile.name).into_owned();
             self.failed_account_errors
                 .insert(profile_id.to_owned(), message.clone());
             self.status = AuthUiStatus::Error(message);
@@ -356,9 +352,9 @@ impl AuthState {
     /// problems only warn, everything else becomes an error status.
     pub(super) fn report_cache_save_failure(&mut self, message: String) {
         if is_nonfatal_account_cache_error(message.as_str()) {
-            notification::warn!("auth", "{message}");
+            notification::warn!("auth", "{message}", message = message);
         } else {
-            notification::error!("auth", "{message}");
+            notification::error!("auth", "{message}", message = message);
             self.status = AuthUiStatus::Error(message);
         }
     }
@@ -398,10 +394,7 @@ impl AuthState {
         match microsoft_client_id() {
             Ok(client_id) => self.spawn_single_account_renewal_worker(client_id, profile_id),
             Err(err) => {
-                notification::warn!(
-                    "auth",
-                    "Could not renew the active account before use: {err}. Continuing with the cached session."
-                );
+                notification::warn!("auth", "Could not renew the active account before use: {err}. Continuing with the cached session.", err = err);
                 self.refreshed.insert(profile_id);
                 return true;
             }
@@ -520,7 +513,7 @@ impl AuthState {
         &self.account_avatars
     }
 
-    pub fn status_message(&self) -> Option<&str> {
+    pub fn status_message(&self) -> Option<std::borrow::Cow<'_, str>> {
         self.status.status_message()
     }
 

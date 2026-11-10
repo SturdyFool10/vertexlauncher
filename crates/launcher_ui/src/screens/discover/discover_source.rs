@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum DiscoverSource {
     Modrinth,
@@ -5,10 +6,10 @@ pub(crate) enum DiscoverSource {
 }
 
 impl DiscoverSource {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Modrinth => "Modrinth",
-            Self::CurseForge => "CurseForge",
+            Self::Modrinth => tr!("Modrinth"),
+            Self::CurseForge => tr!("CurseForge"),
         }
     }
 }

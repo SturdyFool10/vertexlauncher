@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use launcher_ui::screens::SettingsInfo;
 use std::sync::{Mutex, OnceLock};
 
@@ -36,10 +37,10 @@ fn apply_graphics_overrides(info: &mut SettingsInfo) {
         let driver_name = clean_value(&graphics.driver_name);
         let driver_version = clean_value(&graphics.driver_version);
         info.graphics_driver = match (driver_name.as_str(), driver_version.as_str()) {
-            ("Unknown", "Unknown") => "Unknown".to_owned(),
+            ("Unknown", "Unknown") => tr!("Unknown").into_owned(),
             ("Unknown", version) => version.to_owned(),
             (name, "Unknown") => name.to_owned(),
-            (name, version) => format!("{name} {version}"),
+            (name, version) => tr!("{name} {version}", name = name, version = version).into_owned(),
         };
     }
 }
@@ -64,11 +65,11 @@ fn build_base_settings_info() -> SettingsInfo {
 
     SettingsInfo {
         cpu: platform::detect_cpu_name(),
-        gpu: "Unknown".to_owned(),
+        gpu: tr!("Unknown").into_owned(),
         memory: platform::detect_total_memory(),
-        graphics_api: "Unknown".to_owned(),
-        graphics_driver: "Unknown".to_owned(),
-        app_version: format!("{version} ({revision})"),
+        graphics_api: tr!("Unknown").into_owned(),
+        graphics_driver: tr!("Unknown").into_owned(),
+        app_version: tr!("{version} ({revision})", version = version, revision = revision).into_owned(),
         available_graphics_adapters: Vec::new(),
     }
 }
@@ -76,7 +77,7 @@ fn build_base_settings_info() -> SettingsInfo {
 fn clean_value(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        "Unknown".to_owned()
+        tr!("Unknown").into_owned()
     } else {
         trimmed.to_owned()
     }

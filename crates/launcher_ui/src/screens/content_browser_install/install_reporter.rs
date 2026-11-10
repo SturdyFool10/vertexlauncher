@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 use std::cell::RefCell;
 
@@ -67,12 +68,8 @@ impl InstallReporter {
         let total = self.total_files();
         let position = (self.done + 1).min(total);
         let mut message = match self.current.as_deref() {
-            Some(name) => format!(
-                "Installing {name} ({position}/{total}) · {:.1} MiB · {:.1} MiB/s",
-                (self.bytes_before_current + self.current_bytes) as f64 / (1024.0 * 1024.0),
-                bytes_per_second / (1024.0 * 1024.0),
-            ),
-            None => format!("Resolving dependencies ({}/{total} done)", self.done),
+            Some(name) => tr!("Installing {name} ({position}/{total}) · {downloaded:.1} MiB · {speed:.1} MiB/s", name = name, position = position, total = total, downloaded = (self.bytes_before_current + self.current_bytes) as f64 / (1024.0 * 1024.0), speed = bytes_per_second / (1024.0 * 1024.0)).into_owned(),
+            None => tr!("Resolving dependencies ({done}/{total} done)", done = self.done, total = total).into_owned(),
         };
         let next = self
             .names
@@ -83,13 +80,16 @@ impl InstallReporter {
             .collect::<Vec<_>>();
         if !next.is_empty() {
             let remaining = self.names.len().saturating_sub(self.done as usize + 1);
-            message.push_str(&format!("\nNext: {}", next.join(", ")));
+            message.push('\n');
+            message.push_str(&tr!("Next: {names}", names = next.join(", ")));
             if remaining > next.len() {
-                message.push_str(&format!(" (+{} more)", remaining - next.len()));
+                message.push(' ');
+                message.push_str(&tr!("(+{count} more)", count = remaining - next.len()));
             }
         }
         if self.queued_after > 0 {
-            message.push_str(&format!("\n{} more queued", self.queued_after));
+            message.push('\n');
+            message.push_str(&tr!("{count} more queued", count = self.queued_after));
         }
         message
     }

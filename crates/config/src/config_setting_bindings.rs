@@ -115,6 +115,7 @@ impl Config {
             follow_console_on_launch,
             start_fullscreen,
             steam_deck_handoff,
+            language: _,
             displayed_time: _,
             debug_fps_counter,
             debug_framegraph,

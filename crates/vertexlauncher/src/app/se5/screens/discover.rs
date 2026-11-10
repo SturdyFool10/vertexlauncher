@@ -2,6 +2,7 @@
 //! The search, filtering, paging and install logic is `launcher_ui`'s `discover_api`; this draws it.
 
 
+use vertex_i18n::tr;
 use launcher_ui::screens::{AppScreen, discover_api as api};
 use vertex_shell::sturdy::ui::{
     AlignX, AlignY, Border, ChildAlignment, CornerRadius, Direction, ElementDesc, Padding,
@@ -19,7 +20,7 @@ const LOAD_MORE_MARGIN: f32 = 700.0;
 pub fn browse(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     api::tick(&mut state.discover);
     let _scroll = kit.scroll(ui, SCROLL_ID, kit::SPACE_LG, kit::SPACE_XL);
-    kit.text(ui, TextRole::Title, "Discover");
+    kit.text(ui, TextRole::Title, &tr!("Discover"));
     filters(ui, kit, state);
 
     let status = api::status(&state.discover);
@@ -37,7 +38,7 @@ pub fn browse(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         );
     }
     if status.searching {
-        kit.text_wrapped(ui, TextRole::Muted, "Loading modpacks...");
+        kit.text_wrapped(ui, TextRole::Muted, &tr!("Loading modpacks..."));
     }
 
     let entries = api::entries(&state.discover);
@@ -45,7 +46,7 @@ pub fn browse(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.text_wrapped(
             ui,
             TextRole::Muted,
-            "No modpacks matched the current search and filters.",
+            &tr!("No modpacks matched the current search and filters."),
         );
         return;
     }
@@ -116,7 +117,7 @@ fn filters(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             "discover::query",
             api::query_mut(&mut state.discover),
-            "Search modpacks and press Enter",
+            &tr!("Search modpacks and press Enter"),
             false,
             Sizing::Grow,
         );
@@ -124,7 +125,7 @@ fn filters(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             submit = true;
             as_tag = ui.engine().input().modifiers().shift;
         }
-        if kit.button(ui, "discover::search", "Search", ButtonKind::Primary, true) {
+        if kit.button(ui, "discover::search", &tr!("Search"), ButtonKind::Primary, true) {
             submit = true;
         }
     }
@@ -211,7 +212,7 @@ fn tile(ui: &mut Ui<'_>, kit: &mut Kit, entry: &api::EntryView, column: usize, w
             if let Some(author) = &entry.author {
                 kit::wrapped_label(
                     ui,
-                    &format!("by {author}"),
+                    &tr!("by {author}", author = author),
                     &kit.style(TextRole::Muted),
                     titles_width,
                 );
@@ -222,7 +223,7 @@ fn tile(ui: &mut Ui<'_>, kit: &mut Kit, entry: &api::EntryView, column: usize, w
         if let Some(downloads) = &entry.downloads {
             kit::wrapped_label(
                 ui,
-                &format!("Downloads: {downloads}"),
+                &tr!("Downloads: {downloads}", downloads = downloads),
                 &kit.style(TextRole::Muted),
                 inner,
             );
@@ -230,7 +231,7 @@ fn tile(ui: &mut Ui<'_>, kit: &mut Kit, entry: &api::EntryView, column: usize, w
         if let Some(updated) = &entry.updated {
             kit::wrapped_label(
                 ui,
-                &format!("Updated: {updated}"),
+                &tr!("Updated: {updated}", updated = updated),
                 &kit.style(TextRole::Muted),
                 inner,
             );
@@ -241,7 +242,7 @@ fn tile(ui: &mut Ui<'_>, kit: &mut Kit, entry: &api::EntryView, column: usize, w
 }
 
 /// Source badges in rows that break before one would cross `max_width`, so they wrap instead of overflowing.
-fn badges(ui: &mut Ui<'_>, kit: &Kit, sources: &[&str], max_width: f32) {
+fn badges(ui: &mut Ui<'_>, kit: &Kit, sources: &[String], max_width: f32) {
     let style = kit.style(TextRole::Small);
     let gap = f32::from(kit::SPACE_SM);
     let mut rows: Vec<Vec<&str>> = vec![Vec::new()];
@@ -250,11 +251,11 @@ fn badges(ui: &mut Ui<'_>, kit: &Kit, sources: &[&str], max_width: f32) {
         let width = ui.measure_text(&style, source).x + 16.0;
         let row = rows.last_mut().expect("rows is never empty");
         if !row.is_empty() && used + gap + width > max_width {
-            rows.push(vec![*source]);
+            rows.push(vec![source.as_str()]);
             used = width;
         } else {
             used += if row.is_empty() { width } else { gap + width };
-            row.push(*source);
+            row.push(source.as_str());
         }
     }
     let _column = ui.element(
@@ -332,11 +333,11 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     }
     let _scroll = kit.scroll(ui, "discover-detail::scroll", kit::SPACE_LG, kit::SPACE_XL);
     let Some(view) = api::detail(&state.discover) else {
-        kit.text_wrapped(ui, TextRole::Muted, "No modpack selected.");
+        kit.text_wrapped(ui, TextRole::Muted, &tr!("No modpack selected."));
         if kit.button(
             ui,
             "discover-detail::back",
-            "Back to Discover",
+            &tr!("Back to Discover"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -349,7 +350,7 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         if kit.button(
             ui,
             "discover-detail::back",
-            "Back to Discover",
+            &tr!("Back to Discover"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -398,7 +399,7 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             if let Some(author) = &view.entry.author {
                 kit::label(
                     ui,
-                    &format!("by {author}"),
+                    &tr!("by {author}", author = author),
                     &TextStyle {
                         wrap: TextWrap::Words,
                         ..kit.style(TextRole::Muted)
@@ -418,13 +419,13 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             && kit.button(
                 ui,
                 "discover-detail::project",
-                "Open project page",
+                &tr!("Open project page"),
                 ButtonKind::Neutral,
                 true,
             )
             && let Err(err) = launcher_ui::desktop::open_url(url)
         {
-            launcher_ui::notification::error!("discover", "Could not open the browser: {}", err);
+            launcher_ui::notification::error!("discover", "Could not open the browser: {err}", err = err);
         }
     }
 
@@ -444,7 +445,7 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             TextRole::Muted,
             view.install_message
                 .as_deref()
-                .unwrap_or("Installing modpack..."),
+                .unwrap_or(&tr!("Installing modpack...")),
         );
         kit.progress(
             ui,
@@ -455,7 +456,7 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     }
 
     if view.versions_loading {
-        kit.text_wrapped(ui, TextRole::Muted, "Loading modpack versions...");
+        kit.text_wrapped(ui, TextRole::Muted, &tr!("Loading modpack versions..."));
         return;
     }
     if let Some(error) = &view.versions_error {
@@ -494,13 +495,13 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 },
             );
             if let Some(published) = &version.published {
-                kit.text_wrapped(ui, TextRole::Muted, &format!("Published: {published}"));
+                kit.text_wrapped(ui, TextRole::Muted, &tr!("Published: {published}", published = published));
             }
             if !version.loaders.is_empty() {
                 kit.text_wrapped(
                     ui,
                     TextRole::Muted,
-                    &format!("Loaders: {}", version.loaders.join(", ")),
+                    &tr!("Loaders: {loaders}", loaders = version.loaders.join(", ")),
                 );
             }
             if !version.game_versions.is_empty() {
@@ -511,12 +512,12 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                     .cloned()
                     .collect::<Vec<_>>()
                     .join(", ");
-                kit.text_wrapped(ui, TextRole::Muted, &format!("Game versions: {preview}"));
+                kit.text_wrapped(ui, TextRole::Muted, &tr!("Game versions: {preview}", preview = preview));
             }
             if let Some(downloads) = &version.downloads {
                 kit::label(
                     ui,
-                    &format!("Downloads: {downloads}"),
+                    &tr!("Downloads: {downloads}", downloads = downloads),
                     &TextStyle {
                         wrap: TextWrap::Words,
                         ..kit.style(TextRole::Muted)
@@ -527,7 +528,7 @@ pub fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         if kit.button(
             ui,
             &format!("discover-detail::create::{}", version.id),
-            "Create Instance",
+            &tr!("Create Instance"),
             ButtonKind::Primary,
             !view.install_in_flight,
         ) {

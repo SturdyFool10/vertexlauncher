@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -18,13 +19,13 @@ impl ContentScope {
         ContentScope::DataPacks,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            ContentScope::All => "All Types",
-            ContentScope::Mods => "Mods",
-            ContentScope::ResourcePacks => "Resource Packs",
-            ContentScope::Shaders => "Shaders",
-            ContentScope::DataPacks => "Data Packs",
+            ContentScope::All => tr!("All Types"),
+            ContentScope::Mods => tr!("Mods"),
+            ContentScope::ResourcePacks => tr!("Resource Packs"),
+            ContentScope::Shaders => tr!("Shaders"),
+            ContentScope::DataPacks => tr!("Data Packs"),
         }
     }
 

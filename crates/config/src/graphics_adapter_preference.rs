@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -13,8 +14,8 @@ impl GraphicsAdapterPreferenceType {
 
     pub const fn settings_label(self) -> &'static str {
         match self {
-            Self::PerformanceProfile => "Performance Profile",
-            Self::ExplicitAdapter => "Explicit Adapter",
+            Self::PerformanceProfile => src!("Performance Profile"),
+            Self::ExplicitAdapter => src!("Explicit Adapter"),
         }
     }
 }
@@ -40,11 +41,11 @@ impl GraphicsAdapterProfile {
 
     pub const fn settings_label(self) -> &'static str {
         match self {
-            Self::Default => "Default",
-            Self::HighPerformance => "High Performance",
-            Self::LowPower => "Low Power",
-            Self::DiscreteOnly => "Discrete Only",
-            Self::IntegratedOnly => "Integrated Only",
+            Self::Default => src!("Default"),
+            Self::HighPerformance => src!("High Performance"),
+            Self::LowPower => src!("Low Power"),
+            Self::DiscreteOnly => src!("Discrete Only"),
+            Self::IntegratedOnly => src!("Integrated Only"),
         }
     }
 }

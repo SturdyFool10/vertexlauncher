@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
@@ -62,7 +63,7 @@ pub fn export_instance_as_vtmpack_with_progress<F>(
 where
     F: FnMut(VtmpackExportProgress),
 {
-    progress(progress_update("Reading managed content manifest...", 0, 1));
+    progress(progress_update(vertex_i18n::src!("Reading managed content manifest..."), 0, 1));
     // Read the raw manifest without filesystem validation so that managed content
     // entries are preserved in downloadable_content even if their files are currently
     // missing on disk (e.g. not yet synced, or deleted by the user).
@@ -81,7 +82,7 @@ where
         .collect::<HashSet<_>>();
 
     progress(progress_update(
-        "Checking mods against Modrinth hashes...",
+        vertex_i18n::src!("Checking mods against Modrinth hashes..."),
         1,
         1,
     ));
@@ -125,16 +126,13 @@ where
         .map(|entry| normalize_pack_path(entry.file_path.as_path()))
         .collect::<HashSet<_>>();
 
-    progress(progress_update("Scanning exportable files...", 1, 1));
+    progress(progress_update(vertex_i18n::src!("Scanning exportable files..."), 1, 1));
 
     let mods_dir = instance_root.join("mods");
     let mut bundled_mod_files = Vec::<PathBuf>::new();
     if selected_root_entries.contains("mods") && mods_dir.exists() {
         let entries = fs::read_dir(mods_dir.as_path()).map_err(|err| {
-            format!(
-                "failed to read mods directory {}: {err}",
-                mods_dir.display()
-            )
+            tr!("failed to read mods directory {mods_dir}: {err}", mods_dir = mods_dir.display(), err = err).into_owned()
         })?;
         for entry in entries.flatten() {
             let path = entry.path();
@@ -157,10 +155,7 @@ where
     if selected_root_entries.contains("config") && configs_dir.exists() {
         collect_regular_files_recursive(configs_dir.as_path(), &mut config_files).map_err(
             |err| {
-                format!(
-                    "failed to collect config files under {}: {err}",
-                    configs_dir.display()
-                )
+                tr!("failed to collect config files under {configs_dir}: {err}", configs_dir = configs_dir.display(), err = err).into_owned()
             },
         )?;
     }
@@ -195,10 +190,7 @@ where
         if root_entry_path.is_dir() {
             collect_regular_files_recursive(root_entry_path.as_path(), &mut additional_files)
                 .map_err(|err| {
-                    format!(
-                        "failed to collect files under {}: {err}",
-                        root_entry_path.display()
-                    )
+                    tr!("failed to collect files under {root_entry_path}: {err}", root_entry_path = root_entry_path.display(), err = err).into_owned()
                 })?;
         } else if root_entry_path.is_file() {
             additional_files.push(root_entry_path);
@@ -233,17 +225,14 @@ where
     {
         fs::create_dir_all(parent).map_err(|err| {
             tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %parent.display(), error = %err, context = "create vtmpack export directory");
-            format!(
-                "failed to create export directory {}: {err}",
-                parent.display()
-            )
+            tr!("failed to create export directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
         })?;
     }
 
     let output_file = fs::File::create(output_path)
         .map_err(|err| {
             tracing::warn!(target: "vertexlauncher/io", op = "file_create", path = %output_path.display(), error = %err, context = "create vtmpack archive");
-            format!("failed to create {}: {err}", output_path.display())
+            tr!("failed to create {output_path}: {err}", output_path = output_path.display(), err = err).into_owned()
         })?;
     let total_steps = 3 + bundled_mod_files.len() + config_files.len() + additional_files.len();
     let mut completed_steps = 0usize;
@@ -271,22 +260,22 @@ where
         &mut progress,
     )?;
     progress(progress_update(
-        "Finalizing XZ archive...",
+        vertex_i18n::src!("Finalizing XZ archive..."),
         completed_steps,
         total_steps,
     ));
     archive
         .finish()
-        .map_err(|err| format!("failed to finalize archive: {err}"))?;
+        .map_err(|err| tr!("failed to finalize archive: {err}", err = err).into_owned())?;
     let encoder = archive
         .into_inner()
-        .map_err(|err| format!("failed to flush archive stream: {err}"))?;
+        .map_err(|err| tr!("failed to flush archive stream: {err}", err = err).into_owned())?;
     encoder
         .finish()
-        .map_err(|err| format!("failed to finalize xz stream: {err}"))?;
+        .map_err(|err| tr!("failed to finalize xz stream: {err}", err = err).into_owned())?;
     completed_steps += 1;
     progress(progress_update(
-        "Export complete.",
+        vertex_i18n::src!("Export complete."),
         completed_steps,
         total_steps,
     ));
@@ -326,10 +315,10 @@ where
     F: FnMut(VtmpackExportProgress),
 {
     let manifest_bytes = toml::to_string_pretty(pack_manifest)
-        .map_err(|err| format!("failed to serialize vtmpack manifest: {err}"))?
+        .map_err(|err| tr!("failed to serialize vtmpack manifest: {err}", err = err).into_owned())?
         .into_bytes();
     progress(progress_update(
-        "Writing pack manifest...",
+        vertex_i18n::src!("Writing pack manifest..."),
         *completed_steps,
         total_steps,
     ));
@@ -338,9 +327,9 @@ where
 
     if !sanitized_managed_manifest.projects.is_empty() {
         let raw = toml::to_string_pretty(sanitized_managed_manifest)
-            .map_err(|err| format!("failed to serialize export content manifest: {err}"))?;
+            .map_err(|err| tr!("failed to serialize export content manifest: {err}", err = err).into_owned())?;
         progress(progress_update(
-            "Writing content metadata...",
+            vertex_i18n::src!("Writing content metadata..."),
             *completed_steps,
             total_steps,
         ));
@@ -351,7 +340,7 @@ where
         )?;
     } else {
         progress(progress_update(
-            "Skipping empty content metadata...",
+            vertex_i18n::src!("Skipping empty content metadata..."),
             *completed_steps,
             total_steps,
         ));
@@ -362,13 +351,13 @@ where
         let relative = file.strip_prefix(mods_dir).unwrap_or(file.as_path());
         let target = Path::new("bundled_mods").join(relative);
         progress(progress_update(
-            &format!("Bundling mod {}", target.display()),
+            &tr!("Bundling mod {target}", target = target.display()),
             *completed_steps,
             total_steps,
         ));
         archive
             .append_path_with_name(file.as_path(), target.as_path())
-            .map_err(|err| format!("failed to append bundled mod {}: {err}", file.display()))?;
+            .map_err(|err| tr!("failed to append bundled mod {file}: {err}", file = file.display(), err = err).into_owned())?;
         *completed_steps += 1;
     }
 
@@ -376,13 +365,13 @@ where
         let relative = file.strip_prefix(configs_dir).unwrap_or(file.as_path());
         let target = Path::new("configs").join(relative);
         progress(progress_update(
-            &format!("Bundling config {}", target.display()),
+            &tr!("Bundling config {target}", target = target.display()),
             *completed_steps,
             total_steps,
         ));
         archive
             .append_path_with_name(file.as_path(), target.as_path())
-            .map_err(|err| format!("failed to append config file {}: {err}", file.display()))?;
+            .map_err(|err| tr!("failed to append config file {file}: {err}", file = file.display(), err = err).into_owned())?;
         *completed_steps += 1;
     }
 
@@ -390,13 +379,13 @@ where
         let relative = file.strip_prefix(instance_root).unwrap_or(file.as_path());
         let target = Path::new("root_entries").join(relative);
         progress(progress_update(
-            &format!("Bundling {}", target.display()),
+            &tr!("Bundling {target}", target = target.display()),
             *completed_steps,
             total_steps,
         ));
         archive
             .append_path_with_name(file.as_path(), target.as_path())
-            .map_err(|err| format!("failed to append extra file {}: {err}", file.display()))?;
+            .map_err(|err| tr!("failed to append extra file {file}: {err}", file = file.display(), err = err).into_owned())?;
         *completed_steps += 1;
     }
 
@@ -590,7 +579,7 @@ pub(crate) fn rediscover_modrinth_mods(
                     .file_path
                     .file_name()
                     .map(|name| name.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Modrinth mod".to_owned())
+                    .unwrap_or_else(|| tr!("Modrinth mod").into_owned())
             });
         let project = InstalledContentProject {
             project_key: project_key.clone(),
@@ -725,7 +714,7 @@ pub(crate) fn append_bytes_to_archive<W: Write>(
     header.set_cksum();
     archive
         .append_data(&mut header, path, Cursor::new(bytes))
-        .map_err(|err| format!("failed to append {path} to archive: {err}"))
+        .map_err(|err| tr!("failed to append {path} to archive: {err}", path = path, err = err).into_owned())
 }
 
 pub(crate) fn progress_update(
@@ -734,7 +723,7 @@ pub(crate) fn progress_update(
     total_steps: usize,
 ) -> VtmpackExportProgress {
     VtmpackExportProgress {
-        message: message.to_owned(),
+        message: vertex_i18n::t(message).into_owned(),
         completed_steps,
         total_steps,
     }

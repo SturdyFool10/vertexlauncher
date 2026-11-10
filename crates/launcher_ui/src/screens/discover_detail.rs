@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[path = "discover_detail/discover_version_entry.rs"]
@@ -136,10 +137,7 @@ pub(super) fn request_detail_versions(state: &mut DiscoverState) {
             Ok(join_result) => join_result
                 .map_err(|err| err.to_string())
                 .and_then(|result| result),
-            Err(_) => Err(format!(
-                "detail version request timed out after {}s",
-                DETAIL_VERSIONS_FETCH_TIMEOUT.as_secs()
-            )),
+            Err(_) => Err(tr!("detail version request timed out after {seconds}s", seconds = DETAIL_VERSIONS_FETCH_TIMEOUT.as_secs()).into_owned()),
         };
         if let Err(err) = tx.send(DiscoverVersionsResult {
             request_serial,
@@ -166,7 +164,7 @@ pub(super) fn poll_detail_versions(state: &mut DiscoverState) {
         state.detail_versions_in_flight = false;
         state.detail_versions.clear();
         state.detail_versions_error =
-            Some("Version detail worker stopped unexpectedly.".to_owned());
+            Some(tr!("Version detail worker stopped unexpectedly.").into_owned());
     }
     for result in drained.items {
         if result.request_serial != state.detail_version_request_serial {
@@ -219,7 +217,7 @@ fn load_detail_versions(
                     loaders.as_slice(),
                     game_versions.as_slice(),
                 )
-                .map_err(|err| format!("failed to load Modrinth versions: {err}"))
+                .map_err(|err| tr!("failed to load Modrinth versions: {err}", err = err).into_owned())
                 .map(|versions| {
                     versions
                         .into_iter()
@@ -248,7 +246,7 @@ fn load_detail_versions(
         }
         (DiscoverProjectRef::CurseForge { project_id }, DiscoverSource::CurseForge) => {
             let client = CurseForgeClient::from_env()
-                .ok_or_else(|| "CurseForge API key missing in settings.".to_owned())?;
+                .ok_or_else(|| tr!("CurseForge API key missing in settings.").into_owned())?;
             client
                 .list_mod_files(
                     *project_id,
@@ -257,7 +255,7 @@ fn load_detail_versions(
                     0,
                     50,
                 )
-                .map_err(|err| format!("failed to load CurseForge files: {err}"))
+                .map_err(|err| tr!("failed to load CurseForge files: {err}", err = err).into_owned())
                 .map(|files| {
                     files
                         .into_iter()

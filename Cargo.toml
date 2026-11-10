@@ -25,6 +25,7 @@ members = [
     "crates/skin_gpu",
     "crates/vertex_shell",
     "crates/vertex_theme",
+    "crates/vertex_i18n",
 ]
 default-members = [
     "crates/vertexlauncher",
@@ -80,6 +81,7 @@ shared_lru = { path = "crates/shared_lru" }
 vtmpack = { path = "crates/vtmpack" }
 vertex_shell = { path = "crates/vertex_shell" }
 vertex_theme = { path = "crates/vertex_theme" }
+vertex_i18n = { path = "crates/vertex_i18n" }
 vertex_constants = { path = "crates/vertex_constants" }
 
 [profile.dev]

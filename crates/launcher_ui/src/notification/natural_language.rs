@@ -18,84 +18,97 @@
 //!
 //! # Languages
 //!
-//! The free functions here speak English. Where a helper is a language-independent mechanic
-//! (counts, number grouping, ordinals, list joining, durations, sizes, plural selection), the
-//! same thing exists for every supported language on [`Locale`], and the English function is just
-//! `Locale::English.<name>`. Grammar that belongs to the words themselves (noun plurals,
-//! articles, possessives, verb agreement) stays English-only here: other languages supply it
-//! from a translation catalog as [`PluralForms`], chosen with [`Locale::select`]. See the
-//! [`locale`] module for the split.
+//! The mechanics that differ between languages (counts, number grouping, ordinals, list joining, durations, sizes, plural
+//! selection) are data in the [`locale`] module (from `vertex_i18n`), and the free functions here follow the launcher's
+//! current interface language: [`join_natural`], [`thousands`], [`time_ago`], [`bytes_words`] and the rest speak whatever
+//! language is selected. Grammar that belongs to the words themselves (noun plurals, articles, possessives, verb
+//! agreement) cannot be derived by rule across languages, so the helpers for it ([`pluralize`], [`with_article`],
+//! [`is_or_are`], ...) are English-only, for English source text. A message that needs that grammar in every language is
+//! written with `vertex_i18n::trn!`, so each language's catalog supplies its own plural forms.
 
 use std::time::Duration;
 
-#[path = "natural_language/locale.rs"]
-pub mod locale;
+/// The per-language mechanics; see the module docs.
+pub mod locale {
+    pub use vertex_i18n::locale::*;
+}
 
-pub use locale::{ListKind, Locale, MAX_COUNT_WORD, PluralCategory, PluralForms};
+pub use vertex_i18n::{ListKind, Locale, MAX_COUNT_WORD, PluralCategory, PluralForms, PluralRule};
 
 // ---------------------------------------------------------------------------------------------
 // Counts
 // ---------------------------------------------------------------------------------------------
 
 /// A count as a word: "one" through "ten", then "several" so a big number never reads as a
-/// precise claim. English; see [`Locale::count_word`] for other languages.
+/// precise claim. In the interface language.
 pub fn count_word(count: usize) -> String {
-    Locale::English.count_word(count)
+    Locale::current().count_word(count)
 }
 
 /// A count as a word up to ten, and as exact digits (with thousands separators) above that. Use
 /// it when the number matters ("12 accounts"), unlike [`count_word`].
 pub fn count_or_digits(count: usize) -> String {
-    Locale::English.count_or_digits(count)
+    Locale::current().count_or_digits(count)
 }
 
-/// Digits grouped in threes: `12345` becomes "12,345". English; see [`Locale::thousands`].
+/// Digits grouped in threes: `12345` becomes "12,345". In the interface language.
 pub fn thousands(value: u64) -> String {
-    Locale::English.thousands(value)
+    Locale::current().thousands(value)
 }
 
 /// An ordinal in digits: "1st", "2nd", "3rd", "4th", "11th", "22nd", "113th".
 pub fn ordinal_number(value: u64) -> String {
-    Locale::English.ordinal_number(value)
+    Locale::current().ordinal_number(value)
 }
 
 /// An ordinal as a word up to "tenth", and in digits beyond that.
 pub fn ordinal_word(value: u64) -> String {
-    const WORDS: [&str; 10] = [
-        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
-        "tenth",
-    ];
-    value
-        .checked_sub(1)
-        .and_then(|index| WORDS.get(index as usize))
-        .map_or_else(|| ordinal_number(value), |word| (*word).to_owned())
+    use vertex_i18n::tr_ctx;
+    match value {
+        1 => tr_ctx!("ordinal", "first"),
+        2 => tr_ctx!("ordinal", "second"),
+        3 => tr_ctx!("ordinal", "third"),
+        4 => tr_ctx!("ordinal", "fourth"),
+        5 => tr_ctx!("ordinal", "fifth"),
+        6 => tr_ctx!("ordinal", "sixth"),
+        7 => tr_ctx!("ordinal", "seventh"),
+        8 => tr_ctx!("ordinal", "eighth"),
+        9 => tr_ctx!("ordinal", "ninth"),
+        10 => tr_ctx!("ordinal", "tenth"),
+        _ => return ordinal_number(value),
+    }
+    .into_owned()
 }
 
 /// How many times something happened: "never", "once", "twice", "three times", ... "several
 /// times".
 pub fn times_word(count: usize) -> String {
+    use vertex_i18n::tr;
     match count {
-        0 => "never".to_owned(),
-        1 => "once".to_owned(),
-        2 => "twice".to_owned(),
-        n => format!("{} times", count_word(n)),
+        0 => tr!("never"),
+        1 => tr!("once"),
+        2 => tr!("twice"),
+        n => tr!("{count} times", count = count_word(n)),
     }
+    .into_owned()
 }
 
 /// A rough, human way to say a quantity, for when the exact number is noise: "no", "one", "a
 /// couple of", "a few", "several", "many", "dozens of", "hundreds of", "thousands of".
-pub fn vague_quantity(count: usize) -> &'static str {
+pub fn vague_quantity(count: usize) -> String {
+    use vertex_i18n::tr_ctx;
     match count {
-        0 => "no",
-        1 => "one",
-        2 => "a couple of",
-        3..=5 => "a few",
-        6..=20 => "several",
-        21..=35 => "many",
-        36..=99 => "dozens of",
-        100..=999 => "hundreds of",
-        _ => "thousands of",
+        0 => tr_ctx!("quantity", "no"),
+        1 => tr_ctx!("quantity", "one"),
+        2 => tr_ctx!("quantity", "a couple of"),
+        3..=5 => tr_ctx!("quantity", "a few"),
+        6..=20 => tr_ctx!("quantity", "several"),
+        21..=35 => tr_ctx!("quantity", "many"),
+        36..=99 => tr_ctx!("quantity", "dozens of"),
+        100..=999 => tr_ctx!("quantity", "hundreds of"),
+        _ => tr_ctx!("quantity", "thousands of"),
     }
+    .into_owned()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -455,19 +468,19 @@ pub fn join<S: AsRef<str>>(items: &[S], style: ListStyle) -> String {
     }
 }
 
-/// Items as an English list: "A", "A and B", "A, B, and C".
+/// Items as a list in the interface language: "A", "A and B", "A, B, and C".
 pub fn join_natural<S: AsRef<str>>(items: &[S]) -> String {
-    join(items, ListStyle::AND)
+    Locale::current().join(items, ListKind::And)
 }
 
-/// Items as an either/or list: "A", "A or B", "A, B, or C".
+/// Items as an either/or list in the interface language: "A", "A or B", "A, B, or C".
 pub fn join_or<S: AsRef<str>>(items: &[S]) -> String {
-    join(items, ListStyle::OR)
+    Locale::current().join(items, ListKind::Or)
 }
 
 /// Like [`join_natural`], but shows at most `max` items and folds the rest into "and N more".
 pub fn join_limited<S: AsRef<str>>(items: &[S], max: usize) -> String {
-    join(items, ListStyle::AND.limited(max))
+    Locale::current().join_limited(items, ListKind::And, max)
 }
 
 /// Each distinct item with how many times it appears, in order of first appearance.
@@ -562,26 +575,26 @@ pub fn quoted_all<S: AsRef<str>>(items: &[S]) -> Vec<String> {
 /// minutes and 5 seconds", "1 hour and 30 minutes", "3 days and 4 hours". English; see
 /// [`Locale::duration_words`].
 pub fn duration_words(duration: Duration) -> String {
-    Locale::English.duration_words(duration)
+    Locale::current().duration_words(duration)
 }
 
 /// A duration as one rounded unit, with "about" when rounding changed it: "less than a second",
 /// "45 seconds", "about 5 minutes", "2 hours", "about 3 days". English; see
 /// [`Locale::duration_approx`].
 pub fn duration_approx(duration: Duration) -> String {
-    Locale::English.duration_approx(duration)
+    Locale::current().duration_approx(duration)
 }
 
 /// How long ago something happened: "just now" within five seconds, then "45 seconds ago",
-/// "about 5 minutes ago", "2 hours ago". English; see [`Locale::time_ago`].
+/// "about 5 minutes ago", "2 hours ago". In the interface language.
 pub fn time_ago(elapsed: Duration) -> String {
-    Locale::English.time_ago(elapsed)
+    Locale::current().time_ago(elapsed)
 }
 
 /// A byte count for people: "0 bytes", "1 byte", "512 bytes", "1.5 KB", "20 MB", "3.2 GB".
-/// Units step by 1024. English; see [`Locale::bytes_words`].
+/// Units step by 1024. In the interface language.
 pub fn bytes_words(bytes: u64) -> String {
-    Locale::English.bytes_words(bytes)
+    Locale::current().bytes_words(bytes)
 }
 
 #[cfg(test)]

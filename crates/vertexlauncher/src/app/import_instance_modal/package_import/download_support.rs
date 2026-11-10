@@ -1,17 +1,18 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(crate) fn download_file(url: &str, destination: &Path) -> Result<(), String> {
     throttle_download_url(url);
     let mut response = ureq::get(url)
         .call()
-        .map_err(|err| format!("download request failed for {url}: {err}"))?;
+        .map_err(|err| tr!("download request failed for {url}: {err}", url = url, err = err).into_owned())?;
     let mut reader = response.body_mut().as_reader();
     let mut bytes = Vec::new();
     reader
         .read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read download body from {url}: {err}"))?;
+        .map_err(|err| tr!("failed to read download body from {url}: {err}", url = url, err = err).into_owned())?;
     fs_write_logged(destination, bytes)
-        .map_err(|err| format!("failed to write {}: {err}", destination.display()))
+        .map_err(|err| tr!("failed to write {destination}: {err}", destination = destination.display(), err = err).into_owned())
 }
 
 pub(crate) fn throttle_download_url(url: &str) {

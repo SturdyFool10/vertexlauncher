@@ -402,6 +402,9 @@ pub struct Config {
     /// default on a Steam Deck.
     #[serde(default = "default_steam_deck_handoff")]
     steam_deck_handoff: bool,
+    /// The interface language's tag ("en", "es"); empty follows the system language.
+    #[serde(default)]
+    language: String,
     /// How dates, times and "how long ago" are shown.
     #[serde(default)]
     displayed_time: DisplayedTime,
@@ -550,6 +553,15 @@ impl Config {
     }
 
     /// Whether the launcher's window is hidden while a game runs.
+    /// The interface language's tag; empty means "follow the system language".
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
+    pub fn set_language(&mut self, tag: impl Into<String>) {
+        self.language = tag.into();
+    }
+
     pub fn displayed_time(&self) -> &DisplayedTime {
         &self.displayed_time
     }
@@ -1549,6 +1561,7 @@ impl Default for Config {
             start_fullscreen: false,
             // Off here; a first run (and a saved config that predates the setting) turns it on for a Steam Deck.
             steam_deck_handoff: false,
+            language: String::new(),
             displayed_time: DisplayedTime::default(),
             debug_fps_counter: false,
             debug_framegraph: false,

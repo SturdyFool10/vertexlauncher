@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "linux")]
 use std::env;
@@ -438,8 +439,8 @@ fn build_activity(desired: &DesiredPresence) -> activity::Activity<'static> {
             ..
         } => activity::Activity::new()
             .activity_type(activity::ActivityType::Playing)
-            .details(format!("Playing {instance_name}"))
-            .state("Launched via Vertex")
+            .details(tr!("Playing {instance_name}", instance_name = instance_name).into_owned())
+            .state(tr!("Launched via Vertex").into_owned())
             .timestamps(activity::Timestamps::new().start(*started_at_unix_secs)),
         DesiredPresence::Menu {
             context,
@@ -457,60 +458,60 @@ fn build_activity(desired: &DesiredPresence) -> activity::Activity<'static> {
 fn menu_status(
     context: MenuPresenceContext,
     selected_instance_name: Option<&str>,
-) -> (String, &'static str) {
+) -> (String, String) {
     match context {
         MenuPresenceContext::Home(HomePresenceSection::Activity) => {
-            ("Browsing featured packs".to_owned(), "On the home screen")
+            (tr!("Browsing featured packs").into_owned(), tr!("On the home screen").into_owned())
         }
         MenuPresenceContext::Home(HomePresenceSection::Screenshots) => (
-            "Reviewing screenshots".to_owned(),
-            "In the screenshot manager",
+            tr!("Reviewing screenshots").into_owned(),
+            tr!("In the screenshot manager").into_owned(),
         ),
         MenuPresenceContext::Instance(InstancePresenceSection::Content)
         | MenuPresenceContext::Screen(AppScreen::Instance) => (
             selected_instance_name
-                .map(|name| format!("Managing {name}"))
-                .unwrap_or_else(|| "Managing an instance".to_owned()),
-            "In instance settings",
+                .map(|name| tr!("Managing {name}", name = name).into_owned())
+                .unwrap_or_else(|| tr!("Managing an instance").into_owned()),
+            tr!("In instance settings").into_owned(),
         ),
         MenuPresenceContext::Instance(InstancePresenceSection::Screenshots) => (
             selected_instance_name
-                .map(|name| format!("Reviewing {name} screenshots"))
-                .unwrap_or_else(|| "Reviewing instance screenshots".to_owned()),
-            "In the screenshot gallery",
+                .map(|name| tr!("Reviewing {name} screenshots", name = name).into_owned())
+                .unwrap_or_else(|| tr!("Reviewing instance screenshots").into_owned()),
+            tr!("In the screenshot gallery").into_owned(),
         ),
         MenuPresenceContext::Instance(InstancePresenceSection::Logs) => (
             selected_instance_name
-                .map(|name| format!("Reading {name} logs"))
-                .unwrap_or_else(|| "Reading instance logs".to_owned()),
-            "In the logs viewer",
+                .map(|name| tr!("Reading {name} logs", name = name).into_owned())
+                .unwrap_or_else(|| tr!("Reading instance logs").into_owned()),
+            tr!("In the logs viewer").into_owned(),
         ),
         MenuPresenceContext::Screen(AppScreen::Home) => {
-            ("Browsing featured packs".to_owned(), "On the home screen")
+            (tr!("Browsing featured packs").into_owned(), tr!("On the home screen").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::Library) => {
-            ("Managing instances".to_owned(), "In the library")
+            (tr!("Managing instances").into_owned(), tr!("In the library").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::Discover) => {
-            ("Browsing modpacks".to_owned(), "In Discover")
+            (tr!("Browsing modpacks").into_owned(), tr!("In Discover").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::DiscoverDetail) => {
-            ("Reviewing a modpack".to_owned(), "In Discover")
+            (tr!("Reviewing a modpack").into_owned(), tr!("In Discover").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::ContentBrowser) => {
-            ("Adding content".to_owned(), "Managing mods and resources")
+            (tr!("Adding content").into_owned(), tr!("Managing mods and resources").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::Skins) => {
-            ("Customizing a skin".to_owned(), "In Skin Manager")
+            (tr!("Customizing a skin").into_owned(), tr!("In Skin Manager").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::Settings) => {
-            ("Adjusting settings".to_owned(), "Configuring Vertex")
+            (tr!("Adjusting settings").into_owned(), tr!("Configuring Vertex").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::Legal) => {
-            ("Reviewing licenses".to_owned(), "In legal information")
+            (tr!("Reviewing licenses").into_owned(), tr!("In legal information").into_owned())
         }
         MenuPresenceContext::Screen(AppScreen::Console) => {
-            ("Checking logs".to_owned(), "In the console")
+            (tr!("Checking logs").into_owned(), tr!("In the console").into_owned())
         }
     }
 }

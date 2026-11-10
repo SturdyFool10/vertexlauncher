@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[path = "package_import/download_support.rs"]
@@ -78,7 +79,7 @@ pub(super) fn import_progress(
     total_steps: usize,
 ) -> ImportProgress {
     ImportProgress {
-        message: message.to_owned(),
+        message: vertex_i18n::t(message).into_owned(),
         completed_steps,
         total_steps,
     }
@@ -99,10 +100,7 @@ pub(super) fn join_safe(root: &Path, relative: &Path) -> Result<PathBuf, String>
             Component::Normal(part) => clean.push(part),
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!(
-                    "unsafe path in import package: {}",
-                    relative.display()
-                ));
+                return Err(tr!("unsafe path in import package: {relative}", relative = relative.display()).into_owned());
             }
         }
     }

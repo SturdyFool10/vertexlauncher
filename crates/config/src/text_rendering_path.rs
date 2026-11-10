@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Rendering path selection for text rendering pipeline.
@@ -26,10 +27,10 @@ impl TextRenderingPath {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            TextRenderingPath::Auto => "Auto",
-            TextRenderingPath::AlphaMask => "Alpha Mask",
-            TextRenderingPath::Sdf => "SDF",
-            TextRenderingPath::Msdf => "MSDF",
+            TextRenderingPath::Auto => src!("Auto"),
+            TextRenderingPath::AlphaMask => src!("Alpha Mask"),
+            TextRenderingPath::Sdf => src!("SDF"),
+            TextRenderingPath::Msdf => src!("MSDF"),
         }
     }
 }

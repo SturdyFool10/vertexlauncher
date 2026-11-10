@@ -1,6 +1,7 @@
 //! Toolkit-free view of the Content Browser: the same search, filter, paging, detail and install-queue logic the
 //! egui screen runs, exposed as plain data and calls so any front end can draw it.
 
+use vertex_i18n::tr;
 use super::*;
 
 /// One search result.
@@ -9,7 +10,7 @@ pub struct TileView {
     pub key: String,
     pub name: String,
     pub summary: String,
-    pub kind: &'static str,
+    pub kind: String,
     pub sources: Vec<&'static str>,
     pub icon_url: Option<String>,
     /// The installed version's name (or "Installed") when this project is already in the instance.
@@ -23,13 +24,13 @@ impl TileView {
     fn of(entry: &BrowserProjectEntry, manifest: &ContentInstallManifest, state: &ContentBrowserState) -> Self {
         Self {
             key: entry.dedupe_key.clone(),
-            name: if entry.name.trim().is_empty() { "Unnamed".to_owned() } else { entry.name.trim().to_owned() },
+            name: if entry.name.trim().is_empty() { tr!("Unnamed").into_owned() } else { entry.name.trim().to_owned() },
             summary: if entry.summary.trim().is_empty() {
-                "No description provided.".to_owned()
+                tr!("No description provided.").into_owned()
             } else {
                 entry.summary.trim().to_owned()
             },
-            kind: entry.content_type.label(),
+            kind: entry.content_type.label().into_owned(),
             sources: entry.sources.iter().map(|source| source.label()).collect(),
             icon_url: entry.icon_url.clone(),
             installed: installed_project_for_entry(manifest, entry).map(|(_, project)| {
@@ -37,8 +38,7 @@ impl TileView {
                     .selected_version_name
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
-                    .unwrap_or("Installed")
-                    .to_owned()
+                    .map_or_else(|| tr!("Installed").into_owned(), str::to_owned)
             }),
             downloading: state.active_downloads.iter().any(|active| active.dedupe_key == entry.dedupe_key),
             queued: state.download_queue.iter().any(|queued| queued_dedupe_key(&queued.request) == entry.dedupe_key),
@@ -182,12 +182,7 @@ pub fn back_to_browse(state: &mut ContentBrowserState) {
 /// "Instance: X | Minecraft 1.21 | Loader Fabric".
 pub fn context_line(instance: &InstanceRecord) -> String {
     let game_version = instance.game_version.trim();
-    format!(
-        "Instance: {} | Minecraft {} | Loader {}",
-        instance.name,
-        if game_version.is_empty() { "n/a" } else { game_version },
-        instance.modloader.trim()
-    )
+    tr!("Instance: {name} | Minecraft {game_version} | Loader {instance}", name = instance.name, game_version = if game_version.is_empty() { "n/a" } else { game_version }, instance = instance.modloader.trim()).into_owned()
 }
 
 pub fn status(state: &ContentBrowserState) -> (Option<String>, Vec<String>) {
@@ -205,20 +200,20 @@ pub fn controls(state: &ContentBrowserState) -> Controls {
             .map_or(0, |index| index + 1)
     };
     let queue_status = if state.download_in_flight {
-        format!("Downloads: active, {} queued", state.download_queue.len())
+        tr!("Downloads: active, {count} queued", count = state.download_queue.len()).into_owned()
     } else if state.download_queue.is_empty() {
-        "Downloads: idle".to_owned()
+        tr!("Downloads: idle").into_owned()
     } else {
-        format!("Downloads: idle, {} queued", state.download_queue.len())
+        tr!("Downloads: idle, {count} queued", count = state.download_queue.len()).into_owned()
     };
     Controls {
         versions: state.game_version_options.clone(),
         version,
-        scopes: ContentScope::ALL.iter().map(|value| value.label().to_owned()).collect(),
+        scopes: ContentScope::ALL.iter().map(|value| value.label().into_owned()).collect(),
         scope: ContentScope::ALL.iter().position(|value| *value == state.content_scope).unwrap_or(0),
-        sorts: ModSortMode::ALL.iter().map(|value| value.label().to_owned()).collect(),
+        sorts: ModSortMode::ALL.iter().map(|value| value.label().into_owned()).collect(),
         sort: ModSortMode::ALL.iter().position(|value| *value == state.mod_sort_mode).unwrap_or(0),
-        loaders: BrowserLoader::ALL.iter().map(|value| value.label().to_owned()).collect(),
+        loaders: BrowserLoader::ALL.iter().map(|value| value.label().into_owned()).collect(),
         loader: BrowserLoader::ALL.iter().position(|value| *value == state.loader).unwrap_or(0),
         queue_status,
         identify_busy: state.identify_in_flight,
@@ -274,23 +269,20 @@ pub fn submit(state: &mut ContentBrowserState, as_tag: bool) {
 pub fn searching(state: &ContentBrowserState) -> Option<String> {
     state.search_in_flight.then(|| {
         if state.search_total_tasks > 0 {
-            format!(
-                "Searching content... {}/{} result groups loaded.",
-                state.search_completed_tasks, state.search_total_tasks
-            )
+            tr!("Searching content... {search_completed_tasks}/{search_total_tasks} result groups loaded.", search_completed_tasks = state.search_completed_tasks, search_total_tasks = state.search_total_tasks).into_owned()
         } else {
-            "Searching content...".to_owned()
+            tr!("Searching content...").into_owned()
         }
     })
 }
 
-pub fn empty_message(state: &ContentBrowserState) -> &'static str {
+pub fn empty_message(state: &ContentBrowserState) -> std::borrow::Cow<'static, str> {
     if state.search_in_flight {
-        "Searching content..."
+        tr!("Searching content...")
     } else if state.active_search_request.is_some() {
-        "No content was found for this search. Try different words, another version or loader, or another content type."
+        tr!("No content was found for this search. Try different words, another version or loader, or another content type.")
     } else {
-        "No results yet. Search to browse installable content."
+        tr!("No results yet. Search to browse installable content.")
     }
 }
 
@@ -354,7 +346,7 @@ pub fn quick_install(state: &mut ContentBrowserState, key: &str) {
             loader: state.loader,
         },
     });
-    state.status_message = Some(format!("Queued {} for download ({} in queue).", entry.name, state.download_queue.len()));
+    state.status_message = Some(tr!("Queued {name} for download ({count} in queue).", name = entry.name, count = state.download_queue.len()).into_owned());
 }
 
 pub fn open_detail(state: &mut ContentBrowserState, key: &str) {
@@ -444,12 +436,12 @@ pub fn detail(state: &mut ContentBrowserState, instance_root: &Path) -> Option<D
     Some(DetailView {
         tile: TileView::of(&entry, &manifest, state),
         body: if entry.summary.trim().is_empty() {
-            "No description provided.".to_owned()
+            tr!("No description provided.").into_owned()
         } else {
             entry.summary.trim().to_owned()
         },
         tab: usize::from(state.detail_tab == ContentDetailTab::Versions),
-        loaders: BrowserLoader::ALL.iter().map(|value| value.label().to_owned()).collect(),
+        loaders: BrowserLoader::ALL.iter().map(|value| value.label().into_owned()).collect(),
         loader: BrowserLoader::ALL.iter().position(|value| *value == state.detail_loader_filter).unwrap_or(0),
         versions: state.game_version_options.clone(),
         version,
@@ -495,13 +487,9 @@ pub fn queue_version(state: &mut ContentBrowserState, version_id: &str, action: 
             loader: state.detail_loader_filter,
         },
     });
-    state.status_message = Some(format!(
-        "Queued {} {}.",
-        match action {
+    state.status_message = Some(tr!("Queued {action} {name}.", action = match action {
             RowAction::Switch => "switch for",
             RowAction::Installed => "installed",
             RowAction::Download => "install for",
-        },
-        entry.name
-    ));
+        }, name = entry.name).into_owned());
 }

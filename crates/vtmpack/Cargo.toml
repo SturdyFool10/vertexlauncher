@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+vertex_i18n.workspace = true
 curseforge.workspace = true
 installation.workspace = true
 managed_content.workspace = true

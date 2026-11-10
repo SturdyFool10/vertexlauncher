@@ -639,6 +639,7 @@ dependencies = [
  "serde_json",
  "toml 0.8.23",
  "tracing",
+ "vertex_i18n",
 ]
 
 [[package]]
@@ -2190,6 +2191,7 @@ dependencies = [
  "mc_options",
  "serde_json",
  "tracing",
+ "vertex_i18n",
  "zip",
 ]
 
@@ -2466,6 +2468,7 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "ureq",
+ "vertex_i18n",
  "vertex_theme",
  "vtmpack",
  "wayland-backend",
@@ -2697,6 +2700,7 @@ name = "mc_options"
 version = "0.1.25-Alpha"
 dependencies = [
  "serde_json",
+ "vertex_i18n",
  "zip",
 ]
 
@@ -5033,6 +5037,16 @@ name = "vertex_constants"
 version = "0.1.25-Alpha"
 
 [[package]]
+name = "vertex_i18n"
+version = "0.1.25-Alpha"
+dependencies = [
+ "app_paths",
+ "serde",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
 name = "vertex_shell"
 version = "0.1.25-Alpha"
 dependencies = [
@@ -5093,6 +5107,7 @@ dependencies = [
  "ureq",
  "url",
  "vertex_constants",
+ "vertex_i18n",
  "vertex_shell",
  "vertex_theme",
  "vtmpack",
@@ -5118,6 +5133,7 @@ dependencies = [
  "tracing",
  "ureq",
  "vertex_constants",
+ "vertex_i18n",
  "xz2",
 ]
 

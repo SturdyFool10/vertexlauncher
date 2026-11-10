@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 
@@ -7,11 +8,11 @@ pub(super) fn metadata_validation_error(state: &InstanceScreenState) -> Option<S
     let requested_modloader = selected_modloader_value(state);
     let requested_game_version = state.game_version_input.trim().to_owned();
     let validation_error = if trimmed_name.is_empty() {
-        Some("Name cannot be empty.".to_owned())
+        Some(tr!("Name cannot be empty.").into_owned())
     } else if requested_game_version.is_empty() {
-        Some("Minecraft game version cannot be empty.".to_owned())
+        Some(tr!("Minecraft game version cannot be empty.").into_owned())
     } else if requested_modloader.trim().is_empty() {
-        Some("Modloader cannot be empty.".to_owned())
+        Some(tr!("Modloader cannot be empty.").into_owned())
     } else if support_catalog_ready(state)
         && !state.loader_support.supports_loader(
             requested_modloader.as_str(),
@@ -19,10 +20,7 @@ pub(super) fn metadata_validation_error(state: &InstanceScreenState) -> Option<S
         )
         && state.selected_modloader != CUSTOM_MODLOADER_INDEX
     {
-        Some(format!(
-            "{} is not available for Minecraft {}.",
-            requested_modloader, requested_game_version
-        ))
+        Some(tr!("{requested_modloader} is not available for Minecraft {requested_game_version}.", requested_modloader = requested_modloader, requested_game_version = requested_game_version).into_owned())
     } else {
         resolve_modloader_version_for_settings(
             state,
@@ -53,7 +51,7 @@ pub(super) fn handle_save_versions_click(
                     "Saved instance metadata and versions."
                 );
             }
-            state.status_message = Some("Saved metadata and version settings.".to_owned());
+            state.status_message = Some(tr!("Saved metadata and version settings.").into_owned());
         }
         Err(err) => {
             tracing::warn!(
@@ -117,7 +115,7 @@ pub(super) fn handle_reinstall_click(
                     None,
                 );
             } else {
-                state.status_message = Some("Instance was removed before reinstall.".to_owned());
+                state.status_message = Some(tr!("Instance was removed before reinstall.").into_owned());
             }
         }
         Err(err) => {

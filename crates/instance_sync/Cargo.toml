@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+vertex_i18n.workspace = true
 flate2 = "1.1"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 instances.workspace = true

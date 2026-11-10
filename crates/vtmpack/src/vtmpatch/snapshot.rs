@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 // ── Snapshot types ────────────────────────────────────────────────────────────
@@ -87,26 +88,26 @@ pub(super) fn read_base_snapshot(
 
     for entry in archive
         .entries()
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?
+        .map_err(|err| tr!("failed to read {path}: {err}", path = path.display(), err = err).into_owned())?
     {
-        let mut entry = entry.map_err(|err| format!("failed to read archive entry: {err}"))?;
+        let mut entry = entry.map_err(|err| tr!("failed to read archive entry: {err}", err = err).into_owned())?;
         let archive_path = entry
             .path()
-            .map_err(|err| format!("failed to decode archive path: {err}"))?
+            .map_err(|err| tr!("failed to decode archive path: {err}", err = err).into_owned())?
             .to_path_buf();
         let archive_name = path_to_string(&archive_path);
         let mut bytes = Vec::new();
         entry
             .read_to_end(&mut bytes)
-            .map_err(|err| format!("failed to read {archive_name}: {err}"))?;
+            .map_err(|err| tr!("failed to read {archive_name}: {err}", archive_name = archive_name, err = err).into_owned())?;
 
         if archive_name == "manifest.toml" {
             manifest = Some(
                 toml::from_str::<VtmpackManifest>(
                     std::str::from_utf8(&bytes)
-                        .map_err(|err| format!("base manifest.toml is not valid UTF-8: {err}"))?,
+                        .map_err(|err| tr!("base manifest.toml is not valid UTF-8: {err}", err = err).into_owned())?,
                 )
-                .map_err(|err| format!("failed to parse base manifest.toml: {err}"))?,
+                .map_err(|err| tr!("failed to parse base manifest.toml: {err}", err = err).into_owned())?,
             );
         } else {
             let sha512 = archive_name
@@ -125,7 +126,7 @@ pub(super) fn read_base_snapshot(
     }
 
     let manifest = manifest
-        .ok_or_else(|| format!("No manifest.toml found in Vertex pack {}", path.display()))?;
+        .ok_or_else(|| tr!("No manifest.toml found in Vertex pack {path}", path = path.display()).into_owned())?;
 
     // Insert hash-only sentinels for downloadable entries so they compare
     // correctly against mod files that are present in the current instance.
@@ -190,7 +191,7 @@ pub(super) fn build_current_snapshot(
 
     if !sanitized_manifest.projects.is_empty() {
         let bytes = toml::to_string_pretty(&sanitized_manifest)
-            .map_err(|err| format!("failed to serialize patch content manifest: {err}"))?
+            .map_err(|err| tr!("failed to serialize patch content manifest: {err}", err = err).into_owned())?
             .into_bytes();
         entries.insert(
             PathBuf::from(CONTENT_MANIFEST_ARCHIVE_PATH),
@@ -219,7 +220,7 @@ pub(super) fn build_current_snapshot(
             continue;
         }
         let actual_sha512 = modrinth::hash_file_sha512_hex(source_path.as_path())
-            .map_err(|err| format!("failed to hash {}: {err}", source_path.display()))?;
+            .map_err(|err| tr!("failed to hash {source_path}: {err}", source_path = source_path.display(), err = err).into_owned())?;
         let archive_path = instance_relative_to_archive_path(downloadable.file_path.as_path());
         entries.insert(
             archive_path,
@@ -243,10 +244,7 @@ pub(super) fn build_current_snapshot(
             files.push(root_path);
         } else if root_path.is_dir() {
             collect_regular_files_recursive(root_path.as_path(), &mut files).map_err(|err| {
-                format!(
-                    "failed to collect files under {}: {err}",
-                    root_path.display()
-                )
+                tr!("failed to collect files under {root_path}: {err}", root_path = root_path.display(), err = err).into_owned()
             })?;
         }
 
@@ -262,7 +260,7 @@ pub(super) fn build_current_snapshot(
             let snapshot_entry = if is_mods_dir {
                 // Hash-only for unresolved local mod jars — avoids keeping all JARs in memory.
                 let sha512 = modrinth::hash_file_sha512_hex(file.as_path())
-                    .map_err(|err| format!("failed to hash {}: {err}", file.display()))?;
+                    .map_err(|err| tr!("failed to hash {file}: {err}", file = file.display(), err = err).into_owned())?;
                 SnapshotEntry {
                     bytes: Vec::new(),
                     sha512: Some(sha512),
@@ -271,7 +269,7 @@ pub(super) fn build_current_snapshot(
                 }
             } else {
                 let bytes = fs::read(file.as_path())
-                    .map_err(|err| format!("failed to read {}: {err}", file.display()))?;
+                    .map_err(|err| tr!("failed to read {file}: {err}", file = file.display(), err = err).into_owned())?;
                 SnapshotEntry {
                     bytes,
                     sha512: None,
@@ -525,7 +523,7 @@ pub(super) fn rediscover_changed_mods(
                 archive_path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Unknown mod".to_owned())
+                    .unwrap_or_else(|| tr!("Unknown mod").into_owned())
             });
 
         downloadable.push(VtmpackDownloadableEntry {
@@ -534,7 +532,7 @@ pub(super) fn rediscover_changed_mods(
             file_path: instance_file_path,
             modrinth_project_id: Some(version.project_id.clone()),
             curseforge_project_id: None,
-            selected_source: Some("Modrinth".to_owned()),
+            selected_source: Some(tr!("Modrinth").into_owned()),
             selected_version_id: Some(version.id.clone()),
             selected_version_name: non_empty(version.version_number.as_str()),
             selected_file_sha1: path_to_sha1.get(archive_path).cloned(),

@@ -1,3 +1,4 @@
+use vertex_i18n::{tr, trn};
 use super::*;
 
 pub(super) fn prefetch_bulk_update_metadata(
@@ -37,17 +38,14 @@ pub(super) fn tab_has_known_available_update(
 }
 
 pub(super) fn bulk_update_button_label(kind: InstalledContentKind) -> String {
-    format!("Update all {}", kind.label().to_ascii_lowercase())
+    tr!("Update all {kind}", kind = kind.label().to_ascii_lowercase()).into_owned()
 }
 
 pub(super) fn bulk_update_button_tooltip(kind: InstalledContentKind) -> String {
     if kind == InstalledContentKind::Mods {
-        "Updates all mods to the latest compatible version, you typically should not update pre-made modpacks most of the time if you are playing Multiplayer, or if your modpack is complex".to_owned()
+        tr!("Updates all mods to the latest compatible version, you typically should not update pre-made modpacks most of the time if you are playing Multiplayer, or if your modpack is complex").into_owned()
     } else {
-        format!(
-            "Updates all {} to the latest compatible version for this instance.",
-            kind.label().to_ascii_lowercase()
-        )
+        tr!("Updates all {kind} to the latest compatible version for this instance.", kind = kind.label().to_ascii_lowercase()).into_owned()
     }
 }
 
@@ -84,10 +82,7 @@ pub(super) fn update_all_installed_content(
                 updated_count,
                 "aborting bulk content update after too many passes"
             );
-            return Err(format!(
-                "Stopped updating {} after too many passes.",
-                kind.label().to_ascii_lowercase()
-            ));
+            return Err(tr!("Stopped updating {kind} after too many passes.", kind = kind.label().to_ascii_lowercase()).into_owned());
         }
 
         let managed_identities = load_managed_content_identities(instance_root);
@@ -229,33 +224,30 @@ pub(super) fn update_all_installed_content(
         "finished bulk content update scan"
     );
     let mut message = if updated_count == 0 {
-        format!("No {kind_label} updates available.")
+        tr!("No {kind_label} updates available.", kind_label = kind_label).into_owned()
     } else if updated_count == 1 {
-        format!("Updated 1 {} entry.", kind.content_type_key())
+        tr!("Updated 1 {kind} entry.", kind = kind.content_type_key()).into_owned()
     } else {
-        format!("Updated {updated_count} {kind_label}.")
+        tr!("Updated {updated_count} {kind_label}.", updated_count = updated_count, kind_label = kind_label).into_owned()
     };
     if !failed.is_empty() {
         // What could not be updated does not stop the rest; the first few are named so they can be looked at.
         let shown: Vec<&str> = failed.iter().take(3).map(String::as_str).collect();
-        message.push_str(&format!(
-            " Could not update {}: {}{}",
-            failed.len(),
-            shown.join("; "),
-            if failed.len() > shown.len() {
-                format!("; and {} more (see the log)", failed.len() - shown.len())
-            } else {
-                String::new()
-            }
-        ));
+        let more = if failed.len() > shown.len() {
+            tr!("; and {count} more (see the log)", count = failed.len() - shown.len()).into_owned()
+        } else {
+            String::new()
+        };
+        message.push(' ');
+        message.push_str(&tr!("Could not update {count}: {names}{more}", count = failed.len(), names = shown.join("; "), more = more));
     }
     if removed_duplicates > 0 {
-        message.push_str(&format!(" Removed {removed_duplicates} duplicate file(s)."));
+        message.push(' ');
+        message.push_str(&trn!(removed_duplicates, "Removed {count} duplicate file.", "Removed {count} duplicate files."));
     }
     if removed_artifacts > 0 {
-        message.push_str(&format!(
-            " Cleaned up {removed_artifacts} leftover file(s)."
-        ));
+        message.push(' ');
+        message.push_str(&trn!(removed_artifacts, "Cleaned up {count} leftover file.", "Cleaned up {count} leftover files."));
     }
     Ok(message)
 }
@@ -370,10 +362,10 @@ fn remove_stale_duplicate_content_path(path: &Path) -> Result<(), String> {
 
     if path.is_dir() {
         std::fs::remove_dir_all(path)
-            .map_err(|err| format!("failed to remove stale directory {}: {err}", path.display()))
+            .map_err(|err| tr!("failed to remove stale directory {path}: {err}", path = path.display(), err = err).into_owned())
     } else {
         std::fs::remove_file(path)
-            .map_err(|err| format!("failed to remove stale file {}: {err}", path.display()))
+            .map_err(|err| tr!("failed to remove stale file {path}: {err}", path = path.display(), err = err).into_owned())
     }
 }
 
@@ -924,7 +916,7 @@ fn prefetch_managed_curseforge_updates(
                 latest_version_label: non_empty_owned_for_update_prefetch(
                     latest_file.display_name.as_str(),
                 )
-                .unwrap_or_else(|| "Unknown update".to_owned()),
+                .unwrap_or_else(|| tr!("Unknown update").into_owned()),
             })
         };
 
@@ -1054,7 +1046,7 @@ fn modrinth_update_from_latest_prefetch(
     Some(content_resolver::InstalledContentUpdate {
         latest_version_id: latest.id.clone(),
         latest_version_label: non_empty_owned_for_update_prefetch(latest.version_number.as_str())
-            .unwrap_or_else(|| "Unknown update".to_owned()),
+            .unwrap_or_else(|| tr!("Unknown update").into_owned()),
     })
 }
 

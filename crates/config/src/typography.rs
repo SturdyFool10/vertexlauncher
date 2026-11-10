@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -69,18 +70,18 @@ impl TextRole {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::PageHeading => "Page headings",
-            Self::SectionHeading => "Section headings",
-            Self::ModalTitle => "Dialog titles",
-            Self::Subtitle => "Subtitles",
-            Self::StatLabel => "Small headings and stats",
-            Self::Body => "Body text",
-            Self::BodyStrong => "Emphasized body text",
-            Self::Caption => "Captions",
-            Self::Badge => "Badges and tags",
-            Self::Button => "Button labels",
-            Self::Input => "Text fields",
-            Self::Code => "Console and code",
+            Self::PageHeading => src!("Page headings"),
+            Self::SectionHeading => src!("Section headings"),
+            Self::ModalTitle => src!("Dialog titles"),
+            Self::Subtitle => src!("Subtitles"),
+            Self::StatLabel => src!("Small headings and stats"),
+            Self::Body => src!("Body text"),
+            Self::BodyStrong => src!("Emphasized body text"),
+            Self::Caption => src!("Captions"),
+            Self::Badge => src!("Badges and tags"),
+            Self::Button => src!("Button labels"),
+            Self::Input => src!("Text fields"),
+            Self::Code => src!("Console and code"),
         }
     }
 

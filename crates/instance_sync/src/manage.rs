@@ -2,6 +2,7 @@
 //! instance. Sharing one between several instances is `worlds` and `servers`; this keeps those in step when an entry is
 //! changed, so a deleted server is not put back by the next sync.
 
+use vertex_i18n::tr;
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,7 +45,7 @@ fn ensure_stopped<'a>(
 ) -> Result<(), String> {
     for id in ids {
         if running.contains(id) {
-            return Err(format!("Close {} first; the game rewrites these files when it exits.", label(store, id)));
+            return Err(tr!("Close {instance} first; the game rewrites these files when it exits.", instance = label(store, id)).into_owned());
         }
     }
     Ok(())
@@ -54,13 +55,13 @@ fn root_of(store: &InstanceStore, installations_root: &Path, id: &str) -> Result
     store
         .find(id)
         .map(|instance| instance_root_path(installations_root, instance))
-        .ok_or_else(|| "Instance not found.".to_owned())
+        .ok_or_else(|| tr!("Instance not found.").into_owned())
 }
 
 /// A folder name that stays inside `saves`.
 fn checked_folder(folder: &str) -> Result<&str, String> {
     if folder.is_empty() || folder == "." || folder == ".." || folder.contains(['/', '\\']) {
-        return Err(format!("{folder:?} is not a world folder."));
+        return Err(vertex_i18n::tr!("{folder} is not a world folder.", folder = format!("{folder:?}")).into_owned());
     }
     Ok(folder)
 }
@@ -71,10 +72,7 @@ fn world_path(store: &InstanceStore, installations_root: &Path, id: &str, folder
 
 fn refuse_synced(store: &InstanceStore, id: &str, folder: &str) -> Result<(), String> {
     if store.synced_world_for(id, folder).is_some() {
-        return Err(format!(
-            "{folder} is synced between instances. Use \"Sync world…\" to take {} out of the group first.",
-            label(store, id)
-        ));
+        return Err(tr!("{folder} is synced between instances. Use \"Sync world…\" to take {instance} out of the group first.", folder = folder, instance = label(store, id)).into_owned());
     }
     Ok(())
 }
@@ -92,18 +90,18 @@ fn free_name(dir: &Path, base: &str) -> String {
 
 fn rename_world(path: &Path, new_name: &str) -> Result<(), String> {
     let level = path.join("level.dat");
-    let bytes = fs::read(&level).map_err(|err| format!("could not read level.dat: {err}"))?;
+    let bytes = fs::read(&level).map_err(|err| tr!("could not read level.dat: {err}", err = err).into_owned())?;
     let mut file = nbt::parse(&bytes)?;
     let Some(Tag::Compound(data)) = nbt::get_mut(&mut file.root, "Data") else {
-        return Err("level.dat has no Data section.".to_owned());
+        return Err(tr!("level.dat has no Data section.").into_owned());
     };
     let name = Tag::String(new_name.as_bytes().to_vec());
     match nbt::get_mut(data, "LevelName") {
         Some(tag) => *tag = name,
-        None => data.push(("LevelName".to_owned(), name)),
+        None => data.push((tr!("LevelName").into_owned(), name)),
     }
     let _ = fs::copy(&level, path.join("level.dat_vertex_backup"));
-    write_atomic(&level, &nbt::write_gzip(&file)?, None).map_err(|err| format!("could not write level.dat: {err}"))
+    write_atomic(&level, &nbt::write_gzip(&file)?, None).map_err(|err| tr!("could not write level.dat: {err}", err = err).into_owned())
 }
 
 fn load_servers(root: &Path) -> Result<NbtFile, String> {
@@ -193,14 +191,14 @@ pub fn manage(
         ManageRequest::RenameWorld { instance_ids, folder, new_name } => {
             let new_name = new_name.trim();
             if new_name.is_empty() {
-                return Err("A world needs a name.".to_owned());
+                return Err(tr!("A world needs a name.").into_owned());
             }
             ensure_stopped(store, &instance_ids, running)?;
             for id in &instance_ids {
                 rename_world(&world_path(store, installations_root, id, &folder)?, new_name)
-                    .map_err(|err| format!("{}: {err}", label(store, id)))?;
+                    .map_err(|err| tr!("{instance}: {err}", instance = label(store, id), err = err).into_owned())?;
             }
-            Ok(ManageOutcome { message: format!("Renamed to {new_name}.") })
+            Ok(ManageOutcome { message: tr!("Renamed to {new_name}.", new_name = new_name).into_owned() })
         }
         ManageRequest::DeleteWorld { instance_ids, folder } => {
             ensure_stopped(store, &instance_ids, running)?;
@@ -208,57 +206,61 @@ pub fn manage(
                 refuse_synced(store, id, &folder)?;
                 let path = world_path(store, installations_root, id, &folder)?;
                 if is_link(&path) {
-                    return Err(format!("{folder} is a link; remove it from the sync group instead."));
+                    return Err(tr!("{folder} is a link; remove it from the sync group instead.", folder = folder).into_owned());
                 }
             }
             for id in &instance_ids {
                 let path = world_path(store, installations_root, id, &folder)?;
-                fs::remove_dir_all(&path).map_err(|err| format!("{}: could not delete {folder}: {err}", label(store, id)))?;
+                fs::remove_dir_all(&path).map_err(|err| tr!("{instance}: could not delete {folder}: {err}", instance = label(store, id), folder = folder, err = err).into_owned())?;
             }
-            Ok(ManageOutcome { message: "Deleted.".to_owned() })
+            Ok(ManageOutcome { message: tr!("Deleted.").into_owned() })
         }
         ManageRequest::TransferWorld { source_id, folder, dest_id, remove_source } => {
             if source_id == dest_id {
-                return Err("Pick a different instance.".to_owned());
+                return Err(tr!("Pick a different instance.").into_owned());
             }
             ensure_stopped(store, [&source_id, &dest_id], running)?;
             refuse_synced(store, &source_id, &folder)?;
             let source = world_path(store, installations_root, &source_id, &folder)?;
             if is_link(&source) || !source.is_dir() {
-                return Err(format!("{folder} is not a regular world folder."));
+                return Err(tr!("{folder} is not a regular world folder.", folder = folder).into_owned());
             }
             let saves = root_of(store, installations_root, &dest_id)?.join("saves");
             let name = free_name(&saves, &folder);
             let dest = saves.join(&name);
             if let Err(err) = copy_dir_recursive(&source, &dest) {
                 let _ = fs::remove_dir_all(&dest);
-                return Err(format!("Could not copy the world: {err}"));
+                return Err(tr!("Could not copy the world: {err}", err = err).into_owned());
             }
             if remove_source {
                 fs::remove_dir_all(&source)
-                    .map_err(|err| format!("Copied to {}, but could not remove the original: {err}", label(store, &dest_id)))?;
+                    .map_err(|err| tr!("Copied to {instance}, but could not remove the original: {err}", instance = label(store, &dest_id), err = err).into_owned())?;
             }
             Ok(ManageOutcome {
-                message: format!("{} {} to {}.", if remove_source { "Moved" } else { "Copied" }, name, label(store, &dest_id)),
+                message: if remove_source {
+                    tr!("Moved {name} to {destination}.", name = name, destination = label(store, &dest_id)).into_owned()
+                } else {
+                    tr!("Copied {name} to {destination}.", name = name, destination = label(store, &dest_id)).into_owned()
+                },
             })
         }
         ManageRequest::EditServer { instance_ids, address, new_name, new_address } => {
             let (new_name, new_address) = (new_name.trim(), new_address.trim());
             if new_address.is_empty() {
-                return Err("A server needs an address.".to_owned());
+                return Err(tr!("A server needs an address.").into_owned());
             }
             ensure_stopped(store, &instance_ids, running)?;
             let (old_key, new_key) = (normalize_server_key(&address), normalize_server_key(new_address));
             for id in &instance_ids {
                 let root = root_of(store, installations_root, id)?;
-                let mut file = load_servers(&root).map_err(|err| format!("{}: {err}", label(store, id)))?;
+                let mut file = load_servers(&root).map_err(|err| tr!("{instance}: {err}", instance = label(store, id), err = err).into_owned())?;
                 if old_key != new_key && server_list(&file).iter().any(|entry| entry_key(entry).as_deref() == Some(new_key.as_str())) {
-                    return Err(format!("{} already has a server at {new_address}.", label(store, id)));
+                    return Err(tr!("{instance} already has a server at {new_address}.", instance = label(store, id), new_address = new_address).into_owned());
                 }
                 let Some(entry) = find_server(&mut file, &old_key) else { continue };
                 set_string(entry, "name", new_name);
                 set_string(entry, "ip", new_address);
-                save_servers(&root, &file).map_err(|err| format!("{}: {err}", label(store, id)))?;
+                save_servers(&root, &file).map_err(|err| tr!("{instance}: {err}", instance = label(store, id), err = err).into_owned())?;
             }
             if old_key != new_key {
                 // The sync rule follows the server to its new address.
@@ -266,45 +268,49 @@ pub fn manage(
                 store.set_server_sync_scope(&address, ServerSyncScope::FollowDefault);
                 store.set_server_sync_scope(new_address, scope);
             }
-            Ok(ManageOutcome { message: "Saved.".to_owned() })
+            Ok(ManageOutcome { message: tr!("Saved.").into_owned() })
         }
         ManageRequest::DeleteServer { instance_ids, address } => {
             ensure_stopped(store, &instance_ids, running)?;
             let key = normalize_server_key(&address);
             for id in &instance_ids {
                 let root = root_of(store, installations_root, id)?;
-                let mut file = load_servers(&root).map_err(|err| format!("{}: {err}", label(store, id)))?;
+                let mut file = load_servers(&root).map_err(|err| tr!("{instance}: {err}", instance = label(store, id), err = err).into_owned())?;
                 if remove_server(&mut file, &key) {
-                    save_servers(&root, &file).map_err(|err| format!("{}: {err}", label(store, id)))?;
+                    save_servers(&root, &file).map_err(|err| tr!("{instance}: {err}", instance = label(store, id), err = err).into_owned())?;
                 }
             }
             adjust_scope(store, &address, &instance_ids, None, servers_default_all);
-            Ok(ManageOutcome { message: "Deleted.".to_owned() })
+            Ok(ManageOutcome { message: tr!("Deleted.").into_owned() })
         }
         ManageRequest::TransferServer { source_id, address, dest_id, remove_source } => {
             if source_id == dest_id {
-                return Err("Pick a different instance.".to_owned());
+                return Err(tr!("Pick a different instance.").into_owned());
             }
             ensure_stopped(store, [&source_id, &dest_id], running)?;
             let key = normalize_server_key(&address);
             let source_root = root_of(store, installations_root, &source_id)?;
             let mut source_file = load_servers(&source_root)?;
-            let entry = find_server(&mut source_file, &key).map(|entry| entry.clone()).ok_or("The server is no longer in that instance.")?;
+            let entry = find_server(&mut source_file, &key).map(|entry| entry.clone()).ok_or_else(|| vertex_i18n::tr!("The server is no longer in that instance.").into_owned())?;
             let dest_root = root_of(store, installations_root, &dest_id)?;
             let mut dest_file = load_servers(&dest_root)?;
             if server_list(&dest_file).iter().any(|existing| entry_key(existing).as_deref() == Some(key.as_str())) {
-                return Err(format!("{} already has this server.", label(store, &dest_id)));
+                return Err(tr!("{instance} already has this server.", instance = label(store, &dest_id)).into_owned());
             }
             push_entry(&mut dest_file, entry);
-            save_servers(&dest_root, &dest_file).map_err(|err| format!("{}: {err}", label(store, &dest_id)))?;
+            save_servers(&dest_root, &dest_file).map_err(|err| tr!("{instance}: {err}", instance = label(store, &dest_id), err = err).into_owned())?;
             let removed: BTreeSet<String> = if remove_source { BTreeSet::from([source_id.clone()]) } else { BTreeSet::new() };
             if remove_source {
                 remove_server(&mut source_file, &key);
-                save_servers(&source_root, &source_file).map_err(|err| format!("{}: {err}", label(store, &source_id)))?;
+                save_servers(&source_root, &source_file).map_err(|err| tr!("{instance}: {err}", instance = label(store, &source_id), err = err).into_owned())?;
             }
             adjust_scope(store, &address, &removed, Some(&dest_id), servers_default_all);
             Ok(ManageOutcome {
-                message: format!("{} to {}.", if remove_source { "Moved" } else { "Copied" }, label(store, &dest_id)),
+                message: if remove_source {
+                    tr!("Moved to {destination}.", destination = label(store, &dest_id)).into_owned()
+                } else {
+                    tr!("Copied to {destination}.", destination = label(store, &dest_id)).into_owned()
+                },
             })
         }
     }

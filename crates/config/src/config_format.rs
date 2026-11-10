@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// File format choice for config creation.
@@ -13,8 +14,8 @@ impl ConfigFormat {
     /// Human-readable label for config format selection UI.
     pub fn label(self) -> &'static str {
         match self {
-            ConfigFormat::Json => "JSON (.json)",
-            ConfigFormat::Toml => "TOML (.toml)",
+            ConfigFormat::Json => src!("JSON (.json)"),
+            ConfigFormat::Toml => src!("TOML (.toml)"),
         }
     }
 

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[path = "package_import_curseforge/curseforge_concurrent_download_result.rs"]
@@ -36,7 +37,7 @@ pub(super) fn import_curseforge_pack(
 ) -> Result<InstanceRecord, ImportPackageError> {
     let ImportSource::ManifestFile(package_path) = &request.source else {
         return Err(ImportPackageError::message(
-            "CurseForge pack import requires a manifest file source.",
+            vertex_i18n::src!("CurseForge pack import requires a manifest file source."),
         ));
     };
     let manifest = read_curseforge_pack_manifest(package_path.as_path())
@@ -51,9 +52,9 @@ pub(super) fn import_curseforge_pack(
     .map_err(ImportPackageError::message)?;
     let file_count = manifest.files.iter().filter(|file| file.required).count();
     let total_steps = 5 + override_steps + (file_count * 2);
-    progress(import_progress("Read CurseForge manifest.", 1, total_steps));
+    progress(import_progress(vertex_i18n::src!("Read CurseForge manifest."), 1, total_steps));
     progress(import_progress(
-        "Resolving CurseForge pack metadata...",
+        vertex_i18n::src!("Resolving CurseForge pack metadata..."),
         2,
         total_steps,
     ));
@@ -66,7 +67,7 @@ pub(super) fn import_curseforge_pack(
         NewInstanceSpec {
             name: request.instance_name.clone(),
             description: instances::normalize_optional(manifest.author.as_str())
-                .map(|author| format!("Imported CurseForge pack by {author}.")),
+                .map(|author| tr!("Imported CurseForge pack by {author}.", author = author).into_owned()),
             thumbnail_path: None,
             modloader: resolved.dependency_info.modloader.clone(),
             game_version: resolved.dependency_info.game_version.clone(),
@@ -74,12 +75,10 @@ pub(super) fn import_curseforge_pack(
         },
     )
     .map_err(|err| {
-        ImportPackageError::message(format!("failed to create imported profile: {err}"))
+        ImportPackageError::message(tr!("failed to create imported profile: {err}", err = err).into_owned())
     })?;
     progress(import_progress(
-        &format!(
-            "Downloaded {file_count}/{file_count} mods. Created imported profile. Restoring overrides..."
-        ),
+        &tr!("Downloaded {file_count}/{file_count} mods. Created imported profile. Restoring overrides...", file_count = file_count),
         3 + file_count,
         total_steps,
     ));
@@ -100,7 +99,7 @@ pub(super) fn import_curseforge_pack(
     }
 
     progress(import_progress(
-        "Writing managed metadata...",
+        vertex_i18n::src!("Writing managed metadata..."),
         total_steps.saturating_sub(1),
         total_steps,
     ));
@@ -116,7 +115,7 @@ pub(super) fn import_curseforge_pack(
     }
 
     progress(import_progress(
-        "Import complete.",
+        vertex_i18n::src!("Import complete."),
         total_steps,
         total_steps,
     ));
@@ -137,7 +136,7 @@ pub fn attach_curseforge_modpack_install_state(
         instance_root,
         &ModpackInstallState {
             format: "curseforge".to_owned(),
-            pack_name: default_if_blank(pack_name, "CurseForge Pack".to_owned()),
+            pack_name: default_if_blank(pack_name, tr!("CurseForge Pack").into_owned()),
             version_id: file_id.to_string(),
             version_name: default_if_blank(version_name, file_id.to_string()),
             modrinth_project_id: None,
@@ -158,18 +157,12 @@ pub fn format_curseforge_download_url_error(
         curseforge::CurseForgeError::HttpStatus { status, body } => {
             let body = body.trim();
             if body.is_empty() {
-                format!(
-                    "CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: HTTP {status} with empty response body"
-                )
+                tr!("CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: HTTP {status} with empty response body", project_id = project_id, file_id = file_id, endpoint = endpoint, status = status).into_owned()
             } else {
-                format!(
-                    "CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: HTTP {status}: {body}"
-                )
+                tr!("CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: HTTP {status}: {body}", project_id = project_id, file_id = file_id, endpoint = endpoint, status = status, body = body).into_owned()
             }
         }
-        _ => format!(
-            "CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: {err}"
-        ),
+        _ => tr!("CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: {err}", project_id = project_id, file_id = file_id, endpoint = endpoint, err = err).into_owned(),
     }
 }
 
@@ -230,7 +223,7 @@ pub(super) fn resolve_curseforge_pack_data(
                 .collect::<Vec<_>>()
                 .as_slice(),
         )
-        .map_err(|err| format!("failed to fetch CurseForge pack files: {err}"))?
+        .map_err(|err| tr!("failed to fetch CurseForge pack files: {err}", err = err).into_owned())?
         .into_iter()
         .map(|file| (file.id, file))
         .collect::<HashMap<_, _>>();
@@ -242,7 +235,7 @@ pub(super) fn resolve_curseforge_pack_data(
                 .collect::<Vec<_>>()
                 .as_slice(),
         )
-        .map_err(|err| format!("failed to fetch CurseForge pack projects: {err}"))?
+        .map_err(|err| tr!("failed to fetch CurseForge pack projects: {err}", err = err).into_owned())?
         .into_iter()
         .map(|project| (project.id, project))
         .collect::<HashMap<_, _>>();
@@ -266,7 +259,7 @@ pub(super) fn predownload_curseforge_pack_files(
     let mut manual_requirements = Vec::new();
     let client = CurseForgeClient::from_env().ok_or_else(|| {
         ImportPackageError::message(
-            "CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack.",
+            vertex_i18n::src!("CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack."),
         )
     })?;
 
@@ -275,10 +268,7 @@ pub(super) fn predownload_curseforge_pack_files(
             continue;
         }
         let file = resolved.files.get(&manifest_file.file_id).ok_or_else(|| {
-            ImportPackageError::message(format!(
-                "CurseForge file {} for project {} was not found.",
-                manifest_file.file_id, manifest_file.project_id
-            ))
+            ImportPackageError::message(tr!("CurseForge file {file_id} for project {project_id} was not found.", file_id = manifest_file.file_id, project_id = manifest_file.project_id).into_owned())
         })?;
         let project = resolved.projects.get(&manifest_file.project_id);
         let requirement = build_curseforge_manual_download_requirement(
@@ -309,10 +299,7 @@ pub(super) fn predownload_curseforge_pack_files(
 
     if !download_plans.is_empty() {
         progress(import_progress(
-            &format!(
-                "Preparing {} CurseForge mod downloads...",
-                download_plans.len()
-            ),
+            &tr!("Preparing {count} CurseForge mod downloads...", count = download_plans.len()),
             2,
             total_steps,
         ));
@@ -399,7 +386,7 @@ pub(super) fn download_curseforge_plans_concurrently(
             .as_millis()
     ));
     fs_create_dir_all_logged(staging_dir.as_path())
-        .map_err(|err| format!("failed to create CurseForge staging directory: {err}"))?;
+        .map_err(|err| tr!("failed to create CurseForge staging directory: {err}", err = err).into_owned())?;
     let total_downloads = plans.len();
     // First try everything as one batch under the user's download limits (concurrent transfers and speed limit). Only
     // if that fails as a whole are the mods tried one at a time below, so each one that cannot be fetched can be
@@ -423,7 +410,7 @@ pub(super) fn download_curseforge_plans_concurrently(
             .map(|plan| (plan.requirement.file_id, staged_path_for(plan)))
             .collect();
         progress(import_progress(
-            &format!("Downloaded {total_downloads} mods"),
+            &tr!("Downloaded {total_downloads} mods", total_downloads = total_downloads),
             2 + total_downloads,
             total_steps,
         ));
@@ -484,10 +471,7 @@ pub(super) fn download_curseforge_plans_concurrently(
         match result {
             Ok(path) => {
                 progress(import_progress(
-                    &format!(
-                        "Downloaded {} via {} ({}/{total_downloads} mods)",
-                        requirement.display_name, source_label, completed_downloads
-                    ),
+                    &tr!("Downloaded {display_name} via {source_label} ({completed_downloads}/{total_downloads} mods)", display_name = requirement.display_name, source_label = source_label, completed_downloads = completed_downloads, total_downloads = total_downloads),
                     2 + completed_downloads,
                     total_steps,
                 ));
@@ -503,10 +487,7 @@ pub(super) fn download_curseforge_plans_concurrently(
                     "CurseForge pack predownload failed; requiring manual download"
                 );
                 progress(import_progress(
-                    &format!(
-                        "Queued {} for manual download ({}/{total_downloads} mods checked)",
-                        requirement.display_name, completed_downloads
-                    ),
+                    &tr!("Queued {display_name} for manual download ({completed_downloads}/{total_downloads} mods checked)", display_name = requirement.display_name, completed_downloads = completed_downloads, total_downloads = total_downloads),
                     2 + completed_downloads,
                     total_steps,
                 ));
@@ -531,7 +512,7 @@ pub(super) fn build_curseforge_install_state(
     ModpackInstallState {
         format: "curseforge".to_owned(),
         pack_name: instances::normalize_optional(manifest.name.as_str())
-            .unwrap_or_else(|| "CurseForge Pack".to_owned()),
+            .unwrap_or_else(|| tr!("CurseForge Pack").into_owned()),
         version_id: instances::normalize_optional(manifest.version.as_str())
             .unwrap_or_else(|| "unknown".to_owned()),
         version_name: instances::normalize_optional(manifest.version.as_str())
@@ -550,10 +531,10 @@ pub(super) fn find_curseforge_file(
 ) -> Result<curseforge::File, String> {
     client
         .get_files(&[file_id])
-        .map_err(|err| format!("failed to fetch CurseForge file {file_id}: {err}"))?
+        .map_err(|err| tr!("failed to fetch CurseForge file {file_id}: {err}", file_id = file_id, err = err).into_owned())?
         .into_iter()
         .next()
-        .ok_or_else(|| format!("CurseForge file {file_id} was not found for project {project_id}"))
+        .ok_or_else(|| tr!("CurseForge file {file_id} was not found for project {project_id}", file_id = file_id, project_id = project_id).into_owned())
 }
 
 pub(super) fn populate_curseforge_pack_instance(
@@ -585,18 +566,12 @@ pub(super) fn populate_curseforge_pack_instance(
 
     for manifest_file in manifest.files.iter().filter(|file| file.required) {
         let file = resolved.files.get(&manifest_file.file_id).ok_or_else(|| {
-            ImportPackageError::message(format!(
-                "CurseForge file {} for project {} was not found.",
-                manifest_file.file_id, manifest_file.project_id
-            ))
+            ImportPackageError::message(tr!("CurseForge file {file_id} for project {project_id} was not found.", file_id = manifest_file.file_id, project_id = manifest_file.project_id).into_owned())
         })?;
         let source_path = manual_curseforge_files
             .get(&manifest_file.file_id)
             .ok_or_else(|| {
-                ImportPackageError::message(format!(
-                    "CurseForge file {} was not predownloaded before installation.",
-                    manifest_file.file_id
-                ))
+                ImportPackageError::message(tr!("CurseForge file {file_id} was not predownloaded before installation.", file_id = manifest_file.file_id).into_owned())
             })?;
         let detected_kind =
             detect_installed_content_kind(source_path.as_path()).unwrap_or_else(|| {
@@ -613,26 +588,18 @@ pub(super) fn populate_curseforge_pack_instance(
         let destination = target_dir.join(file.file_name.as_str());
         if let Some(parent) = destination.parent() {
             fs_create_dir_all_logged(parent).map_err(|err| {
-                ImportPackageError::message(format!("failed to create {}: {err}", parent.display()))
+                ImportPackageError::message(tr!("failed to create {parent}: {err}", parent = parent.display(), err = err).into_owned())
             })?;
         }
         completed_steps += 1;
         applied_mods += 1;
         progress(import_progress(
-            &format!(
-                "Applying staged {} for {} ({applied_mods}/{total_mods} files)",
-                detected_kind.content_type_key(),
-                file.display_name
-            ),
+            &tr!("Applying staged {kind} for {display_name} ({applied_mods}/{total_mods} files)", kind = detected_kind.content_type_key(), display_name = file.display_name, applied_mods = applied_mods, total_mods = total_mods),
             completed_steps,
             total_steps,
         ));
         fs_copy_logged(source_path, destination.as_path()).map_err(|err| {
-            ImportPackageError::message(format!(
-                "failed to copy predownloaded file {} into {}: {err}",
-                source_path.display(),
-                destination.display()
-            ))
+            ImportPackageError::message(tr!("failed to copy predownloaded file {source_path} into {destination}: {err}", source_path = source_path.display(), destination = destination.display(), err = err).into_owned())
         })?;
     }
 
@@ -648,9 +615,9 @@ pub(super) fn extract_curseforge_overrides(
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<(), String> {
     let file = fs_file_open_logged(package_path)
-        .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to open {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to read {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
     let normalized_root = format!(
         "{}/",
         overrides_root
@@ -662,10 +629,7 @@ pub(super) fn extract_curseforge_overrides(
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|err| {
-            format!(
-                "failed to read zip entry in {}: {err}",
-                package_path.display()
-            )
+            tr!("failed to read zip entry in {package_path}: {err}", package_path = package_path.display(), err = err).into_owned()
         })?;
         let entry_name = entry.name().replace('\\', "/");
         let Some(relative) = entry_name.strip_prefix(normalized_root.as_str()) else {
@@ -677,33 +641,26 @@ pub(super) fn extract_curseforge_overrides(
         let destination = join_safe(instance_root, Path::new(relative))?;
         *completed_steps += 1;
         progress(import_progress(
-            &format!("Restoring override {}", relative),
+            &tr!("Restoring override {relative}", relative = relative),
             *completed_steps,
             total_steps,
         ));
         if entry.is_dir() {
             fs_create_dir_all_logged(destination.as_path()).map_err(|err| {
-                format!(
-                    "failed to create override directory {}: {err}",
-                    destination.display()
-                )
+                tr!("failed to create override directory {destination}: {err}", destination = destination.display(), err = err).into_owned()
             })?;
             continue;
         }
         if let Some(parent) = destination.parent() {
             fs_create_dir_all_logged(parent)
-                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+                .map_err(|err| tr!("failed to create {parent}: {err}", parent = parent.display(), err = err).into_owned())?;
         }
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).map_err(|err| {
-            format!(
-                "failed to read override {} from {}: {err}",
-                entry_name,
-                package_path.display()
-            )
+            tr!("failed to read override {entry_name} from {package_path}: {err}", entry_name = entry_name, package_path = package_path.display(), err = err).into_owned()
         })?;
         fs_write_logged(destination.as_path(), bytes)
-            .map_err(|err| format!("failed to write override {}: {err}", destination.display()))?;
+            .map_err(|err| tr!("failed to write override {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
     }
 
     Ok(())
@@ -714,9 +671,9 @@ pub(super) fn count_curseforge_override_entries(
     overrides_root: &Path,
 ) -> Result<usize, String> {
     let file = fs_file_open_logged(package_path)
-        .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to open {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to read {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
     let normalized_root = format!(
         "{}/",
         overrides_root
@@ -728,10 +685,7 @@ pub(super) fn count_curseforge_override_entries(
     let mut count = 0usize;
     for index in 0..archive.len() {
         let entry = archive.by_index(index).map_err(|err| {
-            format!(
-                "failed to read zip entry in {}: {err}",
-                package_path.display()
-            )
+            tr!("failed to read zip entry in {package_path}: {err}", package_path = package_path.display(), err = err).into_owned()
         })?;
         let entry_name = entry.name().replace('\\', "/");
         if entry_name.starts_with(normalized_root.as_str()) && !entry.is_dir() {
@@ -743,17 +697,17 @@ pub(super) fn count_curseforge_override_entries(
 
 pub(super) fn read_curseforge_pack_manifest(path: &Path) -> Result<CurseForgePackManifest, String> {
     let file = fs_file_open_logged(path)
-        .map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+        .map_err(|err| tr!("failed to open {path}: {err}", path = path.display(), err = err).into_owned())?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        .map_err(|err| tr!("failed to read {path}: {err}", path = path.display(), err = err).into_owned())?;
     let mut manifest = archive
         .by_name("manifest.json")
-        .map_err(|err| format!("missing manifest.json in {}: {err}", path.display()))?;
+        .map_err(|err| tr!("missing manifest.json in {path}: {err}", path = path.display(), err = err).into_owned())?;
     let mut raw = String::new();
     manifest
         .read_to_string(&mut raw)
-        .map_err(|err| format!("failed to read manifest.json: {err}"))?;
-    serde_json::from_str(&raw).map_err(|err| format!("failed to parse manifest.json: {err}"))
+        .map_err(|err| tr!("failed to read manifest.json: {err}", err = err).into_owned())?;
+    serde_json::from_str(&raw).map_err(|err| tr!("failed to parse manifest.json: {err}", err = err).into_owned())
 }
 
 pub(super) fn resolve_curseforge_pack_dependencies(
@@ -761,10 +715,7 @@ pub(super) fn resolve_curseforge_pack_dependencies(
 ) -> Result<MrpackDependencyInfo, String> {
     let game_version =
         normalize_minecraft_game_version(minecraft.version.as_str()).ok_or_else(|| {
-            format!(
-                "CurseForge pack declared an invalid Minecraft version: {}",
-                minecraft.version.trim()
-            )
+            tr!("CurseForge pack declared an invalid Minecraft version: {kind}", kind = minecraft.version.trim()).into_owned()
         })?;
 
     let loader = minecraft
@@ -775,20 +726,20 @@ pub(super) fn resolve_curseforge_pack_dependencies(
     let Some(loader) = loader else {
         return Ok(MrpackDependencyInfo {
             game_version,
-            modloader: "Vanilla".to_owned(),
+            modloader: tr!("Vanilla").into_owned(),
             modloader_version: String::new(),
         });
     };
 
     let id = loader.id.trim();
     let (modloader, modloader_version) = if let Some(version) = id.strip_prefix("forge-") {
-        ("Forge".to_owned(), version.to_owned())
+        (tr!("Forge").into_owned(), version.to_owned())
     } else if let Some(version) = id.strip_prefix("fabric-") {
-        ("Fabric".to_owned(), version.to_owned())
+        (tr!("Fabric").into_owned(), version.to_owned())
     } else if let Some(version) = id.strip_prefix("quilt-") {
-        ("Quilt".to_owned(), version.to_owned())
+        (tr!("Quilt").into_owned(), version.to_owned())
     } else if let Some(version) = id.strip_prefix("neoforge-") {
-        ("NeoForge".to_owned(), version.to_owned())
+        (tr!("NeoForge").into_owned(), version.to_owned())
     } else {
         (id.to_owned(), String::new())
     };
@@ -943,7 +894,7 @@ pub fn prepare_curseforge_manual_download_for_file(
     }
     let project = client
         .get_mods(&[project_id])
-        .map_err(|err| format!("failed to fetch CurseForge project {project_id}: {err}"))?
+        .map_err(|err| tr!("failed to fetch CurseForge project {project_id}: {err}", project_id = project_id, err = err).into_owned())?
         .into_iter()
         .next();
     Ok(Some(build_curseforge_manual_download_requirement(

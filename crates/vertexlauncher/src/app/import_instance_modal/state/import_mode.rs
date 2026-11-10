@@ -13,6 +13,6 @@ impl ImportMode {
     }
 
     pub(crate) fn options() -> [&'static str; 2] {
-        ["From manifest file", "Import from another launcher"]
+        [vertex_i18n::src!("From manifest file"), vertex_i18n::src!("Import from another launcher")]
     }
 }

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Path, PathBuf};
@@ -37,7 +38,7 @@ fn report_detached_task_failure(task_kind: &str, error: &launcher_runtime::TaskE
     notification::emit_replace(
         notification::Severity::Error,
         "background-task",
-        format!("A background task failed ({task_kind}): {error}"),
+        tr!("A background task failed ({task_kind}): {error}", task_kind = task_kind, error = error).into_owned(),
         format!("background-task/{task_kind}"),
     );
 }
@@ -49,7 +50,7 @@ fn panic_payload_text(payload: &(dyn Any + Send)) -> String {
     if let Some(text) = payload.downcast_ref::<String>() {
         return text.clone();
     }
-    "non-string panic payload".to_owned()
+    tr!("non-string panic payload").into_owned()
 }
 
 fn log_unexpected_panic(context: &'static str, payload: &(dyn Any + Send)) {
@@ -111,10 +112,7 @@ pub(super) fn start_initial_instance_install_with(
         activity_instance.as_str(),
         &InstallProgress {
             stage: InstallStage::PreparingFolders,
-            message: format!(
-                "Starting installation for Minecraft {} ({})...",
-                game_version, modloader
-            ),
+            message: tr!("Starting installation for Minecraft {game_version} ({modloader})...", game_version = game_version, modloader = modloader).into_owned(),
             downloaded_files: 0,
             total_files: 0,
             downloaded_bytes: 0,
@@ -123,14 +121,7 @@ pub(super) fn start_initial_instance_install_with(
             eta_seconds: None,
         },
     );
-    notification::progress!(
-        notification::Severity::Info,
-        notification_source.clone(),
-        0.0f32,
-        "Starting initial install: Minecraft {} / {}.",
-        game_version,
-        modloader
-    );
+    notification::progress!(notification::Severity::Info, notification_source.clone(), 0.0f32, "Starting initial install: Minecraft {game_version} / {modloader}.", game_version = game_version, modloader = modloader);
 
     let _ = tokio_runtime::spawn_detached(async move {
         let last_emit = Arc::new(Mutex::new(
@@ -158,18 +149,16 @@ pub(super) fn start_initial_instance_install_with(
                         .await
                         .map(|path| display_user_path(path.as_path()))
                         .map_err(|err| {
-                            format!("failed to auto-install OpenJDK {}: {err}", runtime.major())
+                            tr!("failed to auto-install OpenJDK {version}: {err}", version = runtime.major(), err = err).into_owned()
                         })
                 }
-                Err(err) => Err(format!(
-                    "configured Java path is not readable ({path}): {err}"
-                )),
+                Err(err) => Err(tr!("configured Java path is not readable ({path}): {err}", path = path, err = err).into_owned()),
             }
         } else if let Some(runtime) = runtime {
             ensure_openjdk_runtime_async(runtime.major())
                 .await
                 .map(|path| display_user_path(path.as_path()))
-                .map_err(|err| format!("failed to auto-install OpenJDK {}: {err}", runtime.major()))
+                .map_err(|err| tr!("failed to auto-install OpenJDK {version}: {err}", version = runtime.major(), err = err).into_owned())
         } else {
             Ok("java".to_owned())
         };
@@ -207,18 +196,7 @@ pub(super) fn start_initial_instance_install_with(
                     } else {
                         0.0
                     };
-                    notification::progress!(
-                        notification::Severity::Info,
-                        notification_source_for_progress.clone(),
-                        fraction,
-                        "{} · {:.1} MiB/s{}",
-                        progress.message,
-                        progress.bytes_per_second / (1024.0 * 1024.0),
-                        progress
-                            .eta_seconds
-                            .map(|eta| format!(" · ETA {}s", eta))
-                            .unwrap_or_default()
-                    );
+                    notification::progress!(notification::Severity::Info, notification_source_for_progress.clone(), fraction, "{message} · {speed:.1} MiB/s{eta}", message = progress.message, speed = progress.bytes_per_second / (1024.0 * 1024.0), eta = progress.eta_seconds.map(|seconds| tr!(" · ETA {seconds}s", seconds = seconds).into_owned()).unwrap_or_default());
                 })
             };
 
@@ -236,25 +214,14 @@ pub(super) fn start_initial_instance_install_with(
         } else {
             Err(java_path_result
                 .err()
-                .unwrap_or_else(|| "failed to select Java executable".to_owned()))
+                .unwrap_or_else(|| tr!("failed to select Java executable").into_owned()))
         };
 
         match result {
             Ok(setup) => {
                 install_activity::clear_instance(activity_instance.as_str());
-                notification::progress!(
-                    notification::Severity::Info,
-                    notification_source.clone(),
-                    1.0f32,
-                    "Initial install complete ({} files, loader {}).",
-                    setup.downloaded_files,
-                    setup.resolved_modloader_version.as_deref().unwrap_or("n/a")
-                );
-                notification::info!(
-                    "Installation Complete!",
-                    "{} was installed successfully.",
-                    instance_name
-                );
+                notification::progress!(notification::Severity::Info, notification_source.clone(), 1.0f32, "Initial install complete ({downloaded_files} files, loader {loader}).", downloaded_files = setup.downloaded_files, loader = setup.resolved_modloader_version.as_deref().unwrap_or("n/a"));
+                notification::info!("Installation Complete!", "{instance_name} was installed successfully.", instance_name = instance_name);
             }
             Err(err) => {
                 install_activity::clear_instance(activity_instance.as_str());
@@ -268,12 +235,7 @@ pub(super) fn start_initial_instance_install_with(
                     error = %err,
                     "Initial install failed for newly created instance."
                 );
-                notification::error!(
-                    notification_source,
-                    "{}: initial install failed: {}",
-                    instance_name,
-                    err
-                );
+                notification::error!(notification_source, "{instance_name}: initial install failed: {err}", instance_name = instance_name, err = err);
                 if let Some(tx) = initial_install_results_tx {
                     if let Err(send_err) = tx.send(InitialInstanceInstallResult::Failed {
                         instance_id,

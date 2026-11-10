@@ -2,11 +2,12 @@
 //! long ago it was. Times are signed 64-bit seconds since the Unix epoch, so there is no 2038 limit, and the calendar
 //! maths is `jiff`'s, which covers years -9999 to 9999 and the system time zone database.
 
+use vertex_i18n::{Locale, src, tr, tr_ctx, trn};
 use jiff::{Span, Timestamp, Unit, Zoned, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 
 macro_rules! choice {
-    ($(#[$meta:meta])* $name:ident { $($variant:ident => $label:literal),+ $(,)? }) => {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident => $label:expr),+ $(,)? }) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
@@ -26,81 +27,81 @@ choice! {
     /// A ready-made date layout from somewhere in the world, or `Custom` to build one from the settings below it. The
     /// examples are for 10 November 2026.
     DateFormat {
-        Custom => "Custom (set it below)",
-        UnitedStates => "United States (11/10/2026)",
-        UnitedStatesLong => "United States, long (November 10, 2026)",
-        Europe => "UK, France, Spain, Italy, Brazil, Australia (10/11/2026)",
-        EuropeLong => "UK and Europe, long (10 November 2026)",
-        Germany => "Germany, Russia, Poland, Turkey (10.11.2026)",
-        Netherlands => "Netherlands, Belgium (10-11-2026)",
-        India => "India, Bangladesh (10-11-2026, day first)",
-        Iso => "ISO 8601, Sweden, Canada, South Africa (2026-11-10)",
-        Japan => "Japan, China (2026年11月10日)",
-        Korea => "South Korea (2026. 11. 10.)",
-        Thailand => "Thailand, Buddhist Era (10/11/2569)",
-        Taiwan => "Taiwan, Minguo calendar (115/11/10)",
+        Custom => src!("Custom (set it below)"),
+        UnitedStates => src!("United States (11/10/2026)"),
+        UnitedStatesLong => src!("United States, long (November 10, 2026)"),
+        Europe => src!("UK, France, Spain, Italy, Brazil, Australia (10/11/2026)"),
+        EuropeLong => src!("UK and Europe, long (10 November 2026)"),
+        Germany => src!("Germany, Russia, Poland, Turkey (10.11.2026)"),
+        Netherlands => src!("Netherlands, Belgium (10-11-2026)"),
+        India => src!("India, Bangladesh (10-11-2026, day first)"),
+        Iso => src!("ISO 8601, Sweden, Canada, South Africa (2026-11-10)"),
+        Japan => src!("Japan, China (2026年11月10日)"),
+        Korea => src!("South Korea (2026. 11. 10.)"),
+        Thailand => src!("Thailand, Buddhist Era (10/11/2569)"),
+        Taiwan => src!("Taiwan, Minguo calendar (115/11/10)"),
     }
 }
 
 choice! {
     /// The order the parts of a date come in.
     DateOrder {
-        MonthDayYear => "Month, day, year",
-        DayMonthYear => "Day, month, year",
-        YearMonthDay => "Year, month, day (ISO 8601 order)",
+        MonthDayYear => src!("Month, day, year"),
+        DayMonthYear => src!("Day, month, year"),
+        YearMonthDay => src!("Year, month, day (ISO 8601 order)"),
     }
 }
 
 choice! {
     /// What goes between the numbers of a numeric date.
     DateSeparator {
-        Dash => "Dash (-)",
-        Slash => "Slash (/)",
-        Dot => "Dot (.)",
-        Space => "Space",
+        Dash => src!("Dash (-)"),
+        Slash => src!("Slash (/)"),
+        Dot => src!("Dot (.)"),
+        Space => src!("Space"),
     }
 }
 
 choice! {
     /// How the month is written.
     MonthStyle {
-        Numeric => "Number (11)",
-        Short => "Short name (Nov)",
-        Long => "Full name (November)",
+        Numeric => src!("Number (11)"),
+        Short => src!("Short name (Nov)"),
+        Long => src!("Full name (November)"),
     }
 }
 
 choice! {
     /// 12-hour or 24-hour clock.
     ClockStyle {
-        Hour12 => "12-hour",
-        Hour24 => "24-hour",
+        Hour12 => src!("12-hour"),
+        Hour24 => src!("24-hour"),
     }
 }
 
 choice! {
     /// How AM and PM are written on a 12-hour clock.
     MeridiemStyle {
-        Upper => "AM / PM",
-        Lower => "am / pm",
-        UpperDotted => "A.M. / P.M.",
-        LowerDotted => "a.m. / p.m.",
+        Upper => src!("AM / PM"),
+        Lower => src!("am / pm"),
+        UpperDotted => src!("A.M. / P.M."),
+        LowerDotted => src!("a.m. / p.m."),
     }
 }
 
 choice! {
     /// What goes between hours, minutes and seconds.
     TimeSeparator {
-        Colon => "Colon (:)",
-        Dot => "Dot (.)",
+        Colon => src!("Colon (:)"),
+        Dot => src!("Dot (.)"),
     }
 }
 
 choice! {
     /// Which time zone times are shown in.
     DisplayTimeZone {
-        Local => "This computer's time zone",
-        Utc => "UTC",
+        Local => src!("This computer's time zone"),
+        Utc => src!("UTC"),
     }
 }
 
@@ -215,11 +216,12 @@ impl DateFormat {
 
 /// A regional date layout (anything but `Custom`) for a year, month and day.
 fn preset_date(format: DateFormat, year: i32, month: usize, day: i8) -> String {
+    let locale = Locale::current();
     match format {
         DateFormat::Custom | DateFormat::UnitedStates => format!("{month:02}/{day:02}/{year}"),
-        DateFormat::UnitedStatesLong => format!("{} {day}, {year}", LONG_MONTHS[month - 1]),
+        DateFormat::UnitedStatesLong => format!("{} {day}, {year}", locale.month_long(month)),
         DateFormat::Europe => format!("{day:02}/{month:02}/{year}"),
-        DateFormat::EuropeLong => format!("{day} {} {year}", LONG_MONTHS[month - 1]),
+        DateFormat::EuropeLong => format!("{day} {} {year}", locale.month_long(month)),
         DateFormat::Germany => format!("{day:02}.{month:02}.{year}"),
         DateFormat::Netherlands | DateFormat::India => format!("{day:02}-{month:02}-{year}"),
         DateFormat::Iso => format!("{year:04}-{month:02}-{day:02}"),
@@ -232,12 +234,6 @@ fn preset_date(format: DateFormat, year: i32, month: usize, day: i8) -> String {
     }
 }
 
-const SHORT_MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const LONG_MONTHS: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November",
-    "December",
-];
-const SHORT_DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 impl DisplayedTime {
     fn zone(&self) -> TimeZone {
@@ -265,7 +261,7 @@ impl DisplayedTime {
             date.push_str(" HE");
         }
         Some(if self.show_weekday {
-            let weekday = SHORT_DAYS[at.weekday().to_monday_zero_offset() as usize];
+            let weekday = Locale::current().weekday_short(at.weekday().to_monday_zero_offset() as usize);
             format!("{weekday}, {date}")
         } else {
             date
@@ -274,6 +270,7 @@ impl DisplayedTime {
 
     /// The date from the order, separator, month style and padding settings.
     fn custom_date(&self, year: i32, month: usize, day: i8) -> String {
+        let locale = Locale::current();
         let year = if self.four_digit_year { format!("{year}") } else { format!("{:02}", year.rem_euclid(100)) };
         let day = if self.pad_date { format!("{day:02}") } else { day.to_string() };
         let separator = match self.date_separator {
@@ -285,8 +282,8 @@ impl DisplayedTime {
         let month_text = match self.month_style {
             MonthStyle::Numeric if self.pad_date => format!("{month:02}"),
             MonthStyle::Numeric => month.to_string(),
-            MonthStyle::Short => SHORT_MONTHS[month - 1].to_owned(),
-            MonthStyle::Long => LONG_MONTHS[month - 1].to_owned(),
+            MonthStyle::Short => locale.month_short(month),
+            MonthStyle::Long => locale.month_long(month).to_owned(),
         };
         let named = self.month_style != MonthStyle::Numeric;
         let date = match (self.date_order, named) {
@@ -342,21 +339,25 @@ impl DisplayedTime {
     /// `Taken at 11-10, 2026 at 02:15:30 PM`.
     pub fn taken_at(&self, unix_seconds: i64) -> String {
         match (self.format_date(unix_seconds), self.format_time(unix_seconds)) {
-            (Some(date), Some(time)) => format!("Taken at {date} at {time}"),
-            _ => "Taken at an unknown time".to_owned(),
+            (Some(date), Some(time)) => tr!("Taken at {date} at {time}", date = date, time = time).into_owned(),
+            _ => tr!("Taken at an unknown time").into_owned(),
         }
     }
 
     /// `1 year 2 days 3 hours 4 seconds ago`, or `... from now` for a time that has not come yet.
     pub fn time_ago(&self, then_unix_seconds: i64, now_unix_seconds: i64) -> String {
         let Some(delta) = self.relative_units(then_unix_seconds, now_unix_seconds) else {
-            return "At an unknown time".to_owned();
+            return tr!("At an unknown time").into_owned();
         };
         let future = then_unix_seconds > now_unix_seconds;
         if delta.is_empty() {
-            return "Just now".to_owned();
+            return tr!("Just now").into_owned();
         }
-        format!("{} {}", delta, if future { "from now" } else { "ago" })
+        if future {
+            tr!("{duration} from now", duration = delta).into_owned()
+        } else {
+            tr!("{duration} ago", duration = delta).into_owned()
+        }
     }
 
     /// The gap between the two moments as the units the settings ask for. `None` when either is out of range.
@@ -369,12 +370,22 @@ impl DisplayedTime {
         let years = earlier.until((Unit::Year, &later)).ok()?.get_years();
         let after_years = earlier.checked_add(Span::new().years(i64::from(years))).ok()?;
         let rest = after_years.until((Unit::Day, &later)).ok()?;
-        let mut parts: Vec<(i64, [&str; 3])> = vec![
-            (i64::from(years), ["year", "years", "y"]),
-            (i64::from(rest.get_days()), ["day", "days", "d"]),
-            (i64::from(rest.get_hours()), ["hour", "hours", "h"]),
-            (rest.get_minutes(), ["minute", "minutes", "m"]),
-            (rest.get_seconds(), ["second", "seconds", "s"]),
+        let mut parts: Vec<(i64, fn(i64, bool) -> String)> = vec![
+            (i64::from(years), |n, abbreviated| {
+                if abbreviated { tr_ctx!("abbreviated duration", "{count}y", count = n).into_owned() } else { trn!(n, "{count} year", "{count} years") }
+            }),
+            (i64::from(rest.get_days()), |n, abbreviated| {
+                if abbreviated { tr_ctx!("abbreviated duration", "{count}d", count = n).into_owned() } else { trn!(n, "{count} day", "{count} days") }
+            }),
+            (i64::from(rest.get_hours()), |n, abbreviated| {
+                if abbreviated { tr_ctx!("abbreviated duration", "{count}h", count = n).into_owned() } else { trn!(n, "{count} hour", "{count} hours") }
+            }),
+            (rest.get_minutes(), |n, abbreviated| {
+                if abbreviated { tr_ctx!("abbreviated duration", "{count}m", count = n).into_owned() } else { trn!(n, "{count} minute", "{count} minutes") }
+            }),
+            (rest.get_seconds(), |n, abbreviated| {
+                if abbreviated { tr_ctx!("abbreviated duration", "{count}s", count = n).into_owned() } else { trn!(n, "{count} second", "{count} seconds") }
+            }),
         ];
         let Some(first) = parts.iter().position(|(value, _)| *value != 0) else {
             return Some(String::new());
@@ -387,13 +398,7 @@ impl DisplayedTime {
         Some(
             parts
                 .iter()
-                .map(|(value, names)| {
-                    if self.relative_abbreviate {
-                        format!("{value}{}", names[2])
-                    } else {
-                        format!("{value} {}", names[usize::from(*value != 1)])
-                    }
-                })
+                .map(|(value, name)| name(*value, self.relative_abbreviate))
                 .collect::<Vec<_>>()
                 .join(" "),
         )

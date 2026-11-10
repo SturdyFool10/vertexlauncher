@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(in crate::screens::home) fn request_screenshot_delete(
@@ -16,7 +17,7 @@ pub(in crate::screens::home) fn request_screenshot_delete(
     let _ = tokio_runtime::spawn_detached(async move {
         let result = launcher_runtime::fs::remove_file(path.as_path()).await.map_err(|err| {
             tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %path.display(), error = %err, context = "delete home screenshot");
-            format!("failed to remove {}: {err}", path.display())
+            tr!("failed to remove {path}: {err}", path = path.display(), err = err).into_owned()
         });
         if let Err(err) = tx.send((screenshot_key.clone(), file_name.clone(), result)) {
             tracing::error!(
@@ -41,10 +42,7 @@ pub(in crate::screens::home) fn poll_delete_screenshot_results(
     if drained.disconnected {
         tracing::error!(target: "vertexlauncher/home", "delete_screenshot_results worker channel stopped unexpectedly.");
         state.delete_screenshot_in_flight = false;
-        notification::error!(
-            "home/screenshots",
-            "Screenshot delete worker stopped unexpectedly."
-        );
+        notification::error!("home/screenshots", "Screenshot delete worker stopped unexpectedly.");
     }
 
     for (screenshot_key, file_name, result) in updates {
@@ -65,16 +63,11 @@ pub(in crate::screens::home) fn poll_delete_screenshot_results(
                 }
                 state.pending_delete_screenshot_key = None;
                 refresh_screenshot_state(state, instances, config, true);
-                notification::info!("home/screenshots", "Deleted '{}' from disk.", file_name);
+                notification::info!("home/screenshots", "Deleted '{file_name}' from disk.", file_name = file_name);
             }
             Err(err) => {
                 state.pending_delete_screenshot_key = None;
-                notification::error!(
-                    "home/screenshots",
-                    "Failed to delete '{}': {}",
-                    file_name,
-                    err
-                );
+                notification::error!("home/screenshots", "Failed to delete '{file_name}': {err}", file_name = file_name, err = err);
             }
         }
     }

@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Texel-level anti-aliasing mode for skin preview rendering.
@@ -20,8 +21,8 @@ impl SkinPreviewTexelAaMode {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            SkinPreviewTexelAaMode::Off => "Off",
-            SkinPreviewTexelAaMode::TexelBoundary => "Texel Border AA",
+            SkinPreviewTexelAaMode::Off => src!("Off"),
+            SkinPreviewTexelAaMode::TexelBoundary => src!("Texel Border AA"),
         }
     }
 }

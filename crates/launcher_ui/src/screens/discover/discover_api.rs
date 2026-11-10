@@ -1,6 +1,7 @@
 //! Toolkit-free view of the Discover screen: the same search, filtering, detail and install logic the egui screen
 //! runs, exposed as plain data and calls so any front end can draw it.
 
+use vertex_i18n::tr;
 use super::*;
 use super::discover_detail::{
     build_install_request, poll_detail_versions, request_detail_versions, selected_detail_provider_ref,
@@ -15,7 +16,7 @@ pub struct EntryView {
     pub summary: String,
     pub author: Option<String>,
     pub icon_url: Option<String>,
-    pub sources: Vec<&'static str>,
+    pub sources: Vec<String>,
     pub downloads: Option<String>,
     pub updated: Option<String>,
 }
@@ -28,7 +29,7 @@ impl EntryView {
             summary: entry.summary.clone(),
             author: entry.author.clone().filter(|author| !author.trim().is_empty()),
             icon_url: entry.icon_url.clone(),
-            sources: entry.sources.iter().map(|source| source.label()).collect(),
+            sources: entry.sources.iter().map(|source| source.label().into_owned()).collect(),
             downloads: entry.popularity_score.map(format_compact_number),
             updated: entry.updated_at.as_deref().map(format_short_date),
         }
@@ -93,9 +94,9 @@ pub fn filters(state: &DiscoverState) -> Filters {
             .map_or(0, |index| index + 1)
     };
     Filters {
-        providers: DiscoverProviderFilter::ALL.iter().map(|value| value.label().to_owned()).collect(),
-        loaders: DiscoverLoaderFilter::ALL.iter().map(|value| value.label().to_owned()).collect(),
-        sorts: DiscoverSortMode::ALL.iter().map(|value| value.label().to_owned()).collect(),
+        providers: DiscoverProviderFilter::ALL.iter().map(|value| value.label().into_owned()).collect(),
+        loaders: DiscoverLoaderFilter::ALL.iter().map(|value| value.label().into_owned()).collect(),
+        sorts: DiscoverSortMode::ALL.iter().map(|value| value.label().into_owned()).collect(),
         game_versions: state.game_version_options.clone(),
         provider: DiscoverProviderFilter::ALL.iter().position(|value| *value == state.provider_filter).unwrap_or(0),
         loader: DiscoverLoaderFilter::ALL.iter().position(|value| *value == state.loader_filter).unwrap_or(0),
@@ -200,7 +201,7 @@ pub fn detail(state: &DiscoverState) -> Option<DetailView> {
     let selected = selected_detail_source(state, entry);
     Some(DetailView {
         entry: EntryView::of(entry),
-        sources: entry.provider_refs.iter().map(|provider| provider.source.label().to_owned()).collect(),
+        sources: entry.provider_refs.iter().map(|provider| provider.source.label().into_owned()).collect(),
         selected_source: entry.provider_refs.iter().position(|provider| provider.source == selected).unwrap_or(0),
         project_url: selected_detail_provider_ref(entry, selected).and_then(|provider| provider.primary_url.clone()),
         versions: state
@@ -242,6 +243,6 @@ pub fn detail_install(state: &mut DiscoverState, version_id: &str) -> Option<Dis
     let entry = state.detail_entry.clone()?;
     let version = state.detail_versions.iter().find(|version| version.version_id == version_id)?.clone();
     let request = build_install_request(&entry, &version)?;
-    state.begin_install(format!("Preparing {}...", version.version_name));
+    state.begin_install(tr!("Preparing {version}...", version = version.version_name).into_owned());
     Some(request)
 }

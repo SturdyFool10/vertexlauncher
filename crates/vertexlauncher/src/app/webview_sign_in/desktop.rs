@@ -1,4 +1,5 @@
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+use vertex_i18n::tr;
 use std::{
     sync::{Arc, Mutex},
     thread,
@@ -363,7 +364,7 @@ fn run_webview_window_attempt(
     );
 
     let window_builder = WindowBuilder::new()
-        .with_title("Microsoft Sign-In")
+        .with_title(tr!("Microsoft Sign-In").into_owned())
         .with_inner_size(LogicalSize::new(980.0, 760.0));
     #[cfg(not(target_os = "macos"))]
     let window_builder = if let Some(icon) = crate::app::app_icon::tao_icon() {
@@ -376,7 +377,7 @@ fn run_webview_window_attempt(
         .build(&event_loop)
         .map_err(|err| AttemptFailure {
             retryable: false,
-            message: format!("Failed to create sign-in window: {err}"),
+            message: tr!("Failed to create sign-in window: {err}", err = err).into_owned(),
         })?;
 
     let activity_state_for_nav = Arc::clone(&activity_state);
@@ -386,7 +387,7 @@ fn run_webview_window_attempt(
     let webview = WebViewBuilder::new(window)
         .map_err(|err| AttemptFailure {
             retryable: false,
-            message: format!("Failed to initialize webview builder: {err}"),
+            message: tr!("Failed to initialize webview builder: {err}", err = err).into_owned(),
         })?
         .with_background_color((255, 255, 255, 255))
         .with_initialization_script(WEBVIEW_DIAGNOSTIC_SCRIPT)
@@ -478,7 +479,7 @@ fn run_webview_window_attempt(
         .with_url(&auth_request_uri)
         .map_err(|err| AttemptFailure {
             retryable: false,
-            message: format!("Failed to set sign-in URL: {err}"),
+            message: tr!("Failed to set sign-in URL: {err}", err = err).into_owned(),
         })?
         .with_navigation_handler(move |uri: String| {
             let current_uri = uri;
@@ -541,7 +542,7 @@ fn run_webview_window_attempt(
         .build()
         .map_err(|err| AttemptFailure {
             retryable: false,
-            message: format!("Failed to build webview: {err}"),
+            message: tr!("Failed to build webview: {err}", err = err).into_owned(),
         })?;
 
     tracing::info!(
@@ -599,10 +600,7 @@ fn run_webview_window_attempt(
                                 "Microsoft sign-in webview showed no page activity; reloading sign-in URL once."
                             );
                         } else {
-                            let message = format!(
-                                "Microsoft sign-in webview never showed page activity within {} seconds and likely failed to render the login page. See launcher logs for details.",
-                                blank_timeout.as_secs()
-                            );
+                            let message = tr!("Microsoft sign-in webview never showed page activity within {seconds} seconds and likely failed to render the login page. See launcher logs for details.", seconds = blank_timeout.as_secs()).into_owned();
                             tracing::error!(
                                 target: "vertexlauncher/auth/webview/helper",
                                 attempt,
@@ -644,7 +642,7 @@ fn run_webview_window_attempt(
                     if slot.is_none() {
                         *slot = Some(AttemptOutcome::Failure(AttemptFailure {
                             retryable: false,
-                            message: "Microsoft sign-in was canceled".to_owned(),
+                            message: tr!("Microsoft sign-in was canceled").into_owned(),
                         }));
                     }
                 }
@@ -665,7 +663,7 @@ fn run_webview_window_attempt(
             let outcome = slot.take().unwrap_or_else(|| {
                 AttemptOutcome::Failure(AttemptFailure {
                     retryable: false,
-                    message: "Microsoft sign-in ended without a callback URL".to_owned(),
+                    message: tr!("Microsoft sign-in ended without a callback URL").into_owned(),
                 })
             });
 
@@ -676,7 +674,7 @@ fn run_webview_window_attempt(
         }
         Err(_) => Err(AttemptFailure {
             retryable: false,
-            message: "Sign-in state was poisoned unexpectedly".to_owned(),
+            message: tr!("Sign-in state was poisoned unexpectedly").into_owned(),
         }),
     }
 }
@@ -686,7 +684,7 @@ pub(super) fn run_webview_window(
     _auth_request_uri: &str,
     _redirect_uri: &str,
 ) -> Result<String, String> {
-    Err("Webview sign-in is not supported on this platform".to_owned())
+    Err(tr!("Webview sign-in is not supported on this platform").into_owned())
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]

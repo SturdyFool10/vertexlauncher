@@ -1,0 +1,3157 @@
+# Vertex Launcher language template.
+# Copy this file to `<tag>.toml` (for example `es.toml`), fill in [language], and translate the messages below.
+# Leave a message empty to keep showing it in English. Keep every {placeholder} exactly as written (you may move
+# or repeat them); see README.md in this folder. This file is generated: `cargo run -p vertex_i18n --bin extract -- --write`.
+
+[language]
+tag = ""
+name = ""
+native_name = ""
+right_to_left = false
+translators = []
+
+# [locale] is optional: it describes how the language counts, joins lists and writes numbers. See README.md.
+
+[strings]
+# placeholders: {eta}
+" ETA {eta}s" = ""
+# placeholders: {count}
+" | showing last {count} lines" = ""
+# placeholders: {eta}
+" · ETA {eta}s" = ""
+# placeholders: {seconds}
+" · ETA {seconds}s" = ""
+# placeholders: {speed}
+" · {speed:.1} MiB/s" = ""
+# placeholders: {java_note}
+"#!/usr/bin/env bash\nset -euo pipefail\n{java_note}\n\njar=\"$(find . -maxdepth 6 -type f \\( -iname '*server*.jar' -o -iname '*forge*.jar' -o -iname '*fabric*.jar' -o -iname '*quilt*.jar' -o -iname '*neoforge*.jar' \\) | head -n 1)\"\nif [ -z \"$jar\" ]; then\n  jar=\"$(find . -maxdepth 6 -type f -iname '*.jar' | head -n 1)\"\nfi\njar=\"${{jar#./}}\"\n\nif [ -z \"$jar\" ]; then\n  echo \"No server jar found in this directory.\"\n  echo \"Check VERTEX_SERVER_BUILD_REPORT.txt for guidance.\"\n  exit 1\nfi\n\necho \"Starting server using $jar\"\njava -Xms2G -Xmx4G -jar \"$jar\" nogui\n" = ""
+"#rrggbb" = ""
+# placeholders: {count}
+"(+{count} more)" = ""
+"03 rather than 3 (for a numeric month and the day). Default: On." = ""
+"09:05 rather than 9:05. Default: On." = ""
+"12-hour" = ""
+"1y 2d 3h rather than 1 year 2 days 3 hours. Default: Off." = ""
+"2026 rather than 26. Default: On." = ""
+"24-hour" = ""
+"250Mbps" = ""
+"3D Anaglyph" = ""
+# placeholders: {count}
+"; and {count} more (see the log)" = ""
+# placeholders: {java_note}
+"@echo off\nsetlocal EnableDelayedExpansion\n{java_note}\n\nset \"jar=\"\nfor /r %%f in (*server*.jar) do (\n  if not defined jar set \"jar=%%f\"\n)\nif not defined jar (\n  for /r %%f in (*forge*.jar *fabric*.jar *quilt*.jar *neoforge*.jar) do (\n    if not defined jar set \"jar=%%f\"\n  )\n)\nif not defined jar (\n  for /r %%f in (*.jar) do (\n  if not defined jar set \"jar=%%f\"\n  )\n)\n\nif not defined jar (\n  echo No server jar found in this directory.\n  echo Check VERTEX_SERVER_BUILD_REPORT.txt for guidance.\n  exit /b 1\n)\n\necho Starting server using !jar!\njava -Xms2G -Xmx4G -jar \"!jar!\" nogui\n" = ""
+"A 12-hour clock with AM and PM, or a 24-hour clock. Default: 12-hour." = ""
+# placeholders: {task_kind} {error}
+"A background task failed ({task_kind}): {error}" = ""
+"A bundle of graphics options. Changing individual options switches this to Custom." = ""
+"A multiplier on the launcher's interface brightness, applied on top of the UI paper white below (1.00 = unchanged). Lower it if the interface looks blown out. Default: 1.00." = ""
+"A ready-made date layout from around the world, or Custom to build your own from the settings below. Default: United States (mm/dd/yyyy)." = ""
+"A second line saying how long ago it was, or how far in the future if the clock was set ahead. Default: On." = ""
+"A server needs an address." = ""
+"A world needs a name." = ""
+"A.M. / P.M." = ""
+"AM / PM" = ""
+"AM / PM Style" = ""
+"ATLauncher" = ""
+"ATLauncher instance" = ""
+"Abbreviate Units" = ""
+"Accessibility" = ""
+"Accessibility Onboarding" = ""
+# placeholders: {name}
+"Account '{name}' has no renewable Microsoft refresh token." = ""
+# placeholders: {number}
+"Account {number}" = ""
+"Accounts and sign-in" = ""
+"Acrylic" = ""
+"Action needed" = ""
+"Active" = ""
+"Active account has no renewable token; launching in offline mode." = ""
+"Active account token could not be renewed. Continuing in offline mode." = ""
+# placeholders: {err}
+"Active account token is missing and renewal is unavailable: {err}. Launching in offline mode." = ""
+# placeholders: {account}
+"Active account: {account}" = ""
+"Add Local Content" = ""
+"Add Vertex to Better Blur DX's window classes" = ""
+"Add a Microsoft account" = ""
+"Add content" = ""
+"Add local file(s)" = ""
+"Added Vertex to Better Blur DX's window classes." = ""
+# placeholders: {summary}
+"Added {summary}." = ""
+"Adding content" = ""
+"Adding local content files..." = ""
+# placeholders: {relative}
+"Adding {relative}" = ""
+"Address" = ""
+"Adds Minecraft snapshots, pre-releases, release candidates and old betas to the version pickers when creating or editing an instance. Newer versions are listed first. Default: Off." = ""
+"Adds experimental and other non-standard entries from Mojang's version list to the version pickers. These are unsupported and may not launch. Default: Off." = ""
+"Adds item IDs and durability to item tooltips (same as F3+H)." = ""
+"Adds the very old Minecraft alpha releases (from 2010) to the version pickers. Many mods and features do not exist for these versions. Default: Off." = ""
+"Adjusting settings" = ""
+"Advanced" = ""
+"Advanced OpenGL" = ""
+"Advanced Tooltips" = ""
+"Advancements" = ""
+"Afrikaans" = ""
+"Albanian" = ""
+"All" = ""
+"All Sources" = ""
+"All Types" = ""
+"All changes saved" = ""
+"Allow CurseForge project IDs" = ""
+"Allow Cursor Changes" = ""
+"Allow Server Listing" = ""
+"Alpha Mask" = ""
+# placeholders: {installed}
+"Already installed in this instance\nCurrent: {installed}" = ""
+# placeholders: {status}
+"Also used by: {status}" = ""
+# placeholders: {instance_root}
+"An instance crashed with exit code 1: {instance_root}" = ""
+"Andalusian" = ""
+"Anglish" = ""
+"Animates the eyes and eyebrows in the skin preview for skins that use a Fresh-style expression layout. Skins without such a layout are unaffected. Preview only; it does not change your skin. Default: Off." = ""
+"Anisotropic Filtering (bits)" = ""
+"Any" = ""
+"Any Loader" = ""
+"Any version" = ""
+"App Version + Commit Hash" = ""
+"Appearance" = ""
+"Appearance Based" = ""
+"Applied only when Window Transparency is Blurred." = ""
+"Applied only when Window Transparency is Blurred. Mica, Mica Alt and the system Acrylic are drawn by Windows with no strength or tint control; the two Legacy backdrops accept a tint." = ""
+"Applied patch: no changes were present in the patch." = ""
+# placeholders: {summary} {operations}
+"Applied patch: {summary} ({operations})." = ""
+# placeholders: {project_name} {count} {count2}
+"Applied {project_name}: {count} added, {count2} removed." = ""
+"Applies Streamer Mode while OBS is running on this computer, and shows a notification when it starts and when it stops. This is temporary and never changes the Enable Streamer Mode setting: it ends when OBS closes or when you turn this off. OBS is found by its process name. The Flatpak build asks the host for its process list, which uses the host-command permission it ships with (org.freedesktop.Flatpak); a sandbox that hides other programs and has no such permission cannot see OBS. Default: On." = ""
+"Apply Patch" = ""
+"Apply Vertex Patch" = ""
+"Apply changes" = ""
+"Apply to" = ""
+# placeholders: {patch_path}
+"Applying patch {patch_path}..." = ""
+"Applying patch..." = ""
+# placeholders: {kind} {display_name} {applied_mods} {total_mods}
+"Applying staged {kind} for {display_name} ({applied_mods}/{total_mods} files)" = ""
+"Arabic" = ""
+"Armenian" = ""
+"Asks for confirmation before opening a link from chat." = ""
+"Asturian" = ""
+"At an unknown time" = ""
+"Attack Indicator" = ""
+"Attack stays active after one press instead of while held." = ""
+"Authenticating..." = ""
+"Auto" = ""
+"Auto-Jump" = ""
+"Auto-detect" = ""
+"Auto-detect installed versions" = ""
+"Auto-generate server zip" = ""
+"Auto-generate server zip..." = ""
+"Automatic (system language)" = ""
+"Autosave Indicator" = ""
+"Azerbaijani" = ""
+"Back to Discover" = ""
+"Back to Instance" = ""
+"Back to Mod Browser" = ""
+"Background for Chat Only" = ""
+"Background profile task lock was poisoned." = ""
+"Badges and tags" = ""
+"Balanced" = ""
+"Balanced (SSAA 2x)" = ""
+"Base text size in points for body and button text. Fractions like 14.5 are allowed. Default: 18." = ""
+"Bashkir" = ""
+"Basque" = ""
+"Bavarian" = ""
+"Behind Window" = ""
+"Belarusian" = ""
+"Better Blur DX" = ""
+"Better Blur DX blurs this window itself, by window class: Vertex asks the compositor for no blur. Its strength, noise, saturation, brightness, contrast, corner radius and refraction are settings of the effect, not of any one window." = ""
+"Better Blur DX is installed but not switched on. Turn it on in System Settings > Window Management > Desktop Effects (and turn KWin's own Blur off); Vertex then needs nothing else." = ""
+"Better Blur DX is on, so KWin blurs this window through the protocol above. Choose Better Blur DX as the protocol to let the effect blur it by window class instead." = ""
+"Biome Blend" = ""
+"Blends textures at a distance to reduce shimmering. 0 turns it off." = ""
+"Blocks" = ""
+"Blur Protocol" = ""
+"Blur Tint Colour" = ""
+"Blur Tint Strength" = ""
+"Blurred" = ""
+"Blurs the moving 3D skin preview by blending several moments across the shutter interval. Applies immediately. Default: Off." = ""
+"Body text" = ""
+"Borderless" = ""
+"Bosnian" = ""
+"Brabantian" = ""
+"Breton" = ""
+"Brightness" = ""
+"Brightness of dark areas. Moody is the default; Bright makes caves easier to see." = ""
+"Browse..." = ""
+"Browser Sign-in" = ""
+"Browsing featured packs" = ""
+"Browsing modpacks" = ""
+"Build zip in Downloads" = ""
+"Building server zip" = ""
+# placeholders: {name} {output_path}
+"Building server zip for {name} at {output_path}..." = ""
+"Building updated modpack files..." = ""
+"Builds a portable server package in your Downloads folder using this instance's files. CurseForge-managed mods that cannot be resolved on Modrinth by hash are listed as unknowns in the report." = ""
+"Bulgarian" = ""
+# placeholders: {name}
+"Bulk update requires conflicting versions of {name}." = ""
+# placeholders: {target}
+"Bundling config {target}" = ""
+# placeholders: {target}
+"Bundling mod {target}" = ""
+# placeholders: {target}
+"Bundling {target}" = ""
+"Button labels" = ""
+"CJK Font" = ""
+"CJK font" = ""
+"CONSTANT" = ""
+"CPU" = ""
+"CPU passes" = ""
+"CPU stages" = ""
+# placeholders: {err}
+"Cache read failed: {err}" = ""
+# placeholders: {err}
+"Cache write failed: {err}" = ""
+"Calibrate Gamepad" = ""
+"Calibration is incomplete or the captured values are inconsistent." = ""
+# placeholders: {name}
+"Calibration needed for {name}. Open the calibration modal to finish setup." = ""
+"Cancel" = ""
+"Cancel Import" = ""
+"Cancel Install" = ""
+"Cannot launch: choose a Minecraft game version first." = ""
+# placeholders: {err}
+"Cannot read destination folder: {err}" = ""
+"Cannot save Java override: configure at least one global Java path in Settings." = ""
+# placeholders: {name} {dependents}
+"Cannot switch {name} while it is required by {dependents}." = ""
+"Cape" = ""
+"Caps the frame rate. Lower it to save power and heat; the top value is unlimited." = ""
+"Captions" = ""
+"Capture current position" = ""
+"Catalan" = ""
+"Cataloged by loader+Minecraft compatibility and cached once per day." = ""
+"Change" = ""
+"Changes which way the timer bar on each notification empties: on, the bar empties from the left edge toward the right; off, from the right edge toward the left. Default: Off." = ""
+"Chat" = ""
+"Chat Delay (seconds)" = ""
+"Chat Text Opacity" = ""
+"Chat Text Size" = ""
+"Chat Width" = ""
+"Chat height while chat is closed." = ""
+"Chat height while you have chat open." = ""
+"Checking CurseForge download restrictions..." = ""
+"Checking logs" = ""
+"Checking mods against Modrinth hashes..." = ""
+"Checking which mods are client-only..." = ""
+"Chinese (Hong Kong)" = ""
+"Chinese (Simplified)" = ""
+"Chinese (Traditional)" = ""
+"Choose Base Modpack" = ""
+"Choose Destination Folder" = ""
+"Choose Skin Image" = ""
+"Choose a .vtmpack, .mrpack, or CurseForge modpack .zip file first." = ""
+"Choose a destination folder. It can be an empty existing folder or a new path that will be created." = ""
+"Choose a name, a Minecraft version and a modloader." = ""
+"Choose an empty folder or enter a new destination path" = ""
+"Choose an instance folder first." = ""
+"Choose file" = ""
+"Choose files" = ""
+"Choose folder" = ""
+"Choose manifest" = ""
+"Choose the instance directory from Modrinth, CurseForge, Prism, ATLauncher, or another launcher." = ""
+"Choose thumbnail" = ""
+"Choose what to include in the patch. After clicking Choose files, you will be prompted for the base .vtmpack to compare against, then where to save the generated .vtmpatch." = ""
+"Choose whether the exported pack may reference CurseForge metadata directly, then select which top-level files and folders from the Minecraft root should be bundled into the pack." = ""
+"Choose whether to import from a pack manifest or an existing launcher instance folder." = ""
+"Choose which instances get this server in their server list. Entries that already exist are never changed or removed." = ""
+"Choose…" = ""
+"Chunk Builder" = ""
+"Chunk Fade-In Time" = ""
+"Cinematic Camera" = ""
+"Classic" = ""
+"Classical Chinese" = ""
+# placeholders: {relative}
+"Classifying CurseForge mod {relative}..." = ""
+"Clear color" = ""
+"Clear selection" = ""
+"Click and Drag Scrolling" = ""
+"Clock" = ""
+"Close" = ""
+# placeholders: {instance}
+"Close {instance} first; a running game can't have its worlds moved." = ""
+# placeholders: {instance}
+"Close {instance} first; the game rewrites these files when it exits." = ""
+# placeholders: {seconds}
+"Closing in {seconds}s" = ""
+"Cloud Distance" = ""
+"Cloud rendering: off, fast (flat), or fancy (3D)." = ""
+"Clouds" = ""
+"Collecting system information…" = ""
+"Colon (:)" = ""
+# placeholders: {account}
+"Color for {account}" = ""
+"Colors" = ""
+"Comma-separated four-letter OpenType feature tags, for example: liga, calt, ss01. Leave empty to use the built-in list. Only has an effect when OpenType features are enabled above, and only for fonts that provide those features. Default: empty (uses kern, liga, calt, onum, pnum)." = ""
+"Command Suggestions" = ""
+"Commands Only" = ""
+"Compatibility unknown for this version" = ""
+"Compatible with this version" = ""
+"Complete" = ""
+"Complete sign-in in the Microsoft webview window..." = ""
+"Complete sign-in in your default browser..." = ""
+"Compression" = ""
+"Configuring Vertex" = ""
+"Connected" = ""
+"Console" = ""
+"Console and code" = ""
+"Constant" = ""
+"Content" = ""
+"Content Background" = ""
+"Content Browser" = ""
+"Content Browser is unavailable while instance prep is running." = ""
+"Content apply worker stopped unexpectedly." = ""
+# placeholders: {err}
+"Content download failed: {err}" = ""
+"Content download worker stopped unexpectedly." = ""
+"Content entry name cannot be empty." = ""
+"Content identification worker stopped unexpectedly." = ""
+"Content operation complete." = ""
+# placeholders: {error}
+"Content search failed: {error}" = ""
+"Content search worker stopped unexpectedly." = ""
+"Controller" = ""
+"Controls" = ""
+"Controls NSVisualEffectView.isEmphasized when macOS native blur is active." = ""
+"Controls how glyphs are rasterized for the launcher UI. Auto keeps the default path. SDF/MSDF are mainly useful for testing the new text pipeline. Default: Auto." = ""
+"Controls supersampled SVG rasterization for launcher icons. Changes apply immediately. Default: Balanced (SSAA 2x)." = ""
+"Controls which non-default Minecraft version categories appear in version pickers." = ""
+"Copied Steam launch options to clipboard." = ""
+"Copied command line to clipboard." = ""
+"Copied instance command line to clipboard." = ""
+"Copied instance root path to the clipboard." = ""
+"Copied screenshot to clipboard." = ""
+# placeholders: {destination}
+"Copied to {destination}." = ""
+# placeholders: {instance} {err}
+"Copied to {instance}, but could not remove the original: {err}" = ""
+# placeholders: {count}
+"Copied {count} console lines." = ""
+# placeholders: {name} {destination}
+"Copied {name} to {destination}." = ""
+# placeholders: {what}
+"Copied {what}." = ""
+"Copies each multiplayer server to the instances chosen in its sync options. Servers already in an instance are never edited or removed. Runs before an instance launches and after one closes; instances that are running are left alone. Default: Off." = ""
+"Copy" = ""
+"Copy Steam launch options" = ""
+"Copy absolute instance root path" = ""
+"Copy all" = ""
+"Copy code" = ""
+"Copy command line" = ""
+"Copy image to clipboard" = ""
+"Copy line" = ""
+"Copy selection" = ""
+"Copy to instance…" = ""
+# placeholders: {noun}
+"Copy {noun} to another instance" = ""
+"Copying launcher instance files..." = ""
+"Cornish" = ""
+# placeholders: {error}
+"Could not add Vertex to Better Blur DX: {error}" = ""
+# placeholders: {what} {reason}
+"Could not apply the {what}; the previous choice is back: {reason}" = ""
+# placeholders: {err}
+"Could not auto-detect installed versions: {err}" = ""
+# placeholders: {err}
+"Could not copy the world: {err}" = ""
+# placeholders: {err}
+"Could not create destination folder: {err}" = ""
+# placeholders: {skipped}
+"Could not determine where to place: {skipped}." = ""
+# placeholders: {version_id} {name}
+"Could not find CurseForge version {version_id} for {name}." = ""
+# placeholders: {path} {err}
+"Could not identify {path}: {err}" = ""
+# placeholders: {err}
+"Could not link the world back into its instance: {err}" = ""
+# placeholders: {err}
+"Could not load Minecraft versions: {err}" = ""
+# placeholders: {err}
+"Could not move the world: {err}" = ""
+# placeholders: {error}
+"Could not open the Desktop Effects settings: {error}" = ""
+# placeholders: {err}
+"Could not open the browser: {err}" = ""
+# placeholders: {err}
+"Could not open the downloads folder: {err}" = ""
+# placeholders: {err}
+"Could not renew the active account before use: {err}. Continuing with the cached session." = ""
+# placeholders: {modloader_label} {game_version}
+"Could not resolve latest {modloader_label} version for Minecraft {game_version}. Refresh modloader versions and try again." = ""
+# placeholders: {trimmed} {err}
+"Could not run {trimmed}: {err}" = ""
+"Could not scan the instance folder." = ""
+# placeholders: {count} {names} {more}
+"Could not update {count}: {names}{more}" = ""
+# placeholders: {err}
+"Could not use the chosen font: {err}" = ""
+# placeholders: {role} {err}
+"Could not use the font for {role}: {err}" = ""
+# placeholders: {error}
+"Couldn't save: {error}. Will retry." = ""
+"Counts years in the Human Era (Holocene) calendar and marks them HE, so 2026 becomes 12026 HE. It adds 10,000 to the year, a big commitment for a calendar whose main feature is a leading 1. Also a nice way to show some love for your favorite infographics channel with the cheerful little birds, the one that makes humanity's whole story look like a tidy timeline. Not available for layouts that already count years their own way (Thailand, Taiwan). Default: Off." = ""
+"Craft Planks" = ""
+"Create" = ""
+"Create Instance" = ""
+"Create from scratch" = ""
+"Create instance" = ""
+"Create settings file" = ""
+"Created imported profile. Restoring overrides..." = ""
+"Created imported profile. Restoring packaged files..." = ""
+"Created instance from modpack." = ""
+"Crisp (SSAA 3x)" = ""
+"Croatian" = ""
+"Crosshair" = ""
+"Ctrl-Click Is Right-Click" = ""
+"Cubic In" = ""
+"Cubic In/Out" = ""
+"Cubic Out" = ""
+# placeholders: {page}
+"Current: {page}" = ""
+"CurseForge" = ""
+"CurseForge API Key" = ""
+"CurseForge API key missing (set VERTEX_CURSEFORGE_API_KEY or CURSEFORGE_API_KEY). Showing Modrinth results only." = ""
+"CurseForge API key missing in settings." = ""
+"CurseForge API key missing in settings. Showing Modrinth results only." = ""
+"CurseForge API key missing." = ""
+"CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack." = ""
+"CurseForge Pack" = ""
+# placeholders: {err}
+"CurseForge class discovery failed: {err}" = ""
+"CurseForge does not allow some files to be downloaded by other launchers. Open each file's page, download it in your browser, and Vertex will pick it up from your downloads folder automatically." = ""
+# placeholders: {project_id} {file_id} {endpoint} {status}
+"CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: HTTP {status} with empty response body" = ""
+# placeholders: {project_id} {file_id} {endpoint} {status} {body}
+"CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: HTTP {status}: {body}" = ""
+# placeholders: {project_id} {file_id} {endpoint} {err}
+"CurseForge download URL lookup failed for project {project_id}, file {file_id} via {endpoint}: {err}" = ""
+# placeholders: {file_id} {err}
+"CurseForge file lookup failed for {file_id}: {err}" = ""
+# placeholders: {file_id} {project_id}
+"CurseForge file {file_id} for project {project_id} has no download URL" = ""
+# placeholders: {file_id} {project_id}
+"CurseForge file {file_id} for project {project_id} was not found." = ""
+# placeholders: {file_id} {project_id}
+"CurseForge file {file_id} was not found for project {project_id}" = ""
+# placeholders: {file_id}
+"CurseForge file {file_id} was not predownloaded before installation." = ""
+# placeholders: {project_id} {err}
+"CurseForge files failed for {project_id}: {err}" = ""
+"CurseForge install canceled." = ""
+"CurseForge instance" = ""
+"CurseForge metadata is removed from the export. CurseForge-managed files are bundled into the pack unless they already use Modrinth as the selected source." = ""
+# placeholders: {error}
+"CurseForge modpack class discovery failed: {error}" = ""
+"CurseForge modpack zip" = ""
+"CurseForge modpack zips are supported, but they only work if you have a CurseForge API key in Settings. Vertex will fall back to Modrinth downloads when it can resolve an exact compatible match." = ""
+"CurseForge pack" = ""
+# placeholders: {kind}
+"CurseForge pack declared an invalid Minecraft version: {kind}" = ""
+"CurseForge pack import requires a manifest file source." = ""
+"CurseForge packs" = ""
+# placeholders: {project_id} {err}
+"CurseForge project lookup failed for {project_id}: {err}" = ""
+# placeholders: {project_id} {file_id}
+"CurseForge project {project_id}, file {file_id}" = ""
+# placeholders: {kind} {err}
+"CurseForge search failed for {kind}: {err}" = ""
+# placeholders: {error}
+"CurseForge search failed: {error}" = ""
+"CurseForge unknown-classification complete." = ""
+# placeholders: {version_id_u64} {err}
+"CurseForge version lookup failed for {version_id_u64}: {err}" = ""
+# placeholders: {version_id}
+"CurseForge version {version_id} has no download URL." = ""
+"Custom" = ""
+"Custom (set it below)" = ""
+"Custom modloader id" = ""
+"Customizing a skin" = ""
+"Cutout Leaves" = ""
+"Czech" = ""
+"DEFAULT" = ""
+"Damage Tilt" = ""
+"Danish" = ""
+"Dark" = ""
+"Dark Loading Background" = ""
+"Darkens the screen edges slightly." = ""
+"Darkness Pulsing" = ""
+"Dash (-)" = ""
+"Data Pack" = ""
+"Data Packs" = ""
+"Data version of the game that last wrote this file. Managed by the game." = ""
+"Date Format" = ""
+"Date Order" = ""
+"Date Separator" = ""
+"Day, month, year" = ""
+"Debug" = ""
+"Debug GUI Scale" = ""
+"Debug Overlay" = ""
+"Debug Shortcut Modifier" = ""
+"Debug: Advanced Tooltips" = ""
+"Debug: Chunk Borders" = ""
+"Debug: Clear Chat" = ""
+"Debug: Copy Location" = ""
+"Debug: Copy Recreate Command" = ""
+"Debug: Crash" = ""
+"Debug: Dump Textures" = ""
+"Debug: Dump Version" = ""
+"Debug: FPS Charts" = ""
+"Debug: Improved Transparency" = ""
+"Debug: Lightmap Texture" = ""
+"Debug: Network Charts" = ""
+"Debug: Options Screen" = ""
+"Debug: Pause on Focus Loss" = ""
+"Debug: Profiling" = ""
+"Debug: Profiling Chart" = ""
+"Debug: Reload Chunks" = ""
+"Debug: Reload Resource Packs" = ""
+"Debug: Show Hitboxes" = ""
+"Debug: Spectate" = ""
+"Debug: Switch Game Mode" = ""
+"Decreased" = ""
+"Default" = ""
+"Default CLI args" = ""
+"Default difficulty for new worlds." = ""
+"Default max memory allocation (MiB)" = ""
+"Defaults to mods, resourcepacks, shaderpacks, and config. You can also include any other top-level files or folders found in the instance root." = ""
+"Defaults to the package name, but you can override it." = ""
+"Delete" = ""
+"Delete Folder" = ""
+"Delete Instance Folder?" = ""
+"Delete This Instance" = ""
+"Delete instance" = ""
+"Delete screenshot" = ""
+# placeholders: {name}
+"Delete the whole folder for \"{name}\". This permanently removes installed content and personal files, including worlds." = ""
+"Delete this content" = ""
+"Delete this screenshot from disk? This permanently removes it." = ""
+"Delete worker stopped unexpectedly." = ""
+# placeholders: {noun}
+"Delete {noun}" = ""
+# placeholders: {file_name}
+"Deleted '{file_name}' from disk." = ""
+# placeholders: {name}
+"Deleted instance '{name}' and its folder." = ""
+"Deleted screenshot from disk." = ""
+# placeholders: {err}
+"Deleted the instance folder, but failed to remove launcher metadata: {err}" = ""
+"Deleted." = ""
+"Delete…" = ""
+"Deleting…" = ""
+"Description (optional)" = ""
+# placeholders: {path}
+"Destination: {path}" = ""
+"Detect OBS" = ""
+# placeholders: {summary} {source_profile_id}
+"Detected and saved {summary} from profile '{source_profile_id}'." = ""
+# placeholders: {name}
+"Detected gamepad: {name}" = ""
+"Detected package" = ""
+# placeholders: {err}
+"Detected versions, but failed to save them: {err}" = ""
+# placeholders: {launcher}
+"Detected {launcher} by location. No profile.json was present, so Minecraft and loader metadata were inferred from profile contents where possible; files will still be copied from the instance root." = ""
+# placeholders: {launcher} {managed_count} {mods_count} {config_count}
+"Detected {launcher} with {managed_count} managed projects, {mods_count} mods, and {config_count} config files." = ""
+"Device Code Sign-in" = ""
+# placeholders: {name}
+"Device: {name}" = ""
+"Dialog titles" = ""
+"Difficulty" = ""
+"DirectX 12" = ""
+"Directional Audio" = ""
+"Disable mod" = ""
+"Discord Rich Presence" = ""
+"Discord integration and launcher-owned activity reporting." = ""
+"Discover" = ""
+# placeholders: {error}
+"Discover search failed: {error}" = ""
+"Discover search worker stopped unexpectedly." = ""
+"Discrete Only" = ""
+"Discrete Scrolling" = ""
+"Display name shown in the sidebar." = ""
+"Displayed Time" = ""
+"Distortion Effects" = ""
+"Doesn't work here" = ""
+"Dolby Vision" = ""
+"Done" = ""
+"Done." = ""
+"Dot (.)" = ""
+# placeholders: {version}
+"Download OpenJDK {version}" = ""
+"Download Speed Limit" = ""
+"Downloaded modpack package. Importing instance..." = ""
+"Downloaded pack files." = ""
+# placeholders: {display_name} {source_label} {completed_downloads} {total_downloads}
+"Downloaded {display_name} via {source_label} ({completed_downloads}/{total_downloads} mods)" = ""
+# placeholders: {file_count}
+"Downloaded {file_count}/{file_count} mods. Created imported profile. Restoring overrides..." = ""
+# placeholders: {runtime} {path}
+"Downloaded {runtime} and selected {path}." = ""
+# placeholders: {total_downloads}
+"Downloaded {total_downloads} mods" = ""
+"Downloading core files" = ""
+# placeholders: {count}
+"Downloading {count} files..." = ""
+# placeholders: {runtime}
+"Downloading {runtime}..." = ""
+# placeholders: {version_name}
+"Downloading {version_name}..." = ""
+"Downloading..." = ""
+# placeholders: {limit}
+"Downloads limited to {limit}." = ""
+# placeholders: {count}
+"Downloads: active, {count} queued" = ""
+"Downloads: idle" = ""
+# placeholders: {count}
+"Downloads: idle, {count} queued" = ""
+# placeholders: {downloads}
+"Downloads: {downloads}" = ""
+"Drag Skin Image here" = ""
+"Draws a live graph of how long each render pass takes on the CPU and GPU, plus a history of recent frame times, over the launcher. GPU times need a GPU that supports timestamp queries. Default: Off." = ""
+"Draws a soft shadow under mobs and other entities." = ""
+"Draws a stronger outline around the block you're looking at." = ""
+"Draws leaves with see-through gaps (fancy) instead of solid blocks (fast)." = ""
+"Draws the launcher's frames per second and frame time in the top-right corner of the window. Default: Off." = ""
+"Drop Selected Item" = ""
+"Drop a .vtmpack, .mrpack or CurseForge .zip pack to import it." = ""
+"Dutch" = ""
+"Dutch (Flemish)" = ""
+"Each pack declares which Minecraft versions it supports. You know your setup better than the metadata: mark a pack as working (or not) for this instance and sync will follow that instead. Overrides only affect sync; they don't change the pack or what the game allows." = ""
+"East Franconian" = ""
+"Easy" = ""
+"Edit server" = ""
+"Edit…" = ""
+"Elfdalian" = ""
+"Elytra: Off" = ""
+"Elytra: On" = ""
+"Embedding bundled files..." = ""
+"Emoji Font" = ""
+"Emoji font" = ""
+"Emphasized body text" = ""
+"Empty Expiry Bars to the Left" = ""
+"Enable 3D Skin Layers" = ""
+"Enable Discord Rich Presence" = ""
+"Enable Download Speed Limit" = ""
+"Enable Frame Limiter" = ""
+"Enable OpenType Features" = ""
+"Enable Skin Expressions" = ""
+"Enable Skin Preview Motion Blur" = ""
+"Enable Streamer Mode" = ""
+"Enable anyway" = ""
+"Enable mod" = ""
+"Enabled Resource Packs" = ""
+"Enables keyboard shortcuts for quitting the game." = ""
+"English (Australia)" = ""
+"English (Canada)" = ""
+"English (New Zealand)" = ""
+"English (UK)" = ""
+"English (US)" = ""
+"Entity Distance" = ""
+"Entity Shadows" = ""
+"Environment variables (optional)" = ""
+"Error" = ""
+# placeholders: {name} {error}
+"Error in attempting to renew login for {name}: {error}" = ""
+# placeholders: {accounts}
+"Errors in attempting to renew login for {accounts}" = ""
+# placeholders: {accounts} {error}
+"Errors in attempting to renew login for {accounts}: {error}" = ""
+"Esperanto" = ""
+"Estonian" = ""
+"Every instance" = ""
+"Example" = ""
+"Exclude CurseForge as a provider" = ""
+"Exclusive" = ""
+"Exclusive Fullscreen" = ""
+"Exit fullscreen (F11)" = ""
+# placeholders: {file_name}
+"Expected file: {file_name}" = ""
+"Explicit Adapter" = ""
+"Exponential In" = ""
+"Exponential In/Out" = ""
+"Exponential Out" = ""
+"Export .vtmpack" = ""
+"Export .vtmpack..." = ""
+"Export Modpack" = ""
+"Export complete." = ""
+"Export in progress" = ""
+"Export theme as JSON" = ""
+# placeholders: {instance} {counts} {path}
+"Exported {instance} — {counts} — saved to {path}" = ""
+# placeholders: {name} {path}
+"Exported {name} to {path}. Give the copy a new \"id\" and it loads as its own theme." = ""
+# placeholders: {name} {output_path}
+"Exporting {name} to {output_path}..." = ""
+"Extra JVM arguments for every instance that does not set its own in its instance settings (for example: -XX:+UseZGC). An instance's own arguments replace these rather than adding to them. Applied the next time the instance launches. Default: empty (no extra arguments)." = ""
+"Extra Telemetry" = ""
+"Extreme XZ compression" = ""
+"FOV Effects" = ""
+"FREQUENT" = ""
+"FXAA (Post)" = ""
+"FXAA + TAA (Temporal)" = ""
+"Fabric" = ""
+"Fabulous!" = ""
+# placeholders: {failures}
+"Failed to add local content: {failures}." = ""
+# placeholders: {err}
+"Failed to apply content changes: {err}" = ""
+# placeholders: {err}
+"Failed to build webview: {err}" = ""
+# placeholders: {err}
+"Failed to copy screenshot: {err}" = ""
+# placeholders: {parent} {err}
+"Failed to create destination directory {parent}: {err}" = ""
+# placeholders: {dest_path} {err}
+"Failed to create destination file {dest_path}: {err}" = ""
+# placeholders: {err}
+"Failed to create sign-in window: {err}" = ""
+# placeholders: {err}
+"Failed to create the settings file: {err}" = ""
+# placeholders: {path} {err}
+"Failed to decompress '{path}': {err}" = ""
+# placeholders: {file_name} {err}
+"Failed to delete '{file_name}': {err}" = ""
+# placeholders: {err}
+"Failed to delete instance: {err}" = ""
+# placeholders: {err}
+"Failed to delete screenshot: {err}" = ""
+# placeholders: {runtime} {err}
+"Failed to download {runtime}: {err}" = ""
+# placeholders: {ext} {err}
+"Failed to export .{ext}: {err}" = ""
+"Failed to export server zip: export task stopped unexpectedly." = ""
+# placeholders: {err}
+"Failed to export server zip: {err}" = ""
+# placeholders: {err}
+"Failed to export theme: {err}" = ""
+"Failed to export: export task stopped unexpectedly." = ""
+# placeholders: {err}
+"Failed to fetch latest profile: {err}" = ""
+# placeholders: {err}
+"Failed to fetch modloader versions: {err}" = ""
+# placeholders: {error}
+"Failed to fetch version catalog: {error}" = ""
+# placeholders: {err}
+"Failed to import profile: {err}" = ""
+# placeholders: {err}
+"Failed to initialize webview builder: {err}" = ""
+# placeholders: {err}
+"Failed to link existing profile folder: {err}" = ""
+# placeholders: {err}
+"Failed to load account cache: {err}" = ""
+# placeholders: {err}
+"Failed to load cached account state: {err}" = ""
+# placeholders: {err}
+"Failed to load instance store: {err}" = ""
+# placeholders: {err}
+"Failed to open instance folder: {err}" = ""
+# placeholders: {source_path} {err}
+"Failed to open source file {source_path}: {err}" = ""
+# placeholders: {err}
+"Failed to open the folder: {err}" = ""
+# placeholders: {err}
+"Failed to open the themes folder: {err}" = ""
+# placeholders: {err}
+"Failed to prepare CurseForge import: {err}" = ""
+# placeholders: {err}
+"Failed to prepare CurseForge install: {err}" = ""
+# placeholders: {err}
+"Failed to prepare game files: {err}" = ""
+# placeholders: {err}
+"Failed to prepare manual CurseForge download: {err}" = ""
+# placeholders: {err}
+"Failed to prepare manual CurseForge downloads: {err}" = ""
+# placeholders: {err}
+"Failed to purge metadata cache: {err}" = ""
+# placeholders: {path} {err}
+"Failed to read '{path}': {err}" = ""
+# placeholders: {err}
+"Failed to read image: {err}" = ""
+# placeholders: {profile_id} {err}
+"Failed to renew account token for {profile_id}: {err}" = ""
+# placeholders: {profile_id} {err}
+"Failed to renew account token for {profile_id}: {err}. Continuing in offline mode." = ""
+"Failed to renew active account token" = ""
+# placeholders: {error}
+"Failed to resolve account avatar in background worker: {error}" = ""
+# placeholders: {what} {err}
+"Failed to save {what}: {err}" = ""
+# placeholders: {err}
+"Failed to set sign-in URL: {err}" = ""
+# placeholders: {operation} {message}
+"Failed to {operation}: {message}" = ""
+# placeholders: {operation} {message}
+"Failed to {operation}: {message}. Minecraft auth token may be expired. Sign out and sign back in, then retry." = ""
+# placeholders: {source_path} {err}
+"Failed while reading source file {source_path}: {err}" = ""
+# placeholders: {dest_path} {err}
+"Failed while writing destination file {dest_path}: {err}" = ""
+"Fancy" = ""
+"Fancy Graphics" = ""
+"Fancy draws more detail (leaves, water, clouds); fast is quicker on weak hardware." = ""
+"Far" = ""
+"Faroese" = ""
+"Fast" = ""
+"Favorites" = ""
+"Fetching modloader versions..." = ""
+"Fetching version catalog..." = ""
+# placeholders: {loader_label} {game_version}
+"Fetching {loader_label} versions for Minecraft {game_version}..." = ""
+"Field of View" = ""
+"Field of view in degrees: how wide the game world appears. Higher shows more but distorts the edges." = ""
+# placeholders: {downloaded_files} {total_files} {bytes}
+"Files: {downloaded_files}/{total_files} · {bytes}" = ""
+"Filipino" = ""
+"Finalizing XZ archive..." = ""
+"Finalizing sign-in..." = ""
+"Finalizing updated instance..." = ""
+"Finalizing zip archive..." = ""
+"Find Tree" = ""
+"Finish signing in in your browser…" = ""
+"Finnish" = ""
+"Focused Height" = ""
+"Folder" = ""
+# placeholders: {root}
+"Folder: {root}" = ""
+"Follow launcher default (currently: every instance)" = ""
+"Follow launcher default (currently: only where it already exists)" = ""
+"Follow output" = ""
+"Follows Window Active State" = ""
+"Font" = ""
+"Font family used for this text role." = ""
+"Font for Chinese, Japanese and Korean characters in this kind of text. Leave on the general setting to follow the CJK Font choice above." = ""
+"Font for emoji in this kind of text. Leave on the general setting to follow the Emoji Font choice above." = ""
+"Font size for this text role, in points." = ""
+"Font weight from 100 (thin) to 900 (black), in steps of 100; 400 is regular and 700 is bold. Fonts that lack the chosen weight may look different. Default: 400." = ""
+"Font, shaping, and glyph rendering settings that affect launcher text." = ""
+"For streaming and screenshots: shows \"Hidden Account\" instead of your account name in the top bar, Home, Instance and Skins screens, and masks account IDs (player UUID, XUID) in notifications. Nothing is changed on disk. Default: Off." = ""
+"Force Java 21 Minimum" = ""
+"Force Unicode Font" = ""
+"Forces the game window height in pixels. 0 uses the default size." = ""
+"Forces the game window width in pixels. 0 uses the default size." = ""
+"Forge" = ""
+"Four-Digit Year" = ""
+"Frame Limit FPS" = ""
+"Frame graph" = ""
+"Framebuffer Objects" = ""
+"French (Canada)" = ""
+"French (France)" = ""
+"Frequent" = ""
+"Friendly Creatures" = ""
+"Friends" = ""
+"Frisian" = ""
+"Friulian" = ""
+"From" = ""
+"From manifest file" = ""
+"Full Screen UI" = ""
+"Full name (November)" = ""
+"Fullscreen" = ""
+"Fullscreen (F11)" = ""
+"Fullscreen Resolution" = ""
+"Fullscreen Style" = ""
+"GL Debug Verbosity" = ""
+"GPU" = ""
+"GPU passes" = ""
+"GPU, skin preview rendering, frame pacing, and download throughput behavior." = ""
+"GUI Scale (0 = Auto)" = ""
+"Galician" = ""
+"Game Log Level" = ""
+"Game settings" = ""
+# placeholders: {preview}
+"Game versions: {preview}" = ""
+# placeholders: {name}
+"Gamepad connected: {name}" = ""
+# placeholders: {name}
+"Gamepad disconnected: {name}" = ""
+"Generate .vtmpatch" = ""
+"Generate Patch" = ""
+"Generate Patch..." = ""
+# placeholders: {instance} {counts} {path}
+"Generated patch for {instance} — {counts} — saved to {path}" = ""
+# placeholders: {instance_name} {output_path}
+"Generating patch for {instance_name} at {output_path}..." = ""
+"Generic launcher instance" = ""
+"Georgian" = ""
+"German (Austria)" = ""
+"German (Germany)" = ""
+"German (Switzerland)" = ""
+"Germany, Russia, Poland, Turkey (10.11.2026)" = ""
+"Glint Speed" = ""
+"Glint Strength" = ""
+"Go" = ""
+# placeholders: {verification_uri} {user_code}
+"Go to {verification_uri} and enter code: {user_code}" = ""
+"Graphics" = ""
+"Graphics & Performance" = ""
+"Graphics API" = ""
+"Graphics API Preference" = ""
+"Graphics Adapter Preference" = ""
+"Graphics Adapter Preference Type" = ""
+"Graphics Backend" = ""
+"Graphics Driver + Version" = ""
+"Graphics Preset" = ""
+"Greek" = ""
+"HDR Color Space" = ""
+"HDR Max Content Light Level" = ""
+"HDR Max Frame-Average Light Level" = ""
+"HDR UI Brightness" = ""
+"HDR UI Paper White" = ""
+"HDR When Available" = ""
+"HDR10 (HLG)" = ""
+"HDR10 (PQ)" = ""
+"HUD Window" = ""
+"Hand Off to Minecraft (Steam Deck)" = ""
+"Hard" = ""
+"Hat" = ""
+"Hawaiian" = ""
+"Header View" = ""
+"Hebrew" = ""
+"Hidden" = ""
+"Hidden Account" = ""
+"Hide GUI" = ""
+"Hide Lightning Flashes" = ""
+"Hide Matched Names" = ""
+"Hide Server Address" = ""
+"Hide Splash Texts" = ""
+"Hide Zero Units" = ""
+"Hides Vertex's window while Minecraft runs, so the game takes the screen instead of Vertex staying in front of it in Steam Deck game mode, and brings Vertex back when the game closes. Turned on automatically on a Steam Deck. Default: Off." = ""
+"Hides coordinates and other details on the debug screen." = ""
+"Hides player names that match a chat filter." = ""
+"Hides the server address in the multiplayer list and pause screen." = ""
+"Hides the yellow splash text on the title screen." = ""
+"High Contrast" = ""
+"High Contrast Block Outline" = ""
+"High Performance" = ""
+"Hindi" = ""
+"Home" = ""
+"Hostile Creatures" = ""
+"Hotbar" = ""
+"Hotbar Slot 1" = ""
+"Hotbar Slot 2" = ""
+"Hotbar Slot 3" = ""
+"Hotbar Slot 4" = ""
+"Hotbar Slot 5" = ""
+"Hotbar Slot 6" = ""
+"Hotbar Slot 7" = ""
+"Hotbar Slot 8" = ""
+"Hotbar Slot 9" = ""
+"How AM and PM are written. Default: AM / PM." = ""
+"How F11 and the title bar's fullscreen button take the window fullscreen. Borderless covers the screen without changing the display mode, so it switches instantly. Exclusive takes over the display and its video mode where the system supports it. Default: Borderless." = ""
+"How blurred the world behind menus looks." = ""
+"How bright the shimmer on enchanted items is." = ""
+"How dates, times and \"how long ago\" are written, such as on screenshots." = ""
+"How eagerly the game rebuilds chunks after a block changes. Higher options prevent visual lag when building but can lower frame rate." = ""
+"How far away clouds are drawn, in blocks." = ""
+"How far away mobs, items and other entities are still drawn. Higher values cost performance." = ""
+"How far from you rain and snow are drawn, in blocks." = ""
+"How far the view turns for a given mouse movement." = ""
+"How fast downloads may go, for example 250Mbps, 250 Mbps, 30MB/s or 1.5 Gbps. Lowercase b (Mbps, Mbit/s) is bits and uppercase B (MB/s, MiB/s) is bytes, so 80Mbps is about 10 MB/s. A bare number is Mbps. Default: empty (no limit)." = ""
+"How fast the shimmer on enchanted items moves." = ""
+"How long pop-up notifications and toasts stay on screen." = ""
+"How long the virtual camera shutter stays open, in 60 FPS frame lengths. Longer shutters give longer blur trails. Default: 0.75." = ""
+"How long, in seconds, a notification takes to fade away after its timer runs out. 0 makes it disappear instantly. Dismissing a notification with its X button is always instant. Default: 0.25." = ""
+"How many blocks around you are averaged when tinting grass, leaves and water by biome. Higher blends transitions more smoothly." = ""
+"How many chunks around you are drawn. Higher lets you see farther but costs performance." = ""
+"How many chunks around you the game keeps active (mobs move, crops grow). Lower saves performance." = ""
+"How many files the launcher downloads at the same time (1–128) for game files, libraries and mods. Higher can be faster on fast connections but may trigger rate limits from download servers. Default: 8." = ""
+"How many particles (smoke, sparks, bubbles) are shown." = ""
+"How many snapshots of the skin preview are blended across the shutter interval (2–16). More samples make smoother blur and cost more GPU work. Default: 5." = ""
+"How many ticks you have to tap forward twice to start sprinting." = ""
+"How much OpenGL debug output the game prints to the log." = ""
+"How much each scroll notch changes the selected hotbar slot or menu." = ""
+"How much the console shows. The console keeps its recent history, so choosing a more verbose level also shows lines that were hidden when they were logged." = ""
+"How much the view shakes when you take damage." = ""
+"How notification popups expire and fade away." = ""
+"How often background music plays." = ""
+"How opaque the chat text is." = ""
+"How round the window's corners are, in pixels (0 is square). Works with every Window Transparency mode; set it to 0 on an Opaque window to keep your OS's own corners. Default: 12." = ""
+"How strong the motion blur trail is on the rotating skin preview. 0 turns the blur off. Default: 0.15." = ""
+"How strongly sprinting, speed effects and bows change your field of view." = ""
+"How strongly the blur is tinted with the colour below. 0 is no tint. Only the Legacy Blur and Legacy Acrylic backdrops can be tinted." = ""
+"How strongly the screen pulses when a Warden or Darkness effect is nearby." = ""
+"How textures are smoothed: none, smooth, or anisotropic for crisper distant surfaces." = ""
+"How the skin preview is smoothed. MSAA samples the scene itself (see MSAA Samples); SMAA and FXAA are post-process filters; TAA blends frames over time; Off is fastest. Changes apply immediately. Default: FXAA (Post)." = ""
+"Human Era Years" = ""
+"Hungarian" = ""
+"ISO 8601, Sweden, Canada, South Africa (2026-11-10)" = ""
+"Icelandic" = ""
+# placeholders: {project_name} {path}
+"Identified {project_name} from {path}." = ""
+# placeholders: {selected_path}
+"Identifying {selected_path} in the background..." = ""
+"Ido" = ""
+"Igbo" = ""
+"Images" = ""
+"Import" = ""
+"Import Profile" = ""
+"Import complete." = ""
+"Import from a pack manifest or copy an instance out of another launcher." = ""
+"Import from another launcher" = ""
+"Import preview worker stopped unexpectedly." = ""
+"Import profile" = ""
+"Import source" = ""
+# placeholders: {path}
+"Import source {path} is not a directory." = ""
+"Imported ATLauncher Instance" = ""
+"Imported CurseForge Instance" = ""
+"Imported CurseForge Pack" = ""
+# placeholders: {author}
+"Imported CurseForge pack by {author}." = ""
+"Imported Instance" = ""
+"Imported Modrinth Instance" = ""
+"Imported Modrinth Pack" = ""
+"Imported Prism Instance" = ""
+# placeholders: {launcher}
+"Imported by copying files from {launcher}." = ""
+"Imported from a Modrinth instance folder without profile.json metadata." = ""
+"Imported from a Prism / MultiMC style instance." = ""
+"Imported from an existing ATLauncher instance." = ""
+"Imported from an existing CurseForge instance." = ""
+"Imported from an existing Modrinth launcher instance." = ""
+"Imported profile name" = ""
+"Importing profile in the background..." = ""
+"Improved Transparency" = ""
+"In Discover" = ""
+"In Skin Manager" = ""
+"In instance settings" = ""
+"In legal information" = ""
+"In the console" = ""
+"In the library" = ""
+"In the logs viewer" = ""
+"In the screenshot gallery" = ""
+"In the screenshot manager" = ""
+"In this instance" = ""
+"In-Game Notifications" = ""
+"Inactive" = ""
+"Inactivity FPS Limit" = ""
+"Include Alpha Versions" = ""
+"Include Experimental Versions" = ""
+"Include Snapshots and Betas" = ""
+"Include seconds in the time. Default: On." = ""
+"Include top-level entries from the Minecraft root" = ""
+"Included Notices" = ""
+"Incompatible Resource Packs" = ""
+"India, Bangladesh (10-11-2026, day first)" = ""
+"Indonesian" = ""
+"Info" = ""
+# placeholders: {downloaded_files} {loader}
+"Initial install complete ({downloaded_files} files, loader {loader})." = ""
+"Inspect folder" = ""
+"Inspect manifest" = ""
+"Inspecting import source in the background..." = ""
+# placeholders: {instance_id_for_notifications}
+"Install task ended for {instance_id_for_notifications}." = ""
+"Install task stopped unexpectedly." = ""
+"Installed" = ""
+# placeholders: {game_version} {downloaded_files}
+"Installed Minecraft {game_version} ({downloaded_files} files)." = ""
+# placeholders: {game_version} {instance_root_display} {files}
+"Installed Minecraft {game_version} in {instance_root_display} ({files})." = ""
+"Installing modloader" = ""
+"Installing modpack..." = ""
+# placeholders: {name} {position} {total} {downloaded} {speed}
+"Installing {name} ({position}/{total}) · {downloaded:.1} MiB · {speed:.1} MiB/s" = ""
+"Installing…" = ""
+"Instance" = ""
+"Instance Defaults" = ""
+"Instance Settings" = ""
+"Instance Sync" = ""
+"Instance folder" = ""
+# placeholders: {path}
+"Instance folder {path} does not exist." = ""
+# placeholders: {reason}
+"Instance move failed: {reason}" = ""
+# placeholders: {dest_path}
+"Instance moved to {dest_path}." = ""
+"Instance not found." = ""
+# placeholders: {root}
+"Instance root directory not found: {root}" = ""
+"Instance runtime was not running for this account." = ""
+"Instance settings" = ""
+"Instance was removed before opening its folder." = ""
+"Instance was removed before reinstall." = ""
+"Instance was removed before save." = ""
+# placeholders: {name} {game_version} {instance}
+"Instance: {name} | Minecraft {game_version} | Loader {instance}" = ""
+"Instances & Worlds" = ""
+"Instances with this turned on share the settings chosen below." = ""
+"Integrated Only" = ""
+"Interface Language" = ""
+"Interslavic" = ""
+# placeholders: {version_id} {err}
+"Invalid CurseForge version id {version_id}: {err}" = ""
+"Invert Mouse X" = ""
+"Invert Mouse Y" = ""
+"Irish" = ""
+"Italian" = ""
+"Items per page" = ""
+"JSON (.json)" = ""
+"JVM args override (optional)" = ""
+"Jacket" = ""
+"Japan, China (2026年11月10日)" = ""
+"Japanese" = ""
+"Japanese Glyph Variants" = ""
+"Java" = ""
+"Java 16" = ""
+"Java 17 (LTS)" = ""
+"Java 21 (LTS)" = ""
+"Java 25 (LTS)" = ""
+"Java 8" = ""
+"Java JVM Paths (Optional)" = ""
+"Java path override" = ""
+# placeholders: {err}
+"Java validation failed: {err}" = ""
+# placeholders: {version}
+"Java validation passed: {version}" = ""
+# placeholders: {seconds} {trimmed}
+"Java {seconds} ({trimmed})" = ""
+"Joined First Server" = ""
+"Jukebox/Note Blocks" = ""
+"Jump" = ""
+"Jumps automatically over single blocks while you move." = ""
+"Just now" = ""
+"KDE Blur" = ""
+"Kannada" = ""
+"Kazakh" = ""
+"Keep multiplayer servers, command history, and creative hotbars in step across your instances. Sync runs before an instance launches and after it closes; right-click a server on Home to choose which instances it goes to." = ""
+"Keep these settings in step across instances. The most recently changed instance wins; its settings are translated to each other instance's Minecraft version (renamed options, key codes, value formats). Settings that belong to this machine, like the window size or audio device, are never copied, and running instances are left alone until they close." = ""
+"Keep this group of game options identical across your instances." = ""
+"Keep this mod's options identical across your instances." = ""
+"Keeps textures sharp on surfaces seen at a steep angle. Higher values are sharper but cost performance." = ""
+"Key Binds" = ""
+"Klingon" = ""
+"Korean" = ""
+"LOLCAT" = ""
+"Language" = ""
+"Language & Fonts" = ""
+"Lao" = ""
+"Last Server" = ""
+"Last Update" = ""
+"Last Updated" = ""
+# placeholders: {ms}
+"Latency: {ms}ms" = ""
+"Latest" = ""
+"Latin" = ""
+"Latvian" = ""
+"Launch" = ""
+# placeholders: {err}
+"Launch failed: {err}" = ""
+"Launch is already in progress." = ""
+# placeholders: {instance_root_display} {game_version_for_task} {modloader_for_task} {modloader_version_display} {max_memory} {java_launch_mode}
+"Launch request: root={instance_root_display} | Minecraft {game_version_for_task} | {modloader_for_task}{modloader_version_display} | max memory={max_memory} MiB | {java_launch_mode}" = ""
+# placeholders: {instance_root_display} {game_version} {modloader} {modloader_version_display} {max_memory} {java_launch_mode}
+"Launch request: root={instance_root_display} | Minecraft {game_version} | {modloader}{modloader_version_display} | max memory={max_memory} MiB | {java_launch_mode}" = ""
+"Launch worker stopped unexpectedly before returning a result." = ""
+# placeholders: {pid} {profile_id} {files} {loader}
+"Launched (pid {pid}, profile {profile_id}, {files}, loader {loader})." = ""
+# placeholders: {pid} {profile_id}
+"Launched Minecraft (pid {pid}, profile {profile_id})." = ""
+# placeholders: {game_version} {pid} {profile_id}
+"Launched Minecraft {game_version} (pid {pid}, profile {profile_id})." = ""
+# placeholders: {game_version} {pid} {downloaded_files}
+"Launched Minecraft {game_version} (pid {pid}, {downloaded_files} files)." = ""
+# placeholders: {game_version} {instance_root_display} {pid} {profile_id} {files} {loader_version}
+"Launched Minecraft {game_version} in {instance_root_display} (pid {pid}, profile {profile_id}, {files}, loader: {loader_version})." = ""
+"Launched via Vertex" = ""
+"Launcher" = ""
+"Launcher UI font (default)" = ""
+"Launcher import requires an instance directory source." = ""
+"Launcher previews are not valid for manifest imports." = ""
+"Launcher profiles" = ""
+"Launching" = ""
+"Launching…" = ""
+"Lazy Account Refresh" = ""
+"Leave blank for None. Configure only versions you actually use." = ""
+"Leave blank to use launcher instance default JVM args." = ""
+"Leave out units that are zero, so 1 hour 4 seconds is not 1 hour 0 minutes 4 seconds. Default: On." = ""
+"Leave the left stick untouched, then capture its neutral resting position." = ""
+"Left" = ""
+"Left Pants Leg" = ""
+"Left Sleeve" = ""
+"Legacy Acrylic" = ""
+"Legacy Blur" = ""
+"Legal" = ""
+"Lets friends see what you're playing." = ""
+"Lets the game change the mouse cursor's shape." = ""
+"Lets you scroll lists and pages by clicking and dragging their contents. Turn off if dragging keeps scrolling when you meant to select text or drag something. The mouse wheel and scroll bars always work. Default: On." = ""
+"Lets you toggle the narrator with its keyboard shortcut." = ""
+"Lets your name appear in the player list shown by servers." = ""
+"LevelName" = ""
+"Library" = ""
+"Light" = ""
+"Limburgish" = ""
+"Limited" = ""
+"Limits how fast the launcher downloads. Turn it on to set the speed; if the speed is empty or not valid, no limit is applied. Default: Off." = ""
+"Limits how often the launcher window redraws (see Frame Limit FPS) to save power and heat. It does not affect Minecraft. Applied immediately. Default: Off." = ""
+"Line Spacing" = ""
+"Linear" = ""
+"Link Existing Vertex Profile" = ""
+"Link existing Vertex profile" = ""
+# placeholders: {name} {summary}
+"Linked existing profile '{name}' and detected {summary}." = ""
+# placeholders: {name}
+"Linked existing profile '{name}'. You can adjust Minecraft/version settings from the profile screen." = ""
+# placeholders: {path}
+"Linked existing profile at {path}." = ""
+"Linked profile version detection failed; using fallback version metadata. You can run auto-detect from Instance Settings." = ""
+"Linux" = ""
+"Linux blur protocols expose only blur regions to clients; Vertex requests a full-window region. Blur strength, radius, saturation, and noise are controlled by the compositor." = ""
+"Linux compositor blur protocol used when Window Transparency is Blurred. Auto prefers ext_background_effect_v1 and falls back to KDE blur. Better Blur DX, offered only where that KWin effect is installed, is not a protocol: Vertex asks for no blur and the effect blurs the window by its window class." = ""
+"Linux gamepad input may be blocked: VertexLauncher could not open any /dev/input/event* device with read/write access." = ""
+"Linux gamepad input unavailable: /dev/input is missing, so evdev devices cannot be opened." = ""
+# placeholders: {err}
+"Linux gamepad input unavailable: failed to read /dev/input ({err})." = ""
+"Linux gamepad input unavailable: no /dev/input/event* devices were found." = ""
+"Linux-only. Experimental. When the setting above is enabled, forces Mesa Zink so OpenGL runs over Vulkan. Disable it to keep Mesa's default OpenGL driver selection. Versions using Vulkan directly should ignore it." = ""
+"Linux-only. Experimental. When the setting above is enabled, this toggle decides whether this instance forces Mesa Zink so OpenGL runs over Vulkan. When the setting above is disabled, the launcher-wide Zink setting is used instead. Versions using Vulkan directly should ignore it." = ""
+"Linux-only. Vertex will explicitly manage OpenGL driver environment variables for launched games. This affects all launched versions by default; versions using Vulkan directly should ignore it." = ""
+"Linux-only. When enabled, this instance uses the Zink toggle below instead of the launcher-wide Linux OpenGL driver behavior. When disabled, this instance falls back to the launcher-wide Linux graphics settings. Versions using Vulkan directly should ignore it." = ""
+"Linux-specific launch compatibility settings for this instance." = ""
+"Linux-specific settings that apply across the launcher." = ""
+"List Players" = ""
+"Lithuanian" = ""
+# placeholders: {x} {y}
+"Live left stick: x={x:.3}, y={y:.3}" = ""
+"Live performance readouts drawn over the launcher." = ""
+"Load Hotbar Activator" = ""
+"Loaded cached accounts, but token renewal failed" = ""
+# placeholders: {err}
+"Loaded cached accounts, but token renewal was skipped: {err}" = ""
+"Loaded cached accounts, but token renewal worker stopped unexpectedly." = ""
+"Loaded cached discover results." = ""
+# placeholders: {count}
+"Loaded {count} modloader versions." = ""
+"Loader" = ""
+"Loader version" = ""
+"Loaders marked unavailable do not support the selected Minecraft version." = ""
+# placeholders: {loaders}
+"Loaders: {loaders}" = ""
+"Loading Minecraft versions…" = ""
+# placeholders: {kind}
+"Loading installed {kind}..." = ""
+"Loading log contents..." = ""
+"Loading modpack versions..." = ""
+"Loading modpacks..." = ""
+"Loading selected skin in the background..." = ""
+"Loading versions..." = ""
+"Loading…" = ""
+"Local image path for this instance." = ""
+"Locks the frame rate to your monitor's refresh rate to prevent screen tearing." = ""
+"Log" = ""
+"Log is empty." = ""
+"Log load worker stopped unexpectedly." = ""
+"Logging" = ""
+"Logs" = ""
+"Lojban" = ""
+"Lombard" = ""
+"Longer shutter intervals produce stronger blur but more trailing. Best paired with SMAA, FXAA, or TAA." = ""
+"Looking up changed mods on Modrinth..." = ""
+"Low German" = ""
+"Low Power" = ""
+"Lowers the frame rate when you are away from the keyboard or the window is minimized." = ""
+"Luxembourgish" = ""
+"MOTD unavailable" = ""
+"MSAA (GPU)" = ""
+"MSDF" = ""
+"Mac Fullscreen Menu Bar" = ""
+"Macedonian" = ""
+"Main Hand" = ""
+"Maintenance & Actions" = ""
+"Makes the camera sway while you walk." = ""
+"Makes web links in chat clickable." = ""
+"Malay" = ""
+"Malay (Jawi)" = ""
+"Maltese" = ""
+"Manage this profile's metadata, version stack, runtime overrides, and maintenance actions." = ""
+"Managed CurseForge entries stay downloadable in the pack manifest." = ""
+"Managing an instance" = ""
+"Managing instances" = ""
+"Managing mods and resources" = ""
+# placeholders: {name}
+"Managing {name}" = ""
+"Manifest file" = ""
+"Manual CurseForge download staging was empty." = ""
+"Manual CurseForge downloads needed" = ""
+"Marked as not working here" = ""
+"Marked as working here" = ""
+"Master Volume" = ""
+"Max" = ""
+"Max Concurrent Downloads" = ""
+"Max Framerate" = ""
+"Max memory allocation (MiB)" = ""
+"MaxCLL: the brightest pixel the launcher reports to the display, in nits. Displays use it to decide how to tone-map. Default: 1000." = ""
+"MaxFALL: the brightest average frame the launcher reports to the display, in nits (never above Max Content Light Level). Default: 400." = ""
+"Maximize" = ""
+"Maximum" = ""
+"Maximum memory (Java -Xmx) for every instance that does not set its own memory in its instance settings. Changing it affects those instances the next time they launch. The slider stops at the RAM this computer has. Default: 4096 MiB." = ""
+"Measuring..." = ""
+"Memory" = ""
+"Menu" = ""
+"Menu Background Blur" = ""
+"Merges chat command history (command_history.txt) across all instances so commands you typed in one show up in the others. Keeps the newest 50 unique commands. Runs before launch and after an instance closes. Default: Off." = ""
+"Metadata & Versions" = ""
+"Metal" = ""
+"Mica" = ""
+"Mica Alt" = ""
+"Microsoft Sign-In" = ""
+# placeholders: {error}
+"Microsoft returned an authorization error: {error}." = ""
+"Microsoft returned to Vertex Launcher, but no authorization code was included." = ""
+"Microsoft sign-in ended without a callback URL" = ""
+"Microsoft sign-in finished successfully." = ""
+"Microsoft sign-in was canceled" = ""
+# placeholders: {seconds}
+"Microsoft sign-in webview never showed page activity within {seconds} seconds and likely failed to render the login page. See launcher logs for details." = ""
+"Minecraft" = ""
+"Minecraft Version" = ""
+"Minecraft Version Groups" = ""
+"Minecraft game version" = ""
+"Minecraft game version cannot be empty." = ""
+"Minecraft installations folder" = ""
+"Minecraft is running. The game rewrites options.txt when you leave its options screens, so changes here can be overwritten; changes made in-game appear here as they are saved." = ""
+"Minecraft version" = ""
+# placeholders: {game_version}
+"Minecraft {game_version}" = ""
+# placeholders: {game_version} {loader}
+"Minecraft {game_version} • {loader}" = ""
+# placeholders: {version} {major} {minor}
+"Minecraft {version} uses format {major}.{minor}" = ""
+"Minimal" = ""
+"Minimize" = ""
+"Minimum" = ""
+"Mipmap Levels" = ""
+"Missing Minecraft access token for active account." = ""
+"Missing adapter (falls back to High Performance)" = ""
+"Mod" = ""
+"Mod & other key binds" = ""
+"Mod disabled." = ""
+"Mod enabled." = ""
+"Mod settings to sync" = ""
+"Model:" = ""
+"Modloader" = ""
+"Modloader cannot be empty." = ""
+"Modloader version" = ""
+"Modloader version worker stopped unexpectedly." = ""
+"Modpack" = ""
+"Modrinth" = ""
+"Modrinth .mrpack" = ""
+# placeholders: {err}
+"Modrinth hash lookup failed: {err}" = ""
+"Modrinth launcher instance" = ""
+"Modrinth mod" = ""
+"Modrinth pack" = ""
+# placeholders: {version}
+"Modrinth pack declared an invalid Minecraft version: {version}" = ""
+# placeholders: {path}
+"Modrinth pack entry {path} has no download URL" = ""
+"Modrinth pack import requires a manifest file source." = ""
+"Modrinth pack is missing the required minecraft dependency." = ""
+"Modrinth packs" = ""
+# placeholders: {err}
+"Modrinth project lookup failed: {err}" = ""
+# placeholders: {kind} {err}
+"Modrinth search failed for {kind}: {err}" = ""
+# placeholders: {error}
+"Modrinth search failed: {error}" = ""
+# placeholders: {version_id} {err}
+"Modrinth version lookup failed for {version_id}: {err}" = ""
+# placeholders: {project_id} {err}
+"Modrinth versions failed for {project_id}: {err}" = ""
+"Mods" = ""
+"Mongolian" = ""
+"Month Style" = ""
+"Month, day, year" = ""
+"Most Units Shown" = ""
+"Most Used Instances" = ""
+"Motion: Idle" = ""
+"Motion: Walk" = ""
+"Mouse Sensitivity" = ""
+"Move" = ""
+"Move Complete" = ""
+"Move Failed" = ""
+"Move Instance" = ""
+"Move Instance..." = ""
+"Move the stick so Vertex can see live input first." = ""
+"Move to instance…" = ""
+# placeholders: {err}
+"Move worker panicked: {err}" = ""
+# placeholders: {noun}
+"Move {noun} to another instance" = ""
+# placeholders: {destination}
+"Moved to {destination}." = ""
+# placeholders: {name} {destination}
+"Moved {name} to {destination}." = ""
+"Movement" = ""
+"Moving Instance" = ""
+"Music" = ""
+"Music & Sounds" = ""
+"Music Frequency" = ""
+"Music Toast" = ""
+"My instance" = ""
+"NSVisualEffectView blending mode used when macOS native blur is active." = ""
+"NSVisualEffectView material used when macOS native blur is active." = ""
+"NSVisualEffectView state used when macOS native blur is active." = ""
+"Nahuatl" = ""
+"Name" = ""
+"Name cannot be empty." = ""
+"Narrator" = ""
+"Narrator Hotkey" = ""
+"Native Networking" = ""
+"Nearby" = ""
+"NeoForge" = ""
+"Netherlands, Belgium (10-11-2026)" = ""
+"Never" = ""
+"New instances are created under this folder as <folder>/<instance.minecraft_root>. Relative paths are resolved from the launcher working directory." = ""
+"Next" = ""
+# placeholders: {names}
+"Next: {names}" = ""
+"No CPU pass timings." = ""
+"No CPU stage timings." = ""
+"No Cape" = ""
+"No GPU timings: this device has no timestamp queries." = ""
+"No Java executable path is configured." = ""
+"No Microsoft account signed in" = ""
+"No Minecraft versions are available." = ""
+"No cataloged modloader versions were found for this Minecraft version." = ""
+# placeholders: {name}
+"No compatible downloadable file found for dependency {name}." = ""
+# placeholders: {name}
+"No compatible downloadable file found for {name}." = ""
+"No configured global Java paths found. Add at least one Java path in Settings first." = ""
+"No content item selected." = ""
+"No content was found for this search. Try different words, another version or loader, or another content type." = ""
+"No description provided." = ""
+# placeholders: {version_id}
+"No downloadable file found for Modrinth version {version_id}." = ""
+"No files or folders found in the instance root." = ""
+"No game versions available yet." = ""
+"No graphics adapters detected" = ""
+"No instances created yet." = ""
+"No instances yet." = ""
+"No live left-stick sample is available from this device yet." = ""
+"No log files found under this instance's logs folder." = ""
+# placeholders: {path}
+"No manifest.toml found in Vertex pack {path}" = ""
+"No matches found." = ""
+"No modloader versions found for this Minecraft version." = ""
+"No modpack selected." = ""
+"No modpacks matched the current search and filters." = ""
+"No players online" = ""
+"No readable pack.mcmeta; compatibility unknown" = ""
+"No recent worlds or servers." = ""
+"No resource packs found." = ""
+"No results yet. Search to browse installable content." = ""
+"No screenshots found in any instance." = ""
+"No screenshots found under this instance's screenshots folder." = ""
+"No settings match your search." = ""
+"No skin loaded" = ""
+"No usable Minecraft version profiles were found in this instance." = ""
+# placeholders: {versions_dir}
+"No versions directory was found at {versions_dir}." = ""
+"No versions match the current filters." = ""
+"No worlds or servers found in any instance." = ""
+# placeholders: {kind_label}
+"No {kind_label} updates available." = ""
+# placeholders: {kind}
+"No {kind} have an update available." = ""
+# placeholders: {kind}
+"No {kind} installed." = ""
+# placeholders: {kind} {query}
+"No {kind} match '{query}'." = ""
+# placeholders: {manifest} {patch}
+"No {manifest} found in Vertex patch {patch}" = ""
+"None" = ""
+"Normal" = ""
+"Northern Sami" = ""
+"Norwegian Bokmal" = ""
+"Norwegian Nynorsk" = ""
+"Not a setting this launcher knows; edited as raw text." = ""
+"Not a speed this understands; try 250Mbps or 30MB/s. No limit is applied until it is." = ""
+# placeholders: {version}
+"Not declared for this version{version}" = ""
+"Nothing logged yet." = ""
+"Notification Fade Out Easing" = ""
+"Notification Fade Out Time" = ""
+"Notification Time" = ""
+"Notifications" = ""
+"Number (11)" = ""
+"Occitan" = ""
+"Off" = ""
+"On Pause" = ""
+"On systems with both an integrated and a discrete GPU, the launcher window renders on the integrated one (lower power and heat) instead of the discrete one. This is the same as choosing the Low Power adapter profile below. It only affects the launcher, not Minecraft, and is ignored when a specific adapter is chosen.. Default: On." = ""
+"On the home screen" = ""
+"On-stream safety and account security settings." = ""
+"One KEY=value per line. Blank lines and # comments are ignored. Values are not written to launch logs." = ""
+"Online & Misc" = ""
+"Only PNG screenshots can be copied to the clipboard." = ""
+"Only Show Secure Chat" = ""
+"Only active when Window Transparency is Transparent or Blurred. 100% is fully opaque UI chrome and 0% is fully transparent. Default: 100%." = ""
+"Only draws the text background behind chat, not other text." = ""
+# placeholders: {status}
+"Only in {status}" = ""
+"Only instances that already have the mod's config file take part. Thread counts, server identity and other machine-specific keys are skipped." = ""
+"Only shows chat messages that carry a valid signature." = ""
+"Only where it already exists" = ""
+"Opacity of the dark box behind chat text." = ""
+"Opaque" = ""
+"Opaque is a normal window. Transparent lets the desktop show through the launcher. Blurred also asks the operating system to blur what is behind it, where your platform supports that.. Default: Opaque." = ""
+"Open Chat" = ""
+"Open Command" = ""
+"Open Console When Launching" = ""
+"Open Content Browser" = ""
+"Open CurseForge file page" = ""
+"Open Desktop Effects (Better Blur DX settings)" = ""
+"Open Instance Folder" = ""
+"Open Inventory" = ""
+"Open a notice below to read its full legal text." = ""
+"Open downloads folder" = ""
+"Open folder" = ""
+# placeholders: {root}
+"Open instance folder\n{root}" = ""
+"Open instance menu" = ""
+"Open mod details" = ""
+"Open project page" = ""
+"Open the console of the game you are playing" = ""
+"Open the instance folder and commit any metadata or runtime changes." = ""
+"Open/Close Inventory" = ""
+"OpenGL" = ""
+"OpenType Features to Enable" = ""
+# placeholders: {instance_root}
+"Opened instance folder: {instance_root}" = ""
+"Opens the launcher fullscreen, in the style chosen under Fullscreen Style. Press Escape or F11 to leave fullscreen. Default: Off." = ""
+"Operator Items Tab" = ""
+# placeholders: {key}
+"Option: {key}" = ""
+"Optional note shown in library instance tiles." = ""
+"Options Version" = ""
+"Other keys (mods and other versions)" = ""
+"Output Device" = ""
+"Overall graphics quality: Fast, Fancy, or Fabulous! (adds transparency and weather effects)." = ""
+"Overall volume for everything." = ""
+"Override Java runtime for this instance" = ""
+"Override max memory for this instance" = ""
+"Overview" = ""
+"PNG" = ""
+# placeholders: {output_file_name} {counts}
+"Pack exported — {output_file_name} — {counts}" = ""
+"Pad Day and Month With Zeros" = ""
+"Pad Hour With a Zero" = ""
+"Page" = ""
+"Page headings" = ""
+# placeholders: {page}
+"Page {page}" = ""
+"Panorama Scroll Speed" = ""
+# placeholders: {parent}
+"Parent folder does not exist: {parent}" = ""
+"Particles" = ""
+# placeholders: {patch_file_name} {message}
+"Patch applied — {patch_file_name} — {message}" = ""
+# placeholders: {patch_file_name} {err}
+"Patch apply failed — {patch_file_name} — {err}" = ""
+"Patch export complete." = ""
+# placeholders: {output_file_name} {counts}
+"Patch generated — {output_file_name} — {counts}" = ""
+# placeholders: {trimmed} {err}
+"Path is not readable: {trimmed}: {err}" = ""
+"Path to a .vtmpack, .mrpack or .zip" = ""
+"Path to an image" = ""
+"Path to the instance folder" = ""
+"Pause and Toast" = ""
+"Pause on Lost Focus" = ""
+"Pauses the game when the window loses focus." = ""
+"Peaceful" = ""
+"Per-instance memory limit." = ""
+"Per-instance overrides for memory, JVM arguments, and Java runtime selection." = ""
+"Performance Profile" = ""
+"Persian" = ""
+"Pick Block" = ""
+"Pick a different instance." = ""
+"Pick from available Minecraft versions." = ""
+"Pick the launcher's GPU either by a performance profile (High Performance or Low Power) or by choosing one specific detected adapter.. Default: Performance Profile." = ""
+"Ping unknown" = ""
+"Pirate Speak" = ""
+"Player" = ""
+"Player Affected" = ""
+"Players" = ""
+# placeholders: {online}
+"Players online ({online}):" = ""
+# placeholders: {instance_name}
+"Playing {instance_name}" = ""
+"Please enter or browse to a destination folder." = ""
+"Polish" = ""
+"Popover" = ""
+"Popularity" = ""
+"Portuguese (Brazil)" = ""
+"Portuguese (Portugal)" = ""
+"Power Saver" = ""
+"Prefer Integrated Graphics" = ""
+"Preparing Microsoft sign-in..." = ""
+# placeholders: {game_version}
+"Preparing Minecraft {game_version}..." = ""
+"Preparing export task..." = ""
+"Preparing folders" = ""
+"Preparing import task..." = ""
+# placeholders: {count}
+"Preparing {count} CurseForge mod downloads..." = ""
+# placeholders: {version}
+"Preparing {version}..." = ""
+"Preserving user-added content..." = ""
+"Preserving worlds and servers..." = ""
+"Press a key…" = ""
+"Previous" = ""
+"Primary" = ""
+"Prism / MultiMC" = ""
+"Prism / MultiMC / PolyMC instance" = ""
+"Privacy" = ""
+"Profile actions" = ""
+"Profile name" = ""
+"Progress through the in-game tutorial hints. Managed by the game." = ""
+"Prompt on Links" = ""
+# placeholders: {published}
+"Published: {published}" = ""
+"Punch Tree" = ""
+"Purge metadata cache" = ""
+"Purged local metadata cache. Version lists will be re-fetched on next refresh." = ""
+"Purging..." = ""
+"Push the left stick downward and capture it." = ""
+"Push the left stick left and capture it." = ""
+"Push the left stick right and capture it." = ""
+"Push the left stick upward and capture it." = ""
+"Puts Mon, Tue... in front of the date. Default: Off." = ""
+"Quadratic In/Out" = ""
+"Quenya" = ""
+# placeholders: {action} {name}
+"Queued {action} {name}." = ""
+# placeholders: {display_name} {completed_downloads} {total_downloads}
+"Queued {display_name} for manual download ({completed_downloads}/{total_downloads} mods checked)" = ""
+# placeholders: {name} {count}
+"Queued {name} for download ({count} in queue)." = ""
+"Queued: installs after the downloads ahead of it" = ""
+"Quick Actions" = ""
+"Quick install latest compatible version" = ""
+"Quilt" = ""
+"Quit Shortcuts" = ""
+"Raw Input" = ""
+"Read CurseForge manifest." = ""
+"Reading .mrpack manifest..." = ""
+"Reading XZ .vtmpack for inspection..." = ""
+"Reading XZ .vtmpack manifest..." = ""
+"Reading base .vtmpack..." = ""
+"Reading instance files..." = ""
+"Reading instance logs" = ""
+"Reading managed content manifest..." = ""
+"Reading updated .mrpack manifest..." = ""
+# placeholders: {name}
+"Reading {name} logs" = ""
+"Reads chat and menus aloud. Choose what it reads, or turn it off." = ""
+"Reads the mouse directly, ignoring operating-system acceleration and settings." = ""
+"Realms Notifications" = ""
+"Recent" = ""
+"Red/cyan 3D effect for anaglyph glasses." = ""
+"Reduced Debug Info" = ""
+"Refresh" = ""
+"Refresh local files" = ""
+"Refresh modloader versions" = ""
+"Refresh version list" = ""
+"Refreshed installed content metadata and hash cache." = ""
+"Refreshing account token..." = ""
+"Refreshing cached account session..." = ""
+"Refreshing session..." = ""
+"Refreshing your account before launching..." = ""
+"Refreshing your account..." = ""
+"Reinstall Profile" = ""
+# placeholders: {instance_root_display} {game_version_for_task} {modloader_for_task} {modloader_version_display} {java_launch_mode}
+"Reinstall request: root={instance_root_display} | Minecraft {game_version_for_task} | {modloader_for_task}{modloader_version_display} | {java_launch_mode}" = ""
+# placeholders: {game_version} {downloaded_files}
+"Reinstalled Minecraft {game_version} ({downloaded_files} files)." = ""
+# placeholders: {game_version} {instance_root_display} {files} {loader_version}
+"Reinstalled Minecraft {game_version} in {instance_root_display} ({files}, loader: {loader_version})." = ""
+# placeholders: {game_version}
+"Reinstalling Minecraft {game_version} profile..." = ""
+"Relevance" = ""
+"Remembers unsent chat text when you close chat." = ""
+"Remove" = ""
+"Removed installed content." = ""
+"Removing installed content..." = ""
+"Rename world" = ""
+# placeholders: {new_name}
+"Renamed to {new_name}." = ""
+"Rename…" = ""
+"Render Distance" = ""
+"Render Distance (chunks)" = ""
+"Render the launcher in HDR on displays that support it. Default: Off." = ""
+"Renders the second skin layer (hat, jacket, sleeves, pants) as raised 3D voxels in the skin preview instead of a flat overlay. Can be combined with skin expressions. Preview only; costs some GPU time. Default: Off." = ""
+"Renders through framebuffer objects; needed for some effects." = ""
+"Renews an account's Microsoft/Minecraft sign-in only when something needs it, and only for the active account: right before launching a game, or when you open something that needs you signed in, such as the Skins screen. Nothing is renewed at startup and your other accounts are left alone until you switch to them. Off renews every saved account when the launcher starts. Renewing the active account yourself from the account menu still works either way. Default: Off." = ""
+"Required for CurseForge modpack zip imports. Overrides VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY and enables CurseForge browsing/download metadata." = ""
+"Reserved for Windows-specific instance settings." = ""
+"Reserved for macOS-specific instance settings." = ""
+"Reset to default" = ""
+"Resolving CurseForge pack metadata..." = ""
+# placeholders: {done} {total}
+"Resolving dependencies ({done}/{total} done)" = ""
+"Resolving dependencies..." = ""
+"Resolving metadata" = ""
+# placeholders: {name}
+"Resolving {name}" = ""
+"Resource Pack" = ""
+"Resource Packs" = ""
+"Resource pack sync is off. Turn it on in the Sync tab; overrides are remembered either way." = ""
+"Resource packs the game has enabled, in load order. Manage them on the Resource Packs tab." = ""
+"Resource packs the game skipped because they target another version." = ""
+"Restore down" = ""
+# placeholders: {relative}
+"Restoring bundled mod {relative}" = ""
+# placeholders: {relative}
+"Restoring config {relative}" = ""
+"Restoring managed metadata..." = ""
+# placeholders: {relative}
+"Restoring override {relative}" = ""
+# placeholders: {relative}
+"Restoring {relative}" = ""
+"Retry" = ""
+"Reverses horizontal look." = ""
+"Reverses vertical look, so moving the mouse up looks down." = ""
+"Review complete. Save the calibration to use this controller automatically next time." = ""
+"Reviewing a modpack" = ""
+"Reviewing instance screenshots" = ""
+"Reviewing licenses" = ""
+"Reviewing screenshots" = ""
+# placeholders: {name}
+"Reviewing {name} screenshots" = ""
+"Right" = ""
+"Right Pants Leg" = ""
+"Right Sleeve" = ""
+"Ripuarian" = ""
+"Romanian" = ""
+# placeholders: {root}
+"Root Folder: {root}" = ""
+"Rotate With Minecart" = ""
+"Runs Minecraft versions that need Java 8, 16 or 17 (1.20.4 and older) on Java 21 instead. Versions that need Java 21 or 25 are unchanged. Useful for a single modern runtime, but some old mods and loaders may not work on Java 21. Default: On." = ""
+"Runs the game in fullscreen instead of a window." = ""
+"Runtime Overrides" = ""
+"Runtime and hardware information for this installation." = ""
+"Russian" = ""
+"Russian (Pre-revolutionary)" = ""
+"Rusyn" = ""
+"SDF" = ""
+# placeholders: {display_name} {expected} {actual}
+"SHA-512 mismatch for {display_name} (expected {expected}, got {actual})" = ""
+"SMAA (GPU Post)" = ""
+"SVG Anti-Aliasing" = ""
+"Samples per pixel for the skin preview when its anti-aliasing is MSAA (1–8). More samples give smoother edges but use more GPU memory. Default: 4." = ""
+"Save" = ""
+"Save Chat Drafts" = ""
+"Save Hotbar Activator" = ""
+"Save calibration" = ""
+"Save instance settings" = ""
+"Save metadata & versions" = ""
+"Saved accounts (right-click to set a color)" = ""
+"Saved gamepad calibration." = ""
+"Saved instance settings." = ""
+"Saved metadata and version settings." = ""
+"Saved skin and cape changes." = ""
+"Saved." = ""
+"Saves the selected theme as a JSON file in the themes folder, to use as a starting point for your own theme." = ""
+"Saving…" = ""
+"Scale used for the debug screen text." = ""
+"Scan this QR code to continue with device code on another device, or use browser sign-in on this device to avoid typing the code manually." = ""
+"Scanning current instance files..." = ""
+"Scanning exportable files..." = ""
+"Scanning for screenshots..." = ""
+"Scanning instance files..." = ""
+"Scottish Gaelic" = ""
+"Screenshot Gallery" = ""
+"Screenshot delete worker stopped unexpectedly." = ""
+"Screenshots" = ""
+# placeholders: {count}
+"Screenshots ({count})" = ""
+"Scroll Sensitivity" = ""
+"Search" = ""
+"Search all settings" = ""
+# placeholders: {kind}
+"Search installed {kind} by name, file, version, or provider" = ""
+"Search modpacks and press Enter" = ""
+"Search project names, summaries, and tags. Press Enter to search" = ""
+"Searching content..." = ""
+# placeholders: {search_completed_tasks} {search_total_tasks}
+"Searching content... {search_completed_tasks}/{search_total_tasks} result groups loaded." = ""
+# placeholders: {request}
+"Searching {request} for modpacks..." = ""
+"Secondary" = ""
+"Seconds that newly loaded chunks take to fade in. 0 shows them instantly." = ""
+"Seconds to delay incoming chat messages." = ""
+"Section headings" = ""
+"Select Minecraft Skin" = ""
+"Select a .vtmpack, .mrpack, or CurseForge modpack .zip file." = ""
+"Select a log file from the left to view it." = ""
+"Select a log file to view it with the same highlighting rules as the live console." = ""
+"Select an instance first. Content Browser installs into the selected instance." = ""
+"Select an instance from the left sidebar or click + to create one." = ""
+"Select which configured Java path this instance should use." = ""
+"Select..." = ""
+"Selected image must be a valid PNG skin (expected 64x64 or 64x32)." = ""
+"Selected instances" = ""
+"Selection" = ""
+"Sends extra optional diagnostic data to Mojang." = ""
+"Serbian (Cyrillic)" = ""
+"Serbian (Latin)" = ""
+"Server export complete." = ""
+"Server offline" = ""
+"Server sync is turned off. Enable it in Settings → Instance Sync for these options to take effect." = ""
+"Server sync options" = ""
+# placeholders: {instance_name} {output_path} {summary}
+"Server zip ready for {instance_name} at {output_path}. {summary}" = ""
+"Servers that have no sync options of their own are copied to every instance. Options you set on a specific server always override this. Needs Sync Multiplayer Servers to be on. Default: Off." = ""
+"Set" = ""
+"Set Linux OpenGL Driver" = ""
+"Set a Java executable path before testing, or download OpenJDK." = ""
+"Set by the game to detect a crash on the previous run." = ""
+"Settings" = ""
+"Settings to sync" = ""
+"Shader" = ""
+"Shader pack options" = ""
+"Shaders" = ""
+"Shakespearean English" = ""
+"Share Presence" = ""
+"Shared Java behavior for launches that use managed runtime selection." = ""
+"Shares packs between these instances where their metadata says they work (or you've said they do), and keeps which packs are enabled in step. Manage per-pack exceptions on the Resource Packs tab." = ""
+"Shares saved creative hotbars (hotbar.nbt) across instances. Hotbars only flow from older Minecraft versions to the same or newer ones, because older versions cannot read newer item data. Runs before launch and after an instance closes. Default: Off." = ""
+"Sheet" = ""
+"Short" = ""
+"Short name (Nov)" = ""
+"Show Day of the Week" = ""
+"Show FPS Counter" = ""
+"Show Frame Graph" = ""
+"Show How Long Ago" = ""
+"Show Now Playing Toast" = ""
+"Show Screenshot Time Card" = ""
+"Show Seconds" = ""
+"Show Subtitles" = ""
+"Show in folder" = ""
+"Show updatable files" = ""
+# placeholders: {count}
+"Showing {count} modpacks." = ""
+"Shown" = ""
+"Shows Realms invites and news on the title screen." = ""
+"Shows a pop-up naming the music track that starts playing." = ""
+"Shows an icon while the world is saving." = ""
+"Shows captions for sounds, useful for accessibility or when muted." = ""
+"Shows colored text in chat." = ""
+"Shows in-game pop-up notifications." = ""
+"Shows the hat layer of your skin." = ""
+"Shows the jacket layer of your skin." = ""
+"Shows the left pants layer of your skin." = ""
+"Shows the left sleeve layer of your skin." = ""
+"Shows the operator-only items tab in creative mode." = ""
+"Shows the right pants layer of your skin." = ""
+"Shows the right sleeve layer of your skin." = ""
+"Shows when a screenshot was taken, and how long ago, in the corner of the screenshot viewer. The time comes from the screenshot's file name when it has one, otherwise from the file's modified time. Default: On." = ""
+"Shows your Discord status as the instance you are playing with an elapsed timer, or the launcher screen you are on when nothing is running. Skipped for instances that have their own Discord Rich Presence mod, so the two do not fight over your status. Needs the Discord desktop app running. Default: On." = ""
+"Shows your cape." = ""
+"Sidebar" = ""
+"Sign in" = ""
+"Sign in before copying Steam launch options." = ""
+"Sign in before copying a command line." = ""
+"Sign in before copying an instance command line." = ""
+"Sign in with a Minecraft account to manage skins and capes." = ""
+"Sign in with an account that owns Minecraft to launch." = ""
+"Sign in with the Microsoft account that owns Minecraft: Java Edition." = ""
+"Sign-in Failed" = ""
+"Sign-in state was poisoned unexpectedly" = ""
+"Sign-in stopped unexpectedly before completion" = ""
+"Signed in" = ""
+# placeholders: {account}
+"Signed in as {account}" = ""
+"Signing in with Microsoft..." = ""
+"Signing in…" = ""
+"Silesian" = ""
+"Simulation Distance (chunks)" = ""
+"Sine In/Out" = ""
+"Size" = ""
+"Size of chat text." = ""
+"Size of menus and the HUD. 0 picks the largest size that fits your window." = ""
+"Size, weight, and font for each kind of text. These stack with the UI font size and weight above." = ""
+"Skin" = ""
+"Skin Image" = ""
+"Skin Manager" = ""
+"Skin Preview MSAA Samples" = ""
+"Skin Preview Motion Blur Amount" = ""
+"Skin Preview Motion Blur Samples" = ""
+"Skin Preview Motion Blur Shutter" = ""
+"Skin Preview Post Anti-Aliasing" = ""
+"Skin Preview Texel Edge AA" = ""
+"Skins" = ""
+"Skip Multiplayer Warning" = ""
+"Skipping empty content metadata..." = ""
+"Skips the multiplayer safety warning." = ""
+"Slash (/)" = ""
+"Slim (Alex)" = ""
+"Slovak" = ""
+"Slovenian" = ""
+"Small headings and stats" = ""
+"Smooth Lighting" = ""
+"Smooths the hard pixel edges between skin texels inside the skin shader, on top of the post anti-aliasing below. Off keeps crisp pixel-art edges. Default: Off." = ""
+"Sneak" = ""
+"Sneak stays on after one press instead of while held." = ""
+"Social Interactions Screen" = ""
+"Softens the shadows where blocks meet. Higher settings look nicer but cost performance." = ""
+"Somali" = ""
+"Sorts see-through things (water, stained glass, particles) correctly. Needs a capable GPU." = ""
+"Sound" = ""
+"South Korea (2026. 11. 10.)" = ""
+"Space" = ""
+"Space between chat lines." = ""
+"Spanish (Argentina)" = ""
+"Spanish (Chile)" = ""
+"Spanish (Ecuador)" = ""
+"Spanish (Mexico)" = ""
+"Spanish (Spain)" = ""
+"Spanish (Uruguay)" = ""
+"Spanish (Venezuela)" = ""
+"Spectator Hotbar" = ""
+"Spectator Outlines" = ""
+"Speed limit is on but empty, so no limit is applied. Enter something like 250Mbps or 30MB/s." = ""
+"Speed of the rotating title-screen panorama. 0 stops it." = ""
+"Sprint" = ""
+"Sprint Window (ticks)" = ""
+"Sprint stays on after one press instead of while held." = ""
+"Standard XZ compression" = ""
+"Start Vertex in Fullscreen" = ""
+"Start syncing" = ""
+"Started Cleanly" = ""
+"Starting export..." = ""
+# placeholders: {game_version} {modloader}
+"Starting initial install: Minecraft {game_version} / {modloader}." = ""
+# placeholders: {game_version} {modloader}
+"Starting installation for Minecraft {game_version} ({modloader})..." = ""
+"Starting installation..." = ""
+"Still loading content metadata. Try again in a moment." = ""
+"Stop" = ""
+"Stop syncing" = ""
+"Stop the running instance before deleting its folder." = ""
+"Stopped instance runtime." = ""
+# placeholders: {kind}
+"Stopped updating {kind} after too many passes." = ""
+"Stops the sky flashing during thunderstorms." = ""
+"Stored normalized: 0.0 is 70°." = ""
+# placeholders: {path}
+"Stores sign-in tokens in {path} instead of the system keyring. The file is not encrypted. Turn this off to move them back into the keyring. Default: Off." = ""
+"Strafe Left" = ""
+"Strafe Right" = ""
+"Streamer mode was turned off because OBS is no longer running." = ""
+"Streamer mode was turned on because OBS was detected." = ""
+"Strength of the wobble when you use a Nether portal or have nausea." = ""
+"Subtitles" = ""
+"Suggests commands as you type in chat." = ""
+"Swap Item With Offhand" = ""
+"Swedish" = ""
+"Switches to the instance's console as soon as you launch it, so you can watch the game start. Turn off to stay on the page you launched from. Default: On." = ""
+"Sync" = ""
+"Sync Chunk Writes" = ""
+"Sync Command History" = ""
+"Sync Creative Hotbars" = ""
+"Sync Multiplayer Servers" = ""
+"Sync New Servers to All Instances" = ""
+"Sync now" = ""
+"Sync options…" = ""
+"Sync resource packs" = ""
+"Sync this instance's settings" = ""
+"Sync world" = ""
+"Sync world…" = ""
+"System" = ""
+"System Default" = ""
+"TAA (Temporal)" = ""
+"TOML (.toml)" = ""
+"Tagalog" = ""
+"Taiwan, Minguo calendar (115/11/10)" = ""
+"Take Screenshot" = ""
+"Taken at an unknown time" = ""
+# placeholders: {date} {time}
+"Taken at {date} at {time}" = ""
+"Takes full control of the display in fullscreen. Can lower latency but makes alt-tabbing slower." = ""
+"Tamil" = ""
+"Tatar" = ""
+"Tertiary" = ""
+"Test Java" = ""
+"Test notification" = ""
+# placeholders: {path}
+"Testing {path}..." = ""
+"Testing..." = ""
+"Texel Border AA" = ""
+"Text" = ""
+"Text Background Opacity" = ""
+"Text Rendering Path" = ""
+"Text fields" = ""
+"Text styles" = ""
+"Texture Filtering" = ""
+"Thai" = ""
+"Thailand, Buddhist Era (10/11/2569)" = ""
+"That profile folder is already registered in Vertex." = ""
+"The active account changed, so the launch was cancelled." = ""
+"The audio output device the game plays through. System Default follows your operating system's choice." = ""
+"The brightness, in nits, of the interface's white. 0 uses the display's own SDR white level, which can be too bright when the system does not report it; try 80-200 if the interface looks blown out. Default: 0 (automatic)." = ""
+"The camera turns with the minecart on curves." = ""
+"The curve of the fade-out animation. Linear fades at a constant rate; Cubic and Exponential ease in, out, or both, and the Exponential curves are the most abrupt. Changes apply immediately. Default: Cubic In/Out." = ""
+"The destination folder must be empty." = ""
+"The destination path already exists and is not a folder." = ""
+"The destination path is invalid." = ""
+"The font Chinese, Japanese and Korean text falls back to." = ""
+"The font colour emoji are drawn with." = ""
+"The language the game's menus and text are shown in." = ""
+"The language the launcher's interface is shown in." = ""
+"The language the launcher's text is shown in. Automatic follows your system's language and shows English when the launcher has no translation for it. More languages appear here when you add a translation file to the launcher's languages folder. Default: Automatic." = ""
+"The last server address you connected to with Direct Connect." = ""
+"The least severe line shown in Vertex's own console. Debug lines are always kept; trace lines (the engine's progress and timings) are only kept while Trace is chosen. Default: Info." = ""
+"The least severe line shown in a game's console. Default: Info." = ""
+"The main font for launcher text. Each text style (headings, body, buttons) can override it in the font settings below. Default: Maple Mono NF (included)." = ""
+"The most frames per second the launcher window draws when the frame limiter is on (30–240). Lower saves more power. Default: 120." = ""
+"The most units the \"how long ago\" line shows, largest first: years, days, hours, minutes, seconds. Default: 5." = ""
+"The order the day, month and year come in. Default: Month, day, year." = ""
+"The server did not share which players are online" = ""
+"The server is no longer in that instance." = ""
+"The signal sent to the display while HDR is on. HDR10 (PQ) suits most monitors; scRGB is Windows' native HDR format; HLG and Dolby Vision need display and platform support. Default: HDR10 (PQ)." = ""
+# placeholders: {message} {seconds}
+"The skin preview could not be drawn ({message}). Trying again in {seconds:.0}s." = ""
+"The tint colour as #rrggbb. Ignored until it is a complete colour." = ""
+"The world moves to Vertex's shared worlds folder and each instance you pick gets a link to it (or a copy that refreshes at launch and exit where links aren't possible). Progress made in any of them appears in all of them. Close the game in every picked instance first." = ""
+"Theme" = ""
+"Theme and launcher chrome settings." = ""
+# placeholders: {folder}
+"Themes are loaded from {folder}. Add or edit a theme file there and it appears here without restarting." = ""
+"This account is already running another instance." = ""
+"This computer's time zone" = ""
+"This instance is not tied to an updatable modpack yet." = ""
+"This is a test notification." = ""
+"This is the name the game lists the world under; its folder keeps its name." = ""
+"This localhost page is not being used by Vertex Launcher." = ""
+"This modpack has a rich presence mod" = ""
+"This permanently deletes the world's folder from the instances below. It cannot be undone." = ""
+"This removes the server from the instances below, and stops sync from adding it back to them." = ""
+"This screen has not been rebuilt for the new renderer yet. Start Vertex with --legacy-ui to use it in the previous interface; your settings and instances are shared." = ""
+"This screenshot could not be opened." = ""
+"This tab should close automatically." = ""
+"This tab should close automatically. You can return to Vertex Launcher." = ""
+"This world is already synced." = ""
+"This world is stored once and linked into each instance below, so progress made in any of them appears in all of them. Removing an instance gives it its own copy." = ""
+"Thumbnail path (optional)" = ""
+"Time Separator" = ""
+"Time Zone" = ""
+"Tiny" = ""
+"Titlebar" = ""
+"To" = ""
+"To keep a world in step between instances instead of making a separate copy, use \"Sync world…\"." = ""
+"Toggle Attack" = ""
+"Toggle Crouch" = ""
+"Toggle Fullscreen" = ""
+"Toggle Perspective" = ""
+"Toggle Spectator Shader Effects" = ""
+"Toggle Sprint" = ""
+"Toggle Use" = ""
+"Toggle server favorite" = ""
+"Toggle world favorite" = ""
+# placeholders: {path}
+"Tokens will be written, unencrypted, to {path}. Keep that file private, never share it, and leave it out of backups and screenshots." = ""
+"Toki Pona" = ""
+"Tooltip" = ""
+"Total shutter interval measured in 60 FPS frames. Higher values create longer streaks." = ""
+"Touchscreen Mode" = ""
+"Trace" = ""
+"Transparent" = ""
+"Treats Ctrl+click as a right click (macOS)." = ""
+"Treats each scroll as exactly one step, ignoring high-resolution scrolling. Helps with free-spinning wheels." = ""
+"Try starting the browser sign-in flow again from the launcher." = ""
+"Turkish" = ""
+"Turn this on for at least two instances for anything to sync." = ""
+"Turns on OpenType font features (kerning, ligatures, alternates, number styles) for launcher text. The features used are the tags listed below; if that list is empty, the built-in list is used: kern, liga, calt, onum, pnum. Default: On." = ""
+"Tutorial Step" = ""
+"Type to search" = ""
+"UI" = ""
+"UI Font" = ""
+"UI Font Size" = ""
+"UI Font Weight" = ""
+"UI Opacity" = ""
+"UK and Europe, long (10 November 2026)" = ""
+"UK, France, Spain, Italy, Brazil, Australia (10/11/2026)" = ""
+"UTC" = ""
+"Ukrainian" = ""
+"Ultra (SSAA 4x)" = ""
+"Unbind" = ""
+"Under Page Background" = ""
+"Under Window Background" = ""
+"Unfocused Height" = ""
+"United States (11/10/2026)" = ""
+"United States, long (November 10, 2026)" = ""
+"Unknown" = ""
+"Unknown cape" = ""
+"Unknown mod" = ""
+"Unknown update" = ""
+"Unnamed" = ""
+# placeholders: {path}
+"Unsupported Vertex pack compression in {path}. Expected xz." = ""
+# placeholders: {selected_path}
+"Unsupported content file: {selected_path}. Expected a mod .jar or supported pack .zip." = ""
+# placeholders: {name}
+"Unsupported content type for {name}." = ""
+# placeholders: {path}
+"Unsupported import file {path}. Expected .vtmpack, .mrpack, or a CurseForge modpack .zip." = ""
+# placeholders: {kind}
+"Update all {kind}" = ""
+"Update complete." = ""
+"Update to this version" = ""
+# placeholders: {version}
+"Update: {version}" = ""
+# placeholders: {kind}
+"Updated 1 {kind} entry." = ""
+# placeholders: {name}
+"Updated {name}." = ""
+# placeholders: {updated_count} {kind_label}
+"Updated {updated_count} {kind_label}." = ""
+# placeholders: {updated}
+"Updated: {updated}" = ""
+"Updates all mods to the latest compatible version, you typically should not update pre-made modpacks most of the time if you are playing Multiplayer, or if your modpack is complex" = ""
+# placeholders: {kind}
+"Updates all {kind} to the latest compatible version for this instance." = ""
+# placeholders: {project_name}
+"Updating {project_name}..." = ""
+"Upper Saxon German" = ""
+"Upside-Down English" = ""
+"Use #rrggbb or rgb(r, g, b)" = ""
+"Use Auto-detect unless you know which launcher produced the instance." = ""
+"Use Browser Sign-in" = ""
+"Use Item/Place Block" = ""
+"Use Unsecured File Account Storage" = ""
+"Use VBOs" = ""
+"Use Zink Driver (Experimental)" = ""
+"Use any custom modloader name." = ""
+"Use current neutral" = ""
+"Use general CJK font" = ""
+"Use general emoji font" = ""
+"Use item stays active after one press instead of while held." = ""
+"Use pack's metadata" = ""
+"Use unsecured account storage?" = ""
+"Used by Minecraft 1.16.5 and older" = ""
+"Used by Minecraft 1.17 to 1.17.1" = ""
+"Used by Minecraft 1.18 to 1.20.4" = ""
+"Used by Minecraft 1.20.5 to 1.21.x" = ""
+"Used by Minecraft 26.1 and newer" = ""
+"Used when creating new instances. You can still override values per instance." = ""
+"Uses Japanese forms of shared CJK characters." = ""
+"Uses a 3D audio effect so sounds seem to come from their direction. Best with headphones." = ""
+"Uses a dark background on the loading screen." = ""
+"Uses higher-contrast menus and button outlines." = ""
+"Uses occlusion culling to skip drawing hidden chunks." = ""
+"Uses the Unicode font for all text, which supports more characters but looks different." = ""
+"Uses the maximum XZ preset with the extreme flag. Exports take longer and may use more memory, but prioritize the smallest archive." = ""
+"Uses the operating system's faster networking when available." = ""
+"Uses the standard XZ compression preset for a balanced export." = ""
+"Uses touchscreen controls instead of a mouse and keyboard." = ""
+"Uses vertex buffer objects for faster rendering." = ""
+"VK_INSTANCE_LAYERS=\nMESA_VK_WSI_PRESENT_MODE=mailbox" = ""
+"VSync" = ""
+"Valencian" = ""
+"Vanilla" = ""
+"Venetian" = ""
+"Version catalog behavior and content provider access." = ""
+"Version catalog worker stopped unexpectedly." = ""
+"Version detail worker stopped unexpectedly." = ""
+"Version details worker stopped unexpectedly." = ""
+"Versions" = ""
+"Vertex .vtmpack" = ""
+"Vertex Launcher" = ""
+"Vertex Launcher could not understand the browser callback request." = ""
+# placeholders: {percent} {speed} {eta}
+"Vertex Launcher · Installing {percent}% · {speed:.1} MiB/s{eta}" = ""
+"Vertex Log Level" = ""
+"Vertex Modpack" = ""
+"Vertex Modpack Patch" = ""
+"Vertex is fullscreen. Press Escape (or F11) to leave fullscreen." = ""
+"Vertex is moving this instance now." = ""
+"Vertex keeps its settings in one file. Choose its format; you can edit it by hand later." = ""
+"Vertex pack import requires a manifest file source." = ""
+"Vertex packs" = ""
+"Vertex's window class (org.sturdyfool10.VertexLauncher) is not on the effect's list, so the window stays plain transparent. Vertex adds it when this is chosen; if that did not work, add it here." = ""
+"Vertex's window class (org.sturdyfool10.VertexLauncher) is on the effect's list, so the window is blurred." = ""
+"Video" = ""
+"Video mode used in exclusive fullscreen, as chosen in the game." = ""
+"Vietnamese" = ""
+"View" = ""
+"View Bobbing" = ""
+"Vignette" = ""
+"Viossa" = ""
+"Visual Effect Blending Mode" = ""
+"Visual Effect Emphasized" = ""
+"Visual Effect Material" = ""
+"Visual Effect State" = ""
+"Volume of ambient and environmental sounds, like caves." = ""
+"Volume of background music." = ""
+"Volume of hostile mobs." = ""
+"Volume of jukeboxes and note blocks." = ""
+"Volume of menu and interface sounds." = ""
+"Volume of passive and neutral mobs." = ""
+"Volume of rain and thunder." = ""
+"Volume of sound effects." = ""
+"Volume of sounds from blocks, like digging and placing." = ""
+"Volume of sounds made by players." = ""
+"Volume of speech and voice sounds." = ""
+"Vulkan" = ""
+"Wait for installation to finish before deleting this instance." = ""
+"Wait for launch preparation to finish before deleting this instance." = ""
+"Waiting for account token refresh..." = ""
+"Waiting for manual CurseForge download..." = ""
+"Waiting for the engine's first timings..." = ""
+"Walk Backwards" = ""
+"Walk Forwards" = ""
+"Warning" = ""
+"Warning: this keeps your sign-in tokens in a plain-text file instead of your system's secure keyring. Doing so can improve compatibility with the Steam Deck, but it also means you need to be extra careful with your security, because it can make it really easy for your login details to be compromised: anyone or anything that can read that file can sign in as you." = ""
+# placeholders: {downloads_dir}
+"Watching: {downloads_dir}" = ""
+"Weather" = ""
+"Weather Radius" = ""
+"Web Links" = ""
+"WebGPU" = ""
+"Webview Sign-in" = ""
+"Webview sign-in is not supported on this platform" = ""
+"Weight" = ""
+"Welcome back" = ""
+# placeholders: {name}
+"Welcome back, {name}" = ""
+"Welcome to Vertex" = ""
+"Welsh" = ""
+"What goes between hours, minutes and seconds. Default: Colon." = ""
+"What goes between the numbers of a date. Default: Dash." = ""
+"What the launcher does when you start a game." = ""
+"When AFK" = ""
+"When Minimized" = ""
+"When disabled, launcher instance default memory is used." = ""
+"When enabled, Vertex clears its own Discord Rich Presence for this instance after launch so the mod inside Minecraft can take over." = ""
+"When enabled, this instance will use the selected configured global Java path." = ""
+"Where the attack cooldown meter is shown." = ""
+"Whether the accessibility setup screen still needs to be shown at first launch." = ""
+"Whether the macOS menu bar can appear while the game is fullscreen." = ""
+"Whether you have joined a server before. Managed by the game." = ""
+"Which graphics API the game renders with. Default lets Minecraft choose." = ""
+"Which graphics API the launcher renders with. Auto lets the launcher choose; Vulkan, Metal (macOS), DirectX 12 (Windows) and WebGPU force one; WebGPU reaches GPUs that neither Vulkan nor DirectX 12 can. Only APIs your system supports are listed. Try another if the launcher shows graphical glitches.. Default: Auto." = ""
+"Which hand is your main hand." = ""
+"Which messages appear in chat: everything, only commands, or nothing." = ""
+"Which time zone times are shown in. Default: this computer's." = ""
+"Width of the chat window." = ""
+"Window Backdrop Type" = ""
+"Window Background" = ""
+"Window Corner Radius" = ""
+"Window Height Override (0 = none)" = ""
+"Window Transparency" = ""
+"Window Width Override (0 = none)" = ""
+"Windows" = ""
+"Windows DWM system backdrop material used when Window Transparency is Blurred. Auto tries modern backdrops before legacy blur; None requests DWMSBT_NONE." = ""
+"Windows-specific window composition and compatibility settings." = ""
+"With Performance Profile above, the kind of GPU to prefer: Default, High Performance, Low Power, Discrete Only or Integrated Only. With Explicit Adapter, the exact GPU to use; if it is no longer available (unplugged or driver change) the launcher falls back to the High Performance profile.. Default: Low Power." = ""
+"Within Window" = ""
+"Working… copying a large world can take a while." = ""
+"Working… moving or copying a large world can take a while." = ""
+"Works here" = ""
+"World is not synced." = ""
+"Worlds & Servers" = ""
+"Write the month as a number or as a name. Default: Number." = ""
+"Writes world data to disk synchronously. Safer against crashes, but slower." = ""
+"Writing EULA placeholder..." = ""
+"Writing content metadata..." = ""
+"Writing launch scripts..." = ""
+"Writing managed metadata..." = ""
+"Writing pack manifest..." = ""
+"Writing patch archive..." = ""
+"Writing server build report..." = ""
+# placeholders: {name} {game_version} {loader} {count} {bundled_count} {config_count}
+"XZ-compressed {name} for Minecraft {game_version} ({loader}) with {count} downloadable items, {bundled_count} bundled mods, {config_count} config files." = ""
+"Yakut" = ""
+"Year, month, day (ISO 8601 order)" = ""
+"Yiddish" = ""
+"Yoruba" = ""
+"You can close this tab and retry the sign-in flow." = ""
+"You can close this tab." = ""
+# placeholders: {trimmed} {status} {first_line}
+"`{trimmed} -version` exited with {status}; output: {first_line}" = ""
+# placeholders: {trimmed} {first_line}
+"`{trimmed} -version` ran, but output did not look like Java: {first_line}" = ""
+"a.m. / p.m." = ""
+"adventure" = ""
+"am / pm" = ""
+# placeholders: {runtime_major}
+"auto-provisioned OpenJDK {runtime_major}" = ""
+# placeholders: {err}
+"base manifest.toml is not valid UTF-8: {err}" = ""
+# placeholders: {author}
+"by {author}" = ""
+"cheats off" = ""
+"cheats on" = ""
+"clear cape" = ""
+# placeholders: {path}
+"configured Java at {path}" = ""
+# placeholders: {path} {err}
+"configured Java path is not readable ({path}): {err}" = ""
+# placeholders: {err}
+"content identification worker panicked: {err}" = ""
+# placeholders: {err}
+"content install worker panicked: {err}" = ""
+# placeholders: {err}
+"content search worker panicked: {err}" = ""
+# placeholders: {link_err} {copy_err}
+"could not link ({link_err}) or copy ({copy_err})" = ""
+# placeholders: {err}
+"could not read level.dat: {err}" = ""
+# placeholders: {err}
+"could not remove the link: {err}" = ""
+# placeholders: {err}
+"could not restore a copy: {err}" = ""
+# placeholders: {error}
+"could not run kwriteconfig6: {error}" = ""
+# placeholders: {err}
+"could not start: {err}" = ""
+# placeholders: {err}
+"could not write level.dat: {err}" = ""
+"creative" = ""
+# placeholders: {seconds}
+"detail version request timed out after {seconds}s" = ""
+# placeholders: {difficulty}
+"difficulty {difficulty}" = ""
+# placeholders: {other}
+"difficulty {other}" = ""
+"display settings" = ""
+# placeholders: {url} {err}
+"download failed for {url}: {err}" = ""
+# placeholders: {url} {err}
+"download request failed for {url}: {err}" = ""
+# placeholders: {name}
+"download source for {name} could not be determined from the pack metadata" = ""
+# placeholders: {file_path}
+"downloadable entry {file_path} has no CurseForge file id" = ""
+# placeholders: {file_path}
+"downloadable entry {file_path} has no CurseForge project id" = ""
+# placeholders: {file_path}
+"downloadable entry {file_path} has no version_id" = ""
+# placeholders: {destination} {name}
+"downloaded {destination} did not match recorded sha1 for {name}" = ""
+# placeholders: {destination} {name}
+"downloaded {destination} did not match recorded sha512 for {name}" = ""
+"easy" = ""
+"echo \"Recommended Java major: unknown\"" = ""
+# placeholders: {major}
+"echo \"Recommended Java major: {major}\"" = ""
+"echo Recommended Java major: unknown" = ""
+# placeholders: {major}
+"echo Recommended Java major: {major}" = ""
+"empty archive path" = ""
+"entry was not resolved" = ""
+"ext_background_effect_v1" = ""
+# placeholders: {existing_root} {err}
+"failed to activate updated instance root {existing_root}: {err}" = ""
+# placeholders: {err}
+"failed to add VERTEX_SERVER_BUILD_REPORT.txt: {err}" = ""
+# placeholders: {err}
+"failed to add eula.txt: {err}" = ""
+# placeholders: {err}
+"failed to add start-server.bat: {err}" = ""
+# placeholders: {err}
+"failed to add start-server.sh: {err}" = ""
+# placeholders: {zip_path} {err}
+"failed to add {zip_path} to zip: {err}" = ""
+# placeholders: {file} {err}
+"failed to append bundled mod {file}: {err}" = ""
+# placeholders: {file} {err}
+"failed to append config file {file}: {err}" = ""
+# placeholders: {file} {err}
+"failed to append extra file {file}: {err}" = ""
+# placeholders: {path} {err}
+"failed to append {path} to archive: {err}" = ""
+# placeholders: {source_path} {err}
+"failed to append {source_path}: {err}" = ""
+# placeholders: {runtime_major} {err}
+"failed to auto-install OpenJDK {runtime_major}: {err}" = ""
+# placeholders: {version} {err}
+"failed to auto-install OpenJDK {version}: {err}" = ""
+# placeholders: {endpoint} {err}
+"failed to bind single-instance IPC endpoint {endpoint}: {err}" = ""
+# placeholders: {err}
+"failed to clear install artifacts before reinstall: {err}" = ""
+# placeholders: {configs_dir} {err}
+"failed to collect config files under {configs_dir}: {err}" = ""
+# placeholders: {path} {err}
+"failed to collect files under {path}: {err}" = ""
+# placeholders: {root_entry_path} {err}
+"failed to collect files under {root_entry_path}: {err}" = ""
+# placeholders: {root_path} {err}
+"failed to collect files under {root_path}: {err}" = ""
+# placeholders: {err}
+"failed to configure single-instance probe timeout: {err}" = ""
+# placeholders: {endpoint} {err}
+"failed to connect single-instance probe to {endpoint}: {err}" = ""
+# placeholders: {source_path} {destination} {err}
+"failed to copy predownloaded file {source_path} into {destination}: {err}" = ""
+# placeholders: {source_path} {destination} {err}
+"failed to copy staged CurseForge retry file {source_path} into {destination}: {err}" = ""
+# placeholders: {path} {destination} {err}
+"failed to copy {path} to {destination}: {err}" = ""
+# placeholders: {source} {destination} {err}
+"failed to copy {source} to {destination}: {err}" = ""
+# placeholders: {err}
+"failed to create CurseForge staging directory: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create bundled mod directory {parent}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create config directory {parent}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create content folder {parent}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create export directory {parent}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create import directory {parent}: {err}" = ""
+# placeholders: {err}
+"failed to create imported profile: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create imported root entry directory {parent}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create metadata directory {parent}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to create override directory {destination}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create override parent {parent}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create patch export directory {parent}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create server export directory {parent}: {err}" = ""
+# placeholders: {err}
+"failed to create single-instance probe socket: {err}" = ""
+# placeholders: {err}
+"failed to create staging directory: {err}" = ""
+# placeholders: {temp_root} {err}
+"failed to create temp instance root {temp_root}: {err}" = ""
+# placeholders: {err}
+"failed to create temp mods directory: {err}" = ""
+# placeholders: {temp_path} {err}
+"failed to create temp package {temp_path}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to create {destination}: {err}" = ""
+# placeholders: {output_path} {err}
+"failed to create {output_path}: {err}" = ""
+# placeholders: {parent} {err}
+"failed to create {parent}: {err}" = ""
+# placeholders: {err}
+"failed to decode archive path: {err}" = ""
+# placeholders: {err}
+"failed to decode patch entry path: {err}" = ""
+# placeholders: {url} {err}
+"failed to download modpack from {url}: {err}" = ""
+# placeholders: {err}
+"failed to download pack files: {err}" = ""
+# placeholders: {url} {err}
+"failed to download thumbnail from {url}: {err}" = ""
+# placeholders: {file_id} {err}
+"failed to fetch CurseForge file {file_id}: {err}" = ""
+# placeholders: {err}
+"failed to fetch CurseForge pack files: {err}" = ""
+# placeholders: {err}
+"failed to fetch CurseForge pack projects: {err}" = ""
+# placeholders: {project_id} {err}
+"failed to fetch CurseForge project {project_id}: {err}" = ""
+# placeholders: {version_id} {err}
+"failed to fetch Modrinth fallback version {version_id}: {err}" = ""
+# placeholders: {version_id}
+"failed to fetch Modrinth version {version_id}" = ""
+# placeholders: {version_id} {err}
+"failed to fetch Modrinth version {version_id}: {err}" = ""
+# placeholders: {err}
+"failed to finalize archive: {err}" = ""
+# placeholders: {err}
+"failed to finalize patch archive: {err}" = ""
+# placeholders: {err}
+"failed to finalize patch xz stream: {err}" = ""
+# placeholders: {err}
+"failed to finalize xz stream: {err}" = ""
+# placeholders: {err}
+"failed to finalize zip archive: {err}" = ""
+# placeholders: {err}
+"failed to flush archive stream: {err}" = ""
+# placeholders: {err}
+"failed to flush patch archive: {err}" = ""
+# placeholders: {destination} {err}
+"failed to hash downloaded file {destination}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to hash downloaded {destination}: {err}" = ""
+# placeholders: {err}
+"failed to hash file: {err}" = ""
+# placeholders: {file} {err}
+"failed to hash {file}: {err}" = ""
+# placeholders: {source_path} {err}
+"failed to hash {source_path}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to import bundled mod {destination}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to import config {destination}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to import extra root entry {destination}: {err}" = ""
+# placeholders: {err}
+"failed to inspect downloads folder: {err}" = ""
+# placeholders: {path} {err}
+"failed to inspect {path}: {err}" = ""
+# placeholders: {err}
+"failed to load CurseForge files: {err}" = ""
+# placeholders: {err}
+"failed to load Modrinth versions: {err}" = ""
+# placeholders: {path} {err}
+"failed to normalize {path}: {err}" = ""
+# placeholders: {file} {err}
+"failed to open {file}: {err}" = ""
+# placeholders: {package_path} {err}
+"failed to open {package_path}: {err}" = ""
+# placeholders: {path} {err}
+"failed to open {path}: {err}" = ""
+# placeholders: {path_label} {err}
+"failed to optimize '{path_label}' for memory: {err}" = ""
+# placeholders: {err}
+"failed to parse base manifest.toml: {err}" = ""
+# placeholders: {err}
+"failed to parse manifest.json: {err}" = ""
+# placeholders: {err}
+"failed to parse modrinth.index.json: {err}" = ""
+# placeholders: {err}
+"failed to parse patch.toml: {err}" = ""
+# placeholders: {err}
+"failed to parse vtmpack manifest: {err}" = ""
+# placeholders: {manifest_path} {err}
+"failed to parse {manifest_path}: {err}" = ""
+# placeholders: {path} {err}
+"failed to parse {path}: {err}" = ""
+# placeholders: {profile_path} {err}
+"failed to parse {profile_path}: {err}" = ""
+# placeholders: {prefetched_path} {target_path} {err}
+"failed to place prefetched content {prefetched_path} at {target_path}: {err}" = ""
+# placeholders: {ready} {target_path} {err}
+"failed to place {ready} at {target_path}: {err}" = ""
+# placeholders: {path_label} {err}
+"failed to read '{path_label}': {err}" = ""
+# placeholders: {package_path} {err}
+"failed to read archive entry in {package_path}: {err}" = ""
+# placeholders: {err}
+"failed to read archive entry: {err}" = ""
+# placeholders: {err}
+"failed to read directory entry: {err}" = ""
+# placeholders: {url} {err}
+"failed to read download body from {url}: {err}" = ""
+# placeholders: {err}
+"failed to read downloads folder: {err}" = ""
+# placeholders: {err}
+"failed to read manifest.json: {err}" = ""
+# placeholders: {err}
+"failed to read manifest.toml: {err}" = ""
+# placeholders: {url} {err}
+"failed to read modpack download from {url}: {err}" = ""
+# placeholders: {err}
+"failed to read modrinth.index.json: {err}" = ""
+# placeholders: {mods_dir} {err}
+"failed to read mods directory {mods_dir}: {err}" = ""
+# placeholders: {entry_name} {package_path} {err}
+"failed to read override {entry_name} from {package_path}: {err}" = ""
+# placeholders: {err}
+"failed to read patch entry: {err}" = ""
+# placeholders: {url} {err}
+"failed to read thumbnail from {url}: {err}" = ""
+# placeholders: {err}
+"failed to read version directory entry: {err}" = ""
+# placeholders: {package_path} {err}
+"failed to read zip entry in {package_path}: {err}" = ""
+# placeholders: {archive_name} {err}
+"failed to read {archive_name}: {err}" = ""
+# placeholders: {current} {err}
+"failed to read {current}: {err}" = ""
+# placeholders: {file} {err}
+"failed to read {file}: {err}" = ""
+# placeholders: {manifest_path} {err}
+"failed to read {manifest_path}: {err}" = ""
+# placeholders: {package_path} {err}
+"failed to read {package_path}: {err}" = ""
+# placeholders: {patch_path} {err}
+"failed to read {patch_path}: {err}" = ""
+# placeholders: {path} {err}
+"failed to read {path}: {err}" = ""
+# placeholders: {profile_path} {err}
+"failed to read {profile_path}: {err}" = ""
+# placeholders: {source} {err}
+"failed to read {source}: {err}" = ""
+# placeholders: {versions_dir} {err}
+"failed to read {versions_dir}: {err}" = ""
+# placeholders: {endpoint} {err}
+"failed to receive single-instance probe response from {endpoint}: {err}" = ""
+# placeholders: {backup_root} {err}
+"failed to remove stale backup {backup_root}: {err}" = ""
+# placeholders: {path} {err}
+"failed to remove stale directory {path}: {err}" = ""
+# placeholders: {path} {err}
+"failed to remove stale file {path}: {err}" = ""
+# placeholders: {backup_root} {err}
+"failed to remove update backup {backup_root}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to remove {destination}: {err}" = ""
+# placeholders: {file_path} {err}
+"failed to remove {file_path}: {err}" = ""
+# placeholders: {path} {err}
+"failed to remove {path}: {err}" = ""
+# placeholders: {path} {err}
+"failed to rename {path}: {err}" = ""
+# placeholders: {project_id} {file_id} {err}
+"failed to resolve CurseForge download URL for {project_id}/{file_id}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to restore managed metadata into {destination}: {err}" = ""
+# placeholders: {previous_file_path} {staged_previous_path} {err}
+"failed to restore {previous_file_path} from {staged_previous_path}: {err}" = ""
+# placeholders: {err}
+"failed to save instance metadata: {err}" = ""
+"failed to select Java executable" = ""
+# placeholders: {endpoint} {err}
+"failed to send single-instance probe to {endpoint}: {err}" = ""
+# placeholders: {err}
+"failed to serialize export content manifest: {err}" = ""
+# placeholders: {err}
+"failed to serialize managed import manifest: {err}" = ""
+# placeholders: {err}
+"failed to serialize patch content manifest: {err}" = ""
+# placeholders: {err}
+"failed to serialize vtmpack manifest: {err}" = ""
+# placeholders: {err}
+"failed to serialize vtmpatch manifest: {err}" = ""
+# placeholders: {existing_file_path} {err}
+"failed to stage existing content {existing_file_path} for replacement: {err}" = ""
+# placeholders: {existing_root} {err}
+"failed to stage old instance root {existing_root}: {err}" = ""
+# placeholders: {file_name} {err}
+"failed to stage {file_name} from downloads folder: {err}" = ""
+# placeholders: {err}
+"failed to write eula.txt: {err}" = ""
+# placeholders: {destination_root} {err}
+"failed to write managed import manifest into {destination_root}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to write override {destination}: {err}" = ""
+# placeholders: {err}
+"failed to write server build report: {err}" = ""
+# placeholders: {err}
+"failed to write start-server.bat: {err}" = ""
+# placeholders: {err}
+"failed to write start-server.sh: {err}" = ""
+# placeholders: {temp_path} {err}
+"failed to write temp package {temp_path}: {err}" = ""
+# placeholders: {path} {err}
+"failed to write thumbnail {path}: {err}" = ""
+# placeholders: {destination} {err}
+"failed to write {destination}: {err}" = ""
+# placeholders: {file} {err}
+"failed to write {file} to zip: {err}" = ""
+# placeholders: {err}
+"failed: {err}" = ""
+# placeholders: {world_id}
+"folder {world_id}" = ""
+"graphics device" = ""
+"hard" = ""
+# placeholders: {id}
+"instance {id} disappeared after install" = ""
+# placeholders: {instance_id}
+"instance {instance_id} disappeared during discover install" = ""
+# placeholders: {instance_id}
+"instance {instance_id} disappeared during update" = ""
+# placeholders: {instance_id}
+"instance {instance_id} was not found" = ""
+# placeholders: {instance_name}
+"instance {instance_name}" = ""
+# placeholders: {name} {err}
+"invalid CurseForge file id for {name}: {err}" = ""
+"java from PATH" = ""
+"just now" = ""
+"kwriteconfig6 did not accept the change" = ""
+# placeholders: {last_used}
+"last used {last_used}" = ""
+"level.dat has no Data section." = ""
+"links aren't available here, so it holds a copy that is refreshed at launch and exit" = ""
+"macOS" = ""
+"macOS-specific settings." = ""
+# placeholders: {name}
+"missing CurseForge file id for {name}" = ""
+# placeholders: {name}
+"missing CurseForge project id for {name}" = ""
+# placeholders: {name}
+"missing Modrinth version id for {name}" = ""
+# placeholders: {path} {err}
+"missing manifest.json in {path}: {err}" = ""
+# placeholders: {path} {err}
+"missing modrinth.index.json in {path}: {err}" = ""
+# placeholders: {other}
+"mode {other}" = ""
+# placeholders: {seconds}
+"modloader version request timed out after {seconds}s" = ""
+"never" = ""
+# placeholders: {id} {name}
+"no Modrinth file on version {id} matched recorded sha1 for {name}" = ""
+# placeholders: {id} {name}
+"no Modrinth file on version {id} matched recorded sha512 for {name}" = ""
+"no Modrinth project matched this file hash" = ""
+# placeholders: {id}
+"no downloadable file found for Modrinth version {id}" = ""
+# placeholders: {version_id}
+"no downloadable files for Modrinth version {version_id}" = ""
+"no files" = ""
+"no supported URL opener found" = ""
+"no supported file manager launcher succeeded" = ""
+# placeholders: {launchers}
+"no supported file manager launcher was found ({launchers})" = ""
+"non-string panic payload" = ""
+"normal" = ""
+"once" = ""
+"opening URLs is not supported on this platform" = ""
+"opening folders is not supported on this platform" = ""
+"or" = ""
+# placeholders: {err}
+"patch apply worker failed: {err}" = ""
+# placeholders: {archive_name}
+"patch entry {archive_name} is not an instance file" = ""
+# placeholders: {err}
+"patch.toml is not valid UTF-8: {err}" = ""
+# placeholders: {path}
+"path does not exist: {path}" = ""
+"peaceful" = ""
+"player active" = ""
+# placeholders: {prefetched_path}
+"prefetched content file missing at {prefetched_path}" = ""
+# placeholders: {err}
+"removed installed content, but failed to update the content manifest: {err}" = ""
+"scRGB (linear)" = ""
+"set cape" = ""
+"setting" = ""
+# placeholders: {endpoint} {retry_err}
+"single-instance IPC endpoint {endpoint} remained unavailable after probe: {retry_err}" = ""
+# placeholders: {endpoint}
+"single-instance IPC endpoint {endpoint} replied with an unexpected payload" = ""
+"spectator" = ""
+# placeholders: {source_path}
+"staged CurseForge retry file {source_path} had no file name" = ""
+"survival" = ""
+"the engine no longer has the preview's picture" = ""
+"the line" = ""
+"the selection" = ""
+"twice" = ""
+"unknown error" = ""
+# placeholders: {relative}
+"unsafe patch path component in {relative}" = ""
+# placeholders: {archive_name}
+"unsupported patch entry path: {archive_name}" = ""
+"upload skin" = ""
+# placeholders: {seconds}
+"version catalog request timed out after {seconds}s" = ""
+# placeholders: {version_name}
+"version {version_name}" = ""
+"window effect" = ""
+# placeholders: {bytes}
+"{bytes} B" = ""
+# placeholders: {content_type}
+"{content_type} search worker panicked unexpectedly." = ""
+# placeholders: {count} {count2} {count3}
+"{count} files included, {count2} client-only mods left out, {count3} CurseForge-managed unknown mods flagged." = ""
+# placeholders: {count}
+"{count} more" = ""
+# placeholders: {count}
+"{count} more queued" = ""
+# placeholders: {count}
+"{count} times" = ""
+# placeholders: {count} {label}
+"{count} {label}" = ""
+# placeholders: {current}
+"{current} (unrecognized)" = ""
+# placeholders: {days}
+"{days}d ago" = ""
+# placeholders: {done} {total_steps}
+"{done} of {total_steps} steps complete" = ""
+# placeholders: {duration}
+"{duration} ago" = ""
+# placeholders: {duration}
+"{duration} from now" = ""
+# placeholders: {elapsed_days}
+"{elapsed_days}d ago" = ""
+# placeholders: {elapsed_hours}
+"{elapsed_hours}h ago" = ""
+# placeholders: {elapsed_minutes}
+"{elapsed_minutes}m ago" = ""
+# placeholders: {elapsed_months}
+"{elapsed_months}mo ago" = ""
+# placeholders: {elapsed_years}
+"{elapsed_years}y ago" = ""
+# placeholders: {err} {restore_err}
+"{err} (also failed to restore original file: {restore_err})" = ""
+# placeholders: {err} {restore_err}
+"{err} (also failed to restore the original file: {restore_err})" = ""
+# placeholders: {failure} {err}
+"{failure}: {err}" = ""
+# placeholders: {file_path} {err}
+"{file_path} (gap fill): {err}" = ""
+# placeholders: {file_path} {err}
+"{file_path}: {err}" = ""
+# placeholders: {folder}
+"{folder} is a link; remove it from the sync group instead." = ""
+# placeholders: {folder}
+"{folder} is not a regular world folder." = ""
+# placeholders: {folder}
+"{folder} is not a world folder." = ""
+# placeholders: {folder} {instance}
+"{folder} is synced between instances. Use \"Sync world…\" to take {instance} out of the group first." = ""
+# placeholders: {fps}
+"{fps:.0} FPS" = ""
+# placeholders: {hours}
+"{hours}h ago" = ""
+# placeholders: {id} {name} {err}
+"{id}: could not add pack {name}: {err}" = ""
+# placeholders: {id} {id2} {err}
+"{id}: failed to copy hotbars from {id2}: {err}" = ""
+# placeholders: {id} {name} {err}
+"{id}: failed to write shaderpacks/{name}: {err}" = ""
+# placeholders: {id} {file} {err}
+"{id}: failed to write {file}: {err}" = ""
+# placeholders: {instance_name}
+"{instance_name} was installed successfully." = ""
+# placeholders: {instance_name} {game_version} {path}
+"{instance_name} · Minecraft {game_version} · {path}" = ""
+# placeholders: {instance_name} {error}
+"{instance_name}: initial install failed and the incomplete instance was removed: {error}" = ""
+# placeholders: {instance_name} {error} {delete_err}
+"{instance_name}: initial install failed: {error}. Cleanup also failed: {delete_err}" = ""
+# placeholders: {instance_name} {err}
+"{instance_name}: initial install failed: {err}" = ""
+# placeholders: {instance} {new_address}
+"{instance} already has a server at {new_address}." = ""
+# placeholders: {instance}
+"{instance} already has this server." = ""
+# placeholders: {instance} {user_text}
+"{instance} for {user_text}" = ""
+# placeholders: {instance} {folder} {err}
+"{instance}: could not delete {folder}: {err}" = ""
+# placeholders: {instance} {folder_name} {err}
+"{instance}: could not refresh world {folder_name}: {err}" = ""
+# placeholders: {instance} {folder_name} {err}
+"{instance}: could not update shared world {folder_name}: {err}" = ""
+# placeholders: {instance} {err}
+"{instance}: {err}" = ""
+# placeholders: {label}
+"{label} (unavailable)" = ""
+# placeholders: {label} {folder_name}
+"{label} already has a world named {folder_name}; rename it to sync them." = ""
+# placeholders: {label} {folder}
+"{label} already has a world named {folder}; rename it to sync them." = ""
+# placeholders: {label} {err}
+"{label}: {err}." = ""
+# placeholders: {label} {note}
+"{label}: {note}." = ""
+# placeholders: {label} {summary}
+"{label}: {summary}" = ""
+# placeholders: {latest} {worst} {count}
+"{latest:.2} ms frame  ·  {worst:.1} ms worst of {count}" = ""
+# placeholders: {launch_count} {last_launched}
+"{launch_count} launches | {last_launched}" = ""
+# placeholders: {loader}
+"{loader} (not available)" = ""
+# placeholders: {loader} {game_version}
+"{loader} does not support Minecraft {game_version}." = ""
+# placeholders: {loader} {game_version}
+"{loader} for Minecraft {game_version}" = ""
+# placeholders: {loader} {loader_version} {game_version}
+"{loader} {loader_version} for Minecraft {game_version}" = ""
+# placeholders: {loader} {version} {game_version}
+"{loader} {version} · Minecraft {game_version}" = ""
+# placeholders: {loader} {game_version}
+"{loader} · Minecraft {game_version}" = ""
+# placeholders: {location} {declared} {status}
+"{location} · declared formats: {declared} · {status}" = ""
+# placeholders: {matching} {total}
+"{matching} matching / {total} installed" = ""
+# placeholders: {message} {speed} {eta}
+"{message} · {speed:.1} MiB/s{eta}" = ""
+# placeholders: {minutes}
+"{minutes}m ago" = ""
+# placeholders: {modloader_label} {raw_modloader_version} {game_version}
+"{modloader_label} {raw_modloader_version} is not available for Minecraft {game_version}." = ""
+# placeholders: {modloader} {game_version}
+"{modloader} for Minecraft {game_version}" = ""
+# placeholders: {modloader} {modloader_version} {game_version}
+"{modloader} {modloader_version} for Minecraft {game_version}" = ""
+# placeholders: {moved} {total} {files_done} {total_files}
+"{moved} of {total} · {files_done} of {total_files} files" = ""
+# placeholders: {name_input}
+"{name_input} finished installing files and launched successfully." = ""
+# placeholders: {name_input}
+"{name_input} finished installing successfully." = ""
+# placeholders: {name_input} {err}
+"{name_input} installation failed: {err}" = ""
+# placeholders: {names} {licenses}
+"{names} ({licenses})" = ""
+# placeholders: {name} {game_version}
+"{name} (Minecraft {game_version})" = ""
+# placeholders: {name} {error}
+"{name} ({error})" = ""
+# placeholders: {name} {relative}
+"{name} ({relative})" = ""
+# placeholders: {name} {relative}
+"{name} ({relative}) - file missing" = ""
+# placeholders: {name} {relative} {error}
+"{name} ({relative}) - hash failed: {error}" = ""
+# placeholders: {name}
+"{name} crashed with exit code 1." = ""
+# placeholders: {name} {game_version} {world_version}
+"{name} runs Minecraft {game_version}, older than this world ({world_version}). Opening it there can corrupt the world." = ""
+# placeholders: {name} {version}
+"{name} {version}" = ""
+# placeholders: {name} {version} {game_version} {loader} {count}
+"{name} {version} for Minecraft {game_version} ({loader}) with {count} packaged files." = ""
+# placeholders: {name} {err}
+"{name}: {err}" = ""
+# placeholders: {operation_label}
+"{operation_label} complete." = ""
+# placeholders: {output_file_name} {err}
+"{output_file_name} export failed — {err}" = ""
+# placeholders: {page} {total_pages}
+"{page} / {total_pages}" = ""
+# placeholders: {participants}
+"{participants} instances take part." = ""
+# placeholders: {path}
+"{path} is not a directory." = ""
+# placeholders: {prefix} {err}
+"{prefix}: {err}" = ""
+# placeholders: {prefix} {err}
+"{prefix}: {err}. Continuing with cached account in offline mode." = ""
+# placeholders: {program} {error}
+"{program}: {error}" = ""
+# placeholders: {requested_modloader} {requested_game_version}
+"{requested_modloader} is not available for Minecraft {requested_game_version}." = ""
+# placeholders: {runtime}
+"{runtime} action worker disconnected." = ""
+# placeholders: {seconds}
+"{seconds}s ago" = ""
+# placeholders: {severity} {count}
+"{severity} ×{count}" = ""
+# placeholders: {shown}
+"{shown} (Active)" = ""
+# placeholders: {shown}
+"{shown} (Failed)" = ""
+# placeholders: {size}
+"{size:.1} GB" = ""
+# placeholders: {size}
+"{size:.1} KB" = ""
+# placeholders: {size}
+"{size:.1} KiB" = ""
+# placeholders: {size}
+"{size:.1} MB" = ""
+# placeholders: {size}
+"{size:.1} MiB" = ""
+# placeholders: {size_bytes}
+"{size_bytes} B" = ""
+# placeholders: {size}
+"{size} downloaded" = ""
+# placeholders: {source_path} {destination_dir} {err}
+"{source_path} -> {destination_dir} ({err})" = ""
+# placeholders: {source_path} {destination_path} {err}
+"{source_path} -> {destination_path} ({err})" = ""
+# placeholders: {stage} {speed} {eta}
+"{stage} · {speed:.1} MiB/s{eta}" = ""
+# placeholders: {text} {key}
+"{text}\n\nOption: {key}" = ""
+# placeholders: {title} {total}
+"{title}  ({total:.2} ms)" = ""
+# placeholders: {total}
+"{total} installed" = ""
+# placeholders: {value}
+"{value:.0} MiB" = ""
+# placeholders: {value}
+"{value:.0} nits" = ""
+# placeholders: {value}
+"{value:.0} px" = ""
+# placeholders: {version} {revision}
+"{version} ({revision})" = ""
+# placeholders: {instance}
+"· {instance}" = ""
+
+[contexts."abbreviated duration"]
+"{count}d" = ""
+"{count}h" = ""
+"{count}m" = ""
+"{count}s" = ""
+"{count}y" = ""
+
+[contexts."ordinal"]
+"eighth" = ""
+"fifth" = ""
+"first" = ""
+"fourth" = ""
+"ninth" = ""
+"second" = ""
+"seventh" = ""
+"sixth" = ""
+"tenth" = ""
+"third" = ""
+
+[contexts."quantity"]
+"a couple of" = ""
+"a few" = ""
+"dozens of" = ""
+"hundreds of" = ""
+"many" = ""
+"no" = ""
+"one" = ""
+"several" = ""
+"thousands of" = ""
+
+[plurals."Adding {count} local content files..."]
+# English one: "Adding {count} local content file..."
+one = ""
+other = ""
+
+[plurals."Cleaned up {count} leftover files."]
+# English one: "Cleaned up {count} leftover file."
+one = ""
+other = ""
+
+[plurals."Login tokens for {accounts} renewed successfully, you are now ready to play!"]
+# English one: "Login token for {accounts} renewed successfully, you are now ready to play!"
+one = ""
+other = ""
+
+[plurals."Patch apply incomplete: {summary}. {count} files failed to download: {details}"]
+# English one: "Patch apply incomplete: {summary}. {count} file failed to download: {details}"
+one = ""
+other = ""
+
+[plurals."Patch apply made no filesystem changes despite {count} planned operations. The target instance may already match the patch, or all removal targets were already absent."]
+# English one: "Patch apply made no filesystem changes despite {count} planned operation. The target instance may already match the patch, or all removal targets were already absent."
+one = ""
+other = ""
+
+[plurals."Removed {count} duplicate files."]
+# English one: "Removed {count} duplicate file."
+one = ""
+other = ""
+
+[plurals."Renewing login tokens for {accounts}"]
+# English one: "Renewing login token for {accounts}"
+one = ""
+other = ""
+
+[plurals."We detected {amount} new screenshots!"]
+# English one: "We detected a new screenshot!"
+one = ""
+other = ""
+
+[plurals."Your account {account_name} got {amount} new capes: {capes}, Congrats!"]
+# English one: "Your account {account_name} got a new cape: {capes}, Congrats!"
+one = ""
+other = ""
+
+[plurals."{count} additional files"]
+# English one: "{count} additional file"
+one = ""
+other = ""
+
+[plurals."{count} bundled files"]
+# English one: "{count} bundled file"
+one = ""
+other = ""
+
+[plurals."{count} bundled mods"]
+# English one: "{count} bundled mod"
+one = ""
+other = ""
+
+[plurals."{count} changed additional files"]
+# English one: "{count} changed additional file"
+one = ""
+other = ""
+
+[plurals."{count} changed config files"]
+# English one: "{count} changed config file"
+one = ""
+other = ""
+
+[plurals."{count} config files"]
+# English one: "{count} config file"
+one = ""
+other = ""
+
+[plurals."{count} days"]
+# English one: "{count} day"
+one = ""
+other = ""
+
+[plurals."{count} downloadable mods"]
+# English one: "{count} downloadable mod"
+one = ""
+other = ""
+
+[plurals."{count} downloaded files"]
+# English one: "{count} downloaded file"
+one = ""
+other = ""
+
+[plurals."{count} files already found."]
+# English one: "{count} file already found."
+one = ""
+other = ""
+
+[plurals."{count} files downloaded"]
+# English one: "{count} file downloaded"
+one = ""
+other = ""
+
+[plurals."{count} hours"]
+# English one: "{count} hour"
+one = ""
+other = ""
+
+[plurals."{count} minutes"]
+# English one: "{count} minute"
+one = ""
+other = ""
+
+[plurals."{count} notices"]
+# English one: "{count} notice"
+one = ""
+other = ""
+
+[plurals."{count} planned mod operations"]
+# English one: "{count} planned mod operation"
+one = ""
+other = ""
+
+[plurals."{count} removed files"]
+# English one: "{count} removed file"
+one = ""
+other = ""
+
+[plurals."{count} seconds"]
+# English one: "{count} second"
+one = ""
+other = ""
+
+[plurals."{count} years"]
+# English one: "{count} year"
+one = ""
+other = ""
+
+[plurals."{name} took {amount} screenshots!"]
+# English one: "{name} took a screenshot!"
+one = ""
+other = ""

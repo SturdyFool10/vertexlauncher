@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 
@@ -132,7 +133,7 @@ pub(super) fn poll_instance_log_load_results(state: &mut InstanceScreenState) {
         state.log_load_in_flight = false;
         state.requested_log_load_path = None;
         state.requested_log_load_modified_at_ms = None;
-        state.loaded_log_error = Some("Log load worker stopped unexpectedly.".to_owned());
+        state.loaded_log_error = Some(tr!("Log load worker stopped unexpectedly.").into_owned());
         state.loaded_log_truncated = false;
     }
     for (request_id, path, modified_at_ms, result) in drained.items {
@@ -201,7 +202,7 @@ pub(super) fn load_selected_instance_log(state: &mut InstanceScreenState) {
 
 fn read_instance_log_lines(path: &Path) -> Result<(Vec<String>, bool), String> {
     let bytes =
-        fs::read(path).map_err(|err| format!("Failed to read '{}': {err}", path.display()))?;
+        fs::read(path).map_err(|err| tr!("Failed to read '{path}': {err}", path = path.display(), err = err).into_owned())?;
     let decoded = if path
         .extension()
         .and_then(OsStr::to_str)
@@ -211,7 +212,7 @@ fn read_instance_log_lines(path: &Path) -> Result<(Vec<String>, bool), String> {
         let mut output = Vec::new();
         decoder
             .read_to_end(&mut output)
-            .map_err(|err| format!("Failed to decompress '{}': {err}", path.display()))?;
+            .map_err(|err| tr!("Failed to decompress '{path}': {err}", path = path.display(), err = err).into_owned())?;
         output
     } else {
         bytes
@@ -232,10 +233,10 @@ pub(super) fn format_log_file_size(size_bytes: u64) -> String {
     const MIB: f64 = 1024.0 * 1024.0;
     let size = size_bytes as f64;
     if size >= MIB {
-        format!("{:.1} MiB", size / MIB)
+        tr!("{size:.1} MiB", size = size / MIB).into_owned()
     } else if size >= KIB {
-        format!("{:.1} KiB", size / KIB)
+        tr!("{size:.1} KiB", size = size / KIB).into_owned()
     } else {
-        format!("{size_bytes} B")
+        tr!("{size_bytes} B", size_bytes = size_bytes).into_owned()
     }
 }

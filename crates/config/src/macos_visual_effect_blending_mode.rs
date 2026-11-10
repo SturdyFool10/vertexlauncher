@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// NSVisualEffectView blending mode selection for macOS blur/backdrop effects.
@@ -16,8 +17,8 @@ impl MacosVisualEffectBlendingMode {
 
     pub const fn label(self) -> &'static str {
         match self {
-            MacosVisualEffectBlendingMode::BehindWindow => "Behind Window",
-            MacosVisualEffectBlendingMode::WithinWindow => "Within Window",
+            MacosVisualEffectBlendingMode::BehindWindow => src!("Behind Window"),
+            MacosVisualEffectBlendingMode::WithinWindow => src!("Within Window"),
         }
     }
 }

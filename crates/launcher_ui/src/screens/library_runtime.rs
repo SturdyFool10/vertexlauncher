@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -67,7 +68,7 @@ pub fn request_runtime_launch(
     if game_version.is_empty() {
         state.status_by_instance.insert(
             instance.id.clone(),
-            "Cannot launch: choose a Minecraft game version first.".to_owned(),
+            tr!("Cannot launch: choose a Minecraft game version first.").into_owned(),
         );
         return false;
     }
@@ -79,14 +80,14 @@ pub fn request_runtime_launch(
     state.pending_launches.insert(instance_id.clone());
     state.status_by_instance.insert(
         instance_id.clone(),
-        format!("Preparing Minecraft {}...", game_version),
+        tr!("Preparing Minecraft {game_version}...", game_version = game_version).into_owned(),
     );
 
     let modloader = instance.modloader.trim().to_owned();
     let modloader_version = normalize_optional(instance.modloader_version.as_str());
     let modloader_version_display = modloader_version
         .as_deref()
-        .map(|value| format!(" {value}"))
+        .map(|value| tr!(" {value}", value = value).into_owned())
         .unwrap_or_default();
     let required_java_major = config.effective_required_java_major(game_version.as_str());
     let java_executable = config.choose_java_executable(
@@ -99,11 +100,11 @@ pub fn request_runtime_launch(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        format!("configured Java at {path}")
+        tr!("configured Java at {path}", path = path).into_owned()
     } else if let Some(runtime_major) = required_java_major {
-        format!("auto-provisioned OpenJDK {runtime_major}")
+        tr!("auto-provisioned OpenJDK {runtime_major}", runtime_major = runtime_major).into_owned()
     } else {
-        "java from PATH".to_owned()
+        tr!("java from PATH").into_owned()
     };
     let download_max_concurrent = config.download_max_concurrent().max(1);
     let download_speed_limit_bps = config.parsed_download_speed_limit_bps();
@@ -153,15 +154,7 @@ pub fn request_runtime_launch(
     console::push_log_to_tab(
         tab_id.as_str(),
         crate::log_format::LogLevel::Info,
-        format!(
-            "Launch request: root={} | Minecraft {} | {}{} | max memory={} MiB | {}",
-            instance_root_display,
-            game_version,
-            modloader,
-            modloader_version_display,
-            max_memory_mib.max(512),
-            java_launch_mode,
-        ),
+        tr!("Launch request: root={instance_root_display} | Minecraft {game_version} | {modloader}{modloader_version_display} | max memory={max_memory} MiB | {java_launch_mode}", instance_root_display = instance_root_display, game_version = game_version, modloader = modloader, modloader_version_display = modloader_version_display, max_memory = max_memory_mib.max(512), java_launch_mode = java_launch_mode).into_owned(),
     );
     state.pending_launch_contexts.insert(
         instance_id.clone(),
@@ -195,12 +188,10 @@ pub fn request_runtime_launch(
                             installed
                         })
                         .map_err(|err| {
-                            format!("failed to auto-install OpenJDK {runtime_major}: {err}")
+                            tr!("failed to auto-install OpenJDK {runtime_major}: {err}", runtime_major = runtime_major, err = err).into_owned()
                         })
                 }
-                Err(err) => Err(format!(
-                    "configured Java path is not readable ({path}): {err}"
-                )),
+                Err(err) => Err(tr!("configured Java path is not readable ({path}): {err}", path = path, err = err).into_owned()),
             }
         } else if let Some(runtime_major) = required_java_major {
             ensure_openjdk_runtime_async(runtime_major)
@@ -210,7 +201,7 @@ pub fn request_runtime_launch(
                     configured_java = Some((runtime_major, installed.clone()));
                     installed
                 })
-                .map_err(|err| format!("failed to auto-install OpenJDK {runtime_major}: {err}"))
+                .map_err(|err| tr!("failed to auto-install OpenJDK {runtime_major}: {err}", runtime_major = runtime_major, err = err).into_owned())
         } else {
             Ok("java".to_owned())
         };
@@ -231,7 +222,7 @@ pub fn request_runtime_launch(
                 install_activity::set_status(
                     instance_id.as_str(),
                     installation::InstallStage::ResolvingMetadata,
-                    format!("Preparing Minecraft {}...", game_version),
+                    tr!("Preparing Minecraft {game_version}...", game_version = game_version).into_owned(),
                 );
                 let progress_cb: InstallProgressCallback =
                     Arc::new(move |progress: installation::InstallProgress| {
@@ -334,7 +325,7 @@ pub fn request_runtime_launch(
         } else {
             Err(java_path_result
                 .err()
-                .unwrap_or_else(|| "failed to select Java executable".to_owned()))
+                .unwrap_or_else(|| tr!("failed to select Java executable").into_owned()))
         };
 
         if let Err(err) = tx.send(RuntimeLaunchResult {
@@ -371,10 +362,7 @@ pub fn poll_runtime_actions(
             );
         }
         state.pending_launch_contexts.clear();
-        notification::error!(
-            "library/runtime",
-            "Launch worker stopped unexpectedly before returning a result."
-        );
+        notification::error!("library/runtime", "Launch worker stopped unexpectedly before returning a result.");
     }
 
     for update in updates {
@@ -412,24 +400,15 @@ pub fn poll_runtime_actions(
                     console::push_log_to_tab(
                         tab_id.as_str(),
                         crate::log_format::LogLevel::Info,
-                        format!(
-                            "Launched Minecraft (pid {}, profile {}).",
-                            outcome.launch.pid, outcome.launch.profile_id
-                        ),
+                        tr!("Launched Minecraft (pid {pid}, profile {profile_id}).", pid = outcome.launch.pid, profile_id = outcome.launch.profile_id).into_owned(),
                     );
                 }
                 state.status_by_instance.insert(
                     update.instance_id,
-                    format!(
-                        "Launched (pid {}, profile {}, {} file(s), loader {}).",
-                        outcome.launch.pid,
-                        outcome.launch.profile_id,
-                        outcome.downloaded_files,
-                        outcome
+                    tr!("Launched (pid {pid}, profile {profile_id}, {files}, loader {loader}).", pid = outcome.launch.pid, profile_id = outcome.launch.profile_id, files = vertex_i18n::trn!(outcome.downloaded_files, "{count} file downloaded", "{count} files downloaded"), loader = outcome
                             .resolved_modloader_version
                             .as_deref()
-                            .unwrap_or("n/a"),
-                    ),
+                            .unwrap_or("n/a")).into_owned(),
                 );
             }
             Err(err) => {
@@ -449,12 +428,12 @@ pub fn poll_runtime_actions(
                     console::push_log_to_tab(
                         tab_id.as_str(),
                         crate::log_format::LogLevel::Error,
-                        format!("Launch failed: {err}"),
+                        tr!("Launch failed: {err}", err = err).into_owned(),
                     );
                 }
                 state
                     .status_by_instance
-                    .insert(update.instance_id, format!("Launch failed: {err}"));
+                    .insert(update.instance_id, tr!("Launch failed: {err}", err = err).into_owned());
             }
         }
     }
@@ -499,7 +478,7 @@ pub fn poll_delete_instance_results(
     if drained.disconnected {
         tracing::error!(target: "vertexlauncher/library", "delete_results worker channel stopped unexpectedly.");
         state.delete_in_flight = false;
-        state.delete_error = Some("Delete worker stopped unexpectedly.".to_owned());
+        state.delete_error = Some(tr!("Delete worker stopped unexpectedly.").into_owned());
     }
 
     for update in updates {
@@ -507,9 +486,7 @@ pub fn poll_delete_instance_results(
         match update {
             Ok(deleted) => {
                 if let Err(err) = remove_instance_record(instances, deleted.id.as_str()) {
-                    state.delete_error = Some(format!(
-                        "Deleted the instance folder, but failed to remove launcher metadata: {err}"
-                    ));
+                    state.delete_error = Some(tr!("Deleted the instance folder, but failed to remove launcher metadata: {err}", err = err).into_owned());
                     continue;
                 }
                 state.pending_launches.remove(deleted.id.as_str());
@@ -517,11 +494,7 @@ pub fn poll_delete_instance_results(
                 state.status_by_instance.remove(deleted.id.as_str());
                 state.delete_target_instance_id = None;
                 state.delete_error = None;
-                notification::warn!(
-                    "instance_store",
-                    "Deleted instance '{}' and its folder.",
-                    deleted.name
-                );
+                notification::warn!("instance_store", "Deleted instance '{name}' and its folder.", name = deleted.name);
             }
             Err(err) => {
                 tracing::error!(
@@ -529,7 +502,7 @@ pub fn poll_delete_instance_results(
                     error = %err,
                     "Instance delete failed."
                 );
-                state.delete_error = Some(format!("Failed to delete instance: {err}"));
+                state.delete_error = Some(tr!("Failed to delete instance: {err}", err = err).into_owned());
             }
         }
     }

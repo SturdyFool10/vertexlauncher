@@ -3,6 +3,7 @@
 //! `launcher_ui`'s `InstanceSession`, shared with the egui screen.
 
 
+use vertex_i18n::tr;
 use content_resolver::InstalledContentKind;
 use instances::InstanceRecord;
 use launcher_ui::notification;
@@ -31,11 +32,11 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         .cloned()
     else {
         let _scroll = kit.scroll(ui, SCROLL_ID, kit::SPACE_LG, kit::SPACE_XL);
-        kit.text(ui, TextRole::Title, "Instance");
+        kit.text(ui, TextRole::Title, &tr!("Instance"));
         kit.text(
             ui,
             TextRole::Muted,
-            "Select an instance from the left sidebar or click + to create one.",
+            &tr!("Select an instance from the left sidebar or click + to create one."),
         );
         return;
     };
@@ -98,7 +99,7 @@ fn header(
         kit.text(
             ui,
             TextRole::Muted,
-            &format!("Root Folder: {}", root.display()),
+            &tr!("Root Folder: {root}", root = root.display()),
         );
         if kit.icon_button(ui, "instance::folder", Icon::Folder, 30.0) {
             library::open_folder(state, &id);
@@ -106,7 +107,7 @@ fn header(
         kit.tooltip(
             ui,
             "instance::folder",
-            &format!("Open instance folder\n{}", root.display()),
+            &tr!("Open instance folder\n{root}", root = root.display()),
         );
         if kit.icon_button(ui, "instance::copy-root", Icon::Copy, 24.0) {
             let absolute = if root.is_absolute() {
@@ -121,21 +122,18 @@ fn header(
                 .engine()
                 .primary_window_control()
                 .map(|mut window| window.set_clipboard_text(&text));
-            notification::info!(
-                "instance/root",
-                "Copied instance root path to the clipboard."
-            );
+            notification::info!("instance/root", "Copied instance root path to the clipboard.");
         }
         kit.tooltip(
             ui,
             "instance::copy-root",
-            "Copy absolute instance root path",
+            &tr!("Copy absolute instance root path"),
         );
         kit.fill(ui);
         if kit.button(
             ui,
             "instance::game-settings",
-            "Game settings",
+            &tr!("Game settings"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -160,7 +158,7 @@ fn header(
         if kit.button(
             ui,
             "instance::settings",
-            "Instance settings",
+            &tr!("Instance settings"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -173,13 +171,10 @@ fn install_progress(ui: &mut Ui<'_>, kit: &mut Kit, progress: &api::InstallProgr
     let _card = kit.card(ui, "instance::install", kit::SPACE_XS);
     let mut label = progress.stage.clone();
     if progress.bytes_per_second > 0.0 {
-        label.push_str(&format!(
-            " · {:.1} MiB/s",
-            progress.bytes_per_second / (1024.0 * 1024.0)
-        ));
+        label.push_str(&tr!(" · {speed:.1} MiB/s", speed = progress.bytes_per_second / (1024.0 * 1024.0)));
     }
     if let Some(eta) = progress.eta_seconds {
-        label.push_str(&format!(" · ETA {eta}s"));
+        label.push_str(&tr!(" · ETA {eta}s", eta = eta));
     }
     if let Some(fraction) = progress.fraction {
         label.push_str(&format!(" · {:.0}%", fraction * 100.0));
@@ -201,15 +196,12 @@ fn install_progress(ui: &mut Ui<'_>, kit: &mut Kit, progress: &api::InstallProgr
                 api::human_bytes(progress.downloaded_bytes),
                 api::human_bytes(total)
             ),
-            None => format!("{} downloaded", api::human_bytes(progress.downloaded_bytes)),
+            None => tr!("{size} downloaded", size = api::human_bytes(progress.downloaded_bytes)).into_owned(),
         };
         kit.text(
             ui,
             TextRole::Small,
-            &format!(
-                "Files: {}/{} · {}",
-                progress.downloaded_files, progress.total_files, bytes
-            ),
+            &tr!("Files: {downloaded_files}/{total_files} · {bytes}", downloaded_files = progress.downloaded_files, total_files = progress.total_files, bytes = bytes),
         );
     }
 }
@@ -223,14 +215,14 @@ fn tabs(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) {
             session.state.active_tab
         });
     for (tab, label) in [
-        (InstanceScreenTab::Content, "Content"),
-        (InstanceScreenTab::ScreenshotGallery, "Screenshot Gallery"),
-        (InstanceScreenTab::Logs, "Logs"),
+        (InstanceScreenTab::Content, tr!("Content")),
+        (InstanceScreenTab::ScreenshotGallery, tr!("Screenshot Gallery")),
+        (InstanceScreenTab::Logs, tr!("Logs")),
     ] {
         if kit.tab_sized(
             ui,
             &format!("instance::tab::{label}"),
-            label,
+            &label,
             current == tab,
             Sizing::Grow,
         ) && let Some(session) = state.sessions.get_mut(id)
@@ -281,7 +273,7 @@ fn content_tab(
         let (main, menu) = kit.split_button(
             ui,
             "instance::open-browser",
-            "Open Content Browser",
+            &tr!("Open Content Browser"),
             "instance::add-menu",
             !locked,
         );
@@ -295,10 +287,10 @@ fn content_tab(
             kit.tooltip(
                 ui,
                 "instance::open-browser",
-                "Content Browser is unavailable while instance prep is running.",
+                &tr!("Content Browser is unavailable while instance prep is running."),
             );
         }
-        kit.tooltip(ui, "instance::add-menu", "Add content");
+        kit.tooltip(ui, "instance::add-menu", &tr!("Add content"));
     }
     let style = PopupStyle {
         background: kit.palette.bg_dark,
@@ -323,13 +315,13 @@ fn content_tab(
                     .direction(Direction::TopToBottom)
                     .child_gap(kit::SPACE_XS),
             );
-            if kit.nav_item(ui, "instance::add-local", None, "Add local file(s)", false) {
+            if kit.nav_item(ui, "instance::add-local", None, &tr!("Add local file(s)"), false) {
                 if live {
                     add_files = true;
                     popup.close();
                 }
             }
-            if kit.nav_item(ui, "instance::add-patch", None, "Apply Patch", false) {
+            if kit.nav_item(ui, "instance::add-patch", None, &tr!("Apply Patch"), false) {
                 if live {
                     apply_patch = true;
                     popup.close();
@@ -339,7 +331,7 @@ fn content_tab(
                 ui,
                 "instance::add-refresh",
                 None,
-                "Refresh local files",
+                &tr!("Refresh local files"),
                 false,
             ) {
                 if live {
@@ -354,7 +346,7 @@ fn content_tab(
         state.file_dialogs.open(
             "instance::add-local",
             crate::app::se5::file_dialog::Pick::Files,
-            crate::app::se5::file_dialog::Dialog::new().title("Add Local Content"),
+            crate::app::se5::file_dialog::Dialog::new().title(tr!("Add Local Content")),
         );
     }
     if apply_patch {
@@ -362,8 +354,8 @@ fn content_tab(
             "instance::apply-patch",
             crate::app::se5::file_dialog::Pick::File,
             crate::app::se5::file_dialog::Dialog::new()
-                .title("Apply Vertex Patch")
-                .filter("Vertex Modpack Patch", &[vtmpack::VTMPATCH_EXTENSION]),
+                .title(tr!("Apply Vertex Patch"))
+                .filter(tr!("Vertex Modpack Patch"), &[vtmpack::VTMPATCH_EXTENSION]),
         );
     }
     if refresh && let Some(session) = state.sessions.get_mut(&id) {
@@ -406,10 +398,7 @@ fn content_tab(
         ui,
         "instance::content-search",
         &mut query,
-        &format!(
-            "Search installed {} by name, file, version, or provider",
-            view.kind.label().to_lowercase()
-        ),
+        &tr!("Search installed {kind} by name, file, version, or provider", kind = view.kind.label().to_lowercase()),
         false,
         Sizing::Grow,
     ) {
@@ -440,7 +429,7 @@ fn content_tab(
     }
     {
         let _row = kit.row(ui, kit::SPACE_SM);
-        kit.text(ui, TextRole::Muted, "Items per page");
+        kit.text(ui, TextRole::Muted, &tr!("Items per page"));
         let sizes: Vec<String> = api::content::PAGE_SIZES
             .iter()
             .map(usize::to_string)
@@ -452,13 +441,13 @@ fn content_tab(
         if let Some(index) = kit.dropdown(ui, "instance::page-size", size_index, &sizes, 90.0) {
             api::content::set_page_size(&mut session.state, api::content::PAGE_SIZES[index]);
         }
-        kit.text(ui, TextRole::Muted, "Page");
+        kit.text(ui, TextRole::Muted, &tr!("Page"));
         let pages: Vec<String> = (1..=view.total_pages)
             .map(|page| {
                 if page == view.page {
-                    format!("{page} / {}", view.total_pages)
+                    tr!("{page} / {total_pages}", page = page, total_pages = view.total_pages).into_owned()
                 } else {
-                    format!("Page {page}")
+                    tr!("Page {page}", page = page).into_owned()
                 }
             })
             .collect();
@@ -479,7 +468,7 @@ fn content_tab(
         if let Some(on) = kit.checkbox(
             ui,
             "instance::updatable-only",
-            "Show updatable files",
+            &tr!("Show updatable files"),
             view.updatable_only,
         ) {
             api::content::set_updatable_only(&mut session.state, on);
@@ -691,16 +680,16 @@ fn content_row(
         kit.tooltip(
             ui,
             &toggle_id,
-            if row.disabled {
-                "Enable mod"
+            &if row.disabled {
+                tr!("Enable mod")
             } else {
-                "Disable mod"
+                tr!("Disable mod")
             },
         );
     }
-    kit.tooltip(ui, &delete_id, "Delete this content");
+    kit.tooltip(ui, &delete_id, &tr!("Delete this content"));
     if row.update_label.is_some() {
-        kit.tooltip(ui, &update_id, "Update to this version");
+        kit.tooltip(ui, &update_id, &tr!("Update to this version"));
     }
     if toggled {
         RowAction::Toggle
@@ -752,13 +741,13 @@ fn screenshots_tab(
     kit.text(
         ui,
         TextRole::Heading,
-        &format!("Screenshots ({})", shots.len()),
+        &tr!("Screenshots ({count})", count = shots.len()),
     );
     if shots.is_empty() {
         kit.text(
             ui,
             TextRole::Muted,
-            "No screenshots found under this instance's screenshots folder.",
+            &tr!("No screenshots found under this instance's screenshots folder."),
         );
         return;
     }
@@ -861,17 +850,17 @@ fn logs_tab(
         return;
     };
     api::logs_tick(&mut session.state, root);
-    kit.text(ui, TextRole::Heading, "Logs");
+    kit.text(ui, TextRole::Heading, &tr!("Logs"));
     kit.text(
         ui,
         TextRole::Muted,
-        "Select a log file to view it with the same highlighting rules as the live console.",
+        &tr!("Select a log file to view it with the same highlighting rules as the live console."),
     );
     if session.state.logs.is_empty() {
         kit.text(
             ui,
             TextRole::Muted,
-            "No log files found under this instance's logs folder.",
+            &tr!("No log files found under this instance's logs folder."),
         );
         return;
     }
@@ -936,11 +925,11 @@ fn logs_tab(
                     );
                     let mut details = path.display().to_string();
                     if session.state.loaded_log_truncated {
-                        details.push_str(&format!(" | showing last {} lines", api::MAX_LOG_LINES));
+                        details.push_str(&tr!(" | showing last {count} lines", count = api::MAX_LOG_LINES));
                     }
                     kit.text_clipped(ui, TextRole::Small, &details, 640.0);
                     if session.state.log_load_in_flight {
-                        kit.text(ui, TextRole::Muted, "Loading log contents...");
+                        kit.text(ui, TextRole::Muted, &tr!("Loading log contents..."));
                     }
                     if let Some(error) = &session.state.loaded_log_error {
                         kit::label(
@@ -957,14 +946,14 @@ fn logs_tab(
                             kit,
                             "instance::log-lines",
                             &session.state.loaded_log_lines,
-                            "Log is empty.",
+                            &tr!("Log is empty."),
                         );
                     }
                 }
                 None => kit.text(
                     ui,
                     TextRole::Muted,
-                    "Select a log file from the left to view it.",
+                    &tr!("Select a log file from the left to view it."),
                 ),
             }
         }

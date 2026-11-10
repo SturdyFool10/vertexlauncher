@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ModSortMode {
     Relevance,
@@ -12,11 +13,11 @@ impl ModSortMode {
         ModSortMode::LastUpdated,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            ModSortMode::Relevance => "Relevance",
-            ModSortMode::LastUpdated => "Last Update",
-            ModSortMode::Popularity => "Popularity",
+            ModSortMode::Relevance => tr!("Relevance"),
+            ModSortMode::LastUpdated => tr!("Last Update"),
+            ModSortMode::Popularity => tr!("Popularity"),
         }
     }
 }

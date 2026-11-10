@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use config::{
     Config, INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN,
     JavaRuntimeVersion,
@@ -157,14 +158,14 @@ where
     F: FnMut(vtmpack::VtmpackExportProgress),
 {
     progress(vtmpack::VtmpackExportProgress {
-        message: "Scanning instance files...".to_owned(),
+        message: tr!("Scanning instance files...").into_owned(),
         completed_steps: 0,
         total_steps: 1,
     });
     let mut included_files = collect_server_export_files(instance_root, included_root_entries)?;
     let manifest = managed_content::load_content_manifest(instance_root);
     progress(vtmpack::VtmpackExportProgress {
-        message: "Checking which mods are client-only...".to_owned(),
+        message: tr!("Checking which mods are client-only...").into_owned(),
         completed_steps: 0,
         total_steps: 1,
     });
@@ -193,15 +194,12 @@ where
         && !parent.as_os_str().is_empty()
     {
         fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create server export directory {}: {err}",
-                parent.display()
-            )
+            tr!("failed to create server export directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
         })?;
     }
 
     let output_file = fs::File::create(output_path)
-        .map_err(|err| format!("failed to create {}: {err}", output_path.display()))?;
+        .map_err(|err| tr!("failed to create {output_path}: {err}", output_path = output_path.display(), err = err).into_owned())?;
     let mut zip = zip::ZipWriter::new(output_file);
     let file_options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
@@ -216,43 +214,43 @@ where
         let relative = file.strip_prefix(instance_root).unwrap_or(file.as_path());
         let zip_path = normalize_zip_path(relative);
         progress(vtmpack::VtmpackExportProgress {
-            message: format!("Adding {}", relative.display()),
+            message: tr!("Adding {relative}", relative = relative.display()).into_owned(),
             completed_steps,
             total_steps,
         });
         zip.start_file(zip_path.as_str(), file_options)
-            .map_err(|err| format!("failed to add {zip_path} to zip: {err}"))?;
+            .map_err(|err| tr!("failed to add {zip_path} to zip: {err}", zip_path = zip_path, err = err).into_owned())?;
         let mut input = fs::File::open(file.as_path())
-            .map_err(|err| format!("failed to open {}: {err}", file.display()))?;
+            .map_err(|err| tr!("failed to open {file}: {err}", file = file.display(), err = err).into_owned())?;
         std::io::copy(&mut input, &mut zip)
-            .map_err(|err| format!("failed to write {} to zip: {err}", file.display()))?;
+            .map_err(|err| tr!("failed to write {file} to zip: {err}", file = file.display(), err = err).into_owned())?;
         completed_steps += 1;
     }
 
     progress(vtmpack::VtmpackExportProgress {
-        message: "Writing launch scripts...".to_owned(),
+        message: tr!("Writing launch scripts...").into_owned(),
         completed_steps,
         total_steps,
     });
     zip.start_file("start-server.sh", script_options)
-        .map_err(|err| format!("failed to add start-server.sh: {err}"))?;
+        .map_err(|err| tr!("failed to add start-server.sh: {err}", err = err).into_owned())?;
     zip.write_all(build_server_start_script_sh(required_java).as_bytes())
-        .map_err(|err| format!("failed to write start-server.sh: {err}"))?;
+        .map_err(|err| tr!("failed to write start-server.sh: {err}", err = err).into_owned())?;
     completed_steps += 1;
 
     zip.start_file("start-server.bat", script_options)
-        .map_err(|err| format!("failed to add start-server.bat: {err}"))?;
+        .map_err(|err| tr!("failed to add start-server.bat: {err}", err = err).into_owned())?;
     zip.write_all(build_server_start_script_bat(required_java).as_bytes())
-        .map_err(|err| format!("failed to write start-server.bat: {err}"))?;
+        .map_err(|err| tr!("failed to write start-server.bat: {err}", err = err).into_owned())?;
     completed_steps += 1;
 
     progress(vtmpack::VtmpackExportProgress {
-        message: "Writing server build report...".to_owned(),
+        message: tr!("Writing server build report...").into_owned(),
         completed_steps,
         total_steps,
     });
     zip.start_file("VERTEX_SERVER_BUILD_REPORT.txt", file_options)
-        .map_err(|err| format!("failed to add VERTEX_SERVER_BUILD_REPORT.txt: {err}"))?;
+        .map_err(|err| tr!("failed to add VERTEX_SERVER_BUILD_REPORT.txt: {err}", err = err).into_owned())?;
     zip.write_all(
         build_server_export_report(
             instance,
@@ -263,41 +261,36 @@ where
         )
         .as_bytes(),
     )
-    .map_err(|err| format!("failed to write server build report: {err}"))?;
+    .map_err(|err| tr!("failed to write server build report: {err}", err = err).into_owned())?;
     completed_steps += 1;
 
     progress(vtmpack::VtmpackExportProgress {
-        message: "Writing EULA placeholder...".to_owned(),
+        message: tr!("Writing EULA placeholder...").into_owned(),
         completed_steps,
         total_steps,
     });
     zip.start_file("eula.txt", file_options)
-        .map_err(|err| format!("failed to add eula.txt: {err}"))?;
+        .map_err(|err| tr!("failed to add eula.txt: {err}", err = err).into_owned())?;
     zip.write_all(b"eula=false\n")
-        .map_err(|err| format!("failed to write eula.txt: {err}"))?;
+        .map_err(|err| tr!("failed to write eula.txt: {err}", err = err).into_owned())?;
     completed_steps += 1;
 
     progress(vtmpack::VtmpackExportProgress {
-        message: "Finalizing zip archive...".to_owned(),
+        message: tr!("Finalizing zip archive...").into_owned(),
         completed_steps,
         total_steps,
     });
     let _ = zip
         .finish()
-        .map_err(|err| format!("failed to finalize zip archive: {err}"))?;
+        .map_err(|err| tr!("failed to finalize zip archive: {err}", err = err).into_owned())?;
     completed_steps += 1;
 
     progress(vtmpack::VtmpackExportProgress {
-        message: "Server export complete.".to_owned(),
+        message: tr!("Server export complete.").into_owned(),
         completed_steps,
         total_steps,
     });
-    Ok(format!(
-        "{} files included, {} client-only mods left out, {} CurseForge-managed unknown mods flagged.",
-        included_files.len(),
-        client_only.excluded.len(),
-        unknowns.len()
-    ))
+    Ok(tr!("{count} files included, {count2} client-only mods left out, {count3} CurseForge-managed unknown mods flagged.", count = included_files.len(), count2 = client_only.excluded.len(), count3 = unknowns.len()).into_owned())
 }
 
 fn collect_server_export_files(
@@ -318,7 +311,7 @@ fn collect_server_export_files(
             continue;
         }
         collect_regular_files_recursive(path.as_path(), &mut files)
-            .map_err(|err| format!("failed to collect files under {}: {err}", path.display()))?;
+            .map_err(|err| tr!("failed to collect files under {path}: {err}", path = path.display(), err = err).into_owned())?;
     }
     files.sort();
     files.dedup();
@@ -379,20 +372,20 @@ where
     let mut completed = initial_step_offset;
     for (name, path, relative) in candidates {
         progress(vtmpack::VtmpackExportProgress {
-            message: format!("Classifying CurseForge mod {relative}..."),
+            message: tr!("Classifying CurseForge mod {relative}...", relative = relative).into_owned(),
             completed_steps: completed,
             total_steps,
         });
         completed += 1;
 
         if !path.is_file() {
-            unknowns.push(format!("{name} ({relative}) - file missing"));
+            unknowns.push(tr!("{name} ({relative}) - file missing", name = name, relative = relative).into_owned());
             continue;
         }
         let hashes = match modrinth::hash_file_sha1_and_sha512_hex(path.as_path()) {
             Ok(values) => values,
             Err(error) => {
-                unknowns.push(format!("{name} ({relative}) - hash failed: {error}"));
+                unknowns.push(tr!("{name} ({relative}) - hash failed: {error}", name = name, relative = relative, error = error).into_owned());
                 continue;
             }
         };
@@ -408,11 +401,11 @@ where
                 .flatten()
                 .is_some();
         if !matched {
-            unknowns.push(format!("{name} ({relative})"));
+            unknowns.push(tr!("{name} ({relative})", name = name, relative = relative).into_owned());
         }
     }
     progress(vtmpack::VtmpackExportProgress {
-        message: "CurseForge unknown-classification complete.".to_owned(),
+        message: tr!("CurseForge unknown-classification complete.").into_owned(),
         completed_steps: completed,
         total_steps,
     });
@@ -484,10 +477,9 @@ fn build_server_export_report(
 
 fn build_server_start_script_sh(required_java: Option<u8>) -> String {
     let java_note = required_java
-        .map(|major| format!("echo \"Recommended Java major: {major}\""))
-        .unwrap_or_else(|| "echo \"Recommended Java major: unknown\"".to_owned());
-    format!(
-        "#!/usr/bin/env bash
+        .map(|major| tr!("echo \"Recommended Java major: {major}\"", major = major).into_owned())
+        .unwrap_or_else(|| tr!("echo \"Recommended Java major: unknown\"").into_owned());
+    tr!("#!/usr/bin/env bash
 set -euo pipefail
 {java_note}
 
@@ -505,16 +497,14 @@ fi
 
 echo \"Starting server using $jar\"
 java -Xms2G -Xmx4G -jar \"$jar\" nogui
-"
-    )
+", java_note = java_note).into_owned()
 }
 
 fn build_server_start_script_bat(required_java: Option<u8>) -> String {
     let java_note = required_java
-        .map(|major| format!("echo Recommended Java major: {major}"))
-        .unwrap_or_else(|| "echo Recommended Java major: unknown".to_owned());
-    format!(
-        "@echo off
+        .map(|major| tr!("echo Recommended Java major: {major}", major = major).into_owned())
+        .unwrap_or_else(|| tr!("echo Recommended Java major: unknown").into_owned());
+    tr!("@echo off
 setlocal EnableDelayedExpansion
 {java_note}
 
@@ -541,8 +531,7 @@ if not defined jar (
 
 echo Starting server using !jar!
 java -Xms2G -Xmx4G -jar \"!jar!\" nogui
-"
-    )
+", java_note = java_note).into_owned()
 }
 
 fn normalize_zip_path(path: &Path) -> String {
@@ -576,26 +565,26 @@ fn format_time_ago(timestamp_ms: Option<u64>, now_ms: u64) -> String {
     let elapsed_ms = now_ms.saturating_sub(timestamp_ms);
     let elapsed_seconds = elapsed_ms / 1_000;
     if elapsed_seconds < 60 {
-        return "just now".to_owned();
+        return tr!("just now").into_owned();
     }
     let elapsed_minutes = elapsed_seconds / 60;
     if elapsed_minutes < 60 {
-        return format!("{elapsed_minutes}m ago");
+        return tr!("{elapsed_minutes}m ago", elapsed_minutes = elapsed_minutes).into_owned();
     }
     let elapsed_hours = elapsed_minutes / 60;
     if elapsed_hours < 24 {
-        return format!("{elapsed_hours}h ago");
+        return tr!("{elapsed_hours}h ago", elapsed_hours = elapsed_hours).into_owned();
     }
     let elapsed_days = elapsed_hours / 24;
     if elapsed_days < 30 {
-        return format!("{elapsed_days}d ago");
+        return tr!("{elapsed_days}d ago", elapsed_days = elapsed_days).into_owned();
     }
     let elapsed_months = elapsed_days / 30;
     if elapsed_months < 12 {
-        return format!("{elapsed_months}mo ago");
+        return tr!("{elapsed_months}mo ago", elapsed_months = elapsed_months).into_owned();
     }
     let elapsed_years = elapsed_days / 365;
-    format!("{elapsed_years}y ago")
+    tr!("{elapsed_years}y ago", elapsed_years = elapsed_years).into_owned()
 }
 
 fn ensure_selected_modloader_is_supported(state: &mut InstanceScreenState, game_version: &str) {

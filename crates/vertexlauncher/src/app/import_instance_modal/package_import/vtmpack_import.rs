@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(crate) fn import_vtmpack(
@@ -7,9 +8,9 @@ pub(crate) fn import_vtmpack(
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<InstanceRecord, String> {
     let ImportSource::ManifestFile(package_path) = &request.source else {
-        return Err("Vertex pack import requires a manifest file source.".to_owned());
+        return Err(tr!("Vertex pack import requires a manifest file source.").into_owned());
     };
-    progress(import_progress("Reading XZ .vtmpack manifest...", 0, 1));
+    progress(import_progress(vertex_i18n::src!("Reading XZ .vtmpack manifest..."), 0, 1));
     let manifest = read_vtmpack_manifest_with_progress(package_path.as_path(), |_| {})?;
     let extract_steps = count_vtmpack_manifest_payload_entries(&manifest);
     let total_steps = 3 + extract_steps + manifest.downloadable_content.len();
@@ -20,7 +21,7 @@ pub(crate) fn import_vtmpack(
             name: request.instance_name.clone(),
             description: None,
             thumbnail_path: None,
-            modloader: default_if_blank(manifest.instance.modloader.as_str(), "Vanilla".to_owned()),
+            modloader: default_if_blank(manifest.instance.modloader.as_str(), tr!("Vanilla").into_owned()),
             game_version: default_if_blank(
                 manifest.instance.game_version.as_str(),
                 "latest".to_owned(),
@@ -28,9 +29,9 @@ pub(crate) fn import_vtmpack(
             modloader_version: manifest.instance.modloader_version.clone(),
         },
     )
-    .map_err(|err| format!("failed to create imported profile: {err}"))?;
+    .map_err(|err| tr!("failed to create imported profile: {err}", err = err).into_owned())?;
     progress(import_progress(
-        "Created imported profile. Restoring packaged files...",
+        vertex_i18n::src!("Created imported profile. Restoring packaged files..."),
         1,
         total_steps,
     ));
@@ -48,7 +49,7 @@ pub(crate) fn import_vtmpack(
     }
 
     progress(import_progress(
-        "Import complete.",
+        vertex_i18n::src!("Import complete."),
         total_steps,
         total_steps,
     ));
@@ -91,15 +92,12 @@ pub(crate) fn populate_vtmpack_instance(
         let destination = join_safe(instance_root, downloadable.file_path.as_path())?;
         if let Some(parent) = destination.parent() {
             fs_create_dir_all_logged(parent).map_err(|err| {
-                format!(
-                    "failed to create import directory {}: {err}",
-                    parent.display()
-                )
+                tr!("failed to create import directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
             })?;
         }
         completed_steps += 1;
         progress(import_progress(
-            &format!("Resolving {}", downloadable.name),
+            &tr!("Resolving {name}", name = downloadable.name),
             completed_steps,
             total_steps,
         ));
@@ -115,12 +113,12 @@ pub(crate) fn populate_vtmpack_instance(
     }
     if !tasks.is_empty() {
         progress(import_progress(
-            &format!("Downloading {} files...", tasks.len()),
+            &tr!("Downloading {count} files...", count = tasks.len()),
             completed_steps,
             total_steps,
         ));
         installation::download_batch(tasks, &installation::shared_download_policy())
-            .map_err(|err| format!("failed to download pack files: {err}"))?;
+            .map_err(|err| tr!("failed to download pack files: {err}", err = err).into_owned())?;
         for (downloadable, destination) in to_verify {
             verify_vtmpack_download_hash(downloadable, destination.as_path())?;
         }
@@ -157,17 +155,14 @@ fn extract_vtmpack_payload_from_archive(
 ) -> Result<(), String> {
     for entry in archive
         .entries()
-        .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?
+        .map_err(|err| tr!("failed to read {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?
     {
         let mut entry = entry.map_err(|err| {
-            format!(
-                "failed to read archive entry in {}: {err}",
-                package_path.display()
-            )
+            tr!("failed to read archive entry in {package_path}: {err}", package_path = package_path.display(), err = err).into_owned()
         })?;
         let entry_path = entry
             .path()
-            .map_err(|err| format!("failed to decode archive path: {err}"))?
+            .map_err(|err| tr!("failed to decode archive path: {err}", err = err).into_owned())?
             .to_path_buf();
         let entry_string = entry_path.to_string_lossy().replace('\\', "/");
 
@@ -178,89 +173,68 @@ fn extract_vtmpack_payload_from_archive(
         if entry_string == format!("metadata/{CONTENT_MANIFEST_FILE_NAME}") {
             let destination = instance_root.join(CONTENT_MANIFEST_FILE_NAME);
             progress(import_progress(
-                "Restoring managed metadata...",
+                vertex_i18n::src!("Restoring managed metadata..."),
                 *completed_steps,
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
                 fs_create_dir_all_logged(parent).map_err(|err| {
-                    format!(
-                        "failed to create metadata directory {}: {err}",
-                        parent.display()
-                    )
+                    tr!("failed to create metadata directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
                 })?;
             }
             entry.unpack(destination.as_path()).map_err(|err| {
-                format!(
-                    "failed to restore managed metadata into {}: {err}",
-                    destination.display()
-                )
+                tr!("failed to restore managed metadata into {destination}: {err}", destination = destination.display(), err = err).into_owned()
             })?;
             continue;
         }
         if let Some(relative) = entry_string.strip_prefix("bundled_mods/") {
             let destination = join_safe(&instance_root.join("mods"), Path::new(relative))?;
             progress(import_progress(
-                &format!("Restoring bundled mod {}", relative),
+                &tr!("Restoring bundled mod {relative}", relative = relative),
                 *completed_steps,
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
                 fs_create_dir_all_logged(parent).map_err(|err| {
-                    format!(
-                        "failed to create bundled mod directory {}: {err}",
-                        parent.display()
-                    )
+                    tr!("failed to create bundled mod directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
                 })?;
             }
             entry.unpack(destination.as_path()).map_err(|err| {
-                format!(
-                    "failed to import bundled mod {}: {err}",
-                    destination.display()
-                )
+                tr!("failed to import bundled mod {destination}: {err}", destination = destination.display(), err = err).into_owned()
             })?;
             continue;
         }
         if let Some(relative) = entry_string.strip_prefix("configs/") {
             let destination = join_safe(&instance_root.join("config"), Path::new(relative))?;
             progress(import_progress(
-                &format!("Restoring config {}", relative),
+                &tr!("Restoring config {relative}", relative = relative),
                 *completed_steps,
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
                 fs_create_dir_all_logged(parent).map_err(|err| {
-                    format!(
-                        "failed to create config directory {}: {err}",
-                        parent.display()
-                    )
+                    tr!("failed to create config directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
                 })?;
             }
             entry.unpack(destination.as_path()).map_err(|err| {
-                format!("failed to import config {}: {err}", destination.display())
+                tr!("failed to import config {destination}: {err}", destination = destination.display(), err = err).into_owned()
             })?;
             continue;
         }
         if let Some(relative) = entry_string.strip_prefix("root_entries/") {
             let destination = join_safe(instance_root, Path::new(relative))?;
             progress(import_progress(
-                &format!("Restoring {}", relative),
+                &tr!("Restoring {relative}", relative = relative),
                 *completed_steps,
                 total_steps,
             ));
             if let Some(parent) = destination.parent() {
                 fs_create_dir_all_logged(parent).map_err(|err| {
-                    format!(
-                        "failed to create imported root entry directory {}: {err}",
-                        parent.display()
-                    )
+                    tr!("failed to create imported root entry directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
                 })?;
             }
             entry.unpack(destination.as_path()).map_err(|err| {
-                format!(
-                    "failed to import extra root entry {}: {err}",
-                    destination.display()
-                )
+                tr!("failed to import extra root entry {destination}: {err}", destination = destination.display(), err = err).into_owned()
             })?;
         }
     }
@@ -276,30 +250,30 @@ pub(crate) fn resolve_vtmpack_entry_download(
             let version_id = entry
                 .selected_version_id
                 .as_deref()
-                .ok_or_else(|| format!("missing Modrinth version id for {}", entry.name))?;
+                .ok_or_else(|| tr!("missing Modrinth version id for {name}", name = entry.name).into_owned())?;
             let version = ModrinthClient::default()
                 .get_version(version_id)
-                .map_err(|err| format!("failed to fetch Modrinth version {version_id}: {err}"))?;
+                .map_err(|err| tr!("failed to fetch Modrinth version {version_id}: {err}", version_id = version_id, err = err).into_owned())?;
             let file = select_vtmpack_modrinth_file(entry, &version)?;
             Ok((file.url.clone(), true))
         }
         Some(ManagedSource::CurseForge) => {
             let project_id = entry
                 .curseforge_project_id
-                .ok_or_else(|| format!("missing CurseForge project id for {}", entry.name))?;
+                .ok_or_else(|| tr!("missing CurseForge project id for {name}", name = entry.name).into_owned())?;
             let file_id = entry
                 .selected_version_id
                 .as_deref()
-                .ok_or_else(|| format!("missing CurseForge file id for {}", entry.name))?
+                .ok_or_else(|| tr!("missing CurseForge file id for {name}", name = entry.name).into_owned())?
                 .parse::<u64>()
-                .map_err(|err| format!("invalid CurseForge file id for {}: {err}", entry.name))?;
+                .map_err(|err| tr!("invalid CurseForge file id for {name}: {err}", name = entry.name, err = err).into_owned())?;
             let client = CurseForgeClient::from_env().ok_or_else(|| {
                 "CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to import this pack."
                     .to_owned()
             })?;
             let file = find_curseforge_file(&client, project_id, file_id)?;
             let download_url = file.download_url.ok_or_else(|| {
-                format!("CurseForge file {file_id} for project {project_id} has no download URL")
+                tr!("CurseForge file {file_id} for project {project_id} has no download URL", file_id = file_id, project_id = project_id).into_owned()
             })?;
             Ok((download_url, false))
         }
@@ -308,15 +282,12 @@ pub(crate) fn resolve_vtmpack_entry_download(
                 let version = ModrinthClient::default()
                     .get_version(version_id)
                     .map_err(|err| {
-                        format!("failed to fetch Modrinth fallback version {version_id}: {err}")
+                        tr!("failed to fetch Modrinth fallback version {version_id}: {err}", version_id = version_id, err = err).into_owned()
                     })?;
                 let file = select_vtmpack_modrinth_file(entry, &version)?;
                 return Ok((file.url.clone(), true));
             }
-            Err(format!(
-                "download source for {} could not be determined from the pack metadata",
-                entry.name
-            ))
+            Err(tr!("download source for {name} could not be determined from the pack metadata", name = entry.name).into_owned())
         }
     }
 }
@@ -337,10 +308,7 @@ fn select_vtmpack_modrinth_file<'a>(
                         .is_some_and(|hash| hash.eq_ignore_ascii_case(expected))
                 })
                 .ok_or_else(|| {
-                    format!(
-                        "no Modrinth file on version {} matched recorded sha512 for {}",
-                        version.id, entry.name
-                    )
+                    tr!("no Modrinth file on version {id} matched recorded sha512 for {name}", id = version.id, name = entry.name).into_owned()
                 });
         }
     }
@@ -356,10 +324,7 @@ fn select_vtmpack_modrinth_file<'a>(
                         .is_some_and(|hash| hash.eq_ignore_ascii_case(expected))
                 })
                 .ok_or_else(|| {
-                    format!(
-                        "no Modrinth file on version {} matched recorded sha1 for {}",
-                        version.id, entry.name
-                    )
+                    tr!("no Modrinth file on version {id} matched recorded sha1 for {name}", id = version.id, name = entry.name).into_owned()
                 });
         }
     }
@@ -370,10 +335,7 @@ fn select_vtmpack_modrinth_file<'a>(
         .find(|file| file.primary)
         .or_else(|| version.files.first())
         .ok_or_else(|| {
-            format!(
-                "no downloadable file found for Modrinth version {}",
-                version.id
-            )
+            tr!("no downloadable file found for Modrinth version {id}", id = version.id).into_owned()
         })
 }
 
@@ -385,25 +347,17 @@ fn verify_vtmpack_download_hash(
         return Ok(());
     }
     let (sha1, sha512) = modrinth::hash_file_sha1_and_sha512_hex(destination)
-        .map_err(|err| format!("failed to hash downloaded {}: {err}", destination.display()))?;
+        .map_err(|err| tr!("failed to hash downloaded {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
     if let Some(expected) = entry.selected_file_sha512.as_deref() {
         let expected = expected.trim();
         if !expected.is_empty() && !sha512.eq_ignore_ascii_case(expected) {
-            return Err(format!(
-                "downloaded {} did not match recorded sha512 for {}",
-                destination.display(),
-                entry.name
-            ));
+            return Err(tr!("downloaded {destination} did not match recorded sha512 for {name}", destination = destination.display(), name = entry.name).into_owned());
         }
     }
     if let Some(expected) = entry.selected_file_sha1.as_deref() {
         let expected = expected.trim();
         if !expected.is_empty() && !sha1.eq_ignore_ascii_case(expected) {
-            return Err(format!(
-                "downloaded {} did not match recorded sha1 for {}",
-                destination.display(),
-                entry.name
-            ));
+            return Err(tr!("downloaded {destination} did not match recorded sha1 for {name}", destination = destination.display(), name = entry.name).into_owned());
         }
     }
     Ok(())

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
@@ -121,8 +122,8 @@ fn handle_callback_stream(
             "400 Bad Request",
             &render_callback_page(
                 "Sign-in Request Invalid",
-                "Vertex Launcher could not understand the browser callback request.",
-                Some("Try starting the browser sign-in flow again from the launcher."),
+                &tr!("Vertex Launcher could not understand the browser callback request."),
+                Some(&tr!("Try starting the browser sign-in flow again from the launcher.")),
                 CallbackPageTone::Error,
                 colors,
             ),
@@ -141,8 +142,8 @@ fn handle_callback_stream(
             "404 Not Found",
             &render_callback_page(
                 "Wrong Redirect Page",
-                "This localhost page is not being used by Vertex Launcher.",
-                Some("You can close this tab."),
+                &tr!("This localhost page is not being used by Vertex Launcher."),
+                Some(&tr!("You can close this tab.")),
                 CallbackPageTone::Error,
                 colors,
             ),
@@ -154,8 +155,8 @@ fn handle_callback_stream(
     let body = if query_pairs.iter().any(|(key, _)| key == "code") {
         render_callback_page(
             "Sign-in Complete",
-            "Microsoft sign-in finished successfully.",
-            Some("This tab should close automatically. You can return to Vertex Launcher."),
+            &tr!("Microsoft sign-in finished successfully."),
+            Some(&tr!("This tab should close automatically. You can return to Vertex Launcher.")),
             CallbackPageTone::Success,
             colors,
         )
@@ -169,8 +170,8 @@ fn handle_callback_stream(
             .find(|(key, _)| key == "error_description")
             .map(|(_, value)| value.as_ref());
         render_callback_page(
-            "Sign-in Failed",
-            &format!("Microsoft returned an authorization error: {error}."),
+            &tr!("Sign-in Failed"),
+            &tr!("Microsoft returned an authorization error: {error}.", error = error),
             detail,
             CallbackPageTone::Error,
             colors,
@@ -178,8 +179,8 @@ fn handle_callback_stream(
     } else {
         render_callback_page(
             "Sign-in Incomplete",
-            "Microsoft returned to Vertex Launcher, but no authorization code was included.",
-            Some("You can close this tab and retry the sign-in flow."),
+            &tr!("Microsoft returned to Vertex Launcher, but no authorization code was included."),
+            Some(&tr!("You can close this tab and retry the sign-in flow.")),
             CallbackPageTone::Error,
             colors,
         )
@@ -221,13 +222,16 @@ fn render_callback_page(
         CallbackPageTone::Error => colors.danger.as_str(),
     };
     let badge = match tone {
-        CallbackPageTone::Success => "Connected",
-        CallbackPageTone::Error => "Action needed",
+        CallbackPageTone::Success => tr!("Connected"),
+        CallbackPageTone::Error => tr!("Action needed"),
     };
     let detail_html = detail
         .map(|d| format!(r#"<p class="detail">{}</p>"#, escape_html(d)))
         .unwrap_or_default();
     let secs = AUTO_CLOSE_DELAY_SECS.to_string();
+    // "Closing in {seconds}s" around the live countdown number the page's script updates.
+    let closing = tr!("Closing in {seconds}s", seconds = "\u{1}");
+    let (closing_before, closing_after) = closing.split_once('\u{1}').unwrap_or((&closing, ""));
 
     CALLBACK_PAGE_TEMPLATE
         .replace("{{BG}}", &colors.bg)
@@ -237,7 +241,12 @@ fn render_callback_page(
         .replace("{{MUTED}}", &colors.muted)
         .replace("{{PRIMARY_TINT}}", &colors.primary_tint)
         .replace("{{ACCENT}}", accent)
-        .replace("{{BADGE}}", badge)
+        .replace("{{BADGE}}", &escape_html(&badge))
+        .replace("{{LANG}}", &escape_html(&vertex_i18n::current_language().tag))
+        .replace("{{DIR}}", if vertex_i18n::is_right_to_left() { "rtl" } else { "ltr" })
+        .replace("{{FOOTER}}", &escape_html(&tr!("This tab should close automatically.")))
+        .replace("{{CLOSING_BEFORE}}", &escape_html(closing_before))
+        .replace("{{CLOSING_AFTER}}", &escape_html(closing_after))
         .replace("{{TITLE}}", &escape_html(title))
         .replace("{{MESSAGE}}", &escape_html(message))
         .replace("{{DETAIL_HTML}}", &detail_html)

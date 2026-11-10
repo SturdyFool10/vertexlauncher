@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub fn import_package_with_progress<F>(
@@ -25,12 +26,12 @@ where
                     import_curseforge_pack(store, installations_root, &request, &mut progress)
                 }
                 ImportPreviewKind::Launcher(_) => Err(ImportPackageError::message(
-                    "Launcher previews are not valid for manifest imports.",
+                    vertex_i18n::src!("Launcher previews are not valid for manifest imports."),
                 )),
             }
         }
         ImportSource::LauncherDirectory { .. } => {
-            progress(import_progress("Copying launcher instance files...", 0, 0));
+            progress(import_progress(vertex_i18n::src!("Copying launcher instance files..."), 0, 0));
             import_launcher_instance(store, installations_root, &request)
                 .map_err(ImportPackageError::message)
         }
@@ -51,12 +52,12 @@ where
     let existing_instance = store
         .find(instance_id)
         .cloned()
-        .ok_or_else(|| format!("instance {instance_id} was not found"))?;
+        .ok_or_else(|| tr!("instance {instance_id} was not found", instance_id = instance_id).into_owned())?;
     let existing_root = instance_root_path(installations_root, &existing_instance);
     let current_modpack_state = load_modpack_install_state(existing_root.as_path())
-        .ok_or_else(|| "This instance is not tied to an updatable modpack yet.".to_owned())?;
+        .ok_or_else(|| tr!("This instance is not tied to an updatable modpack yet.").into_owned())?;
 
-    progress(import_progress("Reading updated .mrpack manifest...", 0, 1));
+    progress(import_progress(vertex_i18n::src!("Reading updated .mrpack manifest..."), 0, 1));
     let manifest = read_mrpack_manifest(package_path)?;
     let dependency_info = resolve_mrpack_dependencies(&manifest.dependencies)?;
     let override_steps = count_mrpack_override_entries(package_path)?;
@@ -64,16 +65,13 @@ where
     let temp_root = unique_temp_instance_root(installations_root, existing_instance.id.as_str());
 
     fs_create_dir_all_logged(temp_root.as_path()).map_err(|err| {
-        format!(
-            "failed to create temp instance root {}: {err}",
-            temp_root.display()
-        )
+        tr!("failed to create temp instance root {temp_root}: {err}", temp_root = temp_root.display(), err = err).into_owned()
     })?;
     fs_create_dir_all_logged(temp_root.join("mods").as_path())
-        .map_err(|err| format!("failed to create temp mods directory: {err}"))?;
+        .map_err(|err| tr!("failed to create temp mods directory: {err}", err = err).into_owned())?;
 
     progress(import_progress(
-        "Building updated modpack files...",
+        vertex_i18n::src!("Building updated modpack files..."),
         1,
         total_steps,
     ));
@@ -96,7 +94,7 @@ where
         pack_managed_path_keys(&current_manifest, &current_modpack_state.base_manifest);
 
     progress(import_progress(
-        "Preserving user-added content...",
+        vertex_i18n::src!("Preserving user-added content..."),
         total_steps.saturating_sub(4),
         total_steps,
     ));
@@ -112,7 +110,7 @@ where
     }
 
     progress(import_progress(
-        "Preserving worlds and servers...",
+        vertex_i18n::src!("Preserving worlds and servers..."),
         total_steps.saturating_sub(3),
         total_steps,
     ));
@@ -121,7 +119,7 @@ where
     save_modpack_install_state(temp_root.as_path(), &new_modpack_state)?;
 
     progress(import_progress(
-        "Finalizing updated instance...",
+        vertex_i18n::src!("Finalizing updated instance..."),
         total_steps.saturating_sub(2),
         total_steps,
     ));
@@ -129,13 +127,13 @@ where
 
     let instance = store
         .find_mut(instance_id)
-        .ok_or_else(|| format!("instance {instance_id} disappeared during update"))?;
+        .ok_or_else(|| tr!("instance {instance_id} disappeared during update", instance_id = instance_id).into_owned())?;
     instance.game_version = dependency_info.game_version;
     instance.modloader = dependency_info.modloader;
     instance.modloader_version = dependency_info.modloader_version;
 
     progress(import_progress(
-        "Update complete.",
+        vertex_i18n::src!("Update complete."),
         total_steps,
         total_steps,
     ));
@@ -150,7 +148,7 @@ pub(crate) fn load_preview_from_state(state: &mut ImportInstanceState) {
             if path.as_os_str().is_empty() {
                 state.preview = None;
                 state.error = Some(
-                    "Choose a .vtmpack, .mrpack, or CurseForge modpack .zip file first.".to_owned(),
+                    tr!("Choose a .vtmpack, .mrpack, or CurseForge modpack .zip file first.").into_owned(),
                 );
                 return;
             }
@@ -160,7 +158,7 @@ pub(crate) fn load_preview_from_state(state: &mut ImportInstanceState) {
             let path = state.launcher_path.clone();
             if path.as_os_str().is_empty() {
                 state.preview = None;
-                state.error = Some("Choose an instance folder first.".to_owned());
+                state.error = Some(tr!("Choose an instance folder first.").into_owned());
                 return;
             }
             (path, selected_launcher_hint(state), false)
@@ -170,7 +168,7 @@ pub(crate) fn load_preview_from_state(state: &mut ImportInstanceState) {
     state.preview_request_serial = state.preview_request_serial.saturating_add(1);
     let request_serial = state.preview_request_serial;
     state.preview_in_flight = true;
-    state.preview_status_message = Some("Inspecting import source in the background...".to_owned());
+    state.preview_status_message = Some(tr!("Inspecting import source in the background...").into_owned());
     state.error = None;
     let progress_tx = Some(state.preview_progress.sender());
     let _ = tokio_runtime::spawn_detached(async move {

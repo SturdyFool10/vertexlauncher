@@ -206,7 +206,7 @@ fn draw_flow(
     let width_of = |ui: &Ui<'_>, token: &Token<'_>| match token {
         Token::Word(word) => ui.measure_text(&plain, word).x,
         // The chip's padding is 3 px on each side.
-        Token::Account(_) => ui.measure_text(&plain, REDACTED_ACCOUNT_LABEL).x + 6.0,
+        Token::Account(_) => ui.measure_text(&plain, &vertex_i18n::t(REDACTED_ACCOUNT_LABEL)).x + 6.0,
         Token::Break => 0.0,
     };
     let mut lines: Vec<Vec<&Token<'_>>> = vec![Vec::new()];
@@ -244,7 +244,7 @@ fn draw_flow(
         for token in line {
             match token {
                 Token::Word(word) => ui.text(word, &plain),
-                Token::Account(id) => account_chip(ui, REDACTED_ACCOUNT_LABEL, *id, &plain),
+                Token::Account(id) => account_chip(ui, &vertex_i18n::t(REDACTED_ACCOUNT_LABEL), *id, &plain),
                 Token::Break => {}
             }
         }
@@ -281,7 +281,7 @@ fn label_text(ui: &mut Ui<'_>, text: &str, style: &TextStyle) {
                 launcher_ui::privacy::ScrubPiece::Text(part) => ui.text(&part, &plain),
                 launcher_ui::privacy::ScrubPiece::Account { id } => account_chip(
                     ui,
-                    launcher_ui::privacy::REDACTED_ACCOUNT_LABEL,
+                    &vertex_i18n::t(launcher_ui::privacy::REDACTED_ACCOUNT_LABEL),
                     id.as_deref(),
                     &plain,
                 ),
@@ -2164,8 +2164,7 @@ impl Kit {
         let ring = self.focus_border(focused);
         let current = options
             .get(selected)
-            .map_or("Select...", String::as_str)
-            .to_owned();
+            .map_or_else(|| vertex_i18n::tr!("Select...").into_owned(), Clone::clone);
         let hovered = ui.hovered(&trigger);
         {
             let _button = ui.element(
@@ -2235,7 +2234,7 @@ impl Kit {
                     ui,
                     &field,
                     &mut query,
-                    "Type to search",
+                    &vertex_i18n::tr!("Type to search"),
                     false,
                     Sizing::Grow,
                 );
@@ -2269,7 +2268,7 @@ impl Kit {
                 );
                 this.scrollbar(ui, &list_id);
                 if matches.is_empty() {
-                    this.text(ui, TextRole::Muted, "No matches found.");
+                    this.text(ui, TextRole::Muted, &vertex_i18n::tr!("No matches found."));
                 }
                 let visible = ui_kit::visible_rows(ui, &list_id, ROW_HEIGHT, matches.len(), 4);
                 ui_kit::spacer(ui, visible.before);
@@ -2305,7 +2304,7 @@ impl Kit {
         label: impl Fn(T) -> String,
         width: f32,
     ) -> Option<T> {
-        let options: Vec<String> = all.iter().map(|value| label(*value)).collect();
+        let options: Vec<String> = all.iter().map(|value| vertex_i18n::t(&label(*value)).into_owned()).collect();
         let selected = all.iter().position(|value| *value == current).unwrap_or(0);
         self.dropdown(ui, id, selected, &options, width)
             .map(|index| all[index])
@@ -2963,7 +2962,7 @@ impl Kit {
                         .height(Sizing::Fit)
                         .direction(Direction::TopToBottom),
                 );
-                self.text(ui, TextRole::Body, label);
+                self.text(ui, TextRole::Body, &vertex_i18n::t(label));
             }
             if info.is_some() {
                 let _badge = ui.element(
@@ -2978,8 +2977,9 @@ impl Kit {
             control(self, ui);
         }
         if let Some(info) = info {
-            self.tooltip(ui, &info_id, info);
-            self.tooltip(ui, &label_id, info);
+            let info = vertex_i18n::t(info);
+            self.tooltip(ui, &info_id, &info);
+            self.tooltip(ui, &label_id, &info);
         }
     }
 

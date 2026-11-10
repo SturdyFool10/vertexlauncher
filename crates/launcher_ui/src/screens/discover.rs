@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::{
     collections::HashMap,
     hash::Hash,
@@ -124,7 +125,7 @@ fn request_search(state: &mut DiscoverState, show_cached_status: bool, mode: Sea
         apply_search_snapshot(state, &request, snapshot, mode);
         state.search_in_flight = false;
         if show_cached_status {
-            state.status_message = Some("Loaded cached discover results.".to_owned());
+            state.status_message = Some(tr!("Loaded cached discover results.").into_owned());
         }
         return;
     }
@@ -137,10 +138,7 @@ fn request_search(state: &mut DiscoverState, show_cached_status: bool, mode: Sea
         state.page = 1;
         state.has_more_results = true;
     }
-    state.status_message = Some(format!(
-        "Searching {} for modpacks...",
-        request.provider_filter.label()
-    ));
+    state.status_message = Some(tr!("Searching {request} for modpacks...", request = request.provider_filter.label()).into_owned());
     let request_for_task = request.clone();
     let _ = tokio_runtime::spawn_detached(async move {
         let outcome = Ok(perform_search(&request_for_task));
@@ -191,7 +189,7 @@ fn poll_search_results(state: &mut DiscoverState) {
             "Discover search worker disconnected unexpectedly."
         );
         state.search_in_flight = false;
-        state.status_message = Some("Discover search worker stopped unexpectedly.".to_owned());
+        state.status_message = Some(tr!("Discover search worker stopped unexpectedly.").into_owned());
     }
     for result in drained.items {
         if result.request_serial != state.search_request_serial {
@@ -214,7 +212,7 @@ fn poll_search_results(state: &mut DiscoverState) {
                 apply_search_snapshot(state, &result.request, snapshot.clone(), mode);
                 state.cached_snapshots.insert(result.request, snapshot);
                 trim_discover_search_cache(state);
-                state.status_message = Some(format!("Showing {} modpacks.", state.entries.len()));
+                state.status_message = Some(tr!("Showing {count} modpacks.", count = state.entries.len()).into_owned());
             }
             Err(error) => {
                 tracing::warn!(
@@ -223,7 +221,7 @@ fn poll_search_results(state: &mut DiscoverState) {
                     error = %error,
                     "Discover search failed."
                 );
-                state.status_message = Some(format!("Discover search failed: {error}"));
+                state.status_message = Some(tr!("Discover search failed: {error}", error = error).into_owned());
                 state.entries.clear();
                 state.warnings.clear();
             }
@@ -296,7 +294,7 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
                     }
                 }));
             }
-            Err(error) => warnings.push(format!("Modrinth search failed: {error}")),
+            Err(error) => warnings.push(tr!("Modrinth search failed: {error}", error = error).into_owned()),
         }
     }
 
@@ -343,12 +341,12 @@ fn perform_search(request: &DiscoverSearchRequest) -> DiscoverSearchSnapshot {
                                 },
                             ));
                         }
-                        Err(error) => warnings.push(format!("CurseForge search failed: {error}")),
+                        Err(error) => warnings.push(tr!("CurseForge search failed: {error}", error = error).into_owned()),
                     }
                 }
             }
             None => warnings.push(
-                "CurseForge API key missing in settings. Showing Modrinth results only.".to_owned(),
+                tr!("CurseForge API key missing in settings. Showing Modrinth results only.").into_owned(),
             ),
         }
     }
@@ -504,9 +502,7 @@ fn resolve_curseforge_modpack_class_id(
             })
             .map(|class_entry| class_entry.id),
         Err(error) => {
-            warnings.push(format!(
-                "CurseForge modpack class discovery failed: {error}"
-            ));
+            warnings.push(tr!("CurseForge modpack class discovery failed: {error}", error = error).into_owned());
             None
         }
     }
@@ -564,10 +560,7 @@ fn request_version_catalog(state: &mut DiscoverState) {
             Ok(join_result) => join_result
                 .map_err(|err| err.to_string())
                 .and_then(|result| result),
-            Err(_) => Err(format!(
-                "version catalog request timed out after {}s",
-                VERSION_CATALOG_FETCH_TIMEOUT.as_secs()
-            )),
+            Err(_) => Err(tr!("version catalog request timed out after {seconds}s", seconds = VERSION_CATALOG_FETCH_TIMEOUT.as_secs()).into_owned()),
         };
         if let Err(err) = tx.send(result) {
             tracing::error!(
@@ -588,7 +581,7 @@ fn poll_version_catalog(state: &mut DiscoverState) {
         );
         state.version_catalog_in_flight = false;
         state.version_catalog_error =
-            Some("Version catalog worker stopped unexpectedly.".to_owned());
+            Some(tr!("Version catalog worker stopped unexpectedly.").into_owned());
     }
     let updates = drained.items;
 

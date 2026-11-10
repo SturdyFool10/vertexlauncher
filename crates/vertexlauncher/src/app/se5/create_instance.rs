@@ -1,6 +1,7 @@
 //! The "Create instance" dialog: name, Minecraft version, modloader and loader version. Creating registers the
 //! instance and starts downloading its game files, exactly as the egui dialog does.
 
+use vertex_i18n::tr;
 use installation::{VersionCatalog, VersionCatalogFilter, fetch_version_catalog_with_refresh};
 use instances::{InstanceRecord, InstanceStore, NewInstanceSpec, create_instance};
 use vertex_shell::sturdy::ui::{Sizing, TextStyle, TextWrap, Ui};
@@ -11,7 +12,7 @@ use super::AppState;
 use super::kit::{self, ButtonKind, Kit, TextRole};
 
 const LOADERS: [&str; 5] = ["Vanilla", "Fabric", "Forge", "NeoForge", "Quilt"];
-const LATEST_LOADER_VERSION: &str = "Latest";
+const LATEST_LOADER_VERSION: &str = vertex_i18n::src!("Latest");
 
 #[derive(Default)]
 pub struct CreateState {
@@ -114,20 +115,20 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
     let busy = state.create.create_in_flight;
     let response = kit::modal(ui, "create-instance", &style, !busy, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Create instance");
+        kit.text(ui, TextRole::Heading, &tr!("Create instance"));
         kit.text(
             ui,
             TextRole::Muted,
-            "Choose a name, a Minecraft version and a modloader.",
+            &tr!("Choose a name, a Minecraft version and a modloader."),
         );
 
         let create_state = &mut state.create;
-        kit.setting_row(ui, "create::name-row", "Name", None, |kit, ui| {
+        kit.setting_row(ui, "create::name-row", &tr!("Name"), None, |kit, ui| {
             kit.text_field(
                 ui,
                 "create::name",
                 &mut create_state.name,
-                "My instance",
+                &tr!("My instance"),
                 false,
                 Sizing::Fixed(300.0),
             );
@@ -146,9 +147,9 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             .unwrap_or_default();
         if versions.is_empty() {
             let message = match (&create_state.catalog_error, create_state.catalog_in_flight) {
-                (Some(err), _) => format!("Could not load Minecraft versions: {err}"),
-                (None, true) => "Loading Minecraft versions…".to_owned(),
-                (None, false) => "No Minecraft versions are available.".to_owned(),
+                (Some(err), _) => tr!("Could not load Minecraft versions: {err}", err = err).into_owned(),
+                (None, true) => tr!("Loading Minecraft versions…").into_owned(),
+                (None, false) => tr!("No Minecraft versions are available.").into_owned(),
             };
             kit::label(
                 ui,
@@ -159,7 +160,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                 },
             );
             if create_state.catalog_error.is_some()
-                && kit.button(ui, "create::retry", "Retry", ButtonKind::Neutral, true)
+                && kit.button(ui, "create::retry", &tr!("Retry"), ButtonKind::Neutral, true)
             {
                 refresh = true;
             }
@@ -167,7 +168,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             kit.setting_row(
                 ui,
                 "create::version-row",
-                "Minecraft version",
+                &tr!("Minecraft version"),
                 None,
                 |kit, ui| {
                     if let Some(index) = kit.dropdown(
@@ -199,12 +200,12 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                         .unavailable_reason(loader, &game_version)
                 });
                 match unavailable {
-                    Some(_) if *loader != "Vanilla" => format!("{loader} (not available)"),
+                    Some(_) if *loader != "Vanilla" => tr!("{loader} (not available)", loader = loader).into_owned(),
                     _ => (*loader).to_owned(),
                 }
             })
             .collect();
-        kit.setting_row(ui, "create::loader-row", "Modloader", None, |kit, ui| {
+        kit.setting_row(ui, "create::loader-row", &tr!("Modloader"), None, |kit, ui| {
             if let Some(index) = kit.dropdown(
                 ui,
                 "create::loader",
@@ -238,7 +239,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             kit.setting_row(
                 ui,
                 "create::loader-version-row",
-                "Loader version",
+                &tr!("Loader version"),
                 None,
                 |kit, ui| {
                     if let Some(index) = kit.dropdown(
@@ -257,7 +258,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             kit.text(
                 ui,
                 TextRole::Danger,
-                &format!("{loader} does not support Minecraft {game_version}."),
+                &tr!("{loader} does not support Minecraft {game_version}.", loader = loader, game_version = game_version),
             );
         }
         if let Some(error) = &create_state.error {
@@ -281,7 +282,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
 
         let _actions = kit.row(ui, kit::SPACE_SM);
         kit.fill(ui);
-        if kit.button(ui, "create::cancel", "Cancel", ButtonKind::Neutral, !busy) {
+        if kit.button(ui, "create::cancel", &tr!("Cancel"), ButtonKind::Neutral, !busy) {
             close = true;
         }
         let can_create = !busy
@@ -291,7 +292,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
         if kit.button(
             ui,
             "create::submit",
-            "Create",
+            &tr!("Create"),
             ButtonKind::Primary,
             can_create,
         ) {

@@ -4,6 +4,7 @@
 //! `saves/<name>` is a symlink to it (a junction on Windows). Where linking isn't possible
 //! the member gets a real copy that [`mirror_pass`] keeps in step (newest save wins).
 
+use vertex_i18n::tr;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -61,10 +62,7 @@ fn ensure_stopped(
 ) -> Result<(), String> {
     for id in ids {
         if running.contains(id.as_ref()) {
-            return Err(format!(
-                "Close {} first; a running game can't have its worlds moved.",
-                instance_label(store, id.as_ref())
-            ));
+            return Err(tr!("Close {instance} first; a running game can't have its worlds moved.", instance = instance_label(store, id.as_ref())).into_owned());
         }
     }
     Ok(())
@@ -94,7 +92,7 @@ fn place_member(shared: &Path, saves_path: &Path) -> Result<WorldLinkMode, Strin
         Err(link_err) => {
             copy_dir_recursive(shared, saves_path).map_err(|copy_err| {
                 let _ = fs::remove_dir_all(saves_path);
-                format!("could not link ({link_err}) or copy ({copy_err})")
+                tr!("could not link ({link_err}) or copy ({copy_err})", link_err = link_err, copy_err = copy_err).into_owned()
             })?;
             Ok(WorldLinkMode::Mirror)
         }
@@ -103,7 +101,7 @@ fn place_member(shared: &Path, saves_path: &Path) -> Result<WorldLinkMode, Strin
 
 fn describe_mode(mode: WorldLinkMode) -> Option<&'static str> {
     (mode == WorldLinkMode::Mirror).then_some(
-        "links aren't available here, so it holds a copy that is refreshed at launch and exit",
+        vertex_i18n::src!("links aren't available here, so it holds a copy that is refreshed at launch and exit"),
     )
 }
 
@@ -121,18 +119,18 @@ pub fn enable_world_sync(
     all_ids.insert(source_id);
     ensure_stopped(store, all_ids, running)?;
     if store.synced_world_for(source_id, folder).is_some() {
-        return Err("This world is already synced.".to_owned());
+        return Err(tr!("This world is already synced.").into_owned());
     }
     let source_path = paths
         .saves_path(store, source_id, folder)
-        .ok_or_else(|| "Instance not found.".to_owned())?;
+        .ok_or_else(|| tr!("Instance not found.").into_owned())?;
     if is_link(&source_path) || !source_path.is_dir() {
-        return Err(format!("{folder} is not a regular world folder."));
+        return Err(tr!("{folder} is not a regular world folder.", folder = folder).into_owned());
     }
 
     let id = new_world_id(folder);
     let shared = paths.shared_path(&id);
-    move_dir(&source_path, &shared).map_err(|err| format!("Could not move the world: {err}"))?;
+    move_dir(&source_path, &shared).map_err(|err| tr!("Could not move the world: {err}", err = err).into_owned())?;
 
     let mut outcome = WorldSyncOutcome::default();
     let mut members = BTreeMap::new();
@@ -143,9 +141,7 @@ pub fn enable_world_sync(
         Err(err) => {
             // Put the world back so nothing is lost.
             let _ = move_dir(&shared, &source_path);
-            return Err(format!(
-                "Could not link the world back into its instance: {err}"
-            ));
+            return Err(tr!("Could not link the world back into its instance: {err}", err = err).into_owned());
         }
     }
     for member in other_members
@@ -157,19 +153,17 @@ pub fn enable_world_sync(
             continue;
         };
         if path.exists() || is_link(&path) {
-            outcome.warnings.push(format!(
-                "{label} already has a world named {folder}; rename it to sync them."
-            ));
+            outcome.warnings.push(tr!("{label} already has a world named {folder}; rename it to sync them.", label = label, folder = folder).into_owned());
             continue;
         }
         match place_member(&shared, &path) {
             Ok(mode) => {
                 if let Some(note) = describe_mode(mode) {
-                    outcome.warnings.push(format!("{label}: {note}."));
+                    outcome.warnings.push(tr!("{label}: {note}.", label = label, note = note).into_owned());
                 }
                 members.insert(member.clone(), mode);
             }
-            Err(err) => outcome.warnings.push(format!("{label}: {err}.")),
+            Err(err) => outcome.warnings.push(tr!("{label}: {err}.", label = label, err = err).into_owned()),
         }
     }
     store.synced_worlds.push(SyncedWorld {
@@ -191,9 +185,9 @@ fn detach_member(
         return Ok(());
     };
     if is_link(&path) {
-        remove_link(&path).map_err(|err| format!("could not remove the link: {err}"))?;
+        remove_link(&path).map_err(|err| tr!("could not remove the link: {err}", err = err).into_owned())?;
         copy_dir_recursive(&paths.shared_path(&world.id), &path)
-            .map_err(|err| format!("could not restore a copy: {err}"))?;
+            .map_err(|err| tr!("could not restore a copy: {err}", err = err).into_owned())?;
     }
     // Mirrored members already hold a real (possibly stale) copy; refresh it first.
     Ok(())
@@ -212,12 +206,12 @@ pub fn disable_world_sync(
         .iter()
         .find(|world| world.id == world_id)
         .cloned()
-        .ok_or_else(|| "World is not synced.".to_owned())?;
+        .ok_or_else(|| tr!("World is not synced.").into_owned())?;
     ensure_stopped(store, world.members.keys(), running)?;
     refresh_mirrors_of(store, paths, &world, running);
     for member in world.members.keys() {
         detach_member(paths, store, &world, member)
-            .map_err(|err| format!("{}: {err}", instance_label(store, member)))?;
+            .map_err(|err| tr!("{instance}: {err}", instance = instance_label(store, member), err = err).into_owned())?;
     }
     let _ = fs::remove_dir_all(paths.shared_path(&world.id));
     store.synced_worlds.retain(|entry| entry.id != world.id);
@@ -238,7 +232,7 @@ pub fn set_world_members(
         .iter()
         .find(|world| world.id == world_id)
         .cloned()
-        .ok_or_else(|| "World is not synced.".to_owned())?;
+        .ok_or_else(|| tr!("World is not synced.").into_owned())?;
     let current: BTreeSet<&String> = world.members.keys().collect();
     let changing: Vec<&String> = wanted
         .iter()
@@ -255,7 +249,7 @@ pub fn set_world_members(
     refresh_mirrors_of(store, paths, &world, running);
     for removed in world.members.keys().filter(|id| !wanted.contains(*id)) {
         detach_member(paths, store, &world, removed)
-            .map_err(|err| format!("{}: {err}", instance_label(store, removed)))?;
+            .map_err(|err| tr!("{instance}: {err}", instance = instance_label(store, removed), err = err).into_owned())?;
         members.remove(removed);
     }
     let shared = paths.shared_path(&world.id);
@@ -265,20 +259,17 @@ pub fn set_world_members(
             continue;
         };
         if path.exists() || is_link(&path) {
-            outcome.warnings.push(format!(
-                "{label} already has a world named {}; rename it to sync them.",
-                world.folder_name
-            ));
+            outcome.warnings.push(tr!("{label} already has a world named {folder_name}; rename it to sync them.", label = label, folder_name = world.folder_name).into_owned());
             continue;
         }
         match place_member(&shared, &path) {
             Ok(mode) => {
                 if let Some(note) = describe_mode(mode) {
-                    outcome.warnings.push(format!("{label}: {note}."));
+                    outcome.warnings.push(tr!("{label}: {note}.", label = label, note = note).into_owned());
                 }
                 members.insert(added.clone(), mode);
             }
-            Err(err) => outcome.warnings.push(format!("{label}: {err}.")),
+            Err(err) => outcome.warnings.push(tr!("{label}: {err}.", label = label, err = err).into_owned()),
         }
     }
     if let Some(entry) = store
@@ -345,11 +336,7 @@ fn mirror_world(
     {
         match replace_with_copy(path, &shared) {
             Ok(()) => report.worlds_updated += 1,
-            Err(err) => report.errors.push(format!(
-                "{}: could not update shared world {}: {err}",
-                instance_label(store, id),
-                world.folder_name
-            )),
+            Err(err) => report.errors.push(tr!("{instance}: could not update shared world {folder_name}: {err}", instance = instance_label(store, id), folder_name = world.folder_name, err = err).into_owned()),
         }
     }
     // 2. The shared copy refreshes any older mirror.
@@ -363,11 +350,7 @@ fn mirror_world(
         if stale {
             match replace_with_copy(&shared, path) {
                 Ok(()) => report.worlds_updated += 1,
-                Err(err) => report.errors.push(format!(
-                    "{}: could not refresh world {}: {err}",
-                    instance_label(store, id),
-                    world.folder_name
-                )),
+                Err(err) => report.errors.push(tr!("{instance}: could not refresh world {folder_name}: {err}", instance = instance_label(store, id), folder_name = world.folder_name, err = err).into_owned()),
             }
         }
     }

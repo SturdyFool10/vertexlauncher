@@ -5,6 +5,7 @@
 //! launcher; finding it lets the Settings screen say so and point at the effect's own settings. Its strength, noise,
 //! saturation, brightness, contrast and refraction are global KWin settings: a client cannot set them.
 
+use vertex_i18n::tr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -175,9 +176,9 @@ pub fn cover_vertex() -> Result<(), String> {
         .args(["--file", "kwinrc", "--group", CONFIG_GROUP, "--key", "WindowClasses"])
         .arg(lines.join("\n"))
         .status()
-        .map_err(|error| format!("could not run kwriteconfig6: {error}"))?;
+        .map_err(|error| tr!("could not run kwriteconfig6: {error}", error = error).into_owned())?;
     if !status.success() {
-        return Err("kwriteconfig6 did not accept the change".to_owned());
+        return Err(tr!("kwriteconfig6 did not accept the change").into_owned());
     }
     // A failed reload is not fatal: the effect picks the list up the next time KWin reads its settings.
     let _ = std::process::Command::new("dbus-send")
@@ -198,7 +199,7 @@ pub fn open_settings() {
     launcher_runtime::spawn_blocking_detached(|| {
         if let Err(error) = std::process::Command::new("kcmshell6").arg(CONFIG_MODULE).spawn() {
             tracing::warn!(target: "vertexlauncher/better_blur", "could not open the Desktop Effects settings: {error}");
-            launcher_ui::notification::warn!("settings", "Could not open the Desktop Effects settings: {}", error);
+            launcher_ui::notification::warn!("settings", "Could not open the Desktop Effects settings: {error}", error = error);
         }
     });
 }
@@ -241,7 +242,7 @@ impl BetterBlurWatch {
                 Ok(()) => launcher_ui::notification::info!("settings", "Added Vertex to Better Blur DX's window classes."),
                 Err(error) => {
                     tracing::warn!(target: "vertexlauncher/better_blur", "could not add Vertex to Better Blur DX: {error}");
-                    launcher_ui::notification::warn!("settings", "Could not add Vertex to Better Blur DX: {}", error);
+                    launcher_ui::notification::warn!("settings", "Could not add Vertex to Better Blur DX: {error}", error = error);
                 }
             }
             let _ = tx.send(detect());

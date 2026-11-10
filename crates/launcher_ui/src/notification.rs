@@ -175,72 +175,72 @@ fn center() -> &'static NotificationCenter {
 
 #[macro_export]
 macro_rules! __notification_log {
-    ($source:expr, $fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($source:expr, $fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Log,
             $source,
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
-    ($fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Log,
             module_path!(),
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
 }
 
 #[macro_export]
 macro_rules! __notification_info {
-    ($source:expr, $fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($source:expr, $fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Info,
             $source,
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
-    ($fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Info,
             module_path!(),
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
 }
 
 #[macro_export]
 macro_rules! __notification_warn {
-    ($source:expr, $fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($source:expr, $fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Warn,
             $source,
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
-    ($fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Warn,
             module_path!(),
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
 }
 
 #[macro_export]
 macro_rules! __notification_error {
-    ($source:expr, $fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($source:expr, $fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Error,
             $source,
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
-    ($fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit(
             $crate::notification::Severity::Error,
             module_path!(),
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
         )
     };
 }
@@ -252,11 +252,11 @@ pub use crate::__notification_warn as warn;
 
 #[macro_export]
 macro_rules! __notification_progress {
-    ($severity:expr, $source:expr, $progress:expr, $fmt:literal $(, $arg:expr )* $(,)?) => {
+    ($severity:expr, $source:expr, $progress:expr, $fmt:literal $(, $name:ident = $value:expr )* $(,)?) => {
         $crate::notification::emit_progress(
             $severity,
             $source,
-            format!($fmt $(, $arg )*),
+            $crate::i18n::tr!($fmt $(, $name = $value)*).into_owned(),
             $progress,
         )
     };

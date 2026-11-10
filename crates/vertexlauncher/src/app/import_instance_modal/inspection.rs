@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(super) fn inspect_package(path: &Path) -> Result<ImportPreview, String> {
@@ -20,10 +21,7 @@ where
         "vtmpack" => inspect_vtmpack_with_progress(path, progress),
         "mrpack" => inspect_mrpack(path),
         "zip" => inspect_curseforge_pack(path),
-        _ => Err(format!(
-            "Unsupported import file {}. Expected .vtmpack, .mrpack, or a CurseForge modpack .zip.",
-            path.display()
-        )),
+        _ => Err(tr!("Unsupported import file {path}. Expected .vtmpack, .mrpack, or a CurseForge modpack .zip.", path = path.display()).into_owned()),
     }
 }
 
@@ -40,7 +38,7 @@ where
     F: FnMut(String),
 {
     let manifest = read_vtmpack_manifest_with_progress(path, |_| {
-        progress("Reading XZ .vtmpack for inspection...".to_owned());
+        progress(tr!("Reading XZ .vtmpack for inspection...").into_owned());
     })?;
     Ok(ImportPreview {
         kind: ImportPreviewKind::Manifest(ImportPackageKind::VertexPack),
@@ -48,18 +46,10 @@ where
         game_version: manifest.instance.game_version.clone(),
         modloader: manifest.instance.modloader.clone(),
         modloader_version: manifest.instance.modloader_version.clone(),
-        summary: format!(
-            "XZ-compressed {} for Minecraft {} ({}) with {} downloadable items, {} bundled mods, {} config files.",
-            manifest.instance.name,
-            manifest.instance.game_version,
-            format_loader_label(
+        summary: tr!("XZ-compressed {name} for Minecraft {game_version} ({loader}) with {count} downloadable items, {bundled_count} bundled mods, {config_count} config files.", name = manifest.instance.name, game_version = manifest.instance.game_version, loader = format_loader_label(
                 manifest.instance.modloader.as_str(),
                 manifest.instance.modloader_version.as_str()
-            ),
-            manifest.downloadable_content.len(),
-            manifest.bundled_mods.len(),
-            manifest.configs.len()
-        ),
+            ), count = manifest.downloadable_content.len(), count2 = manifest.bundled_mods.len(), count3 = manifest.configs.len()).into_owned(),
     })
 }
 
@@ -69,22 +59,15 @@ pub(super) fn inspect_mrpack(path: &Path) -> Result<ImportPreview, String> {
     Ok(ImportPreview {
         kind: ImportPreviewKind::Manifest(ImportPackageKind::ModrinthPack),
         detected_name: instances::normalize_optional(manifest.name.as_str())
-            .unwrap_or_else(|| "Imported Modrinth Pack".to_owned()),
+            .unwrap_or_else(|| tr!("Imported Modrinth Pack").into_owned()),
         game_version: dependency_info.game_version.clone(),
         modloader: dependency_info.modloader.clone(),
         modloader_version: dependency_info.modloader_version.clone(),
-        summary: format!(
-            "{} {} for Minecraft {} ({}) with {} packaged files.",
-            instances::normalize_optional(manifest.name.as_str())
-                .unwrap_or_else(|| "Modrinth pack".to_owned()),
-            instances::normalize_optional(manifest.version_id.as_str()).unwrap_or_default(),
-            dependency_info.game_version,
-            format_loader_label(
+        summary: tr!("{name} {version} for Minecraft {game_version} ({loader}) with {count} packaged files.", name = instances::normalize_optional(manifest.name.as_str())
+                .unwrap_or_else(|| tr!("Modrinth pack").into_owned()), version = instances::normalize_optional(manifest.version_id.as_str()).unwrap_or_default(), game_version = dependency_info.game_version, loader = format_loader_label(
                 dependency_info.modloader.as_str(),
                 dependency_info.modloader_version.as_str()
-            ),
-            manifest.files.len()
-        )
+            ), count = manifest.files.len()).into_owned()
         .trim()
         .to_owned(),
     })
@@ -96,22 +79,15 @@ pub(super) fn inspect_curseforge_pack(path: &Path) -> Result<ImportPreview, Stri
     Ok(ImportPreview {
         kind: ImportPreviewKind::Manifest(ImportPackageKind::CurseForgePack),
         detected_name: instances::normalize_optional(manifest.name.as_str())
-            .unwrap_or_else(|| "Imported CurseForge Pack".to_owned()),
+            .unwrap_or_else(|| tr!("Imported CurseForge Pack").into_owned()),
         game_version: dependency_info.game_version.clone(),
         modloader: dependency_info.modloader.clone(),
         modloader_version: dependency_info.modloader_version.clone(),
-        summary: format!(
-            "{} {} for Minecraft {} ({}) with {} packaged files.",
-            instances::normalize_optional(manifest.name.as_str())
-                .unwrap_or_else(|| "CurseForge pack".to_owned()),
-            instances::normalize_optional(manifest.version.as_str()).unwrap_or_default(),
-            dependency_info.game_version,
-            format_loader_label(
+        summary: tr!("{name} {version} for Minecraft {game_version} ({loader}) with {count} packaged files.", name = instances::normalize_optional(manifest.name.as_str())
+                .unwrap_or_else(|| tr!("CurseForge pack").into_owned()), version = instances::normalize_optional(manifest.version.as_str()).unwrap_or_default(), game_version = dependency_info.game_version, loader = format_loader_label(
                 dependency_info.modloader.as_str(),
                 dependency_info.modloader_version.as_str()
-            ),
-            manifest.files.len()
-        )
+            ), count = manifest.files.len()).into_owned()
         .trim()
         .to_owned(),
     })
@@ -150,16 +126,10 @@ pub(super) fn inspect_launcher_details(
     launcher_hint: Option<LauncherKind>,
 ) -> Result<LauncherInspection, String> {
     if !path.exists() {
-        return Err(format!(
-            "Instance folder {} does not exist.",
-            path.display()
-        ));
+        return Err(tr!("Instance folder {path} does not exist.", path = path.display()).into_owned());
     }
     if !path.is_dir() {
-        return Err(format!(
-            "Import source {} is not a directory.",
-            path.display()
-        ));
+        return Err(tr!("Import source {path} is not a directory.", path = path.display()).into_owned());
     }
 
     let launcher = launcher_hint.unwrap_or_else(|| detect_launcher_kind(path));
@@ -178,7 +148,7 @@ pub(super) fn import_launcher_instance(
     request: &ImportRequest,
 ) -> Result<InstanceRecord, String> {
     let ImportSource::LauncherDirectory { path, launcher } = &request.source else {
-        return Err("Launcher import requires an instance directory source.".to_owned());
+        return Err(tr!("Launcher import requires an instance directory source.").into_owned());
     };
 
     let inspection = inspect_launcher_details(path.as_path(), *launcher)?;
@@ -189,12 +159,12 @@ pub(super) fn import_launcher_instance(
             name: request.instance_name.clone(),
             description: inspection.description.clone(),
             thumbnail_path: None,
-            modloader: default_if_blank(inspection.modloader.as_str(), "Vanilla".to_owned()),
+            modloader: default_if_blank(inspection.modloader.as_str(), tr!("Vanilla").into_owned()),
             game_version: default_if_blank(inspection.game_version.as_str(), "latest".to_owned()),
             modloader_version: inspection.modloader_version.clone(),
         },
     )
-    .map_err(|err| format!("failed to create imported profile: {err}"))?;
+    .map_err(|err| tr!("failed to create imported profile: {err}", err = err).into_owned())?;
     let instance_root = instance_root_path(installations_root, &instance);
 
     if let Err(err) = copy_launcher_instance_content(
@@ -242,12 +212,9 @@ pub(super) fn inspect_modrinth_launcher_instance(
             inspection.modloader_version = modloader_version;
         }
         inspection.description = Some(
-            "Imported from a Modrinth instance folder without profile.json metadata.".to_owned(),
+            tr!("Imported from a Modrinth instance folder without profile.json metadata.").into_owned(),
         );
-        inspection.summary = format!(
-            "Detected {} by location. No profile.json was present, so Minecraft and loader metadata were inferred from profile contents where possible; files will still be copied from the instance root.",
-            inspection.launcher.label()
-        );
+        inspection.summary = tr!("Detected {launcher} by location. No profile.json was present, so Minecraft and loader metadata were inferred from profile contents where possible; files will still be copied from the instance root.", launcher = vertex_i18n::t(inspection.launcher.label())).into_owned();
         return Ok(inspection);
     }
 
@@ -260,7 +227,7 @@ pub(super) fn inspect_modrinth_launcher_instance(
             .and_then(|value| value.to_str())
             .map(str::to_owned),
     ])
-    .unwrap_or_else(|| "Imported Modrinth Instance".to_owned());
+    .unwrap_or_else(|| tr!("Imported Modrinth Instance").into_owned());
     let game_version = first_non_empty([
         json_string_at_path(&profile, &["metadata", "game_version"]),
         json_string_at_path(&profile, &["game_version"]),
@@ -292,7 +259,7 @@ pub(super) fn inspect_modrinth_launcher_instance(
     Ok(build_launcher_inspection(
         LauncherKind::Modrinth,
         name,
-        Some("Imported from an existing Modrinth launcher instance.".to_owned()),
+        Some(tr!("Imported from an existing Modrinth launcher instance.").into_owned()),
         game_version,
         modloader,
         modloader_version,
@@ -396,7 +363,7 @@ pub(super) fn infer_modrinth_loader_from_dependencies_file(
         .and_then(|value| value.get("fabricloader"))
         .and_then(Value::as_str)
         .and_then(clean_version_requirement)?;
-    Some(("Fabric".to_owned(), fabric_requirement))
+    Some((tr!("Fabric").into_owned(), fabric_requirement))
 }
 
 pub(super) fn clean_version_requirement(raw: &str) -> Option<String> {
@@ -433,16 +400,16 @@ pub(super) fn infer_modrinth_loader_from_mod_filenames(
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
         if file_name.contains("fabric") {
-            return Some(("Fabric".to_owned(), None));
+            return Some((tr!("Fabric").into_owned(), None));
         }
         if file_name.contains("quilt") {
-            return Some(("Quilt".to_owned(), None));
+            return Some((tr!("Quilt").into_owned(), None));
         }
         if file_name.contains("neoforge") {
-            return Some(("NeoForge".to_owned(), None));
+            return Some((tr!("NeoForge").into_owned(), None));
         }
         if file_name.contains("forge") {
-            return Some(("Forge".to_owned(), None));
+            return Some((tr!("Forge").into_owned(), None));
         }
     }
     None
@@ -572,16 +539,16 @@ pub(super) fn infer_loader_from_meta_version(value: &Value) -> Option<(String, S
             .and_then(Value::as_str)?
             .to_ascii_lowercase();
         if let Some(version) = name.strip_prefix("net.fabricmc:fabric-loader:") {
-            return Some(("Fabric".to_owned(), version.to_owned()));
+            return Some((tr!("Fabric").into_owned(), version.to_owned()));
         }
         if let Some(version) = name.strip_prefix("org.quiltmc:quilt-loader:") {
-            return Some(("Quilt".to_owned(), version.to_owned()));
+            return Some((tr!("Quilt").into_owned(), version.to_owned()));
         }
         if let Some(version) = name.strip_prefix("net.neoforged:neoforge:") {
-            return Some(("NeoForge".to_owned(), version.to_owned()));
+            return Some((tr!("NeoForge").into_owned(), version.to_owned()));
         }
         if let Some(version) = name.strip_prefix("net.minecraftforge:forge:") {
-            return Some(("Forge".to_owned(), version.to_owned()));
+            return Some((tr!("Forge").into_owned(), version.to_owned()));
         }
     }
     None
@@ -598,7 +565,7 @@ pub(super) fn inspect_curseforge_launcher_instance(
             .and_then(|value| value.to_str())
             .map(str::to_owned),
     ])
-    .unwrap_or_else(|| "Imported CurseForge Instance".to_owned());
+    .unwrap_or_else(|| tr!("Imported CurseForge Instance").into_owned());
     let game_version = first_non_empty([
         json_string_at_path(&manifest, &["gameVersion"]),
         json_string_at_path(&manifest, &["minecraftVersion"]),
@@ -628,7 +595,7 @@ pub(super) fn inspect_curseforge_launcher_instance(
     Ok(build_launcher_inspection(
         LauncherKind::CurseForge,
         name,
-        Some("Imported from an existing CurseForge instance.".to_owned()),
+        Some(tr!("Imported from an existing CurseForge instance.").into_owned()),
         game_version,
         modloader,
         modloader_version,
@@ -654,7 +621,7 @@ pub(super) fn inspect_prism_launcher_instance(path: &Path) -> Result<LauncherIns
             .and_then(|value| value.to_str())
             .map(str::to_owned),
     ])
-    .unwrap_or_else(|| "Imported Prism Instance".to_owned());
+    .unwrap_or_else(|| tr!("Imported Prism Instance").into_owned());
     let (game_version, modloader, modloader_version) =
         parse_prism_versions(pack_json.as_ref(), cfg.get("MCVersion").cloned());
     let managed_manifest =
@@ -662,7 +629,7 @@ pub(super) fn inspect_prism_launcher_instance(path: &Path) -> Result<LauncherIns
     Ok(build_launcher_inspection(
         LauncherKind::Prism,
         name,
-        Some("Imported from a Prism / MultiMC style instance.".to_owned()),
+        Some(tr!("Imported from a Prism / MultiMC style instance.").into_owned()),
         game_version,
         modloader,
         modloader_version,
@@ -682,7 +649,7 @@ pub(super) fn inspect_atlauncher_instance(path: &Path) -> Result<LauncherInspect
             .and_then(|value| value.to_str())
             .map(str::to_owned),
     ])
-    .unwrap_or_else(|| "Imported ATLauncher Instance".to_owned());
+    .unwrap_or_else(|| tr!("Imported ATLauncher Instance").into_owned());
     let game_version = first_non_empty([
         manifest
             .as_ref()
@@ -717,7 +684,7 @@ pub(super) fn inspect_atlauncher_instance(path: &Path) -> Result<LauncherInspect
     Ok(build_launcher_inspection(
         LauncherKind::ATLauncher,
         name,
-        Some("Imported from an existing ATLauncher instance.".to_owned()),
+        Some(tr!("Imported from an existing ATLauncher instance.").into_owned()),
         game_version,
         modloader,
         modloader_version,
@@ -735,23 +702,20 @@ pub(super) fn inspect_generic_launcher_instance_with_launcher(
     launcher: LauncherKind,
 ) -> Result<LauncherInspection, String> {
     if !path.is_dir() {
-        return Err(format!("{} is not a directory.", path.display()));
+        return Err(tr!("{path} is not a directory.", path = path.display()).into_owned());
     }
     let managed_manifest = load_existing_managed_manifest(path).unwrap_or_default();
     let name = path
         .file_name()
         .and_then(|value| value.to_str())
         .map(str::to_owned)
-        .unwrap_or_else(|| "Imported Instance".to_owned());
+        .unwrap_or_else(|| tr!("Imported Instance").into_owned());
     Ok(build_launcher_inspection(
         launcher,
         name,
-        Some(format!(
-            "Imported by copying files from {}.",
-            launcher.label()
-        )),
+        Some(tr!("Imported by copying files from {launcher}.", launcher = vertex_i18n::t(launcher.label())).into_owned()),
         "latest".to_owned(),
-        "Vanilla".to_owned(),
+        tr!("Vanilla").into_owned(),
         String::new(),
         path.to_path_buf(),
         managed_manifest,
@@ -776,15 +740,9 @@ pub(super) fn build_launcher_inspection(
         name,
         description,
         game_version: default_if_blank(game_version.as_str(), "latest".to_owned()),
-        modloader: default_if_blank(modloader.as_str(), "Vanilla".to_owned()),
+        modloader: default_if_blank(modloader.as_str(), tr!("Vanilla").into_owned()),
         modloader_version,
-        summary: format!(
-            "Detected {} with {} managed projects, {} mods, and {} config files.",
-            launcher.label(),
-            managed_count,
-            mods_count,
-            config_count
-        ),
+        summary: tr!("Detected {launcher} with {managed_count} managed projects, {mods_count} mods, and {config_count} config files.", launcher = vertex_i18n::t(launcher.label()), managed_count = managed_count, mods_count = mods_count, config_count = config_count).into_owned(),
         source_root,
         managed_manifest,
     }
@@ -798,16 +756,13 @@ pub(super) fn copy_launcher_instance_content(
     copy_dir_recursive(source_root, source_root, destination_root)?;
     if !managed_manifest.projects.is_empty() {
         let raw = toml::to_string_pretty(managed_manifest)
-            .map_err(|err| format!("failed to serialize managed import manifest: {err}"))?;
+            .map_err(|err| tr!("failed to serialize managed import manifest: {err}", err = err).into_owned())?;
         fs_write_logged(
             destination_root.join(CONTENT_MANIFEST_FILE_NAME).as_path(),
             raw,
         )
         .map_err(|err| {
-            format!(
-                "failed to write managed import manifest into {}: {err}",
-                destination_root.display()
-            )
+            tr!("failed to write managed import manifest into {destination_root}: {err}", destination_root = destination_root.display(), err = err).into_owned()
         })?;
     }
     Ok(())
@@ -819,32 +774,28 @@ pub(super) fn copy_dir_recursive(
     destination_root: &Path,
 ) -> Result<(), String> {
     let entries = fs_read_dir_logged(current)
-        .map_err(|err| format!("failed to read {}: {err}", current.display()))?;
+        .map_err(|err| tr!("failed to read {current}: {err}", current = current.display(), err = err).into_owned())?;
     for entry in entries {
-        let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
+        let entry = entry.map_err(|err| tr!("failed to read directory entry: {err}", err = err).into_owned())?;
         let path = entry.path();
         let relative = path
             .strip_prefix(root)
-            .map_err(|err| format!("failed to normalize {}: {err}", path.display()))?;
+            .map_err(|err| tr!("failed to normalize {path}: {err}", path = path.display(), err = err).into_owned())?;
         if should_skip_import_path(relative) {
             continue;
         }
         let destination = destination_root.join(relative);
         if path.is_dir() {
             fs_create_dir_all_logged(destination.as_path())
-                .map_err(|err| format!("failed to create {}: {err}", destination.display()))?;
+                .map_err(|err| tr!("failed to create {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
             copy_dir_recursive(root, path.as_path(), destination_root)?;
         } else if path.is_file() {
             if let Some(parent) = destination.parent() {
                 fs_create_dir_all_logged(parent)
-                    .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+                    .map_err(|err| tr!("failed to create {parent}: {err}", parent = parent.display(), err = err).into_owned())?;
             }
             fs_copy_logged(path.as_path(), destination.as_path()).map_err(|err| {
-                format!(
-                    "failed to copy {} to {}: {err}",
-                    path.display(),
-                    destination.display()
-                )
+                tr!("failed to copy {path} to {destination}: {err}", path = path.display(), destination = destination.display(), err = err).into_owned()
             })?;
         }
     }
@@ -887,8 +838,8 @@ pub(super) fn should_skip_import_path(relative: &Path) -> bool {
 
 pub(super) fn read_json_file(path: &Path) -> Result<Value, String> {
     let raw = fs_read_to_string_logged(path)
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    serde_json::from_str(&raw).map_err(|err| format!("failed to parse {}: {err}", path.display()))
+        .map_err(|err| tr!("failed to read {path}: {err}", path = path.display(), err = err).into_owned())?;
+    serde_json::from_str(&raw).map_err(|err| tr!("failed to parse {path}: {err}", path = path.display(), err = err).into_owned())
 }
 
 pub(super) fn read_json_file_optional(path: &Path) -> Result<Option<Value>, String> {
@@ -900,7 +851,7 @@ pub(super) fn read_json_file_optional(path: &Path) -> Result<Option<Value>, Stri
 
 pub(super) fn read_key_value_file(path: &Path) -> Result<HashMap<String, String>, String> {
     let raw = fs_read_to_string_logged(path)
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        .map_err(|err| tr!("failed to read {path}: {err}", path = path.display(), err = err).into_owned())?;
     let mut values = HashMap::new();
     for line in raw.lines() {
         let trimmed = line.trim();
@@ -919,7 +870,7 @@ pub(super) fn parse_prism_versions(
     cfg_game_version: Option<String>,
 ) -> (String, String, String) {
     let mut game_version = cfg_game_version.unwrap_or_else(|| "latest".to_owned());
-    let mut loader = "Vanilla".to_owned();
+    let mut loader = tr!("Vanilla").into_owned();
     let mut loader_version = String::new();
 
     if let Some(Value::Array(components)) =
@@ -941,16 +892,16 @@ pub(super) fn parse_prism_versions(
             if uid == "net.minecraft" && !version.trim().is_empty() {
                 game_version = version.clone();
             } else if uid == "net.fabricmc.fabric-loader" {
-                loader = "Fabric".to_owned();
+                loader = tr!("Fabric").into_owned();
                 loader_version = version;
             } else if uid == "net.neoforged" {
-                loader = "NeoForge".to_owned();
+                loader = tr!("NeoForge").into_owned();
                 loader_version = version;
             } else if uid == "net.minecraftforge" {
-                loader = "Forge".to_owned();
+                loader = tr!("Forge").into_owned();
                 loader_version = version;
             } else if uid == "org.quiltmc.quilt-loader" {
-                loader = "Quilt".to_owned();
+                loader = tr!("Quilt").into_owned();
                 loader_version = version;
             }
         }
@@ -982,36 +933,36 @@ pub(super) fn infer_loader_pair(
     loader_hint: Option<String>,
     version_hint: Option<String>,
 ) -> (String, String) {
-    let loader_hint = loader_hint.unwrap_or_else(|| "Vanilla".to_owned());
+    let loader_hint = loader_hint.unwrap_or_else(|| tr!("Vanilla").into_owned());
     let loader_hint_trimmed = loader_hint.trim().to_owned();
     let loader_hint_lower = loader_hint_trimmed.to_ascii_lowercase();
     let version_hint = version_hint.unwrap_or_default();
     if loader_hint_lower.contains("neoforge") {
         return (
-            "NeoForge".to_owned(),
+            tr!("NeoForge").into_owned(),
             trailing_loader_version(&loader_hint_trimmed, &version_hint),
         );
     }
     if loader_hint_lower.contains("fabric") {
         return (
-            "Fabric".to_owned(),
+            tr!("Fabric").into_owned(),
             trailing_loader_version(&loader_hint_trimmed, &version_hint),
         );
     }
     if loader_hint_lower.contains("quilt") {
         return (
-            "Quilt".to_owned(),
+            tr!("Quilt").into_owned(),
             trailing_loader_version(&loader_hint_trimmed, &version_hint),
         );
     }
     if loader_hint_lower.contains("forge") {
         return (
-            "Forge".to_owned(),
+            tr!("Forge").into_owned(),
             trailing_loader_version(&loader_hint_trimmed, &version_hint),
         );
     }
     (
-        default_if_blank(loader_hint_trimmed.as_str(), "Vanilla".to_owned()),
+        default_if_blank(loader_hint_trimmed.as_str(), tr!("Vanilla").into_owned()),
         version_hint,
     )
 }
@@ -1035,9 +986,9 @@ pub(super) fn load_existing_managed_manifest(
         return Ok(ContentInstallManifest::default());
     }
     let raw = fs_read_to_string_logged(manifest_path.as_path())
-        .map_err(|err| format!("failed to read {}: {err}", manifest_path.display()))?;
+        .map_err(|err| tr!("failed to read {manifest_path}: {err}", manifest_path = manifest_path.display(), err = err).into_owned())?;
     toml::from_str(&raw)
-        .map_err(|err| format!("failed to parse {}: {err}", manifest_path.display()))
+        .map_err(|err| tr!("failed to parse {manifest_path}: {err}", manifest_path = manifest_path.display(), err = err).into_owned())
 }
 
 #[derive(Clone, Copy)]
@@ -1281,9 +1232,9 @@ pub(super) fn count_regular_files(path: &Path) -> usize {
 pub(super) fn count_regular_files_recursive(path: &Path) -> Result<usize, String> {
     let mut count = 0usize;
     let entries = fs_read_dir_logged(path)
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        .map_err(|err| tr!("failed to read {path}: {err}", path = path.display(), err = err).into_owned())?;
     for entry in entries {
-        let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
+        let entry = entry.map_err(|err| tr!("failed to read directory entry: {err}", err = err).into_owned())?;
         let entry_path = entry.path();
         if entry_path.is_dir() {
             count += count_regular_files_recursive(entry_path.as_path())?;

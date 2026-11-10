@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::collections::{HashSet, VecDeque};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -169,28 +170,30 @@ pub fn ensure_instance_tab(
 ) -> String {
     let trimmed_instance = instance_name.trim();
     let trimmed_user = username.trim();
-    let instance = if trimmed_instance.is_empty() {
-        "Instance"
+    let instance: std::borrow::Cow<str> = if trimmed_instance.is_empty() {
+        tr!("Instance")
     } else {
-        trimmed_instance
+        trimmed_instance.into()
     };
-    let user = if trimmed_user.is_empty() {
-        "Player"
+    let user: std::borrow::Cow<str> = if trimmed_user.is_empty() {
+        tr!("Player")
     } else {
-        trimmed_user
+        trimmed_user.into()
     };
+    // The tab's identity must not change with the interface language, so it keeps the English fallback name.
+    let identity_user = if trimmed_user.is_empty() { "Player" } else { trimmed_user };
     // The account is a mention, so the tab hides the name whenever streamer mode is on, however
     // the tab was opened. A missing name is just "Player", which reveals nothing.
     let user_text = if trimmed_user.is_empty() {
-        user.to_owned()
+        user.clone().into_owned()
     } else {
-        crate::account_text::mention(user_key.map_or("", str::trim), user)
+        crate::account_text::mention(user_key.map_or("", str::trim), &user)
     };
-    let label = format!("{instance} for {user_text}");
+    let label = tr!("{instance} for {user_text}", instance = instance, user_text = user_text).into_owned();
     let normalized_instance_root = normalize_instance_root_key(instance_root);
     let normalized_user_identity =
-        normalize_tab_user_identity(user_key).or_else(|| normalize_tab_user_identity(Some(user)));
-    let fallback_user_identity = user.to_ascii_lowercase();
+        normalize_tab_user_identity(user_key).or_else(|| normalize_tab_user_identity(Some(identity_user)));
+    let fallback_user_identity = identity_user.to_ascii_lowercase();
     let user_identity_id = normalized_user_identity
         .as_deref()
         .unwrap_or(fallback_user_identity.as_str());

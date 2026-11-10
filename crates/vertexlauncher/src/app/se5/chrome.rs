@@ -1,6 +1,7 @@
 //! Window chrome: the custom title bar (window controls, account menu), the sidebar (screens and instance
 //! shortcuts) and the content area that hosts the active screen.
 
+use vertex_i18n::tr;
 use instances::InstanceRecord;
 use launcher_ui::screens::AppScreen;
 use vertex_shell::sturdy::glam::{UVec2, Vec4};
@@ -51,10 +52,7 @@ pub fn toggle_fullscreen(style: config::FullscreenStyle) {
     enter_fullscreen(style);
     // Fullscreen hides the window's controls, so say how to leave it. (Not when it was the "start in fullscreen"
     // setting that did it: that is a choice made in advance.)
-    launcher_ui::notification::info!(
-        "fullscreen",
-        "Vertex is fullscreen. Press Escape (or F11) to leave fullscreen."
-    );
+    launcher_ui::notification::info!("fullscreen", "Vertex is fullscreen. Press Escape (or F11) to leave fullscreen.");
 }
 
 /// Takes the window fullscreen in `style`.
@@ -134,14 +132,14 @@ fn title_bar(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, maximized: bo
                     bottom_right: 0.0,
                 }),
         );
-        kit.text(ui, TextRole::Body, "Vertex Launcher");
+        kit.text(ui, TextRole::Body, &tr!("Vertex Launcher"));
         if let Some(instance) = state
             .screen
             .eq(&AppScreen::Instance)
             .then(|| selected_name(state))
             .flatten()
         {
-            kit.text(ui, TextRole::Muted, &format!("· {instance}"));
+            kit.text(ui, TextRole::Muted, &tr!("· {instance}", instance = instance));
         }
         kit.fill(ui);
         active_user_button(ui, kit, state);
@@ -187,24 +185,24 @@ fn title_bar(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, maximized: bo
     kit.tooltip(
         ui,
         FULLSCREEN_ID,
-        if vertex_shell::fullscreen() == vertex_shell::Fullscreen::Off {
-            "Fullscreen (F11)"
+        &if vertex_shell::fullscreen() == vertex_shell::Fullscreen::Off {
+            tr!("Fullscreen (F11)")
         } else {
-            "Exit fullscreen (F11)"
+            tr!("Exit fullscreen (F11)")
         },
     );
-    kit.tooltip(ui, MINIMIZE_ID, "Minimize");
+    kit.tooltip(ui, MINIMIZE_ID, &tr!("Minimize"));
     kit.tooltip(
         ui,
         MAXIMIZE_ID,
-        if maximized {
-            "Restore down"
+        &if maximized {
+            tr!("Restore down")
         } else {
-            "Maximize"
+            tr!("Maximize")
         },
     );
-    kit.tooltip(ui, CLOSE_ID, "Close");
-    kit.tooltip(ui, ACCOUNT_ID, "Accounts and sign-in");
+    kit.tooltip(ui, CLOSE_ID, &tr!("Close"));
+    kit.tooltip(ui, ACCOUNT_ID, &tr!("Accounts and sign-in"));
     accounts::account_menu(ui, kit, state, ACCOUNT_ID);
 }
 
@@ -241,13 +239,13 @@ fn active_user_button(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         );
         kit.icon(ui, Icon::Terminal2, 16.0, kit.palette.text);
         launcher_ui::privacy::without_name_scrubbing(|| {
-            kit.text(ui, TextRole::Small, "player active")
+            kit.text(ui, TextRole::Small, &tr!("player active"))
         });
     }
     kit.tooltip(
         ui,
         ACTIVE_USER_ID,
-        "Open the console of the game you are playing",
+        &tr!("Open the console of the game you are playing"),
     );
     if kit.clicked(ui, ACTIVE_USER_ID) {
         state.open(AppScreen::Console);
@@ -419,7 +417,7 @@ fn sidebar(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, radius: f32) {
             if kit.nav_icon(ui, &id, screen_icon(screen), selected) {
                 state.open(screen);
             }
-            kit.tooltip(ui, &id, screen.label());
+            kit.tooltip(ui, &id, &screen.label());
         }
         kit.separator(ui);
         {
@@ -438,7 +436,7 @@ fn sidebar(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, radius: f32) {
                 state.profile_menu.toggle();
             }
         }
-        kit.tooltip(ui, "nav::create-instance", "Profile actions");
+        kit.tooltip(ui, "nav::create-instance", &tr!("Profile actions"));
         {
             let _list = ui.element(
                 &ElementDesc::new()
@@ -513,9 +511,9 @@ fn profile_actions_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 ),
             );
             for (index, label) in [
-                "Create from scratch",
-                "Import profile",
-                "Link existing Vertex profile",
+                &tr!("Create from scratch"),
+                &tr!("Import profile"),
+                &tr!("Link existing Vertex profile"),
             ]
             .into_iter()
             .enumerate()
@@ -549,11 +547,11 @@ fn instance_context_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         return;
     };
     let items = [
-        MenuEntry::new("Open instance menu").icon(Icon::Library),
-        MenuEntry::new("Open folder").icon(Icon::Folder),
-        MenuEntry::new("Copy command line").icon(Icon::Terminal),
-        MenuEntry::new("Copy Steam launch options").icon(Icon::Steam),
-        MenuEntry::new("Delete instance").icon(Icon::Trash).danger(),
+        MenuEntry::new(tr!("Open instance menu")).icon(Icon::Library),
+        MenuEntry::new(tr!("Open folder")).icon(Icon::Folder),
+        MenuEntry::new(tr!("Copy command line")).icon(Icon::Terminal),
+        MenuEntry::new(tr!("Copy Steam launch options")).icon(Icon::Steam),
+        MenuEntry::new(tr!("Delete instance")).icon(Icon::Trash).danger(),
     ];
     if let Some(choice) = kit.context_menu(
         ui,

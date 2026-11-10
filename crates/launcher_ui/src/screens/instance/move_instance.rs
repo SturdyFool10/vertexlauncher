@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -58,7 +59,7 @@ pub(super) fn request_move_instance(
                 "failed to create destination root directory"
             );
             if let Err(send_err) = results_tx.send(MoveInstanceResult::Failed {
-                reason: format!("Could not create destination folder: {err}"),
+                reason: tr!("Could not create destination folder: {err}", err = err).into_owned(),
             }) {
                 tracing::warn!(
                     target: "vertexlauncher/move_instance",
@@ -83,7 +84,7 @@ pub(super) fn request_move_instance(
         .await
         else {
             let _ = results_tx.send(MoveInstanceResult::Failed {
-                reason: "Could not scan the instance folder.".to_owned(),
+                reason: tr!("Could not scan the instance folder.").into_owned(),
             });
             return;
         };
@@ -149,10 +150,7 @@ pub(super) fn request_move_instance(
                                     error = %err,
                                     "failed to create destination directory"
                                 );
-                                fail(format!(
-                                    "Failed to create destination directory {}: {err}",
-                                    parent.display()
-                                ));
+                                fail(tr!("Failed to create destination directory {parent}: {err}", parent = parent.display(), err = err).into_owned());
                                 return;
                             }
                         }
@@ -165,10 +163,7 @@ pub(super) fn request_move_instance(
                                     error = %err,
                                     "failed to open source file"
                                 );
-                                fail(format!(
-                                    "Failed to open source file {}: {err}",
-                                    source_path.display()
-                                ));
+                                fail(tr!("Failed to open source file {source_path}: {err}", source_path = source_path.display(), err = err).into_owned());
                                 return;
                             }
                         };
@@ -181,10 +176,7 @@ pub(super) fn request_move_instance(
                                     error = %err,
                                     "failed to create destination file"
                                 );
-                                fail(format!(
-                                    "Failed to create destination file {}: {err}",
-                                    dest_path.display()
-                                ));
+                                fail(tr!("Failed to create destination file {dest_path}: {err}", dest_path = dest_path.display(), err = err).into_owned());
                                 return;
                             }
                         };
@@ -200,10 +192,7 @@ pub(super) fn request_move_instance(
                                         error = %err,
                                         "failed while reading source file"
                                     );
-                                    fail(format!(
-                                        "Failed while reading source file {}: {err}",
-                                        source_path.display()
-                                    ));
+                                    fail(tr!("Failed while reading source file {source_path}: {err}", source_path = source_path.display(), err = err).into_owned());
                                     return;
                                 }
                             };
@@ -217,10 +206,7 @@ pub(super) fn request_move_instance(
                                     error = %err,
                                     "failed while writing destination file"
                                 );
-                                fail(format!(
-                                    "Failed while writing destination file {}: {err}",
-                                    dest_path.display()
-                                ));
+                                fail(tr!("Failed while writing destination file {dest_path}: {err}", dest_path = dest_path.display(), err = err).into_owned());
                                 return;
                             }
                             bytes_copied += n as u64;
@@ -250,7 +236,7 @@ pub(super) fn request_move_instance(
                         file_rel_path: rel,
                         bytes_copied: 0,
                         done: true,
-                        error: Some(format!("Move worker panicked: {err}")),
+                        error: Some(tr!("Move worker panicked: {err}", err = err).into_owned()),
                     });
                 }
             });

@@ -1,6 +1,7 @@
 //! The in-game settings editor for an instance's `options.txt`: a live view of the file with edits written a moment
 //! after you stop typing, plus the Resource Packs and Sync tabs. The schema logic is `game_settings_api`.
 
+use vertex_i18n::tr;
 use launcher_ui::screens::game_settings_api::{
     self as api, Control, Group, PackOverride, Row, Session,
 };
@@ -89,7 +90,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) ->
         if header.running {
             kit::label(
                 ui,
-                "Minecraft is running. The game rewrites options.txt when you leave its options screens, so changes here can be overwritten; changes made in-game appear here as they are saved.",
+                &tr!("Minecraft is running. The game rewrites options.txt when you leave its options screens, so changes here can be overwritten; changes made in-game appear here as they are saved."),
                 &TextStyle {
                     wrap: TextWrap::Words,
                     ..kit.style(TextRole::Warning)
@@ -99,7 +100,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) ->
         if let Some(error) = &header.error {
             kit::label(
                 ui,
-                &format!("Couldn't save: {error}. Will retry."),
+                &tr!("Couldn't save: {error}. Will retry.", error = error),
                 &TextStyle {
                     wrap: TextWrap::Words,
                     ..kit.style(TextRole::Danger)
@@ -109,10 +110,10 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) ->
         kit.text(
             ui,
             TextRole::Small,
-            if header.saving {
-                "Saving…"
+            &if header.saving {
+                tr!("Saving…")
             } else {
-                "All changes saved"
+                tr!("All changes saved")
             },
         );
 
@@ -121,7 +122,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) ->
             ui,
             "game-settings::search",
             &mut gs.search,
-            "Search all settings",
+            &tr!("Search all settings"),
             false,
             Sizing::Grow,
         );
@@ -146,7 +147,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, id: &str) ->
         close = kit.button(
             ui,
             "game-settings::close",
-            "Close",
+            &tr!("Close"),
             ButtonKind::Neutral,
             true,
         );
@@ -176,19 +177,19 @@ fn tab_strip(ui: &mut Ui<'_>, kit: &mut Kit, gs: &mut GameSettingsState) {
         .map(|g| {
             (
                 Tab::Group(g),
-                g.label().to_owned(),
+                vertex_i18n::t(g.label()).into_owned(),
                 format!("game-settings::tab::{}", g.slug()),
             )
         })
         .collect();
     tabs.push((
         Tab::Packs,
-        "Resource Packs".to_owned(),
+        tr!("Resource Packs").into_owned(),
         "game-settings::tab::packs".to_owned(),
     ));
     tabs.push((
         Tab::Sync,
-        "Sync".to_owned(),
+        tr!("Sync").into_owned(),
         "game-settings::tab::sync".to_owned(),
     ));
     for (tab, label, id) in tabs {
@@ -232,7 +233,7 @@ fn rows(ui: &mut Ui<'_>, kit: &mut Kit, gs: &mut GameSettingsState, group: Group
     let searching = !gs.search.trim().is_empty();
     let list = gs.session.rows(group, &gs.search);
     if list.is_empty() && searching {
-        kit.text(ui, TextRole::Muted, "No settings match your search.");
+        kit.text(ui, TextRole::Muted, &tr!("No settings match your search."));
         return;
     }
     // Capture one key press per frame, for the bind that is waiting for one.
@@ -347,7 +348,7 @@ fn setting(
                 gs.session.set_text(key, &text);
             }
         }
-        Control::List(summary) => kit.text(ui, TextRole::Muted, &format!("{label}: {summary}")),
+        Control::List(summary) => kit.text(ui, TextRole::Muted, &tr!("{label}: {summary}", label = label, summary = summary)),
         Control::Raw(mut text) => {
             if kit.text_setting(ui, &id, label, tip, &mut text, "", false) {
                 gs.session.set_raw(key, &text);
@@ -363,7 +364,7 @@ fn setting(
                 if kit.button(
                     ui,
                     &format!("{id}::unbind"),
-                    "Unbind",
+                    &tr!("Unbind"),
                     ButtonKind::Neutral,
                     true,
                 ) {
@@ -372,10 +373,10 @@ fn setting(
                 if kit.button(
                     ui,
                     &format!("{id}::capture"),
-                    if capturing {
-                        "Press a key…"
+                    &if capturing {
+                        tr!("Press a key…")
                     } else {
-                        "Change"
+                        tr!("Change")
                     },
                     ButtonKind::Neutral,
                     true,
@@ -631,7 +632,7 @@ fn packs_tab(
 ) {
     kit::label(
         ui,
-        "Each pack declares which Minecraft versions it supports. You know your setup better than the metadata: mark a pack as working (or not) for this instance and sync will follow that instead. Overrides only affect sync; they don't change the pack or what the game allows.",
+        &tr!("Each pack declares which Minecraft versions it supports. You know your setup better than the metadata: mark a pack as working (or not) for this instance and sync will follow that instead. Overrides only affect sync; they don't change the pack or what the game allows."),
         &TextStyle {
             wrap: TextWrap::Words,
             ..kit.style(TextRole::Muted)
@@ -640,7 +641,7 @@ fn packs_tab(
     if !instances.game_settings_sync.resource_packs {
         kit::label(
             ui,
-            "Resource pack sync is off. Turn it on in the Sync tab; overrides are remembered either way.",
+            &tr!("Resource pack sync is off. Turn it on in the Sync tab; overrides are remembered either way."),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Warning)
@@ -650,7 +651,7 @@ fn packs_tab(
     kit.gap(ui, f32::from(kit::SPACE_MD));
     let packs = gs.session.packs(instances, config);
     if packs.is_empty() {
-        kit.text(ui, TextRole::Muted, "No resource packs found.");
+        kit.text(ui, TextRole::Muted, &tr!("No resource packs found."));
         return;
     }
     let mut change = None;
@@ -667,9 +668,9 @@ fn packs_tab(
         {
             let _row = kit.row(ui, kit::SPACE_SM);
             for (label, target) in [
-                ("Works here", Some(PackOverride::Allow)),
-                ("Doesn't work here", Some(PackOverride::Deny)),
-                ("Use pack's metadata", None),
+                (tr!("Works here"), Some(PackOverride::Allow)),
+                (tr!("Doesn't work here"), Some(PackOverride::Deny)),
+                (tr!("Use pack's metadata"), None),
             ] {
                 let selected = pack.verdict == target;
                 let kind = if selected {
@@ -680,7 +681,7 @@ fn packs_tab(
                 if kit.button(
                     ui,
                     &format!("game-settings::pack::{}::{label}", pack.name),
-                    label,
+                    &label,
                     kind,
                     true,
                 ) && !selected
@@ -708,7 +709,7 @@ fn sync_tab(
 ) {
     kit::label(
         ui,
-        "Keep these settings in step across instances. The most recently changed instance wins; its settings are translated to each other instance's Minecraft version (renamed options, key codes, value formats). Settings that belong to this machine, like the window size or audio device, are never copied, and running instances are left alone until they close.",
+        &tr!("Keep these settings in step across instances. The most recently changed instance wins; its settings are translated to each other instance's Minecraft version (renamed options, key codes, value formats). Settings that belong to this machine, like the window size or audio device, are never copied, and running instances are left alone until they close."),
         &TextStyle {
             wrap: TextWrap::Words,
             ..kit.style(TextRole::Muted)
@@ -719,8 +720,8 @@ fn sync_tab(
     if kit.toggle_setting(
         ui,
         "game-settings::sync::member",
-        "Sync this instance's settings",
-        Some("Instances with this turned on share the settings chosen below."),
+        &tr!("Sync this instance's settings"),
+        Some(&tr!("Instances with this turned on share the settings chosen below.")),
         &mut member,
     ) {
         if member {
@@ -734,14 +735,14 @@ fn sync_tab(
         ui,
         TextRole::Muted,
         &if participants < 2 {
-            "Turn this on for at least two instances for anything to sync.".to_owned()
+            tr!("Turn this on for at least two instances for anything to sync.").into_owned()
         } else {
-            format!("{participants} instances take part.")
+            tr!("{participants} instances take part.", participants = participants).into_owned()
         },
     );
 
     kit.gap(ui, f32::from(kit::SPACE_MD));
-    kit.text(ui, TextRole::Heading, "Settings to sync");
+    kit.text(ui, TextRole::Heading, &tr!("Settings to sync"));
     for group in api::syncable_groups() {
         let mut on = instances
             .game_settings_sync
@@ -751,7 +752,7 @@ fn sync_tab(
             ui,
             &format!("game-settings::sync::group::{}", group.slug()),
             group.label(),
-            Some("Keep this group of game options identical across your instances."),
+            Some(&tr!("Keep this group of game options identical across your instances.")),
             &mut on,
         ) {
             if on {
@@ -766,10 +767,10 @@ fn sync_tab(
     }
 
     kit.gap(ui, f32::from(kit::SPACE_MD));
-    kit.text(ui, TextRole::Heading, "Mod settings to sync");
+    kit.text(ui, TextRole::Heading, &tr!("Mod settings to sync"));
     kit::label(
         ui,
-        "Only instances that already have the mod's config file take part. Thread counts, server identity and other machine-specific keys are skipped.",
+        &tr!("Only instances that already have the mod's config file take part. Thread counts, server identity and other machine-specific keys are skipped."),
         &TextStyle {
             wrap: TextWrap::Words,
             ..kit.style(TextRole::Muted)
@@ -781,7 +782,7 @@ fn sync_tab(
             ui,
             &format!("game-settings::sync::mod::{mod_id}"),
             name,
-            Some("Keep this mod's options identical across your instances."),
+            Some(&tr!("Keep this mod's options identical across your instances.")),
             &mut on,
         ) {
             if on {
@@ -800,8 +801,8 @@ fn sync_tab(
     if kit.toggle_setting(
         ui,
         "game-settings::sync::packs",
-        "Sync resource packs",
-        Some("Shares packs between these instances where their metadata says they work (or you've said they do), and keeps which packs are enabled in step. Manage per-pack exceptions on the Resource Packs tab."),
+        &tr!("Sync resource packs"),
+        Some(&tr!("Shares packs between these instances where their metadata says they work (or you've said they do), and keeps which packs are enabled in step. Manage per-pack exceptions on the Resource Packs tab.")),
         &mut packs,
     ) {
         instances.game_settings_sync.resource_packs = packs;
@@ -810,7 +811,7 @@ fn sync_tab(
     if kit.button(
         ui,
         "game-settings::sync::now",
-        "Sync now",
+        &tr!("Sync now"),
         ButtonKind::Neutral,
         true,
     ) {

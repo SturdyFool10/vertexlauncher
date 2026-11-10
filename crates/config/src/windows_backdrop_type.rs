@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Backdrop type selection for Windows window appearance effects.
@@ -35,13 +36,13 @@ impl WindowsBackdropType {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            WindowsBackdropType::Auto => "Auto",
-            WindowsBackdropType::None => "None",
-            WindowsBackdropType::Mica => "Mica",
-            WindowsBackdropType::Acrylic => "Acrylic",
-            WindowsBackdropType::MicaAlt => "Mica Alt",
-            WindowsBackdropType::LegacyBlur => "Legacy Blur",
-            WindowsBackdropType::LegacyAcrylic => "Legacy Acrylic",
+            WindowsBackdropType::Auto => src!("Auto"),
+            WindowsBackdropType::None => src!("None"),
+            WindowsBackdropType::Mica => src!("Mica"),
+            WindowsBackdropType::Acrylic => src!("Acrylic"),
+            WindowsBackdropType::MicaAlt => src!("Mica Alt"),
+            WindowsBackdropType::LegacyBlur => src!("Legacy Blur"),
+            WindowsBackdropType::LegacyAcrylic => src!("Legacy Acrylic"),
         }
     }
 }

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(super) fn apply_detected_instance_versions(
@@ -44,14 +45,14 @@ pub(super) fn apply_detected_instance_versions(
 
 pub(super) fn detected_versions_summary(detected: &DetectedInstanceVersions) -> String {
     if detected.modloader_version.trim().is_empty() {
-        format!(
-            "{} for Minecraft {}",
-            detected.modloader, detected.game_version
-        )
+        tr!("{loader} for Minecraft {game_version}", loader = detected.modloader, game_version = detected.game_version).into_owned()
     } else {
-        format!(
-            "{} {} for Minecraft {}",
-            detected.modloader, detected.modloader_version, detected.game_version
+        tr!(
+            "{loader} {loader_version} for Minecraft {game_version}",
+            loader = detected.modloader,
+            loader_version = detected.modloader_version,
+            game_version = detected.game_version
         )
+        .into_owned()
     }
 }

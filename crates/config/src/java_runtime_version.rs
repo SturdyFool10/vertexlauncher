@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Java runtime version selection for Minecraft instance configuration.
@@ -82,22 +83,22 @@ impl JavaRuntimeVersion {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            JavaRuntimeVersion::Java8 => "Java 8",
-            JavaRuntimeVersion::Java16 => "Java 16",
-            JavaRuntimeVersion::Java17 => "Java 17 (LTS)",
-            JavaRuntimeVersion::Java21 => "Java 21 (LTS)",
-            JavaRuntimeVersion::Java25 => "Java 25 (LTS)",
+            JavaRuntimeVersion::Java8 => src!("Java 8"),
+            JavaRuntimeVersion::Java16 => src!("Java 16"),
+            JavaRuntimeVersion::Java17 => src!("Java 17 (LTS)"),
+            JavaRuntimeVersion::Java21 => src!("Java 21 (LTS)"),
+            JavaRuntimeVersion::Java25 => src!("Java 25 (LTS)"),
         }
     }
 
     /// Tooltip text providing additional information about this Java version.
     pub const fn info_tooltip(self) -> &'static str {
         match self {
-            JavaRuntimeVersion::Java8 => "Used by Minecraft 1.16.5 and older",
-            JavaRuntimeVersion::Java16 => "Used by Minecraft 1.17 to 1.17.1",
-            JavaRuntimeVersion::Java17 => "Used by Minecraft 1.18 to 1.20.4",
-            JavaRuntimeVersion::Java21 => "Used by Minecraft 1.20.5 to 1.21.x",
-            JavaRuntimeVersion::Java25 => "Used by Minecraft 26.1 and newer",
+            JavaRuntimeVersion::Java8 => src!("Used by Minecraft 1.16.5 and older"),
+            JavaRuntimeVersion::Java16 => src!("Used by Minecraft 1.17 to 1.17.1"),
+            JavaRuntimeVersion::Java17 => src!("Used by Minecraft 1.18 to 1.20.4"),
+            JavaRuntimeVersion::Java21 => src!("Used by Minecraft 1.20.5 to 1.21.x"),
+            JavaRuntimeVersion::Java25 => src!("Used by Minecraft 26.1 and newer"),
         }
     }
 }

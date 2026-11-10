@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[path = "content_browser_install/dependency_ref.rs"]
@@ -255,7 +256,7 @@ pub(super) fn apply_content_install_request_with_prefetched_downloads(
                 &modrinth,
                 curseforge.as_ref(),
             )?
-            .ok_or_else(|| format!("No compatible downloadable file found for {}.", entry.name))?;
+            .ok_or_else(|| tr!("No compatible downloadable file found for {name}.", name = entry.name).into_owned())?;
             (entry, game_version, loader, resolved)
         }
         ContentInstallRequest::Exact {
@@ -320,11 +321,7 @@ pub(super) fn apply_content_install_request_with_prefetched_downloads(
                 dependents = %dependents.join(", "),
                 "rejecting content switch because dependents are still installed"
             );
-            return Err(format!(
-                "Cannot switch {} while it is required by {}.",
-                root_entry.name,
-                dependents.join(", ")
-            ));
+            return Err(tr!("Cannot switch {name} while it is required by {dependents}.", name = root_entry.name, dependents = dependents.join(", ")).into_owned());
         }
         remove_installed_project(
             instance_root,
@@ -463,20 +460,13 @@ fn install_project_recursive(
         if existing.is_some() || !target_path.exists() || prefetched_path.is_some() {
             if let Some(prefetched_path) = prefetched_path.as_ref() {
                 if !prefetched_path.exists() {
-                    return Err(format!(
-                        "prefetched content file missing at {}",
-                        prefetched_path.display()
-                    ));
+                    return Err(tr!("prefetched content file missing at {prefetched_path}", prefetched_path = prefetched_path.display()).into_owned());
                 }
                 if target_path.exists() {
                     remove_content_path(target_path.as_path())?;
                 }
                 std::fs::rename(prefetched_path, target_path.as_path()).map_err(|err| {
-                    format!(
-                        "failed to place prefetched content {} at {}: {err}",
-                        prefetched_path.display(),
-                        target_path.display()
-                    )
+                    tr!("failed to place prefetched content {prefetched_path} at {target_path}: {err}", prefetched_path = prefetched_path.display(), target_path = target_path.display(), err = err).into_owned()
                 })?;
             } else {
                 report_begin_file(entry.name.as_str());
@@ -523,10 +513,7 @@ fn install_project_recursive(
             let dep_resolved =
                 resolve_best_download(&dep_entry, game_version, loader, modrinth, curseforge)?
                     .ok_or_else(|| {
-                        format!(
-                            "No compatible downloadable file found for dependency {}.",
-                            dep_entry.name
-                        )
+                        tr!("No compatible downloadable file found for dependency {name}.", name = dep_entry.name).into_owned()
                     })?;
             dependency_keys.push(dep_entry.dedupe_key.clone());
             install_project_recursive(
@@ -597,7 +584,7 @@ fn install_project_recursive(
                     previous_file_path.as_path(),
                 )
                 .map_err(|restore_err| {
-                    format!("{err} (also failed to restore original file: {restore_err})")
+                    tr!("{err} (also failed to restore original file: {restore_err})", err = err, restore_err = restore_err).into_owned()
                 })?;
             }
             Err(err)
@@ -653,7 +640,7 @@ fn remove_installed_project(
             cleanup.stale_paths.push(file_path.clone());
         } else {
             std::fs::remove_file(file_path.as_path())
-                .map_err(|err| format!("failed to remove {}: {err}", file_path.display()))?;
+                .map_err(|err| tr!("failed to remove {file_path}: {err}", file_path = file_path.display(), err = err).into_owned())?;
             removed_files.push(file_path.display().to_string());
         }
     }
@@ -715,7 +702,7 @@ pub(super) fn update_installed_file_only(
     let placed = (|| -> Result<(), String> {
         if let Some(parent) = target_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|err| format!("failed to create content folder {}: {err}", parent.display()))?;
+                .map_err(|err| tr!("failed to create content folder {parent}: {err}", parent = parent.display(), err = err).into_owned())?;
         }
         let ready = match prefetched_paths.get(&target_path).filter(|path| path.exists()) {
             Some(prefetched) => prefetched.clone(),
@@ -734,18 +721,14 @@ pub(super) fn update_installed_file_only(
             remove_content_path(target_path.as_path())?;
         }
         std::fs::rename(ready.as_path(), target_path.as_path()).map_err(|err| {
-            format!(
-                "failed to place {} at {}: {err}",
-                ready.display(),
-                target_path.display()
-            )
+            tr!("failed to place {ready} at {target_path}: {err}", ready = ready.display(), target_path = target_path.display(), err = err).into_owned()
         })
     })();
     if let Err(err) = placed {
         if let Some(staged) = staged_path.as_ref() {
             restore_staged_update_file(staged.as_path(), effective_installed_file_path.as_path())
                 .map_err(|restore_err| {
-                    format!("{err} (also failed to restore the original file: {restore_err})")
+                    tr!("{err} (also failed to restore the original file: {restore_err})", err = err, restore_err = restore_err).into_owned()
                 })?;
         }
         return Err(err);
@@ -860,10 +843,7 @@ pub(super) fn stage_existing_file_for_update(
 
     let staged_path = staged_update_backup_path(existing_file_path);
     std::fs::rename(existing_file_path, staged_path.as_path()).map_err(|err| {
-        format!(
-            "failed to stage existing content {} for replacement: {err}",
-            existing_file_path.display()
-        )
+        tr!("failed to stage existing content {existing_file_path} for replacement: {err}", existing_file_path = existing_file_path.display(), err = err).into_owned()
     })?;
     Ok(Some(staged_path))
 }
@@ -944,11 +924,7 @@ pub(super) fn restore_staged_update_file(
     }
 
     std::fs::rename(staged_previous_path, previous_file_path).map_err(|err| {
-        format!(
-            "failed to restore {} from {}: {err}",
-            previous_file_path.display(),
-            staged_previous_path.display()
-        )
+        tr!("failed to restore {previous_file_path} from {staged_previous_path}: {err}", previous_file_path = previous_file_path.display(), staged_previous_path = staged_previous_path.display(), err = err).into_owned()
     })
 }
 
@@ -985,10 +961,10 @@ pub(super) fn remove_content_path(path: &Path) -> Result<(), String> {
 
     if path.is_dir() {
         std::fs::remove_dir_all(path)
-            .map_err(|err| format!("failed to remove {}: {err}", path.display()))
+            .map_err(|err| tr!("failed to remove {path}: {err}", path = path.display(), err = err).into_owned())
     } else {
         std::fs::remove_file(path)
-            .map_err(|err| format!("failed to remove {}: {err}", path.display()))
+            .map_err(|err| tr!("failed to remove {path}: {err}", path = path.display(), err = err).into_owned())
     }
 }
 
@@ -1069,7 +1045,7 @@ fn resolve_modrinth_download(
 
     let versions = modrinth
         .list_project_versions(project_id, &loaders, &game_versions)
-        .map_err(|err| format!("Modrinth versions failed for {project_id}: {err}"))?;
+        .map_err(|err| tr!("Modrinth versions failed for {project_id}: {err}", project_id = project_id, err = err).into_owned())?;
     let dependency_version_projects = modrinth_dependency_project_ids(
         modrinth,
         versions
@@ -1124,7 +1100,7 @@ fn resolve_curseforge_download(
     };
     let project = curseforge
         .get_mod(project_id)
-        .map_err(|err| format!("CurseForge project lookup failed for {project_id}: {err}"))?;
+        .map_err(|err| tr!("CurseForge project lookup failed for {project_id}: {err}", project_id = project_id, err = err).into_owned())?;
     let Some(file_id) = project
         .latest_files_indexes
         .iter()
@@ -1141,7 +1117,7 @@ fn resolve_curseforge_download(
     };
     let Some(file) = curseforge
         .get_files(&[file_id])
-        .map_err(|err| format!("CurseForge file lookup failed for {file_id}: {err}"))?
+        .map_err(|err| tr!("CurseForge file lookup failed for {file_id}: {err}", file_id = file_id, err = err).into_owned())?
         .into_iter()
         .next()
     else {
@@ -1351,19 +1327,19 @@ pub(super) fn modrinth_dependency_refs(
 
 pub(super) fn identify_mod_file_by_hash(path: &Path) -> Result<UnifiedContentEntry, String> {
     let (sha1, sha512) = modrinth::hash_file_sha1_and_sha512_hex(path)
-        .map_err(|err| format!("failed to hash file: {err}"))?;
+        .map_err(|err| tr!("failed to hash file: {err}", err = err).into_owned())?;
     let modrinth = ModrinthClient::default();
 
     for (algorithm, hash) in [("sha512", sha512.as_str()), ("sha1", sha1.as_str())] {
         let Some(version) = modrinth
             .get_version_from_hash(hash, algorithm)
-            .map_err(|err| format!("Modrinth hash lookup failed: {err}"))?
+            .map_err(|err| tr!("Modrinth hash lookup failed: {err}", err = err).into_owned())?
         else {
             continue;
         };
         let project = modrinth
             .get_project(version.project_id.as_str())
-            .map_err(|err| format!("Modrinth project lookup failed: {err}"))?;
+            .map_err(|err| tr!("Modrinth project lookup failed: {err}", err = err).into_owned())?;
         return Ok(UnifiedContentEntry {
             id: format!("modrinth:{}", project.project_id),
             name: project.title,
@@ -1375,7 +1351,7 @@ pub(super) fn identify_mod_file_by_hash(path: &Path) -> Result<UnifiedContentEnt
         });
     }
 
-    Err("no Modrinth project matched this file hash".to_owned())
+    Err(tr!("no Modrinth project matched this file hash").into_owned())
 }
 
 fn normalized_filename(name: &str, url: &str) -> String {
@@ -1390,7 +1366,7 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
     throttle_download_url(url);
     let response = ureq::get(url)
         .call()
-        .map_err(|err| format!("download request failed for {url}: {err}"))?;
+        .map_err(|err| tr!("download request failed for {url}: {err}", url = url, err = err).into_owned())?;
     let (_, body) = response.into_parts();
     let total = body.content_length();
     let mut reader = body.into_reader();
@@ -1399,7 +1375,7 @@ fn download_file(url: &str, destination: &Path) -> Result<(), String> {
     loop {
         let read = reader
             .read(&mut chunk)
-            .map_err(|err| format!("failed to read download body from {url}: {err}"))?;
+            .map_err(|err| tr!("failed to read download body from {url}: {err}", url = url, err = err).into_owned())?;
         if read == 0 {
             break;
         }

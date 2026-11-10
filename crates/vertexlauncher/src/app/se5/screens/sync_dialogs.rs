@@ -1,5 +1,6 @@
 //! Home's sync dialogs: which instances a multiplayer server is kept in, and sharing a world between instances.
 
+use vertex_i18n::tr;
 use std::collections::BTreeSet;
 
 use instance_sync::compare_game_versions;
@@ -112,7 +113,7 @@ pub fn server_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bo
     let mut cancel = false;
     let response = kit::modal(ui, "server-sync", &style, true, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Server sync options");
+        kit.text(ui, TextRole::Heading, &tr!("Server sync options"));
         kit.text(
             ui,
             TextRole::Strong,
@@ -120,34 +121,34 @@ pub fn server_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bo
         );
         kit::label(
             ui,
-            "Choose which instances get this server in their server list. Entries that already exist are never changed or removed.",
+            &tr!("Choose which instances get this server in their server list. Entries that already exist are never changed or removed."),
             &wrapped(kit, TextRole::Muted),
         );
         if !config.sync_servers_enabled() {
             kit::label(
                 ui,
-                "Server sync is turned off. Enable it in Settings → Instance Sync for these options to take effect.",
+                &tr!("Server sync is turned off. Enable it in Settings → Instance Sync for these options to take effect."),
                 &wrapped(kit, TextRole::Warning),
             );
         }
         let default_label = if config.sync_servers_to_all_instances_by_default() {
-            "Follow launcher default (currently: every instance)"
+            tr!("Follow launcher default (currently: every instance)")
         } else {
-            "Follow launcher default (currently: only where it already exists)"
+            tr!("Follow launcher default (currently: only where it already exists)")
         };
         for (choice, label) in [
             (ScopeChoice::FollowDefault, default_label),
             (
                 ScopeChoice::ThisInstanceOnly,
-                "Only where it already exists",
+                tr!("Only where it already exists"),
             ),
-            (ScopeChoice::AllInstances, "Every instance"),
-            (ScopeChoice::Selected, "Selected instances"),
+            (ScopeChoice::AllInstances, tr!("Every instance")),
+            (ScopeChoice::Selected, tr!("Selected instances")),
         ] {
             if kit.radio(
                 ui,
-                &format!("server-sync::choice::{label}"),
-                label,
+                &format!("server-sync::choice::{choice:?}"),
+                &label,
                 sync.choice == choice,
             ) {
                 sync.choice = choice;
@@ -156,7 +157,7 @@ pub fn server_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bo
         if sync.choice == ScopeChoice::Selected {
             instance_list(ui, kit, "server-sync::instances", 260.0, |ui, kit| {
                 for instance in &instances.instances {
-                    let label = format!("{} (Minecraft {})", instance.name, instance.game_version);
+                    let label = tr!("{name} (Minecraft {game_version})", name = instance.name, game_version = instance.game_version).into_owned();
                     let checked = sync.selected.contains(&instance.id);
                     if let Some(next) = kit.checkbox(
                         ui,
@@ -178,11 +179,11 @@ pub fn server_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bo
         cancel = kit.button(
             ui,
             "server-sync::cancel",
-            "Cancel",
+            &tr!("Cancel"),
             ButtonKind::Neutral,
             true,
         );
-        save = kit.button(ui, "server-sync::save", "Save", ButtonKind::Primary, true);
+        save = kit.button(ui, "server-sync::save", &tr!("Save"), ButtonKind::Primary, true);
     });
     if save {
         let scope = match sync.choice {
@@ -267,7 +268,7 @@ fn poll_world(
         Ok(outcome) => {
             instances.synced_worlds = synced_worlds;
             sync.warnings = outcome.warnings;
-            sync.message = Some((false, "Done.".to_owned()));
+            sync.message = Some((false, tr!("Done.").into_owned()));
             // Reflect what actually ended up shared, e.g. members skipped for conflicts.
             sync.selected = match instances.synced_world_for(&sync.instance_id, &sync.folder) {
                 Some(synced) => synced.members.keys().cloned().collect(),
@@ -301,17 +302,17 @@ pub fn world_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> boo
     let style = modal_style(kit, ui, 640.0);
     let response = kit::modal(ui, "world-sync", &style, !busy, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Sync world");
+        kit.text(ui, TextRole::Heading, &tr!("Sync world"));
         kit.text(ui, TextRole::Strong, &sync.world_name);
         let help = if synced_id.is_some() {
-            "This world is stored once and linked into each instance below, so progress made in any of them appears in all of them. Removing an instance gives it its own copy."
+            &tr!("This world is stored once and linked into each instance below, so progress made in any of them appears in all of them. Removing an instance gives it its own copy.")
         } else {
-            "The world moves to Vertex's shared worlds folder and each instance you pick gets a link to it (or a copy that refreshes at launch and exit where links aren't possible). Progress made in any of them appears in all of them. Close the game in every picked instance first."
+            &tr!("The world moves to Vertex's shared worlds folder and each instance you pick gets a link to it (or a copy that refreshes at launch and exit where links aren't possible). Progress made in any of them appears in all of them. Close the game in every picked instance first.")
         };
         kit::label(ui, help, &wrapped(kit, TextRole::Muted));
         instance_list(ui, kit, "world-sync::instances", 280.0, |ui, kit| {
             for instance in &instances.instances {
-                let label = format!("{} (Minecraft {})", instance.name, instance.game_version);
+                let label = tr!("{name} (Minecraft {game_version})", name = instance.name, game_version = instance.game_version).into_owned();
                 let checked = sync.selected.contains(&instance.id);
                 if let Some(next) = kit.checkbox(
                     ui,
@@ -340,10 +341,7 @@ pub fn world_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> boo
                 {
                     kit::label(
                         ui,
-                        &format!(
-                            "{} runs Minecraft {}, older than this world ({}). Opening it there can corrupt the world.",
-                            instance.name, instance.game_version, world_version
-                        ),
+                        &tr!("{name} runs Minecraft {game_version}, older than this world ({world_version}). Opening it there can corrupt the world.", name = instance.name, game_version = instance.game_version, world_version = world_version),
                         &wrapped(kit, TextRole::Warning),
                     );
                 }
@@ -356,7 +354,7 @@ pub fn world_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> boo
             kit.text(
                 ui,
                 TextRole::Muted,
-                "Working… moving or copying a large world can take a while.",
+                &tr!("Working… moving or copying a large world can take a while."),
             );
             kit.progress(ui, "world-sync::progress", None, kit::uptime());
         } else if let Some((is_error, message)) = &sync.message {
@@ -375,12 +373,12 @@ pub fn world_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> boo
         }
         let _row = kit.row(ui, kit::SPACE_SM);
         kit.fill(ui);
-        close = kit.button(ui, "world-sync::close", "Close", ButtonKind::Neutral, true);
+        close = kit.button(ui, "world-sync::close", &tr!("Close"), ButtonKind::Neutral, true);
         if let Some(world_id) = synced_id.clone() {
             if kit.button(
                 ui,
                 "world-sync::stop",
-                "Stop syncing",
+                &tr!("Stop syncing"),
                 ButtonKind::Danger,
                 !busy,
             ) {
@@ -391,7 +389,7 @@ pub fn world_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> boo
             if kit.button(
                 ui,
                 "world-sync::apply",
-                "Apply changes",
+                &tr!("Apply changes"),
                 ButtonKind::Primary,
                 !busy,
             ) {
@@ -404,7 +402,7 @@ pub fn world_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> boo
             && kit.button(
                 ui,
                 "world-sync::start",
-                "Start syncing",
+                &tr!("Start syncing"),
                 ButtonKind::Primary,
                 !busy,
             )

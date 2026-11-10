@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 /// Fetches the latest Minecraft profile and persists it back into the cached account
@@ -18,7 +19,7 @@ pub(super) fn fetch_and_cache_profile(
         "Fetching latest skin profile."
     );
     let profile = auth::fetch_minecraft_profile(access_token)
-        .map_err(|err| format!("Failed to fetch latest profile: {err}"))?;
+        .map_err(|err| tr!("Failed to fetch latest profile: {err}", err = err).into_owned())?;
     tracing::info!(
         target: "vertexlauncher/skins",
         display_name,
@@ -45,7 +46,7 @@ pub(super) fn update_cached_profile(
         "Updating cached account profile snapshot."
     );
     let mut cache =
-        auth::load_cached_accounts().map_err(|err| format!("Cache read failed: {err}"))?;
+        auth::load_cached_accounts().map_err(|err| tr!("Cache read failed: {err}", err = err).into_owned())?;
     let mut changed = false;
     let mut new_capes: Vec<String> = Vec::new();
 
@@ -65,7 +66,7 @@ pub(super) fn update_cached_profile(
                     new_capes.push(
                         cape.alias
                             .clone()
-                            .unwrap_or_else(|| "Unknown cape".to_owned()),
+                            .unwrap_or_else(|| tr!("Unknown cape").into_owned()),
                     );
                 }
             }
@@ -80,7 +81,7 @@ pub(super) fn update_cached_profile(
     }
 
     if changed {
-        auth::save_cached_accounts(&cache).map_err(|err| format!("Cache write failed: {err}"))?;
+        auth::save_cached_accounts(&cache).map_err(|err| tr!("Cache write failed: {err}", err = err).into_owned())?;
         // Only announce after the new list is persisted so a cape is congratulated exactly once.
         // Accounts with no cache entry never reach here: with nothing to compare against, every
         // cape would look new.
@@ -115,14 +116,17 @@ pub(super) fn update_cached_profile(
 /// Congratulation text for the capes an account gained, worded for one, two, or many capes.
 /// `None` when there is nothing new.
 fn new_capes_message(account_name: &str, cape_names: &[String]) -> Option<String> {
-    use crate::notification::natural_language::{a_or_count, join_natural};
+    use crate::notification::natural_language::join_natural;
     if cape_names.is_empty() {
         return None;
     }
-    Some(format!(
-        "Your account {account_name} got {}: {}, Congrats!",
-        a_or_count(cape_names.len(), "new cape"),
-        join_natural(cape_names)
+    Some(vertex_i18n::trn!(
+        cape_names.len(),
+        "Your account {account_name} got a new cape: {capes}, Congrats!",
+        "Your account {account_name} got {amount} new capes: {capes}, Congrats!",
+        account_name = account_name,
+        amount = crate::notification::natural_language::count_word(cape_names.len()),
+        capes = join_natural(cape_names)
     ))
 }
 

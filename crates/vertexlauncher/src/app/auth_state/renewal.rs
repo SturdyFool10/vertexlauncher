@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 impl AuthState {
@@ -35,10 +36,7 @@ impl AuthState {
                                 .map(str::trim)
                                 .is_some_and(|token| !token.is_empty());
                             self.status = if active_refresh && !refreshed_has_token {
-                                notification::warn!(
-                                    "auth",
-                                    "Active account token could not be renewed. Continuing in offline mode."
-                                );
+                                notification::warn!("auth", "Active account token could not be renewed. Continuing in offline mode.");
                                 AuthUiStatus::Idle
                             } else {
                                 AuthUiStatus::Idle
@@ -48,9 +46,9 @@ impl AuthState {
                         Err(err) => {
                             let prefix =
                                 if matches!(self.status, AuthUiStatus::RefreshingActiveSession) {
-                                    "Failed to renew active account token"
+                                    tr!("Failed to renew active account token").into_owned()
                                 } else {
-                                    "Loaded cached accounts, but token renewal failed"
+                                    tr!("Loaded cached accounts, but token renewal failed").into_owned()
                                 };
                             tracing::warn!(
                                 target: "vertexlauncher/auth_state",
@@ -60,14 +58,11 @@ impl AuthState {
                                 "Account renewal worker returned an error."
                             );
                             if is_http_auth_error(err.as_str()) {
-                                notification::warn!(
-                                    "auth",
-                                    "{prefix}: {err}. Continuing with cached account in offline mode."
-                                );
+                                notification::warn!("auth", "{prefix}: {err}. Continuing with cached account in offline mode.", prefix = prefix, err = err);
                                 self.status = AuthUiStatus::Idle;
                             } else {
-                                notification::error!("auth", "{prefix}: {err}");
-                                self.status = AuthUiStatus::Error(format!("{prefix}: {err}"));
+                                notification::error!("auth", "{prefix}: {err}", prefix = prefix, err = err);
+                                self.status = AuthUiStatus::Error(tr!("{prefix}: {err}", prefix = prefix, err = err).into_owned());
                             }
                         }
                     }
@@ -87,19 +82,11 @@ impl AuthState {
                             self.failed_account_errors
                                 .insert(profile_id.clone(), err.clone());
                             if is_http_auth_error(err.as_str()) {
-                                notification::warn!(
-                                    "auth",
-                                    "Failed to renew account token for {profile_id}: {err}. Continuing in offline mode."
-                                );
+                                notification::warn!("auth", "Failed to renew account token for {profile_id}: {err}. Continuing in offline mode.", profile_id = profile_id, err = err);
                                 self.status = AuthUiStatus::Idle;
                             } else {
-                                notification::error!(
-                                    "auth",
-                                    "Failed to renew account token for {profile_id}: {err}"
-                                );
-                                self.status = AuthUiStatus::Error(format!(
-                                    "Failed to renew account token for {profile_id}: {err}"
-                                ));
+                                notification::error!("auth", "Failed to renew account token for {profile_id}: {err}", profile_id = profile_id, err = err);
+                                self.status = AuthUiStatus::Error(tr!("Failed to renew account token for {profile_id}: {err}", profile_id = profile_id, err = err).into_owned());
                             }
                         }
                     }
@@ -112,13 +99,10 @@ impl AuthState {
                         account_count = self.accounts_state.accounts.len(),
                         "Cached-account renewal worker disconnected unexpectedly."
                     );
-                    notification::error!(
-                        "auth",
-                        "Loaded cached accounts, but token renewal worker stopped unexpectedly."
-                    );
+                    notification::error!("auth", "Loaded cached accounts, but token renewal worker stopped unexpectedly.");
                     self.status = AuthUiStatus::Error(
-                        "Loaded cached accounts, but token renewal worker stopped unexpectedly."
-                            .to_owned(),
+                        tr!("Loaded cached accounts, but token renewal worker stopped unexpectedly.")
+                            .into_owned(),
                     );
                     self.renewal = None;
                 }
@@ -144,10 +128,7 @@ impl AuthState {
             .map(str::trim)
             .is_some_and(|token| !token.is_empty());
         if !has_refresh_token {
-            notification::warn!(
-                "auth",
-                "Active account has no renewable token; launching in offline mode."
-            );
+            notification::warn!("auth", "Active account has no renewable token; launching in offline mode.");
             self.status = AuthUiStatus::Idle;
             return;
         }
@@ -155,10 +136,7 @@ impl AuthState {
         let client_id = match microsoft_client_id() {
             Ok(client_id) => client_id,
             Err(err) => {
-                notification::warn!(
-                    "auth",
-                    "Active account token is missing and renewal is unavailable: {err}. Launching in offline mode."
-                );
+                notification::warn!("auth", "Active account token is missing and renewal is unavailable: {err}. Launching in offline mode.", err = err);
                 self.status = AuthUiStatus::Idle;
                 return;
             }

@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Anti-aliasing mode selection for SVG rendering.
@@ -27,10 +28,10 @@ impl SvgAaMode {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            SvgAaMode::Off => "Off",
-            SvgAaMode::Balanced => "Balanced (SSAA 2x)",
-            SvgAaMode::Crisp => "Crisp (SSAA 3x)",
-            SvgAaMode::Ultra => "Ultra (SSAA 4x)",
+            SvgAaMode::Off => src!("Off"),
+            SvgAaMode::Balanced => src!("Balanced (SSAA 2x)"),
+            SvgAaMode::Crisp => src!("Crisp (SSAA 3x)"),
+            SvgAaMode::Ultra => src!("Ultra (SSAA 4x)"),
         }
     }
 

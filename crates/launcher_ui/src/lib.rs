@@ -6,6 +6,8 @@ pub mod app {
     }
 }
 
+/// The language system, re-exported so the notification macros can reach it.
+pub use vertex_i18n as i18n;
 pub mod account_colors;
 pub mod account_text;
 pub mod app_commands;

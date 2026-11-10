@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 // ── Apply helpers ─────────────────────────────────────────────────────────────
@@ -78,14 +79,14 @@ pub(super) fn download_downloadable_entries(
                 if let Some(parent) = file.destination.parent()
                     && let Err(err) = fs::create_dir_all(parent)
                 {
-                    results.push(Err(format!("failed to create {}: {err}", parent.display())));
+                    results.push(Err(tr!("failed to create {parent}: {err}", parent = parent.display(), err = err).into_owned()));
                     continue;
                 }
                 to_download.push((index, file));
                 results.push(Ok(()));
             }
             Some(Err(err)) => results.push(Err(err.clone())),
-            None => results.push(Err("entry was not resolved".to_owned())),
+            None => results.push(Err(tr!("entry was not resolved").into_owned())),
         }
     }
     let task_for = |file: &ResolvedFile| installation::DownloadBatchTask {
@@ -115,7 +116,7 @@ pub(super) fn download_downloadable_entries(
                                 failures
                                     .lock()
                                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                    .push((*index, format!("download failed for {}: {err}", file.url)));
+                                    .push((*index, tr!("download failed for {url}: {err}", url = file.url, err = err).into_owned()));
                             }
                         }
                     });
@@ -137,16 +138,10 @@ pub(super) fn download_downloadable_entries(
             Ok(actual) if actual.eq_ignore_ascii_case(expected) => {}
             Ok(actual) => {
                 let _ = fs::remove_file(file.destination.as_path());
-                results[*index] = Err(format!(
-                    "SHA-512 mismatch for {} (expected {expected}, got {actual})",
-                    file.display_name
-                ));
+                results[*index] = Err(tr!("SHA-512 mismatch for {display_name} (expected {expected}, got {actual})", display_name = file.display_name, expected = expected, actual = actual).into_owned());
             }
             Err(err) => {
-                results[*index] = Err(format!(
-                    "failed to hash downloaded file {}: {err}",
-                    file.destination.display()
-                ));
+                results[*index] = Err(tr!("failed to hash downloaded file {destination}: {err}", destination = file.destination.display(), err = err).into_owned());
             }
         }
     }
@@ -164,14 +159,11 @@ fn resolve_modrinth_entry(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
-            format!(
-                "downloadable entry {} has no version_id",
-                entry.file_path.display()
-            )
+            tr!("downloadable entry {file_path} has no version_id", file_path = entry.file_path.display()).into_owned()
         })?;
     let version = versions
         .get(version_id)
-        .ok_or_else(|| format!("failed to fetch Modrinth version {version_id}"))?;
+        .ok_or_else(|| tr!("failed to fetch Modrinth version {version_id}", version_id = version_id).into_owned())?;
 
     // Prefer the file whose sha512 matches the manifest; fall back to primary.
     let file = version
@@ -189,7 +181,7 @@ fn resolve_modrinth_entry(
         })
         .or_else(|| version.files.iter().find(|f| f.primary))
         .or_else(|| version.files.first())
-        .ok_or_else(|| format!("no downloadable files for Modrinth version {version_id}"))?;
+        .ok_or_else(|| tr!("no downloadable files for Modrinth version {version_id}", version_id = version_id).into_owned())?;
     Ok(ResolvedFile {
         url: file.url.clone(),
         destination: instance_root.join(entry.file_path.as_path()),
@@ -203,23 +195,17 @@ fn resolve_curseforge_entry(
     instance_root: &Path,
 ) -> Result<ResolvedFile, String> {
     let project_id = entry.curseforge_project_id.ok_or_else(|| {
-        format!(
-            "downloadable entry {} has no CurseForge project id",
-            entry.file_path.display()
-        )
+        tr!("downloadable entry {file_path} has no CurseForge project id", file_path = entry.file_path.display()).into_owned()
     })?;
     let file_id = entry
         .selected_version_id
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| {
-            format!(
-                "downloadable entry {} has no CurseForge file id",
-                entry.file_path.display()
-            )
+            tr!("downloadable entry {file_path} has no CurseForge file id", file_path = entry.file_path.display()).into_owned()
         })?
         .parse::<u64>()
-        .map_err(|err| format!("invalid CurseForge file id for {}: {err}", entry.name))?;
+        .map_err(|err| tr!("invalid CurseForge file id for {name}: {err}", name = entry.name, err = err).into_owned())?;
     let client = curseforge::Client::from_env().ok_or_else(|| {
         "CurseForge API key missing. Add one in Settings or set VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY to apply this patch."
             .to_owned()
@@ -227,10 +213,10 @@ fn resolve_curseforge_entry(
     let download_url = client
         .get_mod_file_download_url(project_id, file_id)
         .map_err(|err| {
-            format!("failed to resolve CurseForge download URL for {project_id}/{file_id}: {err}")
+            tr!("failed to resolve CurseForge download URL for {project_id}/{file_id}: {err}", project_id = project_id, file_id = file_id, err = err).into_owned()
         })?
         .ok_or_else(|| {
-            format!("CurseForge file {file_id} for project {project_id} has no download URL")
+            tr!("CurseForge file {file_id} for project {project_id} has no download URL", file_id = file_id, project_id = project_id).into_owned()
         })?;
     Ok(ResolvedFile {
         url: download_url,

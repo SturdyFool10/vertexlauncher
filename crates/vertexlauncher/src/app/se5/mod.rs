@@ -27,6 +27,7 @@ mod toasts;
 
 /// How long after a graphics-device switch the icon textures are made once more.
 
+use vertex_i18n::tr;
 use std::collections::HashMap;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, mpsc};
@@ -251,7 +252,7 @@ impl<T: Clone + Send + 'static> Saver<T> {
             self.in_flight = false;
             if let Err(err) = result {
                 tracing::error!(target: "vertexlauncher/se5/save", "Failed to save {}: {err}", self.what);
-                notification::error!("save", "Failed to save {}: {}", self.what, err);
+                notification::error!("save", "Failed to save {what}: {err}", what = self.what, err = err);
             }
         }
         self.start();
@@ -527,7 +528,7 @@ impl AppState {
             let result = if is_png {
                 std::fs::read(&path).map_err(|err| err.to_string())
             } else {
-                Err("Only PNG screenshots can be copied to the clipboard.".to_owned())
+                Err(tr!("Only PNG screenshots can be copied to the clipboard.").into_owned())
             };
             let _ = tx.send(result);
         });
@@ -548,7 +549,7 @@ impl AppState {
         for result in self.image_copies.drain().items {
             match result {
                 Ok(bytes) => copy_image(ui, &bytes),
-                Err(err) => notification::error!("screenshots", "Failed to copy screenshot: {}", err),
+                Err(err) => notification::error!("screenshots", "Failed to copy screenshot: {err}", err = err),
             }
         }
         let drops = ui.engine().take_drop_events();
@@ -585,16 +586,10 @@ impl AppState {
         }
         match change {
             Some(ObsChange::Started) => {
-                notification::info!(
-                    "Streamer Mode",
-                    "Streamer mode was turned on because OBS was detected."
-                )
+                notification::info!("Streamer Mode", "Streamer mode was turned on because OBS was detected.")
             }
             Some(ObsChange::Stopped) if detection_enabled => {
-                notification::info!(
-                    "Streamer Mode",
-                    "Streamer mode was turned off because OBS is no longer running."
-                )
+                notification::info!("Streamer Mode", "Streamer mode was turned off because OBS is no longer running.")
             }
             _ => {}
         }
@@ -609,19 +604,8 @@ impl AppState {
             } = update;
             let root = self.installations_root();
             match delete_instance(&mut self.instances, instance_id.as_str(), root.as_path()) {
-                Ok(_) => notification::error!(
-                    format!("installation/{instance_name}"),
-                    "{}: initial install failed and the incomplete instance was removed: {}",
-                    instance_name,
-                    error
-                ),
-                Err(delete_err) => notification::error!(
-                    format!("installation/{instance_name}"),
-                    "{}: initial install failed: {}. Cleanup also failed: {}",
-                    instance_name,
-                    error,
-                    delete_err
-                ),
+                Ok(_) => notification::error!(format!("installation/{instance_name}"), "{instance_name}: initial install failed and the incomplete instance was removed: {error}", instance_name = instance_name, error = error),
+                Err(delete_err) => notification::error!(format!("installation/{instance_name}"), "{instance_name}: initial install failed: {error}. Cleanup also failed: {delete_err}", instance_name = instance_name, error = error, delete_err = delete_err),
             }
         }
     }
@@ -647,17 +631,9 @@ impl AppState {
             });
             match name {
                 Some(name) => {
-                    notification::error!(
-                        format!("instance/crash/{}", process.pid),
-                        "{} crashed with exit code 1.",
-                        name
-                    )
+                    notification::error!(format!("instance/crash/{}", process.pid), "{name} crashed with exit code 1.", name = name)
                 }
-                None => notification::error!(
-                    format!("instance/crash/{}", process.pid),
-                    "An instance crashed with exit code 1: {}",
-                    process.instance_root
-                ),
+                None => notification::error!(format!("instance/crash/{}", process.pid), "An instance crashed with exit code 1: {instance_root}", instance_root = process.instance_root),
             }
         }
     }
@@ -717,10 +693,10 @@ impl AppState {
 
     fn report_apply(&mut self, domain: SettingsDomain, result: Applied, bridge: &SettingsBridge) {
         let what = match domain {
-            SettingsDomain::GraphicsDevice => "graphics device",
-            SettingsDomain::WindowEffect => "window effect",
-            SettingsDomain::Presentation => "display settings",
-            _ => "setting",
+            SettingsDomain::GraphicsDevice => tr!("graphics device"),
+            SettingsDomain::WindowEffect => tr!("window effect"),
+            SettingsDomain::Presentation => tr!("display settings"),
+            _ => tr!("setting"),
         };
         match result {
             Applied::Ok => {}
@@ -729,12 +705,7 @@ impl AppState {
                 tracing::info!(target: "vertexlauncher/se5/settings", "The {what} was applied with a fallback: {reason}");
             }
             Applied::Failed(reason) => {
-                notification::error!(
-                    "settings",
-                    "Could not apply the {}; the previous choice is back: {}",
-                    what,
-                    reason
-                );
+                notification::error!("settings", "Could not apply the {what}; the previous choice is back: {reason}", what = what, reason = reason);
                 // The engine kept running on the previous values; put them back in the config so it matches.
                 let previous = self.before_submit.clone();
                 restore_domain(&mut self.config, &previous, domain);
@@ -817,6 +788,8 @@ struct App {
     window_feedback: WindowFeedback,
     /// The "start in fullscreen" setting has been acted on.
     started_fullscreen: bool,
+    /// The language setting last acted on (`""` follows the system), so a change is applied once.
+    applied_language: Option<String>,
 }
 
 impl App {
@@ -826,6 +799,9 @@ impl App {
         bridge: Arc<SettingsBridge>,
         exit_snapshot: Arc<Mutex<Option<(Config, InstanceStore)>>>,
     ) -> Self {
+        for problem in vertex_i18n::load_user_languages() {
+            tracing::warn!(target: "vertexlauncher/i18n", "Skipped language file {}: {}", problem.path.display(), problem.message);
+        }
         let obs_enabled = config.obs_detection_enabled();
         let theme_catalog = ThemeCatalog::load();
         let mut config = config;
@@ -836,7 +812,7 @@ impl App {
         let instances = match load_store() {
             Ok(store) => store,
             Err(err) => {
-                notification::error!("instance_store", "Failed to load instance store: {err}");
+                notification::error!("instance_store", "Failed to load instance store: {err}", err = err);
                 InstanceStore::default()
             }
         };
@@ -929,10 +905,29 @@ impl App {
             debug_overlay: Default::default(),
             window_feedback: WindowFeedback::default(),
             started_fullscreen: false,
+            applied_language: None,
         }
     }
 
+    /// Switches the interface to the language the setting names (or the system's, when it is empty), once per change.
+    fn apply_language(&mut self) {
+        let setting = self.state.config.language();
+        if self.applied_language.as_deref() == Some(setting) {
+            return;
+        }
+        let setting = setting.to_owned();
+        let tag = if setting.is_empty() {
+            vertex_i18n::Locale::detect_system().map(|locale| locale.tag().to_owned()).unwrap_or_default()
+        } else {
+            setting.clone()
+        };
+        // A language that is not installed (a deleted file, a system language with no translation) shows English.
+        vertex_i18n::set_language(&tag);
+        self.applied_language = Some(setting);
+    }
+
     fn draw(&mut self, ui: &mut Ui<'_>) {
+        self.apply_language();
         let now = Instant::now();
         self.kit.delta_seconds = now.duration_since(self.last_frame).as_secs_f32().min(0.25);
         self.last_frame = now;
@@ -1088,7 +1083,7 @@ impl App {
         }
         let stack = fonts::stack_for(&self.state.config);
         if let Err(err) = ui.engine().register_ui_font_stack(0, &stack) {
-            notification::error!("fonts", "Could not use the chosen font: {}", err);
+            notification::error!("fonts", "Could not use the chosen font: {err}", err = err);
         }
         for role in config::TextRole::ALL {
             let stack = fonts::stack_for_role(&self.state.config, role);
@@ -1096,12 +1091,7 @@ impl App {
                 .engine()
                 .register_ui_font_stack(fonts::role_font_id(role), &stack)
             {
-                notification::error!(
-                    "fonts",
-                    "Could not use the font for {}: {}",
-                    role.label(),
-                    err
-                );
+                notification::error!("fonts", "Could not use the font for {role}: {err}", role = role.label(), err = err);
                 break;
             }
         }
@@ -1181,7 +1171,7 @@ fn copy_image(ui: &mut Ui<'_>, bytes: &[u8]) {
         .unwrap_or_else(|| Err(vertex_shell::sturdy::Error::new("no window")));
     match copied {
         Ok(()) => notification::info!("screenshots", "Copied screenshot to clipboard."),
-        Err(err) => notification::error!("screenshots", "Failed to copy screenshot: {}", err),
+        Err(err) => notification::error!("screenshots", "Failed to copy screenshot: {err}", err = err),
     }
 }
 
@@ -1211,18 +1201,14 @@ impl WindowFeedback {
                 };
                 let eta = activity
                     .eta_seconds
-                    .map(|eta| format!(" ETA {eta}s"))
+                    .map(|eta| tr!(" ETA {eta}s", eta = eta).into_owned())
                     .unwrap_or_default();
                 (
-                    format!(
-                        "Vertex Launcher · Installing {}% · {:.1} MiB/s{eta}",
-                        (fraction * 100.0).round() as u32,
-                        activity.bytes_per_second / (1024.0 * 1024.0)
-                    ),
+                    tr!("Vertex Launcher · Installing {percent}% · {speed:.1} MiB/s{eta}", percent = (fraction * 100.0).round() as u32, speed = activity.bytes_per_second / (1024.0 * 1024.0), eta = eta).into_owned(),
                     Some((TaskbarProgress::Normal, (fraction * 100.0).round() as u32)),
                 )
             }
-            None => ("Vertex Launcher".to_owned(), None),
+            None => (tr!("Vertex Launcher").into_owned(), None),
         };
         let mut engine = ui.engine();
         let Some(mut window) = engine.primary_window_control() else {

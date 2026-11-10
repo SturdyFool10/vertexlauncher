@@ -1,7 +1,8 @@
 use super::*;
 
 use launcher_ui::account_text::mention;
-use launcher_ui::notification::natural_language::{capitalize_first, join_natural, pluralize_for};
+use launcher_ui::notification::natural_language::join_natural;
+use vertex_i18n::{tr, trn};
 use launcher_ui::notification::{NotificationBuilder, Severity, retract_from_stack};
 
 const RENEWING_KEY: &str = "login-renewing";
@@ -10,6 +11,7 @@ const RENEWAL_FAILED_KEY: &str = "login-renewal-failed";
 /// Separates an account name from its error inside one stacked failure item.
 const FAILURE_FIELD_SEPARATOR: char = '\u{1f}';
 const NOTIFICATION_SOURCE: &str = "Login Renewal";
+const UNKNOWN_ERROR: &str = vertex_i18n::src!("unknown error");
 
 /// Shows renewal progress and results. Accounts renewing or finishing around the same time share
 /// one notification each for "renewing", "renewed" and "failed", worded for however many there
@@ -63,18 +65,20 @@ pub(super) fn emit_cached_account_renewal_notification(event: CachedAccountRenew
 }
 
 fn renewing_message(names: &[String]) -> String {
-    format!(
-        "Renewing {} for {}",
-        pluralize_for(names.len(), "login token"),
-        join_natural(names)
+    trn!(
+        names.len(),
+        "Renewing login token for {accounts}",
+        "Renewing login tokens for {accounts}",
+        accounts = join_natural(names)
     )
 }
 
 fn renewed_message(names: &[String]) -> String {
-    format!(
-        "{} for {} renewed successfully, you are now ready to play!",
-        capitalize_first(&pluralize_for(names.len(), "login token")),
-        join_natural(names)
+    trn!(
+        names.len(),
+        "Login token for {accounts} renewed successfully, you are now ready to play!",
+        "Login tokens for {accounts} renewed successfully, you are now ready to play!",
+        accounts = join_natural(names)
     )
 }
 
@@ -85,7 +89,7 @@ fn failure_message(items: &[String]) -> String {
         .iter()
         .map(|item| {
             item.split_once(FAILURE_FIELD_SEPARATOR)
-                .unwrap_or((item.as_str(), "unknown error"))
+                .unwrap_or((item.as_str(), UNKNOWN_ERROR))
         })
         .collect();
     let names: Vec<String> = failures
@@ -94,22 +98,16 @@ fn failure_message(items: &[String]) -> String {
         .collect();
     match failures.as_slice() {
         [] => String::new(),
-        [(name, error)] => format!("Error in attempting to renew login for {name}: {error}"),
+        [(name, error)] => tr!("Error in attempting to renew login for {name}: {error}", name = name, error = vertex_i18n::t(error)).into_owned(),
         [(_, first_error), rest @ ..] if rest.iter().all(|(_, error)| error == first_error) => {
-            format!(
-                "Errors in attempting to renew login for {}: {first_error}",
-                join_natural(&names)
-            )
+            tr!("Errors in attempting to renew login for {accounts}: {error}", accounts = join_natural(&names), error = vertex_i18n::t(first_error)).into_owned()
         }
         _ => {
             let described: Vec<String> = failures
                 .iter()
-                .map(|(name, error)| format!("{name} ({error})"))
+                .map(|(name, error)| tr!("{name} ({error})", name = name, error = vertex_i18n::t(error)).into_owned())
                 .collect();
-            format!(
-                "Errors in attempting to renew login for {}",
-                join_natural(&described)
-            )
+            tr!("Errors in attempting to renew login for {accounts}", accounts = join_natural(&described)).into_owned()
         }
     }
 }

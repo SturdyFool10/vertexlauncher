@@ -2,6 +2,7 @@
 //! detour, and what happens when they finish. The packaging, download and install code is the same code the egui
 //! front end runs (`import_flow`, `discover_flow`); this drives it from `AppState`.
 
+use vertex_i18n::tr;
 use std::collections::HashMap;
 use std::sync::mpsc;
 
@@ -80,7 +81,7 @@ impl AppState {
         flows.import.error = None;
         flows.import.import_in_flight = true;
         flows.import.import_latest_progress = Some(ImportProgress {
-            message: "Checking CurseForge download restrictions...".to_owned(),
+            message: tr!("Checking CurseForge download restrictions...").into_owned(),
             completed_steps: 0,
             total_steps: 1,
         });
@@ -124,9 +125,7 @@ impl AppState {
         ) {
             Ok(mut pending) => {
                 if let Err(err) = scan_curseforge_manual_downloads(&mut pending) {
-                    self.flows.import.error = Some(format!(
-                        "Failed to prepare manual CurseForge downloads: {err}"
-                    ));
+                    self.flows.import.error = Some(tr!("Failed to prepare manual CurseForge downloads: {err}", err = err).into_owned());
                     cleanup_pending_curseforge_manual_download(Some(pending));
                     return;
                 }
@@ -142,9 +141,7 @@ impl AppState {
                 }
             }
             Err(err) => {
-                self.flows.import.error = Some(format!(
-                    "Failed to prepare manual CurseForge downloads: {err}"
-                ));
+                self.flows.import.error = Some(tr!("Failed to prepare manual CurseForge downloads: {err}", err = err).into_owned());
             }
         }
     }
@@ -166,7 +163,7 @@ impl AppState {
             (_, Err(err)) => {
                 tracing::error!(target: "vertexlauncher/se5/import", error = %err, "CurseForge manual-download preflight failed.");
                 self.flows.import.error =
-                    Some(format!("Failed to prepare CurseForge import: {err}"));
+                    Some(tr!("Failed to prepare CurseForge import: {err}", err = err).into_owned());
             }
             (None, Ok(_)) => {}
         }
@@ -221,7 +218,7 @@ impl AppState {
                 cleanup_import_request_manual_staging(original.as_ref());
                 cleanup_pending_curseforge_manual_download(self.flows.pending_manual.take());
                 tracing::error!(target: "vertexlauncher/se5/import", error = %err, "Import profile task failed.");
-                self.flows.import.error = Some(format!("Failed to import profile: {err}"));
+                self.flows.import.error = Some(tr!("Failed to import profile: {err}", err = err).into_owned());
             }
         }
     }
@@ -259,7 +256,7 @@ impl AppState {
         let (project_id, file_id) = (*project_id, *file_id);
         let tx = self.flows.discover_preflight.sender();
         self.discover
-            .begin_install("Checking CurseForge download restrictions...");
+            .begin_install(tr!("Checking CurseForge download restrictions..."));
         self.flows.discover_preflight_request = Some(request);
         self.flows.discover_preflight_in_flight = true;
         launcher_runtime::spawn_blocking_detached(move || {
@@ -273,7 +270,7 @@ impl AppState {
         let tx = self.flows.discover_results.sender();
         let progress_tx = self.flows.discover_progress.sender();
         self.discover
-            .begin_install(format!("Downloading {}...", request.version_name));
+            .begin_install(tr!("Downloading {version_name}...", version_name = request.version_name).into_owned());
         let store = self.instances.clone();
         let root = self.installations_root();
         launcher_runtime::spawn_blocking_detached(move || {
@@ -314,9 +311,7 @@ impl AppState {
                     Ok(mut pending) => {
                         if let Err(err) = scan_curseforge_manual_downloads(&mut pending) {
                             cleanup_pending_curseforge_manual_download(Some(pending));
-                            self.discover.finish_install(Err(format!(
-                                "Failed to prepare manual CurseForge download: {err}"
-                            )));
+                            self.discover.finish_install(Err(tr!("Failed to prepare manual CurseForge download: {err}", err = err).into_owned()));
                             return;
                         }
                         if pending.pending_files.is_empty() {
@@ -340,19 +335,17 @@ impl AppState {
                             self.spawn_discover_install(request);
                         } else {
                             self.discover
-                                .begin_install("Waiting for manual CurseForge download...");
+                                .begin_install(tr!("Waiting for manual CurseForge download..."));
                             self.flows.pending_manual = Some(pending);
                         }
                     }
-                    Err(err) => self.discover.finish_install(Err(format!(
-                        "Failed to prepare manual CurseForge download: {err}"
-                    ))),
+                    Err(err) => self.discover.finish_install(Err(tr!("Failed to prepare manual CurseForge download: {err}", err = err).into_owned())),
                 }
             }
             (Some(request), Ok(None)) => self.spawn_discover_install(request),
             (_, Err(err)) => self
                 .discover
-                .finish_install(Err(format!("Failed to prepare CurseForge install: {err}"))),
+                .finish_install(Err(tr!("Failed to prepare CurseForge install: {err}", err = err).into_owned())),
             (None, Ok(_)) => {}
         }
     }
@@ -368,7 +361,7 @@ impl AppState {
         let drained = self.flows.discover_results.drain();
         if drained.disconnected {
             self.discover
-                .finish_install(Err("Install task stopped unexpectedly.".to_owned()));
+                .finish_install(Err(tr!("Install task stopped unexpectedly.").into_owned()));
             return;
         }
         let Some(result) = drained.items.into_iter().next() else {
@@ -384,7 +377,7 @@ impl AppState {
                 start_initial_instance_install_with(Some(tx), &instance, root.as_path(), &config);
                 self.open_instance(&instance.id);
                 self.discover
-                    .finish_install(Ok("Created instance from modpack.".to_owned()));
+                    .finish_install(Ok(tr!("Created instance from modpack.").into_owned()));
             }
             Err(err) => {
                 tracing::error!(target: "vertexlauncher/se5/discover", error = %err, "Discover modpack install failed.");
@@ -416,7 +409,7 @@ impl AppState {
             ManualDownloadContinuation::DiscoverInstall(request) => {
                 let Some(staged) = pending.staged_files.values().next().cloned() else {
                     pending.error =
-                        Some("Manual CurseForge download staging was empty.".to_owned());
+                        Some(tr!("Manual CurseForge download staging was empty.").into_owned());
                     self.flows.pending_manual = Some(pending);
                     return;
                 };
@@ -456,7 +449,7 @@ impl AppState {
             }
             Some(_) => self
                 .discover
-                .finish_install(Err("CurseForge install canceled.".to_owned())),
+                .finish_install(Err(tr!("CurseForge install canceled.").into_owned())),
             None => {}
         }
     }
@@ -479,10 +472,7 @@ impl AppState {
             .map(str::to_ascii_lowercase)
             .unwrap_or_default();
         if !matches!(extension.as_str(), "vtmpack" | "mrpack" | "zip") {
-            notification::warn!(
-                "import",
-                "Drop a .vtmpack, .mrpack or CurseForge .zip pack to import it."
-            );
+            notification::warn!("import", "Drop a .vtmpack, .mrpack or CurseForge .zip pack to import it.");
             return;
         }
         if self.flows.import.import_in_flight {

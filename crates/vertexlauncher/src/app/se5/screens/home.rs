@@ -3,6 +3,7 @@
 //! `launcher_ui`'s `home_api`, shared with the egui screen.
 
 
+use vertex_i18n::tr;
 use instances::InstanceRecord;
 use launcher_ui::screens::home_api::{self as api, EntryKind, EntryView};
 use launcher_ui::screens::{
@@ -34,20 +35,20 @@ pub enum HomeTab {
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     let _scroll = kit.scroll(ui, SCROLL_ID, kit::SPACE_LG, kit::SPACE_XL);
     let greeting = match state.auth.display_name() {
-        Some(name) if !state.streamer_mode() => format!("Welcome back, {name}"),
-        _ => "Welcome back".to_owned(),
+        Some(name) if !state.streamer_mode() => tr!("Welcome back, {name}", name = name).into_owned(),
+        _ => tr!("Welcome back").into_owned(),
     };
     kit.text(ui, TextRole::Title, &greeting);
     {
         let _tabs = kit.row(ui, kit::SPACE_SM);
         for (tab, label) in [
-            (HomeTab::Activity, "Instances & Worlds"),
-            (HomeTab::Screenshots, "Screenshots"),
+            (HomeTab::Activity, tr!("Instances & Worlds")),
+            (HomeTab::Screenshots, tr!("Screenshots")),
         ] {
             if kit.tab_sized(
                 ui,
                 &format!("home::tab::{label}"),
-                label,
+                &label,
                 state.home_tab == tab,
                 Sizing::Grow,
             ) {
@@ -70,18 +71,18 @@ fn activity(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     usage(ui, kit, state);
 
     let view = state.home.activity();
-    kit.text(ui, TextRole::Heading, "Worlds & Servers");
+    kit.text(ui, TextRole::Heading, &tr!("Worlds & Servers"));
     if view.favorites.is_empty() && view.recent.is_empty() {
         kit.text(
             ui,
             TextRole::Muted,
-            "No worlds or servers found in any instance.",
+            &tr!("No worlds or servers found in any instance."),
         );
         return;
     }
     let mut action = None;
     if !view.favorites.is_empty() {
-        kit.text(ui, TextRole::Body, "Favorites");
+        kit.text(ui, TextRole::Body, &tr!("Favorites"));
         for entry in &view.favorites {
             if let Some(next) = entry_row(ui, kit, state, entry, "favorites") {
                 action = Some((entry.clone(), next));
@@ -90,9 +91,9 @@ fn activity(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.separator(ui);
     }
     if view.recent.is_empty() {
-        kit.text(ui, TextRole::Muted, "No recent worlds or servers.");
+        kit.text(ui, TextRole::Muted, &tr!("No recent worlds or servers."));
     } else {
-        kit.text(ui, TextRole::Body, "Recent");
+        kit.text(ui, TextRole::Body, &tr!("Recent"));
         for entry in &view.recent {
             if let Some(next) = entry_row(ui, kit, state, entry, "recent") {
                 action = Some((entry.clone(), next));
@@ -149,10 +150,7 @@ fn copy_command(ui: &mut Ui<'_>, state: &mut AppState, entry: &EntryView, steam:
         .filter(|value| !value.trim().is_empty())
         .or_else(|| state.auth.display_name().map(str::to_owned));
     let Some(user) = user else {
-        launcher_ui::notification::warn!(
-            "home/quick_launch",
-            "Sign in before copying a command line."
-        );
+        launcher_ui::notification::warn!("home/quick_launch", "Sign in before copying a command line.");
         return;
     };
     let Some(target) = entry.targets.first() else {
@@ -179,19 +177,15 @@ fn copy_command(ui: &mut Ui<'_>, state: &mut AppState, entry: &EntryView, steam:
         .engine()
         .primary_window_control()
         .map(|mut window| window.set_clipboard_text(&text));
-    launcher_ui::notification::info!(
-        "home/quick_launch",
-        "{}",
-        if steam {
-            "Copied Steam launch options to clipboard."
-        } else {
-            "Copied command line to clipboard."
-        }
-    );
+    if steam {
+        launcher_ui::notification::info!("home/quick_launch", "Copied Steam launch options to clipboard.");
+    } else {
+        launcher_ui::notification::info!("home/quick_launch", "Copied command line to clipboard.");
+    }
 }
 
 fn usage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
-    kit.text(ui, TextRole::Heading, "Most Used Instances");
+    kit.text(ui, TextRole::Heading, &tr!("Most Used Instances"));
     let mut items: Vec<InstanceRecord> = state.instances.instances.clone();
     items.sort_by(|a, b| {
         b.launch_count
@@ -200,7 +194,7 @@ fn usage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             .then_with(|| a.name.cmp(&b.name))
     });
     if items.is_empty() {
-        kit.text(ui, TextRole::Muted, "No instances yet.");
+        kit.text(ui, TextRole::Muted, &tr!("No instances yet."));
         return;
     }
     for instance in items.iter().take(8) {
@@ -238,11 +232,7 @@ fn usage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             kit.text(
                 ui,
                 TextRole::Small,
-                &format!(
-                    "{} launches | {}",
-                    instance.launch_count,
-                    api::time_ago(instance.last_launched_at_ms)
-                ),
+                &tr!("{launch_count} launches | {last_launched}", launch_count = instance.launch_count, last_launched = api::time_ago(instance.last_launched_at_ms)),
             );
         }
         if kit.clicked(ui, &id) {
@@ -261,10 +251,10 @@ fn ping_indicator(
         None => (
             Icon::AntennaOff,
             p.text_muted.with_w(0.9),
-            "Ping unknown".to_owned(),
+            tr!("Ping unknown").into_owned(),
         ),
         Some(ping) => match ping.latency_ms.filter(|_| ping.online) {
-            None => (Icon::AntennaOff, p.danger, "Server offline".to_owned()),
+            None => (Icon::AntennaOff, p.danger, tr!("Server offline").into_owned()),
             Some(ms) => {
                 let (icon, color) = if ms <= 80 {
                     (Icon::Antenna5, p.success)
@@ -277,7 +267,7 @@ fn ping_indicator(
                 } else {
                     (Icon::Antenna1, p.danger * 0.92)
                 };
-                (icon, color.with_w(1.0), format!("Latency: {ms}ms"))
+                (icon, color.with_w(1.0), tr!("Latency: {ms}ms", ms = ms).into_owned())
             }
         },
     }
@@ -313,7 +303,7 @@ fn server_motd_row(ui: &mut Ui<'_>, kit: &mut Kit, entry: &EntryView, id: &str) 
     {
         let _first = kit.row(ui, 0);
         if entry.motd.is_empty() {
-            let unavailable = ui.ellipsize(&suffix_style, "MOTD unavailable", first_width);
+            let unavailable = ui.ellipsize(&suffix_style, &tr!("MOTD unavailable"), first_width);
             kit::label(ui, &unavailable, &suffix_style);
         } else {
             let fitted = mc_text::fit(ui, kit, &entry.motd[0], &line_style, first_width);
@@ -398,10 +388,10 @@ fn entry_row(
             kit.tooltip(
                 ui,
                 &star_id,
-                if entry.kind == EntryKind::World {
-                    "Toggle world favorite"
+                &if entry.kind == EntryKind::World {
+                    tr!("Toggle world favorite")
                 } else {
-                    "Toggle server favorite"
+                    tr!("Toggle server favorite")
                 },
             );
             match &entry.icon_png {
@@ -526,19 +516,19 @@ fn entry_row(
     }
     if state.home_menu_target.as_deref() == Some(menu_target.as_str()) {
         let sync_label = if entry.kind == EntryKind::World {
-            "Sync world…"
+            tr!("Sync world…")
         } else {
-            "Sync options…"
+            tr!("Sync options…")
         };
-        let edit_label = if entry.kind == EntryKind::World { "Rename…" } else { "Edit…" };
+        let edit_label = if entry.kind == EntryKind::World { tr!("Rename…") } else { tr!("Edit…") };
         let items = [
-            MenuEntry::new("Copy command line").icon(Icon::Terminal),
-            MenuEntry::new("Copy Steam launch options").icon(Icon::Steam),
+            MenuEntry::new(tr!("Copy command line")).icon(Icon::Terminal),
+            MenuEntry::new(tr!("Copy Steam launch options")).icon(Icon::Steam),
             MenuEntry::new(sync_label).icon(Icon::UsersGroup),
             MenuEntry::new(edit_label).icon(Icon::Edit),
-            MenuEntry::new("Copy to instance…").icon(Icon::Copy),
-            MenuEntry::new("Move to instance…").icon(Icon::Folder),
-            MenuEntry::new("Delete…").icon(Icon::Trash).danger(),
+            MenuEntry::new(tr!("Copy to instance…")).icon(Icon::Copy),
+            MenuEntry::new(tr!("Move to instance…")).icon(Icon::Folder),
+            MenuEntry::new(tr!("Delete…")).icon(Icon::Trash).danger(),
         ];
         if let Some(choice) = kit.context_menu(ui, "home::entry-menu", &mut state.home_menu, &items)
         {
@@ -568,10 +558,10 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.text(
             ui,
             TextRole::Muted,
-            if state.home.screenshots_loading() {
-                "Scanning for screenshots..."
+            &if state.home.screenshots_loading() {
+                tr!("Scanning for screenshots...")
             } else {
-                "No screenshots found in any instance."
+                tr!("No screenshots found in any instance.")
             },
         );
         return;
@@ -579,7 +569,7 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     kit.text(
         ui,
         TextRole::Heading,
-        &format!("Screenshots ({})", shots.len()),
+        &tr!("Screenshots ({count})", count = shots.len()),
     );
     let width = kit::content_width_in(ui, SCROLL_ID);
     let gap = f32::from(kit::SPACE_MD);
@@ -773,9 +763,9 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, key: &str) -
                 );
             }
             None if kit.images.failed(&image_key) => {
-                kit.text(ui, TextRole::Danger, "This screenshot could not be opened.")
+                kit.text(ui, TextRole::Danger, &tr!("This screenshot could not be opened."))
             }
-            None => kit.text(ui, TextRole::Muted, "Loading…"),
+            None => kit.text(ui, TextRole::Muted, &tr!("Loading…")),
         }
         kit.text(
             ui,
@@ -785,7 +775,7 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, key: &str) -
         if confirming {
             kit::label(
                 ui,
-                "Delete this screenshot from disk? This permanently removes it.",
+                &tr!("Delete this screenshot from disk? This permanently removes it."),
                 &TextStyle {
                     wrap: TextWrap::Words,
                     ..kit.style(TextRole::Danger)
@@ -796,14 +786,14 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, key: &str) -
             cancel = kit.button(
                 ui,
                 "home-screenshot::no",
-                "Cancel",
+                &tr!("Cancel"),
                 ButtonKind::Neutral,
                 !deleting,
             );
             delete = kit.button(
                 ui,
                 "home-screenshot::yes",
-                if deleting { "Deleting…" } else { "Delete" },
+                &if deleting { tr!("Deleting…") } else { tr!("Delete") },
                 ButtonKind::Danger,
                 !deleting,
             );
@@ -812,37 +802,33 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, key: &str) -
             copy = kit.button(
                 ui,
                 "home-screenshot::copy",
-                "Copy",
+                &tr!("Copy"),
                 ButtonKind::Neutral,
                 true,
             );
             if kit.button(
                 ui,
                 "home-screenshot::folder",
-                "Show in folder",
+                &tr!("Show in folder"),
                 ButtonKind::Neutral,
                 true,
             ) && let Some(parent) = shot.path.parent()
                 && let Err(err) = launcher_ui::desktop::open_in_file_manager(parent)
             {
-                launcher_ui::notification::error!(
-                    "screenshots",
-                    "Failed to open the folder: {}",
-                    err
-                );
+                launcher_ui::notification::error!("screenshots", "Failed to open the folder: {err}", err = err);
             }
             kit.fill(ui);
             ask = kit.button(
                 ui,
                 "home-screenshot::delete",
-                "Delete",
+                &tr!("Delete"),
                 ButtonKind::Danger,
                 true,
             );
             close = kit.button(
                 ui,
                 "home-screenshot::close",
-                "Close",
+                &tr!("Close"),
                 ButtonKind::Neutral,
                 true,
             );

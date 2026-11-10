@@ -1,3 +1,4 @@
+use vertex_i18n::{tr, trn};
 use super::*;
 
 pub fn apply_vtmpatch_to_instance(
@@ -10,26 +11,26 @@ pub fn apply_vtmpatch_to_instance(
 
     for entry in archive
         .entries()
-        .map_err(|err| format!("failed to read {}: {err}", patch_path.display()))?
+        .map_err(|err| tr!("failed to read {patch_path}: {err}", patch_path = patch_path.display(), err = err).into_owned())?
     {
-        let mut entry = entry.map_err(|err| format!("failed to read patch entry: {err}"))?;
+        let mut entry = entry.map_err(|err| tr!("failed to read patch entry: {err}", err = err).into_owned())?;
         let archive_path = entry
             .path()
-            .map_err(|err| format!("failed to decode patch entry path: {err}"))?
+            .map_err(|err| tr!("failed to decode patch entry path: {err}", err = err).into_owned())?
             .to_path_buf();
         let archive_name = path_to_string(&archive_path);
         let mut bytes = Vec::new();
         entry
             .read_to_end(&mut bytes)
-            .map_err(|err| format!("failed to read {archive_name}: {err}"))?;
+            .map_err(|err| tr!("failed to read {archive_name}: {err}", archive_name = archive_name, err = err).into_owned())?;
 
         if archive_name == PATCH_MANIFEST_PATH {
             patch_manifest = Some(
                 toml::from_str::<VtmpatchManifest>(
                     std::str::from_utf8(&bytes)
-                        .map_err(|err| format!("patch.toml is not valid UTF-8: {err}"))?,
+                        .map_err(|err| tr!("patch.toml is not valid UTF-8: {err}", err = err).into_owned())?,
                 )
-                .map_err(|err| format!("failed to parse patch.toml: {err}"))?,
+                .map_err(|err| tr!("failed to parse patch.toml: {err}", err = err).into_owned())?,
             );
         } else {
             bundled_entries.push((archive_path, bytes));
@@ -37,10 +38,7 @@ pub fn apply_vtmpatch_to_instance(
     }
 
     let patch_manifest = patch_manifest.ok_or_else(|| {
-        format!(
-            "No {PATCH_MANIFEST_PATH} found in Vertex patch {}",
-            patch_path.display()
-        )
+        vertex_i18n::tr!("No {manifest} found in Vertex patch {patch}", manifest = PATCH_MANIFEST_PATH, patch = patch_path.display()).into_owned()
     })?;
 
     tracing::info!(
@@ -66,7 +64,7 @@ pub fn apply_vtmpatch_to_instance(
                 "removing file per patch removed_paths"
             );
             fs::remove_file(&destination)
-                .map_err(|err| format!("failed to remove {}: {err}", destination.display()))?;
+                .map_err(|err| tr!("failed to remove {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
             removed += 1;
         } else if destination.is_dir() {
             tracing::debug!(
@@ -75,7 +73,7 @@ pub fn apply_vtmpatch_to_instance(
                 "removing directory per patch removed_paths"
             );
             fs::remove_dir_all(&destination)
-                .map_err(|err| format!("failed to remove {}: {err}", destination.display()))?;
+                .map_err(|err| tr!("failed to remove {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
             removed += 1;
         } else {
             tracing::debug!(
@@ -107,10 +105,10 @@ pub fn apply_vtmpatch_to_instance(
         );
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)
-                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+                .map_err(|err| tr!("failed to create {parent}: {err}", parent = parent.display(), err = err).into_owned())?;
         }
         fs::write(&destination, &bytes)
-            .map_err(|err| format!("failed to write {}: {err}", destination.display()))?;
+            .map_err(|err| tr!("failed to write {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
         bundled_applied_paths.insert(archive_path);
         changed += 1;
     }
@@ -162,7 +160,7 @@ pub fn apply_vtmpatch_to_instance(
                             error = %err,
                             "provider download failed and no bundled fallback is available"
                         );
-                        download_failures.push(format!("{}: {err}", entry.file_path.display()));
+                        download_failures.push(tr!("{file_path}: {err}", file_path = entry.file_path.display(), err = err).into_owned());
                     }
                 }
             }
@@ -209,7 +207,7 @@ pub fn apply_vtmpatch_to_instance(
                     file_path: normalize_pack_path(project.file_path.as_path()),
                     modrinth_project_id: project.modrinth_project_id.clone(),
                     curseforge_project_id: None,
-                    selected_source: Some("Modrinth".to_owned()),
+                    selected_source: Some(tr!("Modrinth").into_owned()),
                     selected_version_id: project.selected_version_id.clone(),
                     selected_version_name: project.selected_version_name.clone(),
                     selected_file_sha1: project.selected_file_sha1.clone(),
@@ -233,7 +231,7 @@ pub fn apply_vtmpatch_to_instance(
                             "gap-fill download failed"
                         );
                         download_failures
-                            .push(format!("{} (gap fill): {err}", entry.file_path.display()));
+                            .push(tr!("{file_path} (gap fill): {err}", file_path = entry.file_path.display(), err = err).into_owned());
                     }
                 }
             }
@@ -265,14 +263,12 @@ pub fn apply_vtmpatch_to_instance(
             .count();
 
     if !download_failures.is_empty() {
-        let err_msg = format!(
-            "Patch apply incomplete: {changed} bundled file{}, {downloaded} downloaded file{}, {removed} removed file{}. {} file{} failed to download: {}",
-            plural(changed),
-            plural(downloaded),
-            plural(removed),
+        let err_msg = trn!(
             download_failures.len(),
-            plural(download_failures.len()),
-            download_failures.join("; ")
+            "Patch apply incomplete: {summary}. {count} file failed to download: {details}",
+            "Patch apply incomplete: {summary}. {count} files failed to download: {details}",
+            summary = patch_summary(changed, downloaded, removed),
+            details = download_failures.join("; ")
         );
         tracing::error!(
             target: LOG,
@@ -286,13 +282,12 @@ pub fn apply_vtmpatch_to_instance(
         return Err(err_msg);
     }
 
-    let message = format!(
-        "Applied patch: {changed} file{} bundled, {downloaded} file{} downloaded, {removed} file{} removed ({planned_mod_operations} planned mod operation{}).",
-        plural(changed),
-        plural(downloaded),
-        plural(removed),
-        plural(planned_mod_operations),
-    );
+    let message = tr!(
+        "Applied patch: {summary} ({operations}).",
+        summary = patch_summary(changed, downloaded, removed),
+        operations = trn!(planned_mod_operations, "{count} planned mod operation", "{count} planned mod operations")
+    )
+    .into_owned();
     tracing::info!(
         target: LOG,
         instance = %instance_root.display(),
@@ -314,12 +309,12 @@ pub fn apply_vtmpatch_to_instance(
                 patch = %patch_path.display(),
                 "patch contained no changes — instance already matches the target"
             );
-            return Ok("Applied patch: no changes were present in the patch.".to_owned());
+            return Ok(tr!("Applied patch: no changes were present in the patch.").into_owned());
         } else {
-            let err_msg = format!(
-                "Patch apply made no filesystem changes despite {planned_changes} planned operation{}. \
-                 The target instance may already match the patch, or all removal targets were already absent.",
-                plural(planned_changes)
+            let err_msg = trn!(
+                planned_changes,
+                "Patch apply made no filesystem changes despite {count} planned operation. The target instance may already match the patch, or all removal targets were already absent.",
+                "Patch apply made no filesystem changes despite {count} planned operations. The target instance may already match the patch, or all removal targets were already absent."
             );
             tracing::warn!(
                 target: LOG,
@@ -333,4 +328,17 @@ pub fn apply_vtmpatch_to_instance(
     }
 
     Ok(message)
+}
+
+
+/// "3 bundled files, 2 downloaded files and 1 removed file", each count with its noun in the right plural form.
+fn patch_summary(changed: usize, downloaded: usize, removed: usize) -> String {
+    vertex_i18n::Locale::current().join(
+        &[
+            trn!(changed, "{count} bundled file", "{count} bundled files"),
+            trn!(downloaded, "{count} downloaded file", "{count} downloaded files"),
+            trn!(removed, "{count} removed file", "{count} removed files"),
+        ],
+        vertex_i18n::ListKind::And,
+    )
 }

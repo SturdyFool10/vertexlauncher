@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 const RUNTIME_PREPARE_TASK_KIND: &str = "instance runtime prepare";
@@ -57,9 +58,9 @@ pub(in super::super) fn request_runtime_prepare(
         state.launch_user_key = None;
     }
     state.status_message = Some(match operation {
-        RuntimePrepareOperation::Launch => format!("Preparing Minecraft {game_version}..."),
+        RuntimePrepareOperation::Launch => tr!("Preparing Minecraft {game_version}...", game_version = game_version).into_owned(),
         RuntimePrepareOperation::ReinstallProfile => {
-            format!("Reinstalling Minecraft {game_version} profile...")
+            tr!("Reinstalling Minecraft {game_version} profile...", game_version = game_version).into_owned()
         }
     });
     let instance_root_display = display_user_path(instance_root.as_path());
@@ -102,18 +103,18 @@ pub(in super::super) fn request_runtime_prepare(
     let modloader_version_display = modloader_version_for_task
         .as_deref()
         .filter(|value| !value.is_empty())
-        .map(|value| format!(" {value}"))
+        .map(|value| tr!(" {value}", value = value).into_owned())
         .unwrap_or_default();
     let java_launch_mode = if let Some(path) = java_executable_for_task
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        format!("configured Java at {path}")
+        tr!("configured Java at {path}", path = path).into_owned()
     } else if let Some(runtime_major) = required_java_major {
-        format!("auto-provisioned OpenJDK {runtime_major}")
+        tr!("auto-provisioned OpenJDK {runtime_major}", runtime_major = runtime_major).into_owned()
     } else {
-        "java from PATH".to_owned()
+        tr!("java from PATH").into_owned()
     };
     let username = visible_username_for_task
         .as_deref()
@@ -137,23 +138,8 @@ pub(in super::super) fn request_runtime_prepare(
         tab_id.as_str(),
         crate::log_format::LogLevel::Info,
         match operation {
-            RuntimePrepareOperation::Launch => format!(
-                "Launch request: root={} | Minecraft {} | {}{} | max memory={} MiB | {}",
-                instance_root_display,
-                game_version_for_task,
-                modloader_for_task,
-                modloader_version_display,
-                max_memory_mib.max(512),
-                java_launch_mode
-            ),
-            RuntimePrepareOperation::ReinstallProfile => format!(
-                "Reinstall request: root={} | Minecraft {} | {}{} | {}",
-                instance_root_display,
-                game_version_for_task,
-                modloader_for_task,
-                modloader_version_display,
-                java_launch_mode
-            ),
+            RuntimePrepareOperation::Launch => tr!("Launch request: root={instance_root_display} | Minecraft {game_version_for_task} | {modloader_for_task}{modloader_version_display} | max memory={max_memory} MiB | {java_launch_mode}", instance_root_display = instance_root_display, game_version_for_task = game_version_for_task, modloader_for_task = modloader_for_task, modloader_version_display = modloader_version_display, max_memory = max_memory_mib.max(512), java_launch_mode = java_launch_mode).into_owned(),
+            RuntimePrepareOperation::ReinstallProfile => tr!("Reinstall request: root={instance_root_display} | Minecraft {game_version_for_task} | {modloader_for_task}{modloader_version_display} | {java_launch_mode}", instance_root_display = instance_root_display, game_version_for_task = game_version_for_task, modloader_for_task = modloader_for_task, modloader_version_display = modloader_version_display, java_launch_mode = java_launch_mode).into_owned(),
         },
     );
     let instance_id_for_notifications = state.name_input.clone();
@@ -178,12 +164,10 @@ pub(in super::super) fn request_runtime_prepare(
                             installed
                         })
                         .map_err(|err| {
-                            format!("failed to auto-install OpenJDK {runtime_major}: {err}")
+                            tr!("failed to auto-install OpenJDK {runtime_major}: {err}", runtime_major = runtime_major, err = err).into_owned()
                         })
                 }
-                Err(err) => Err(format!(
-                    "configured Java path is not readable ({path}): {err}"
-                )),
+                Err(err) => Err(tr!("configured Java path is not readable ({path}): {err}", path = path, err = err).into_owned()),
             }
         } else if let Some(runtime_major) = required_java_major {
             ensure_openjdk_runtime_async(runtime_major)
@@ -193,7 +177,7 @@ pub(in super::super) fn request_runtime_prepare(
                     configured_java = Some((runtime_major, installed.clone()));
                     installed
                 })
-                .map_err(|err| format!("failed to auto-install OpenJDK {runtime_major}: {err}"))
+                .map_err(|err| tr!("failed to auto-install OpenJDK {runtime_major}: {err}", runtime_major = runtime_major, err = err).into_owned())
         } else {
             Ok("java".to_owned())
         };
@@ -237,7 +221,7 @@ pub(in super::super) fn request_runtime_prepare(
                         reinstall_instance_profile_files(instance_root.as_path())
                             .await
                             .map_err(|err| {
-                                format!("failed to clear install artifacts before reinstall: {err}")
+                                tr!("failed to clear install artifacts before reinstall: {err}", err = err).into_owned()
                             });
                     if let Err(err) = reinstall_result {
                         break 'runtime_result Err(err);
@@ -339,7 +323,7 @@ pub(in super::super) fn request_runtime_prepare(
         } else {
             Err(java_path_result
                 .err()
-                .unwrap_or_else(|| "failed to select Java executable".to_owned()))
+                .unwrap_or_else(|| tr!("failed to select Java executable").into_owned()))
         };
         if let Err(err) = tx.send((
             game_version_for_result.clone(),
@@ -357,7 +341,7 @@ pub(in super::super) fn request_runtime_prepare(
         }
         if let Err(err) = progress_tx_done.send(InstallProgress {
             stage: InstallStage::Complete,
-            message: format!("Install task ended for {instance_id_for_notifications}."),
+            message: tr!("Install task ended for {instance_id_for_notifications}.", instance_id_for_notifications = instance_id_for_notifications).into_owned(),
             downloaded_files: 0,
             total_files: 0,
             downloaded_bytes: 0,
@@ -390,18 +374,7 @@ pub(in super::super) fn poll_runtime_progress(state: &mut InstanceScreenState) {
         if should_emit_progress_notification(state, &progress) {
             let source = format!("installation/{}", state.name_input);
             let fraction = progress_fraction(&progress);
-            notification::progress!(
-                notification::Severity::Info,
-                source,
-                fraction,
-                "{} · {:.1} MiB/s{}",
-                stage_label(progress.stage),
-                progress.bytes_per_second / (1024.0 * 1024.0),
-                progress
-                    .eta_seconds
-                    .map(|eta| format!(" · ETA {}s", eta))
-                    .unwrap_or_default()
-            );
+            notification::progress!(notification::Severity::Info, source, fraction, "{stage} · {speed:.1} MiB/s{eta}", stage = stage_label(progress.stage), speed = progress.bytes_per_second / (1024.0 * 1024.0), eta = progress.eta_seconds.map(|seconds| tr!(" · ETA {seconds}s", seconds = seconds).into_owned()).unwrap_or_default());
             state.runtime_last_notification_at = Some(Instant::now());
         }
     }
@@ -466,37 +439,14 @@ pub(in super::super) fn poll_runtime_prepare(
                     console::push_log_to_tab(
                         tab_id.as_str(),
                         crate::log_format::LogLevel::Info,
-                        format!(
-                            "Launched Minecraft {} (pid {}, profile {}).",
-                            game_version, launch.pid, launch.profile_id
-                        ),
+                        tr!("Launched Minecraft {game_version} (pid {pid}, profile {profile_id}).", game_version = game_version, pid = launch.pid, profile_id = launch.profile_id).into_owned(),
                     );
                     state.running = true;
                     install_activity::clear_instance(state.name_input.as_str());
-                    state.status_message = Some(format!(
-                        "Launched Minecraft {} in {} (pid {}, profile {}, {} file(s) downloaded, loader: {}).",
-                        game_version,
-                        instance_root_display,
-                        launch.pid,
-                        launch.profile_id,
-                        setup.downloaded_files,
-                        setup.resolved_modloader_version.as_deref().unwrap_or("n/a")
-                    ));
-                    notification::progress!(
-                        notification::Severity::Info,
-                        format!("installation/{}", state.name_input),
-                        1.0f32,
-                        "Launched Minecraft {} (pid {}, {} files).",
-                        game_version,
-                        launch.pid,
-                        setup.downloaded_files
-                    );
+                    state.status_message = Some(tr!("Launched Minecraft {game_version} in {instance_root_display} (pid {pid}, profile {profile_id}, {files}, loader: {loader_version}).", game_version = game_version, instance_root_display = instance_root_display, pid = launch.pid, profile_id = launch.profile_id, files = vertex_i18n::trn!(setup.downloaded_files, "{count} file downloaded", "{count} files downloaded"), loader_version = setup.resolved_modloader_version.as_deref().unwrap_or("n/a")).into_owned());
+                    notification::progress!(notification::Severity::Info, format!("installation/{}", state.name_input), 1.0f32, "Launched Minecraft {game_version} (pid {pid}, {downloaded_files} files).", game_version = game_version, pid = launch.pid, downloaded_files = setup.downloaded_files);
                     if had_install_progress {
-                        notification::info!(
-                            "Installation Complete!",
-                            "{} finished installing files and launched successfully.",
-                            state.name_input
-                        );
+                        notification::info!("Installation Complete!", "{name_input} finished installing files and launched successfully.", name_input = state.name_input);
                     }
                 } else {
                     state.running = false;
@@ -504,48 +454,17 @@ pub(in super::super) fn poll_runtime_prepare(
                     let source = format!("installation/{}", state.name_input);
                     match operation {
                         RuntimePrepareOperation::ReinstallProfile => {
-                            state.status_message = Some(format!(
-                                "Reinstalled Minecraft {} in {} ({} file(s) downloaded, loader: {}).",
-                                game_version,
-                                instance_root_display,
-                                setup.downloaded_files,
-                                setup.resolved_modloader_version.as_deref().unwrap_or("n/a")
-                            ));
-                            notification::progress!(
-                                notification::Severity::Info,
-                                source,
-                                1.0f32,
-                                "Reinstalled Minecraft {} ({} files).",
-                                game_version,
-                                setup.downloaded_files
-                            );
+                            state.status_message = Some(tr!("Reinstalled Minecraft {game_version} in {instance_root_display} ({files}, loader: {loader_version}).", game_version = game_version, instance_root_display = instance_root_display, files = vertex_i18n::trn!(setup.downloaded_files, "{count} file downloaded", "{count} files downloaded"), loader_version = setup.resolved_modloader_version.as_deref().unwrap_or("n/a")).into_owned());
+                            notification::progress!(notification::Severity::Info, source, 1.0f32, "Reinstalled Minecraft {game_version} ({downloaded_files} files).", game_version = game_version, downloaded_files = setup.downloaded_files);
                             if had_install_progress {
-                                notification::info!(
-                                    "Installation Complete!",
-                                    "{} finished installing successfully.",
-                                    state.name_input
-                                );
+                                notification::info!("Installation Complete!", "{name_input} finished installing successfully.", name_input = state.name_input);
                             }
                         }
                         RuntimePrepareOperation::Launch => {
-                            state.status_message = Some(format!(
-                                "Installed Minecraft {} in {} ({} file(s) downloaded).",
-                                game_version, instance_root_display, setup.downloaded_files
-                            ));
-                            notification::progress!(
-                                notification::Severity::Info,
-                                source,
-                                1.0f32,
-                                "Installed Minecraft {} ({} files).",
-                                game_version,
-                                setup.downloaded_files
-                            );
+                            state.status_message = Some(tr!("Installed Minecraft {game_version} in {instance_root_display} ({files}).", game_version = game_version, instance_root_display = instance_root_display, files = vertex_i18n::trn!(setup.downloaded_files, "{count} file downloaded", "{count} files downloaded")).into_owned());
+                            notification::progress!(notification::Severity::Info, source, 1.0f32, "Installed Minecraft {game_version} ({downloaded_files} files).", game_version = game_version, downloaded_files = setup.downloaded_files);
                             if had_install_progress {
-                                notification::info!(
-                                    "Installation Complete!",
-                                    "{} finished installing successfully.",
-                                    state.name_input
-                                );
+                                notification::info!("Installation Complete!", "{name_input} finished installing successfully.", name_input = state.name_input);
                             }
                         }
                     }
@@ -554,13 +473,8 @@ pub(in super::super) fn poll_runtime_prepare(
             Err(err) => {
                 state.running = false;
                 install_activity::clear_instance(state.name_input.as_str());
-                state.status_message = Some(format!("Failed to prepare game files: {err}"));
-                notification::error!(
-                    format!("installation/{}", state.name_input),
-                    "{} installation failed: {}",
-                    state.name_input,
-                    err
-                );
+                state.status_message = Some(tr!("Failed to prepare game files: {err}", err = err).into_owned());
+                notification::error!(format!("installation/{}", state.name_input), "{name_input} installation failed: {err}", name_input = state.name_input, err = err);
             }
         }
     }
@@ -610,13 +524,13 @@ pub(in super::super) fn progress_fraction_from_activity(
     }
 }
 
-pub(in super::super) fn stage_label(stage: InstallStage) -> &'static str {
+pub(in super::super) fn stage_label(stage: InstallStage) -> std::borrow::Cow<'static, str> {
     match stage {
-        InstallStage::PreparingFolders => "Preparing folders",
-        InstallStage::ResolvingMetadata => "Resolving metadata",
-        InstallStage::DownloadingCore => "Downloading core files",
-        InstallStage::InstallingModloader => "Installing modloader",
-        InstallStage::Complete => "Complete",
+        InstallStage::PreparingFolders => tr!("Preparing folders"),
+        InstallStage::ResolvingMetadata => tr!("Resolving metadata"),
+        InstallStage::DownloadingCore => tr!("Downloading core files"),
+        InstallStage::InstallingModloader => tr!("Installing modloader"),
+        InstallStage::Complete => tr!("Complete"),
     }
 }
 

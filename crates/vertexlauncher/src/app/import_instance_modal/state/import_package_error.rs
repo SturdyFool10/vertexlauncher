@@ -11,6 +11,8 @@ pub enum ImportPackageError {
 
 impl ImportPackageError {
     pub(crate) fn message(message: impl Into<String>) -> Self {
+        let message: String = message.into();
+        let message = vertex_i18n::t(&message).into_owned();
         Self::Message(message.into())
     }
 }

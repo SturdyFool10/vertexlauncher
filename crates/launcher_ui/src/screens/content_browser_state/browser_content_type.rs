@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -16,12 +17,12 @@ impl BrowserContentType {
         BrowserContentType::DataPack,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            BrowserContentType::Mod => "Mod",
-            BrowserContentType::ResourcePack => "Resource Pack",
-            BrowserContentType::Shader => "Shader",
-            BrowserContentType::DataPack => "Data Pack",
+            BrowserContentType::Mod => tr!("Mod"),
+            BrowserContentType::ResourcePack => tr!("Resource Pack"),
+            BrowserContentType::Shader => tr!("Shader"),
+            BrowserContentType::DataPack => tr!("Data Pack"),
         }
     }
 

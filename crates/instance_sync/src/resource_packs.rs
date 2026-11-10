@@ -1,6 +1,7 @@
 //! Resource pack sync: shares packs between opted-in instances where their metadata (or the
 //! user's override) says they work, and keeps the enabled list in step for those packs.
 
+use vertex_i18n::tr;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Read;
@@ -178,7 +179,7 @@ fn share_packs(instances: &[&SyncInstance], store: &InstanceStore, report: &mut 
                 Ok(()) => report.packs_shared += 1,
                 Err(err) => report
                     .errors
-                    .push(format!("{}: could not add pack {name}: {err}", instance.id)),
+                    .push(tr!("{id}: could not add pack {name}: {err}", id = instance.id, name = name, err = err).into_owned()),
             }
         }
     }

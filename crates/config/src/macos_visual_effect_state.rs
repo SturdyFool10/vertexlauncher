@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// NSVisualEffectView state selection for macOS blur/backdrop effects.
@@ -18,9 +19,9 @@ impl MacosVisualEffectState {
 
     pub const fn label(self) -> &'static str {
         match self {
-            MacosVisualEffectState::FollowsWindowActiveState => "Follows Window Active State",
-            MacosVisualEffectState::Active => "Active",
-            MacosVisualEffectState::Inactive => "Inactive",
+            MacosVisualEffectState::FollowsWindowActiveState => src!("Follows Window Active State"),
+            MacosVisualEffectState::Active => src!("Active"),
+            MacosVisualEffectState::Inactive => src!("Inactive"),
         }
     }
 }

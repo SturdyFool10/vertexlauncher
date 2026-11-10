@@ -1,6 +1,7 @@
 //! Toolkit-free view of the instance screen's installed-content list: the same scanning, lookups, filtering, paging
 //! and actions the egui list runs, exposed as plain data and calls.
 
+use vertex_i18n::tr;
 use super::*;
 
 pub const PAGE_SIZES: [usize; 4] = INSTALLED_CONTENT_PAGE_SIZES;
@@ -75,11 +76,11 @@ pub fn view(
     // A rescan of a list already on screen keeps showing it; only a first scan has nothing to show but "loading".
     if files.is_empty() && state.installed_content_cache.scans_in_flight.contains(&kind) {
         view.loading = true;
-        view.empty_message = Some(format!("Loading installed {}...", kind.label().to_lowercase()));
+        view.empty_message = Some(tr!("Loading installed {kind}...", kind = kind.label().to_lowercase()).into_owned());
         return view;
     }
     if files.is_empty() {
-        view.empty_message = Some(format!("No {} installed.", kind.label().to_lowercase()));
+        view.empty_message = Some(tr!("No {kind} installed.", kind = kind.label().to_lowercase()).into_owned());
         return view;
     }
 
@@ -93,11 +94,11 @@ pub fn view(
     if total_items == 0 {
         let query = state.installed_content_search_query.trim();
         view.empty_message = Some(if query.is_empty() && state.installed_content_updatable_only {
-            format!("No {} have an update available.", kind.label().to_lowercase())
+            tr!("No {kind} have an update available.", kind = kind.label().to_lowercase()).into_owned()
         } else if query.is_empty() {
-            format!("No {} installed.", kind.label().to_lowercase())
+            tr!("No {kind} installed.", kind = kind.label().to_lowercase()).into_owned()
         } else {
-            format!("No {} match '{query}'.", kind.label().to_lowercase())
+            tr!("No {kind} match '{query}'.", kind = kind.label().to_lowercase(), query = query).into_owned()
         });
         return view;
     }
@@ -244,20 +245,20 @@ pub fn apply_patch(state: &mut InstanceScreenState, instance_root: &Path, path: 
 
 pub fn refresh(state: &mut InstanceScreenState, instance_root: &Path) {
     refresh_installed_content_state(state, instance_root);
-    state.status_message = Some("Refreshed installed content metadata and hash cache.".to_owned());
+    state.status_message = Some(tr!("Refreshed installed content metadata and hash cache.").into_owned());
 }
 
 /// Opens the Content Browser's detail page for an installed row, once its metadata has resolved. Returns an error
 /// message to show when that is not possible yet.
 pub fn open_detail(state: &mut InstanceScreenState, row: &ContentRow, locked: bool) -> Result<(), String> {
     if locked {
-        return Err("Content Browser is unavailable while instance prep is running.".to_owned());
+        return Err(tr!("Content Browser is unavailable while instance prep is running.").into_owned());
     }
     match state.content_metadata_cache.get(&row.lookup_key).and_then(|meta| meta.clone()) {
         Some(metadata) => {
             crate::screens::content_browser::request_open_detail_for_content(metadata.entry);
             Ok(())
         }
-        None => Err("Still loading content metadata. Try again in a moment.".to_owned()),
+        None => Err(tr!("Still loading content metadata. Try again in a moment.").into_owned()),
     }
 }

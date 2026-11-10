@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 
@@ -13,17 +14,14 @@ pub(super) fn open_instance_folder(
         let instance_root = instances::instance_root_path(&installations_root, instance);
         match desktop::open_in_file_manager(instance_root.as_path()) {
             Ok(()) => {
-                state.status_message = Some(format!(
-                    "Opened instance folder: {}",
-                    instance_root.display()
-                ));
+                state.status_message = Some(tr!("Opened instance folder: {instance_root}", instance_root = instance_root.display()).into_owned());
             }
             Err(err) => {
-                state.status_message = Some(format!("Failed to open instance folder: {err}"));
+                state.status_message = Some(tr!("Failed to open instance folder: {err}", err = err).into_owned());
             }
         }
     } else {
-        state.status_message = Some("Instance was removed before opening its folder.".to_owned());
+        state.status_message = Some(tr!("Instance was removed before opening its folder.").into_owned());
     }
 }
 

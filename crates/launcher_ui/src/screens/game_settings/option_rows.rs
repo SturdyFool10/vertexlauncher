@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 /// Writes a new value for `def`, formatted the way this version's file expects.
@@ -36,7 +37,7 @@ pub(super) fn language_choices(current: &str) -> Vec<(String, String)> {
             } else {
                 (*code).to_owned()
             };
-            (stored, format!("{name} ({code})"))
+            (stored, format!("{} ({code})", vertex_i18n::t(name)))
         })
         .collect()
 }
@@ -51,7 +52,7 @@ pub(super) fn sound_device_choices(
         .strip_prefix(audio_devices::OPENAL_PREFIX)
         .unwrap_or(current);
     let prefixed = current.is_empty() || current.starts_with(audio_devices::OPENAL_PREFIX);
-    let mut choices = vec![(String::new(), "System Default".to_owned())];
+    let mut choices = vec![(String::new(), tr!("System Default").into_owned())];
     let mut found_current = current.is_empty();
     for name in devices.unwrap_or_default() {
         let stored = if name == bare_current {

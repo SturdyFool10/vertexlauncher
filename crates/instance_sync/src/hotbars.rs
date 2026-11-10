@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fs;
@@ -79,10 +80,7 @@ pub(crate) fn sync(instances: &[SyncInstance], skip: &HashSet<String>, report: &
         let path = target.root.join(HOTBAR_FILE);
         match write_atomic(&path, &source_file.bytes, Some(source_file.modified)) {
             Ok(()) => report.hotbars_copied += 1,
-            Err(err) => report.errors.push(format!(
-                "{}: failed to copy hotbars from {}: {err}",
-                target.id, source.id
-            )),
+            Err(err) => report.errors.push(tr!("{id}: failed to copy hotbars from {id2}: {err}", id = target.id, id2 = source.id, err = err).into_owned()),
         }
     }
 }

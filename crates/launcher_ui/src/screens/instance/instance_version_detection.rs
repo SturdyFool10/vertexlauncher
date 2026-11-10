@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,21 +21,18 @@ struct VersionProfileCandidate {
 pub fn detect_instance_versions(instance_root: &Path) -> Result<DetectedInstanceVersions, String> {
     let versions_dir = instance_root.join("versions");
     if !versions_dir.is_dir() {
-        return Err(format!(
-            "No versions directory was found at {}.",
-            versions_dir.display()
-        ));
+        return Err(tr!("No versions directory was found at {versions_dir}.", versions_dir = versions_dir.display()).into_owned());
     }
 
     let mut candidates = Vec::new();
     let entries = fs::read_dir(versions_dir.as_path())
-        .map_err(|err| format!("failed to read {}: {err}", versions_dir.display()))?;
+        .map_err(|err| tr!("failed to read {versions_dir}: {err}", versions_dir = versions_dir.display(), err = err).into_owned())?;
     for entry in entries {
         let entry =
-            entry.map_err(|err| format!("failed to read version directory entry: {err}"))?;
+            entry.map_err(|err| tr!("failed to read version directory entry: {err}", err = err).into_owned())?;
         let file_type = entry
             .file_type()
-            .map_err(|err| format!("failed to inspect {}: {err}", entry.path().display()))?;
+            .map_err(|err| tr!("failed to inspect {path}: {err}", path = entry.path().display(), err = err).into_owned())?;
         if !file_type.is_dir() {
             continue;
         }
@@ -46,9 +44,9 @@ pub fn detect_instance_versions(instance_root: &Path) -> Result<DetectedInstance
         }
 
         let raw = fs::read_to_string(profile_path.as_path())
-            .map_err(|err| format!("failed to read {}: {err}", profile_path.display()))?;
+            .map_err(|err| tr!("failed to read {profile_path}: {err}", profile_path = profile_path.display(), err = err).into_owned())?;
         let parsed: serde_json::Value = serde_json::from_str(raw.as_str())
-            .map_err(|err| format!("failed to parse {}: {err}", profile_path.display()))?;
+            .map_err(|err| tr!("failed to parse {profile_path}: {err}", profile_path = profile_path.display(), err = err).into_owned())?;
         if let Some(candidate) = candidate_from_profile(&dir_name, &parsed) {
             candidates.push(candidate);
         }
@@ -64,7 +62,7 @@ pub fn detect_instance_versions(instance_root: &Path) -> Result<DetectedInstance
             source_profile_id: candidate.profile_id,
         })
         .ok_or_else(|| {
-            "No usable Minecraft version profiles were found in this instance.".to_owned()
+            tr!("No usable Minecraft version profiles were found in this instance.").into_owned()
         })
 }
 
@@ -121,7 +119,7 @@ fn candidate_from_profile(
     Some(VersionProfileCandidate {
         profile_id: profile_id.to_owned(),
         game_version,
-        modloader: "Vanilla".to_owned(),
+        modloader: tr!("Vanilla").into_owned(),
         modloader_version: String::new(),
         score: 100,
     })

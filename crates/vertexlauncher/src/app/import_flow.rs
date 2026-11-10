@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 fn should_preflight_curseforge_manual_downloads(
@@ -60,28 +61,21 @@ impl PendingCurseForgeManualDownloadState {
         ));
         fs::create_dir_all(staging_dir.as_path()).map_err(|err| {
             tracing::warn!(target: "vertexlauncher/io", op = "create_dir_all", path = %staging_dir.display(), error = %err, context = "create manual CurseForge staging");
-            format!("failed to create staging directory: {err}")
+            tr!("failed to create staging directory: {err}", err = err).into_owned()
         })?;
         let mut staged_files = HashMap::new();
         for (file_id, source_path) in initial_staged_files {
             let file_name = source_path
                 .file_name()
                 .ok_or_else(|| {
-                    format!(
-                        "staged CurseForge retry file {} had no file name",
-                        source_path.display()
-                    )
+                    tr!("staged CurseForge retry file {source_path} had no file name", source_path = source_path.display()).into_owned()
                 })?
                 .to_owned();
             let destination = staging_dir.join(file_name);
             if source_path != destination {
                 fs::copy(source_path.as_path(), destination.as_path()).map_err(|err| {
                     tracing::warn!(target: "vertexlauncher/io", op = "copy", from = %source_path.display(), to = %destination.display(), error = %err, context = "stage CurseForge retry file");
-                    format!(
-                        "failed to copy staged CurseForge retry file {} into {}: {err}",
-                        source_path.display(),
-                        destination.display()
-                    )
+                    tr!("failed to copy staged CurseForge retry file {source_path} into {destination}: {err}", source_path = source_path.display(), destination = destination.display(), err = err).into_owned()
                 })?;
             }
             staged_files.insert(file_id, destination);
@@ -174,10 +168,10 @@ pub(super) fn find_and_stage_manual_downloads(
     pending_files: &[import_instance_modal::CurseForgeManualDownloadRequirement],
 ) -> Result<Vec<(u64, PathBuf)>, String> {
     let entries = fs::read_dir(downloads_dir)
-        .map_err(|err| format!("failed to read downloads folder: {err}"))?;
+        .map_err(|err| tr!("failed to read downloads folder: {err}", err = err).into_owned())?;
     let mut candidates = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|err| format!("failed to inspect downloads folder: {err}"))?;
+        let entry = entry.map_err(|err| tr!("failed to inspect downloads folder: {err}", err = err).into_owned())?;
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -198,10 +192,7 @@ pub(super) fn find_and_stage_manual_downloads(
         let staged_path = staging_dir.join(requirement.file_name.as_str());
         fs::copy(source_path, staged_path.as_path()).map_err(|err| {
             tracing::warn!(target: "vertexlauncher/io", op = "copy", from = %source_path.display(), to = %staged_path.display(), error = %err, context = "stage manual CurseForge file");
-            format!(
-                "failed to stage {} from downloads folder: {err}",
-                requirement.file_name
-            )
+            tr!("failed to stage {file_name} from downloads folder: {err}", file_name = requirement.file_name, err = err).into_owned()
         })?;
         found.push((requirement.file_id, staged_path));
     }

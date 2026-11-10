@@ -79,10 +79,7 @@ impl AuthState {
                             error,
                             "Failed to resolve account avatar in background worker."
                         );
-                        notification::warn!(
-                            "auth/avatar",
-                            "Failed to resolve account avatar in background worker: {error}"
-                        );
+                        notification::warn!("auth/avatar", "Failed to resolve account avatar in background worker: {error}", error = error);
                         continue;
                     }
 

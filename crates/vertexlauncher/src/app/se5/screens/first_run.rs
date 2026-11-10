@@ -1,5 +1,6 @@
 //! First launch: choose the config file format.
 
+use vertex_i18n::tr;
 use config::{ConfigFormat, create_default_config};
 use vertex_shell::sturdy::ui::{Sizing, TextStyle, TextWrap, Ui};
 use vertex_shell::sturdy::ui_kit::ModalStyle;
@@ -26,10 +27,10 @@ pub fn config_format(
     let mut create = false;
     let response = kit::modal(ui, "first-run::format", &style, true, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Welcome to Vertex");
+        kit.text(ui, TextRole::Heading, &tr!("Welcome to Vertex"));
         kit::label(
             ui,
-            "Vertex keeps its settings in one file. Choose its format; you can edit it by hand later.",
+            &tr!("Vertex keeps its settings in one file. Choose its format; you can edit it by hand later."),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Body)
@@ -50,7 +51,7 @@ pub fn config_format(
         create = kit.button(
             ui,
             "first-run::format::create",
-            "Create settings file",
+            &tr!("Create settings file"),
             ButtonKind::Primary,
             true,
         );
@@ -68,11 +69,7 @@ pub fn config_format(
             false
         }
         Err(err) => {
-            launcher_ui::notification::error!(
-                "config",
-                "Failed to create the settings file: {}",
-                err
-            );
+            launcher_ui::notification::error!("config", "Failed to create the settings file: {err}", err = err);
             true
         }
     }

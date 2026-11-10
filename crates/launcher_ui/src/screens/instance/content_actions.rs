@@ -1,3 +1,4 @@
+use vertex_i18n::{tr, trn};
 use super::content_updates::update_all_installed_content;
 use super::*;
 
@@ -34,7 +35,7 @@ pub(super) fn request_content_update(
     let kind = state.selected_content_tab;
 
     state.content_apply_in_flight = true;
-    state.status_message = Some(format!("Updating {}...", project_name));
+    state.status_message = Some(tr!("Updating {project_name}...", project_name = project_name).into_owned());
     tracing::info!(
         target: CONTENT_UPDATE_LOG_TARGET,
         instance = %instance_name,
@@ -49,7 +50,7 @@ pub(super) fn request_content_update(
     install_activity::set_status(
         instance_name.as_str(),
         InstallStage::DownloadingCore,
-        format!("Updating {}...", project_name),
+        tr!("Updating {project_name}...", project_name = project_name).into_owned(),
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
@@ -148,11 +149,11 @@ pub(super) fn request_vtmpatch_apply(
     let instance_root = instance_root.to_path_buf();
     let instance_name = state.name_input.clone();
     state.content_apply_in_flight = true;
-    state.status_message = Some(format!("Applying patch {}...", patch_path.display()));
+    state.status_message = Some(tr!("Applying patch {patch_path}...", patch_path = patch_path.display()).into_owned());
     install_activity::set_status(
         instance_name.as_str(),
         InstallStage::DownloadingCore,
-        "Applying patch...".to_owned(),
+        tr!("Applying patch...").into_owned(),
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
@@ -166,7 +167,7 @@ pub(super) fn request_vtmpatch_apply(
         });
         let result = match join.await {
             Ok(r) => r,
-            Err(err) => Err(format!("patch apply worker failed: {err}")),
+            Err(err) => Err(tr!("patch apply worker failed: {err}", err = err).into_owned()),
         };
 
         let patch_file_name = patch_path
@@ -182,12 +183,7 @@ pub(super) fn request_vtmpatch_apply(
                     patch = %patch_path.display(),
                     "vtmpatch apply succeeded: {message}"
                 );
-                notification::info!(
-                    "vtmpatch/apply",
-                    "Patch applied — {} — {}",
-                    patch_file_name,
-                    message
-                );
+                notification::info!("vtmpatch/apply", "Patch applied — {patch_file_name} — {message}", patch_file_name = patch_file_name, message = message);
             }
             Err(err) => {
                 tracing::error!(
@@ -196,12 +192,7 @@ pub(super) fn request_vtmpatch_apply(
                     patch = %patch_path.display(),
                     "vtmpatch apply failed: {err}"
                 );
-                notification::error!(
-                    "vtmpatch/apply",
-                    "Patch apply failed — {} — {}",
-                    patch_file_name,
-                    err
-                );
+                notification::error!("vtmpatch/apply", "Patch apply failed — {patch_file_name} — {err}", patch_file_name = patch_file_name, err = err);
             }
         }
 
@@ -236,15 +227,11 @@ pub(super) fn request_local_content_import(
     let instance_root = instance_root.to_path_buf();
     let instance_name = state.name_input.clone();
     state.content_apply_in_flight = true;
-    state.status_message = Some(format!(
-        "Adding {} local content file{}...",
-        selected_paths.len(),
-        if selected_paths.len() == 1 { "" } else { "s" }
-    ));
+    state.status_message = Some(trn!(selected_paths.len(), "Adding {count} local content file...", "Adding {count} local content files..."));
     install_activity::set_status(
         instance_name.as_str(),
         InstallStage::DownloadingCore,
-        "Adding local content files...".to_owned(),
+        tr!("Adding local content files...").into_owned(),
     );
 
     let _ = tokio_runtime::spawn_detached(async move {
@@ -310,21 +297,13 @@ fn import_local_content_files(
 
         let destination_dir = instance_root.join(kind.folder_name());
         if let Err(err) = fs::create_dir_all(destination_dir.as_path()) {
-            failures.push(format!(
-                "{} -> {} ({err})",
-                source_path.display(),
-                destination_dir.display()
-            ));
+            failures.push(tr!("{source_path} -> {destination_dir} ({err})", source_path = source_path.display(), destination_dir = destination_dir.display(), err = err).into_owned());
             continue;
         }
 
         let destination_path = destination_dir.join(file_name);
         if let Err(err) = fs::copy(source_path.as_path(), destination_path.as_path()) {
-            failures.push(format!(
-                "{} -> {} ({err})",
-                source_path.display(),
-                destination_path.display()
-            ));
+            failures.push(tr!("{source_path} -> {destination_path} ({err})", source_path = source_path.display(), destination_path = destination_path.display(), err = err).into_owned());
             continue;
         }
 
@@ -334,28 +313,22 @@ fn import_local_content_files(
 
     let mut summary = counts_by_kind
         .into_iter()
-        .map(|(label, count)| format!("{count} {label}"))
+        .map(|(label, count)| tr!("{count} {label}", count = count, label = label).into_owned())
         .collect::<Vec<_>>();
     if summary.is_empty() {
-        summary.push("no files".to_owned());
+        summary.push(tr!("no files").into_owned());
     }
 
     if imported_total == 0 {
         if !failures.is_empty() {
-            return Err(format!(
-                "Failed to add local content: {}.",
-                failures.join("; ")
-            ));
+            return Err(tr!("Failed to add local content: {failures}.", failures = failures.join("; ")).into_owned());
         }
         if !skipped.is_empty() {
-            return Err(format!(
-                "Could not determine where to place: {}.",
-                skipped.join(", ")
-            ));
+            return Err(tr!("Could not determine where to place: {skipped}.", skipped = skipped.join(", ")).into_owned());
         }
     }
 
-    let mut message = format!("Added {}.", summary.join(", "));
+    let mut message = tr!("Added {summary}.", summary = summary.join(", ")).into_owned();
     if !failures.is_empty() {
         message.push_str(" Failed to copy: ");
         message.push_str(failures.join("; ").as_str());
@@ -390,7 +363,7 @@ pub(super) fn request_content_delete(
     let path_display = path.display().to_string();
 
     state.content_apply_in_flight = true;
-    state.status_message = Some("Removing installed content...".to_owned());
+    state.status_message = Some(tr!("Removing installed content...").into_owned());
     tracing::info!(
         target: CONTENT_UPDATE_LOG_TARGET,
         instance = %instance_name,
@@ -409,17 +382,15 @@ pub(super) fn request_content_delete(
                 } else {
                     std::fs::remove_file(path.as_path())
                 };
-                delete_result.map_err(|err| format!("failed to remove {}: {err}", path.display()))?;
+                delete_result.map_err(|err| tr!("failed to remove {path}: {err}", path = path.display(), err = err).into_owned())?;
 
                 managed_content::remove_content_manifest_entries_for_path(
                     instance_root.as_path(),
                     path.as_path(),
                 )
-                .map(|_| "Removed installed content.".to_owned())
+                .map(|_| tr!("Removed installed content.").into_owned())
                 .map_err(|err| {
-                    format!(
-                        "removed installed content, but failed to update the content manifest: {err}"
-                    )
+                    tr!("removed installed content, but failed to update the content manifest: {err}", err = err).into_owned()
                 })
             }
         })
@@ -484,12 +455,12 @@ pub(super) fn request_content_toggle(
                 std::fs::rename(&path, &new_path)
                     .map(|_| {
                         if currently_disabled {
-                            "Mod enabled.".to_owned()
+                            tr!("Mod enabled.").into_owned()
                         } else {
-                            "Mod disabled.".to_owned()
+                            tr!("Mod disabled.").into_owned()
                         }
                     })
-                    .map_err(|err| format!("failed to rename {}: {err}", path.display()))
+                    .map_err(|err| tr!("failed to rename {path}: {err}", path = path.display(), err = err).into_owned())
             }
         })
         .await
@@ -573,7 +544,7 @@ pub(super) fn request_bulk_content_update(
             install_activity::set_status(
                 instance_name.as_str(),
                 InstallStage::Complete,
-                format!("{operation_label} complete."),
+                tr!("{operation_label} complete.", operation_label = operation_label).into_owned(),
             );
         }
         match &result {
@@ -618,7 +589,7 @@ pub(super) fn poll_content_apply_results(state: &mut InstanceScreenState, instan
         tracing::error!(target: "vertexlauncher/instance_content", "content_apply_results worker channel stopped unexpectedly.");
         state.content_apply_in_flight = false;
         install_activity::clear_instance(state.name_input.as_str());
-        state.status_message = Some("Content apply worker stopped unexpectedly.".to_owned());
+        state.status_message = Some(tr!("Content apply worker stopped unexpectedly.").into_owned());
     }
 
     for result in updates {
@@ -650,7 +621,7 @@ pub(super) fn poll_content_apply_results(state: &mut InstanceScreenState, instan
                     error = %err,
                     "Applying content changes failed."
                 );
-                state.status_message = Some(format!("Failed to apply content changes: {err}"));
+                state.status_message = Some(tr!("Failed to apply content changes: {err}", err = err).into_owned());
             }
         }
     }

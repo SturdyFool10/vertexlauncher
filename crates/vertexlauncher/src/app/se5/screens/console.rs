@@ -2,6 +2,7 @@
 //! console reads). Only the visible lines are built, so huge game logs stay cheap.
 
 
+use vertex_i18n::tr;
 use launcher_ui::console;
 use launcher_ui::log_format::{self, LogLevel};
 use vertex_shell::sturdy::MouseButton;
@@ -94,7 +95,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.fill(ui);
         let tab = state.console.tabs.entry(tab_id.clone()).or_default();
         let mut follow = tab.follow;
-        kit.text(ui, TextRole::Muted, "Follow output");
+        kit.text(ui, TextRole::Muted, &tr!("Follow output"));
         if let Some(next) = kit.switch(ui, "console::follow", follow, true) {
             follow = next;
         }
@@ -102,7 +103,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         if kit.button(
             ui,
             "console::copy",
-            "Copy all",
+            &tr!("Copy all"),
             ButtonKind::Neutral,
             !snapshot.active_lines.is_empty(),
         ) {
@@ -116,11 +117,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 .engine()
                 .primary_window_control()
                 .map(|mut window| window.set_clipboard_text(&text));
-            launcher_ui::notification::info!(
-                "console",
-                "Copied {} console lines.",
-                snapshot.active_lines.len()
-            );
+            launcher_ui::notification::info!("console", "Copied {count} console lines.", count = snapshot.active_lines.len());
         }
     }
     {
@@ -182,7 +179,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit,
         &lines_id,
         &shown_lines,
-        "Nothing logged yet.",
+        &tr!("Nothing logged yet."),
         follow,
         tab.engaged,
         tab.last_line_count,
@@ -377,11 +374,11 @@ fn log_lines_view(
     let has_selection = selection.range().is_some();
     let items: Vec<MenuEntry> = if has_selection {
         vec![
-            MenuEntry::new("Copy selection").icon(Icon::Copy),
-            MenuEntry::new("Clear selection").icon(Icon::Close),
+            MenuEntry::new(tr!("Copy selection")).icon(Icon::Copy),
+            MenuEntry::new(tr!("Clear selection")).icon(Icon::Close),
         ]
     } else {
-        vec![MenuEntry::new("Copy line").icon(Icon::Copy)]
+        vec![MenuEntry::new(tr!("Copy line")).icon(Icon::Copy)]
     };
     if let Some(choice) = kit.context_menu(ui, &menu_id, &mut selection.menu, &items) {
         // Copies the text from `start` to `end`, partial first and last lines included.
@@ -400,16 +397,16 @@ fn log_lines_view(
                 .engine()
                 .primary_window_control()
                 .map(|mut window| window.set_clipboard_text(&text));
-            launcher_ui::notification::info!("console", "Copied {what}.");
+            launcher_ui::notification::info!("console", "Copied {what}.", what = what);
         };
         match (has_selection, choice, selection.range()) {
             (true, 0, Some((start, end))) if !lines.is_empty() => {
-                copy(ui, start, end, "the selection")
+                copy(ui, start, end, &tr!("the selection"))
             }
             (true, _, _) => selection.clear(),
             (false, _, _) if !lines.is_empty() => {
                 let line = selection.menu_line.min(lines.len() - 1);
-                copy(ui, (line, 0), (line, usize::MAX), "the line");
+                copy(ui, (line, 0), (line, usize::MAX), &tr!("the line"));
             }
             _ => {}
         }

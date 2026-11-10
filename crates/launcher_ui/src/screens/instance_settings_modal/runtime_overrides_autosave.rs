@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 /// How long settings must stay unchanged before they are written to disk.
@@ -31,8 +32,8 @@ pub(super) fn save_runtime_overrides(
     let java_override_runtime_major = if state.java_override_enabled {
         if java_options.is_empty() {
             return Err(
-                "Cannot save Java override: configure at least one global Java path in Settings."
-                    .to_owned(),
+                tr!("Cannot save Java override: configure at least one global Java path in Settings.")
+                    .into_owned(),
             );
         }
         let selected = state.java_override_runtime_major.and_then(|major| {

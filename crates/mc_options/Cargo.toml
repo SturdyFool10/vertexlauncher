@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 serde_json.workspace = true
+vertex_i18n.workspace = true
 zip = { version = "8.6", default-features = false, features = ["deflate"] }

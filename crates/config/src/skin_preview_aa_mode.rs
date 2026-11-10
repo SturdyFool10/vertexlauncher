@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Anti-aliasing mode selection for skin preview rendering.
@@ -32,12 +33,12 @@ impl SkinPreviewAaMode {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            SkinPreviewAaMode::Off => "Off",
-            SkinPreviewAaMode::Msaa => "MSAA (GPU)",
-            SkinPreviewAaMode::Smaa => "SMAA (GPU Post)",
-            SkinPreviewAaMode::Fxaa => "FXAA (Post)",
-            SkinPreviewAaMode::Taa => "TAA (Temporal)",
-            SkinPreviewAaMode::FxaaTaa => "FXAA + TAA (Temporal)",
+            SkinPreviewAaMode::Off => src!("Off"),
+            SkinPreviewAaMode::Msaa => src!("MSAA (GPU)"),
+            SkinPreviewAaMode::Smaa => src!("SMAA (GPU Post)"),
+            SkinPreviewAaMode::Fxaa => src!("FXAA (Post)"),
+            SkinPreviewAaMode::Taa => src!("TAA (Temporal)"),
+            SkinPreviewAaMode::FxaaTaa => src!("FXAA + TAA (Temporal)"),
         }
     }
 }

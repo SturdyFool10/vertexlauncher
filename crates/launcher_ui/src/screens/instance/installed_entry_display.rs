@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 use content_resolver::ResolvedInstalledContent;
 
@@ -47,12 +48,12 @@ impl InstalledEntryDisplay {
             description,
             platform_label: metadata
                 .map(|value| value.entry.source.label().to_owned())
-                .unwrap_or_else(|| "Unknown".to_owned()),
+                .unwrap_or_else(|| tr!("Unknown").into_owned()),
             version_label: metadata.and_then(|value| value.installed_version_label.clone()),
             warning_message: metadata.and_then(|value| value.warning_message.clone()),
             update_label: metadata
                 .and_then(|value| value.update.as_ref())
-                .map(|update| format!("Update: {}", update.latest_version_label)),
+                .map(|update| tr!("Update: {version}", version = update.latest_version_label).into_owned()),
             update_version_id: metadata
                 .and_then(|value| value.update.as_ref())
                 .map(|update| update.latest_version_id.clone()),

@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// How the launcher goes fullscreen.
@@ -15,8 +16,8 @@ impl FullscreenStyle {
 
     pub const fn label(self) -> &'static str {
         match self {
-            FullscreenStyle::Borderless => "Borderless",
-            FullscreenStyle::Exclusive => "Exclusive",
+            FullscreenStyle::Borderless => src!("Borderless"),
+            FullscreenStyle::Exclusive => src!("Exclusive"),
         }
     }
 }

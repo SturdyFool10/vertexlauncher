@@ -1,6 +1,7 @@
 //! Home's manage dialog for a world or server card: rename or edit it, delete it, or move or copy it to another instance.
 //! Sharing one between instances stays in `sync_dialogs`.
 
+use vertex_i18n::tr;
 use std::collections::BTreeSet;
 
 use instance_sync::{ManageRequest, compare_game_versions};
@@ -182,35 +183,35 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
     let response = kit::modal(ui, "manage-entry", &style, !busy, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
         let heading = match (manage.mode, is_world) {
-            (ManageMode::Edit, true) => "Rename world".to_owned(),
-            (ManageMode::Edit, false) => "Edit server".to_owned(),
-            (ManageMode::Delete, _) => format!("Delete {noun}"),
-            (ManageMode::Move, _) => format!("Move {noun} to another instance"),
-            (ManageMode::Copy, _) => format!("Copy {noun} to another instance"),
+            (ManageMode::Edit, true) => tr!("Rename world").into_owned(),
+            (ManageMode::Edit, false) => tr!("Edit server").into_owned(),
+            (ManageMode::Delete, _) => tr!("Delete {noun}", noun = noun).into_owned(),
+            (ManageMode::Move, _) => tr!("Move {noun} to another instance", noun = noun).into_owned(),
+            (ManageMode::Copy, _) => tr!("Copy {noun} to another instance", noun = noun).into_owned(),
         };
         kit.text(ui, TextRole::Heading, &heading);
         kit.text(ui, TextRole::Strong, &manage.title);
 
         match manage.mode {
             ManageMode::Edit => {
-                kit.text(ui, TextRole::Muted, "Name");
-                kit.text_field(ui, "manage::name", &mut manage.name, "Name", false, Sizing::Grow);
+                kit.text(ui, TextRole::Muted, &tr!("Name"));
+                kit.text_field(ui, "manage::name", &mut manage.name, &tr!("Name"), false, Sizing::Grow);
                 if is_world {
                     kit::label(
                         ui,
-                        "This is the name the game lists the world under; its folder keeps its name.",
+                        &tr!("This is the name the game lists the world under; its folder keeps its name."),
                         &wrapped(kit, TextRole::Muted),
                     );
                 } else {
-                    kit.text(ui, TextRole::Muted, "Address");
-                    kit.text_field(ui, "manage::address", &mut manage.address, "Address", false, Sizing::Grow);
+                    kit.text(ui, TextRole::Muted, &tr!("Address"));
+                    kit.text_field(ui, "manage::address", &mut manage.address, &tr!("Address"), false, Sizing::Grow);
                 }
             }
             ManageMode::Delete => {
                 let text = if is_world {
-                    "This permanently deletes the world's folder from the instances below. It cannot be undone."
+                    &tr!("This permanently deletes the world's folder from the instances below. It cannot be undone.")
                 } else {
-                    "This removes the server from the instances below, and stops sync from adding it back to them."
+                    &tr!("This removes the server from the instances below, and stops sync from adding it back to them.")
                 };
                 kit::label(ui, text, &wrapped(kit, TextRole::Warning));
             }
@@ -219,7 +220,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
 
         if matches!(manage.mode, ManageMode::Edit | ManageMode::Delete) {
             if manage.targets.len() > 1 {
-                kit.text(ui, TextRole::Muted, "Apply to");
+                kit.text(ui, TextRole::Muted, &tr!("Apply to"));
                 list(ui, kit, "manage::targets", 160.0, |ui, kit| {
                     for target in &manage.targets {
                         let checked = manage.selected.contains(&target.instance_id);
@@ -241,7 +242,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             }
         } else {
             if manage.targets.len() > 1 {
-                kit.text(ui, TextRole::Muted, "From");
+                kit.text(ui, TextRole::Muted, &tr!("From"));
                 for target in &manage.targets {
                     if kit.radio(
                         ui,
@@ -257,13 +258,13 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                     }
                 }
             }
-            kit.text(ui, TextRole::Muted, "To");
+            kit.text(ui, TextRole::Muted, &tr!("To"));
             list(ui, kit, "manage::dest", 240.0, |ui, kit| {
                 for instance in &instances.instances {
                     if instance.id == manage.source {
                         continue;
                     }
-                    let label = format!("{} (Minecraft {})", instance.name, instance.game_version);
+                    let label = tr!("{name} (Minecraft {game_version})", name = instance.name, game_version = instance.game_version).into_owned();
                     if kit.radio(
                         ui,
                         &format!("manage::dest::{}", instance.id),
@@ -281,24 +282,21 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             {
                 kit::label(
                     ui,
-                    &format!(
-                        "{} runs Minecraft {}, older than this world ({}). Opening it there can corrupt the world.",
-                        instance.name, instance.game_version, world_version
-                    ),
+                    &tr!("{name} runs Minecraft {game_version}, older than this world ({world_version}). Opening it there can corrupt the world.", name = instance.name, game_version = instance.game_version, world_version = world_version),
                     &wrapped(kit, TextRole::Warning),
                 );
             }
             if is_world && manage.mode == ManageMode::Copy {
                 kit::label(
                     ui,
-                    "To keep a world in step between instances instead of making a separate copy, use \"Sync world…\".",
+                    &tr!("To keep a world in step between instances instead of making a separate copy, use \"Sync world…\"."),
                     &wrapped(kit, TextRole::Muted),
                 );
             }
         }
 
         if busy {
-            kit.text(ui, TextRole::Muted, "Working… copying a large world can take a while.");
+            kit.text(ui, TextRole::Muted, &tr!("Working… copying a large world can take a while."));
             kit.progress(ui, "manage::progress", None, kit::uptime());
         } else if let Some((is_error, message)) = &manage.message {
             kit::label(
@@ -313,24 +311,24 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
         close = kit.button(
             ui,
             "manage::close",
-            if manage.done { "Close" } else { "Cancel" },
+            &if manage.done { tr!("Close") } else { tr!("Cancel") },
             ButtonKind::Neutral,
             !busy,
         );
         if !manage.done {
             let (label, kind, ready) = match manage.mode {
                 ManageMode::Edit => (
-                    "Save",
+                    tr!("Save"),
                     ButtonKind::Primary,
                     !manage.selected.is_empty()
                         && !manage.name.trim().is_empty()
                         && (is_world || !manage.address.trim().is_empty()),
                 ),
-                ManageMode::Delete => ("Delete", ButtonKind::Danger, !manage.selected.is_empty()),
-                ManageMode::Move => ("Move", ButtonKind::Primary, manage.dest.is_some()),
-                ManageMode::Copy => ("Copy", ButtonKind::Primary, manage.dest.is_some()),
+                ManageMode::Delete => (tr!("Delete"), ButtonKind::Danger, !manage.selected.is_empty()),
+                ManageMode::Move => (tr!("Move"), ButtonKind::Primary, manage.dest.is_some()),
+                ManageMode::Copy => (tr!("Copy"), ButtonKind::Primary, manage.dest.is_some()),
             };
-            if kit.button(ui, "manage::go", label, kind, ready && !busy) {
+            if kit.button(ui, "manage::go", &label, kind, ready && !busy) {
                 run = Some(requests(manage));
             }
         }

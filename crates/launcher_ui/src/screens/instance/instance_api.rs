@@ -2,6 +2,7 @@
 //! plain-data views and calls for the settings dialog, the content/screenshot/log tabs, exports and moving. The egui
 //! screen drives the same code through its own widgets.
 
+use vertex_i18n::tr;
 use super::*;
 use instances::InstanceRecord;
 
@@ -47,14 +48,14 @@ impl InstanceSession {
                         instance.instance_root_override = Some(dest_path.clone());
                         instances_changed = true;
                     }
-                    state.move_instance_completion_message = Some(format!("Instance moved to {}.", dest_path.display()));
+                    state.move_instance_completion_message = Some(tr!("Instance moved to {dest_path}.", dest_path = dest_path.display()).into_owned());
                     state.move_instance_completion_failed = false;
-                    state.status_message = Some(format!("Instance moved to {}.", dest_path.display()));
+                    state.status_message = Some(tr!("Instance moved to {dest_path}.", dest_path = dest_path.display()).into_owned());
                 }
                 MoveInstanceResult::Failed { reason } => {
-                    state.move_instance_completion_message = Some(format!("Instance move failed: {reason}"));
+                    state.move_instance_completion_message = Some(tr!("Instance move failed: {reason}", reason = reason).into_owned());
                     state.move_instance_completion_failed = true;
-                    state.status_message = Some(format!("Instance move failed: {reason}"));
+                    state.status_message = Some(tr!("Instance move failed: {reason}", reason = reason).into_owned());
                 }
             }
         }
@@ -123,7 +124,7 @@ impl InstanceSession {
             }
             return Some(InstallProgressView {
                 fraction: Some(progress_fraction(progress)),
-                stage: stage_label(progress.stage).to_owned(),
+                stage: stage_label(progress.stage).into_owned(),
                 bytes_per_second: progress.bytes_per_second,
                 eta_seconds: progress.eta_seconds,
                 message: progress.message.clone(),
@@ -136,7 +137,7 @@ impl InstanceSession {
         if self.state.runtime_prepare_in_flight {
             return Some(InstallProgressView {
                 fraction: None,
-                stage: "Starting installation...".to_owned(),
+                stage: tr!("Starting installation...").into_owned(),
                 bytes_per_second: 0.0,
                 eta_seconds: None,
                 message: String::new(),
@@ -152,7 +153,7 @@ impl InstanceSession {
         }
         Some(InstallProgressView {
             fraction: Some(progress_fraction_from_activity(&activity)),
-            stage: stage_label(activity.stage).to_owned(),
+            stage: stage_label(activity.stage).into_owned(),
             bytes_per_second: activity.bytes_per_second,
             eta_seconds: activity.eta_seconds,
             message: activity.message.clone(),

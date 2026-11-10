@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 #[cfg(target_os = "macos")]
 use std::path::Path;
 
@@ -13,7 +14,7 @@ pub(crate) fn detect_cpu_name() -> String {
                     .lines()
                     .find_map(|line| line.strip_prefix("model name\t: ").map(str::to_owned))
             })
-            .unwrap_or_else(|| "Unknown".to_owned());
+            .unwrap_or_else(|| tr!("Unknown").into_owned());
     }
 
     #[cfg(target_os = "windows")]
@@ -21,11 +22,11 @@ pub(crate) fn detect_cpu_name() -> String {
         return detect_windows_cpu_name()
             .or_else(|| std::env::var("PROCESSOR_IDENTIFIER").ok())
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "Unknown".to_owned());
+            .unwrap_or_else(|| tr!("Unknown").into_owned());
     }
 
     #[allow(unreachable_code)]
-    "Unknown".to_owned()
+    tr!("Unknown").into_owned()
 }
 
 #[cfg(target_os = "windows")]
@@ -81,7 +82,7 @@ pub(crate) fn detect_total_memory() -> String {
                     Some(format_memory_from_bytes(kib.saturating_mul(1024)))
                 })
             })
-            .unwrap_or_else(|| "Unknown".to_owned());
+            .unwrap_or_else(|| tr!("Unknown").into_owned());
     }
 
     #[cfg(target_os = "windows")]
@@ -97,17 +98,17 @@ pub(crate) fn detect_total_memory() -> String {
             if GlobalMemoryStatusEx(&mut memory_status).as_bool() {
                 format_memory_from_bytes(memory_status.ullTotalPhys)
             } else {
-                "Unknown".to_owned()
+                tr!("Unknown").into_owned()
             }
         };
     }
 
     #[allow(unreachable_code)]
-    "Unknown".to_owned()
+    tr!("Unknown").into_owned()
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn format_memory_from_bytes(bytes: u64) -> String {
     const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    format!("{:.1} GiB", bytes as f64 / GIB)
+    tr!("{size:.1} GiB", size = bytes as f64 / GIB).into_owned()
 }

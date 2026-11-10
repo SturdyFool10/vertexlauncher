@@ -1,10 +1,11 @@
+use vertex_i18n::tr;
 use super::*;
 
 // ── Archive helpers ───────────────────────────────────────────────────────────
 
 pub(super) fn open_patch_archive(path: &Path) -> Result<tar::Archive<Box<dyn Read>>, String> {
     let bytes =
-        fs::read(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+        fs::read(path).map_err(|err| tr!("failed to open {path}: {err}", path = path.display(), err = err).into_owned())?;
     let decoder = xz2::read::XzDecoder::new(Cursor::new(bytes));
     Ok(tar::Archive::new(Box::new(decoder)))
 }
@@ -15,9 +16,7 @@ pub(super) fn archive_path_to_instance_path(
 ) -> Result<PathBuf, String> {
     let archive_name = path_to_string(archive_path);
     if archive_name == PATCH_MANIFEST_PATH || archive_name == "manifest.toml" {
-        return Err(format!(
-            "patch entry {archive_name} is not an instance file"
-        ));
+        return Err(tr!("patch entry {archive_name} is not an instance file", archive_name = archive_name).into_owned());
     }
     if archive_name == CONTENT_MANIFEST_ARCHIVE_PATH {
         return Ok(instance_root.join(CONTENT_MANIFEST_FILE_NAME));
@@ -31,7 +30,7 @@ pub(super) fn archive_path_to_instance_path(
     if let Some(relative) = archive_name.strip_prefix("root_entries/") {
         return join_safe(instance_root, Path::new(relative));
     }
-    Err(format!("unsupported patch entry path: {archive_name}"))
+    Err(tr!("unsupported patch entry path: {archive_name}", archive_name = archive_name).into_owned())
 }
 
 pub(super) fn join_safe(base: &Path, relative: &Path) -> Result<PathBuf, String> {
@@ -41,10 +40,7 @@ pub(super) fn join_safe(base: &Path, relative: &Path) -> Result<PathBuf, String>
             Component::Normal(part) => out.push(part),
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!(
-                    "unsafe patch path component in {}",
-                    relative.display()
-                ));
+                return Err(tr!("unsafe patch path component in {relative}", relative = relative.display()).into_owned());
             }
         }
     }
@@ -81,7 +77,7 @@ pub(super) fn collect_regular_files_recursive(
 pub(super) fn path_to_archive_name(path: &Path) -> Result<String, String> {
     let value = path_to_string(path);
     if value.trim().is_empty() {
-        Err("empty archive path".to_owned())
+        Err(tr!("empty archive path").into_owned())
     } else {
         Ok(value)
     }

@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// The least severe log line the console shows. Lines below it are still kept (the console remembers its recent history),
@@ -31,11 +32,11 @@ impl ConsoleLogLevel {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            ConsoleLogLevel::Error => "Error",
-            ConsoleLogLevel::Warn => "Warning",
-            ConsoleLogLevel::Info => "Info",
-            ConsoleLogLevel::Debug => "Debug",
-            ConsoleLogLevel::Trace => "Trace",
+            ConsoleLogLevel::Error => src!("Error"),
+            ConsoleLogLevel::Warn => src!("Warning"),
+            ConsoleLogLevel::Info => src!("Info"),
+            ConsoleLogLevel::Debug => src!("Debug"),
+            ConsoleLogLevel::Trace => src!("Trace"),
         }
     }
 }

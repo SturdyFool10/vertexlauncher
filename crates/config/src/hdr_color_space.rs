@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// The signal the swapchain carries when HDR output is on.
@@ -20,10 +21,10 @@ impl HdrColorSpace {
 
     pub const fn label(self) -> &'static str {
         match self {
-            HdrColorSpace::Hdr10St2084 => "HDR10 (PQ)",
-            HdrColorSpace::ScrgbLinear => "scRGB (linear)",
-            HdrColorSpace::Hdr10Hlg => "HDR10 (HLG)",
-            HdrColorSpace::DolbyVision => "Dolby Vision",
+            HdrColorSpace::Hdr10St2084 => src!("HDR10 (PQ)"),
+            HdrColorSpace::ScrgbLinear => src!("scRGB (linear)"),
+            HdrColorSpace::Hdr10Hlg => src!("HDR10 (HLG)"),
+            HdrColorSpace::DolbyVision => src!("Dolby Vision"),
         }
     }
 }

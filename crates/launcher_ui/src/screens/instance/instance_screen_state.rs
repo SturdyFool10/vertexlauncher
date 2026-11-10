@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -55,11 +56,11 @@ pub enum InstanceScreenTab {
 impl InstanceScreenTab {
     pub const ALL: [Self; 3] = [Self::Content, Self::ScreenshotGallery, Self::Logs];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Content => "Content",
-            Self::ScreenshotGallery => "Screenshot Gallery",
-            Self::Logs => "Logs",
+            Self::Content => tr!("Content"),
+            Self::ScreenshotGallery => tr!("Screenshot Gallery"),
+            Self::Logs => tr!("Logs"),
         }
     }
 }

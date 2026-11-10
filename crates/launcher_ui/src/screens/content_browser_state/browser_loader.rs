@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BrowserLoader {
     Any,
@@ -16,13 +17,13 @@ impl BrowserLoader {
         BrowserLoader::Quilt,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            BrowserLoader::Any => "Any",
-            BrowserLoader::Fabric => "Fabric",
-            BrowserLoader::Forge => "Forge",
-            BrowserLoader::NeoForge => "NeoForge",
-            BrowserLoader::Quilt => "Quilt",
+            BrowserLoader::Any => tr!("Any"),
+            BrowserLoader::Fabric => tr!("Fabric"),
+            BrowserLoader::Forge => tr!("Forge"),
+            BrowserLoader::NeoForge => tr!("NeoForge"),
+            BrowserLoader::Quilt => tr!("Quilt"),
         }
     }
 

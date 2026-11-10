@@ -10,11 +10,11 @@ pub enum LauncherKind {
 impl LauncherKind {
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Modrinth => "Modrinth launcher instance",
-            Self::CurseForge => "CurseForge instance",
-            Self::Prism => "Prism / MultiMC / PolyMC instance",
-            Self::ATLauncher => "ATLauncher instance",
-            Self::Unknown => "Generic launcher instance",
+            Self::Modrinth => vertex_i18n::src!("Modrinth launcher instance"),
+            Self::CurseForge => vertex_i18n::src!("CurseForge instance"),
+            Self::Prism => vertex_i18n::src!("Prism / MultiMC / PolyMC instance"),
+            Self::ATLauncher => vertex_i18n::src!("ATLauncher instance"),
+            Self::Unknown => vertex_i18n::src!("Generic launcher instance"),
         }
     }
 }

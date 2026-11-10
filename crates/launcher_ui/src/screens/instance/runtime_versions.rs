@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 const VERSION_CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(75);
@@ -32,16 +33,16 @@ pub(in super::super) fn save_instance_metadata_and_versions(
 ) -> Result<(), String> {
     let trimmed_name = state.name_input.trim();
     if trimmed_name.is_empty() {
-        return Err("Name cannot be empty.".to_owned());
+        return Err(tr!("Name cannot be empty.").into_owned());
     }
 
     let modloader = selected_modloader_value(state);
     let game_version = state.game_version_input.trim().to_owned();
     if game_version.is_empty() {
-        return Err("Minecraft game version cannot be empty.".to_owned());
+        return Err(tr!("Minecraft game version cannot be empty.").into_owned());
     }
     if modloader.trim().is_empty() {
-        return Err("Modloader cannot be empty.".to_owned());
+        return Err(tr!("Modloader cannot be empty.").into_owned());
     }
     let resolved_modloader_version =
         resolve_modloader_version_for_settings(state, modloader.as_str(), game_version.as_str())?;
@@ -64,7 +65,7 @@ pub(in super::super) fn save_instance_metadata_and_versions(
             Some(state.thumbnail_input.clone())
         };
     } else {
-        return Err("Instance was removed before save.".to_owned());
+        return Err(tr!("Instance was removed before save.").into_owned());
     }
 
     set_instance_versions(
@@ -127,10 +128,7 @@ pub(in super::super) fn sync_version_catalog(
             Ok(join_result) => join_result
                 .map_err(|err| err.to_string())
                 .and_then(|result| result),
-            Err(_) => Err(format!(
-                "version catalog request timed out after {}s",
-                VERSION_CATALOG_FETCH_TIMEOUT.as_secs()
-            )),
+            Err(_) => Err(tr!("version catalog request timed out after {seconds}s", seconds = VERSION_CATALOG_FETCH_TIMEOUT.as_secs()).into_owned()),
         };
         match &result {
             Ok(catalog) => tracing::info!(
@@ -197,7 +195,7 @@ pub(in super::super) fn apply_version_catalog_error(
     filter: VersionCatalogFilter,
     error: &str,
 ) {
-    state.version_catalog_error = Some(format!("Failed to fetch version catalog: {error}"));
+    state.version_catalog_error = Some(tr!("Failed to fetch version catalog: {error}", error = error).into_owned());
     state.available_game_versions.clear();
     state.loader_support = LoaderSupportIndex::default();
     state.loader_versions = LoaderVersionIndex::default();
@@ -215,7 +213,7 @@ pub(in super::super) fn poll_version_catalog(state: &mut InstanceScreenState) {
         );
         state.version_catalog_in_flight = false;
         state.version_catalog_error =
-            Some("Version catalog worker stopped unexpectedly.".to_owned());
+            Some(tr!("Version catalog worker stopped unexpectedly.").into_owned());
     }
     let updates = drained.items;
 
@@ -281,9 +279,7 @@ pub(in super::super) fn request_modloader_versions(
 
     state.modloader_versions_in_flight.insert(key.clone());
     state.modloader_versions_status_key = Some(key.clone());
-    state.modloader_versions_status = Some(format!(
-        "Fetching {loader_label} versions for Minecraft {game_version}..."
-    ));
+    state.modloader_versions_status = Some(tr!("Fetching {loader_label} versions for Minecraft {game_version}...", loader_label = loader_label, game_version = game_version).into_owned());
     tracing::info!(
         target: "vertexlauncher/instance_runtime",
         loader = loader_label,
@@ -309,10 +305,7 @@ pub(in super::super) fn request_modloader_versions(
             Ok(join_result) => join_result
                 .map_err(|err| err.to_string())
                 .and_then(|result| result),
-            Err(_) => Err(format!(
-                "modloader version request timed out after {}s",
-                MODLOADER_VERSIONS_FETCH_TIMEOUT.as_secs()
-            )),
+            Err(_) => Err(tr!("modloader version request timed out after {seconds}s", seconds = MODLOADER_VERSIONS_FETCH_TIMEOUT.as_secs()).into_owned()),
         };
         match &result {
             Ok(versions) => tracing::info!(
@@ -351,7 +344,7 @@ pub(in super::super) fn poll_modloader_versions(state: &mut InstanceScreenState)
         tracing::error!(target: "vertexlauncher/instance_runtime", "modloader_versions_results worker channel stopped unexpectedly.");
         state.modloader_versions_in_flight.clear();
         state.modloader_versions_status =
-            Some("Modloader version worker stopped unexpectedly.".to_owned());
+            Some(tr!("Modloader version worker stopped unexpectedly.").into_owned());
     }
 
     for (key, result) in updates {
@@ -361,9 +354,9 @@ pub(in super::super) fn poll_modloader_versions(state: &mut InstanceScreenState)
             Ok(versions) => {
                 state.modloader_versions_cache.insert(key, versions.clone());
                 state.modloader_versions_status = if versions.is_empty() {
-                    Some("No modloader versions found for this Minecraft version.".to_owned())
+                    Some(tr!("No modloader versions found for this Minecraft version.").into_owned())
                 } else {
-                    Some(format!("Loaded {} modloader versions.", versions.len()))
+                    Some(tr!("Loaded {count} modloader versions.", count = versions.len()).into_owned())
                 };
             }
             Err(err) => {
@@ -375,7 +368,7 @@ pub(in super::super) fn poll_modloader_versions(state: &mut InstanceScreenState)
                 );
                 state.modloader_versions_cache.insert(key, Vec::new());
                 state.modloader_versions_status =
-                    Some(format!("Failed to fetch modloader versions: {err}"));
+                    Some(tr!("Failed to fetch modloader versions: {err}", err = err).into_owned());
             }
         }
     }
@@ -433,9 +426,7 @@ pub(in super::super) fn resolve_modloader_version_for_settings(
     {
         return resolve_latest_modloader_version_from_state(state, modloader_label, game_version)
             .ok_or_else(|| {
-                format!(
-                    "Could not resolve latest {modloader_label} version for Minecraft {game_version}. Refresh modloader versions and try again."
-                )
+                tr!("Could not resolve latest {modloader_label} version for Minecraft {game_version}. Refresh modloader versions and try again.", modloader_label = modloader_label, game_version = game_version).into_owned()
             });
     }
 
@@ -458,9 +449,7 @@ pub(in super::super) fn resolve_modloader_version_for_settings(
     if matches_catalog || matches_cache {
         Ok(raw_modloader_version.to_owned())
     } else {
-        Err(format!(
-            "{modloader_label} {raw_modloader_version} is not available for Minecraft {game_version}."
-        ))
+        Err(tr!("{modloader_label} {raw_modloader_version} is not available for Minecraft {game_version}.", modloader_label = modloader_label, raw_modloader_version = raw_modloader_version, game_version = game_version).into_owned())
     }
 }
 
@@ -484,7 +473,7 @@ pub(in super::super) fn configured_java_path_options(config: &Config) -> Vec<(u8
         }
         options.push((
             runtime.major(),
-            format!("Java {} ({trimmed})", runtime.major()),
+            tr!("Java {seconds} ({trimmed})", seconds = runtime.major(), trimmed = trimmed).into_owned(),
         ));
     }
     options

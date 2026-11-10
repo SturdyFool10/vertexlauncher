@@ -1,6 +1,7 @@
 //! The import dialog (a pack manifest or another launcher's instance folder) and the CurseForge manual-download
 //! dialog that either flow can raise.
 
+use vertex_i18n::tr;
 use std::collections::HashMap;
 
 use crate::app::se5::file_dialog::{Dialog as PickerDialog, Pick};
@@ -54,16 +55,16 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
     let import = &mut state.flows.import;
     let response = kit::modal(ui, "import-instance", &style, !in_flight, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Import Profile");
+        kit.text(ui, TextRole::Heading, &tr!("Import Profile"));
         kit.text(
             ui,
             TextRole::Muted,
-            "Import from a pack manifest or copy an instance out of another launcher.",
+            &tr!("Import from a pack manifest or copy an instance out of another launcher."),
         );
 
         let modes = ImportMode::options().map(str::to_owned).to_vec();
         let previous_mode = import.source_mode_index;
-        kit.setting_row(ui, "import::mode-row", "Import source", Some("Choose whether to import from a pack manifest or an existing launcher instance folder."), |kit, ui| {
+        kit.setting_row(ui, "import::mode-row", &tr!("Import source"), Some(&tr!("Choose whether to import from a pack manifest or an existing launcher instance folder.")), |kit, ui| {
             if let Some(index) = kit.dropdown(ui, "import::mode", import.source_mode_index, &modes, 280.0) {
                 import.source_mode_index = index;
             }
@@ -79,14 +80,14 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                 kit.setting_row(
                     ui,
                     "import::file-row",
-                    "Manifest file",
-                    Some("Select a .vtmpack, .mrpack, or CurseForge modpack .zip file."),
+                    &tr!("Manifest file"),
+                    Some(&tr!("Select a .vtmpack, .mrpack, or CurseForge modpack .zip file.")),
                     |kit, ui| {
                         kit.text_field(
                             ui,
                             "import::file-path",
                             &mut text,
-                            "Path to a .vtmpack, .mrpack or .zip",
+                            &tr!("Path to a .vtmpack, .mrpack or .zip"),
                             false,
                             Sizing::Fixed(300.0),
                         );
@@ -100,14 +101,14 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                 pick_file = kit.button(
                     ui,
                     "import::choose-file",
-                    "Choose manifest",
+                    &tr!("Choose manifest"),
                     ButtonKind::Neutral,
                     true,
                 );
                 if kit.button(
                     ui,
                     "import::inspect-file",
-                    "Inspect manifest",
+                    &tr!("Inspect manifest"),
                     ButtonKind::Neutral,
                     true,
                 ) {
@@ -127,7 +128,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                             ImportPackageKind::CurseForgePack
                         ))
                     ) || is_zip);
-                let notice = "CurseForge modpack zips are supported, but they only work if you have a CurseForge API key in Settings. Vertex will fall back to Modrinth downloads when it can resolve an exact compatible match.";
+                let notice = tr!("CurseForge modpack zips are supported, but they only work if you have a CurseForge API key in Settings. Vertex will fall back to Modrinth downloads when it can resolve an exact compatible match.");
                 let role = if highlight {
                     TextRole::Danger
                 } else {
@@ -135,7 +136,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                 };
                 kit::label(
                     ui,
-                    notice,
+                    &notice,
                     &TextStyle {
                         wrap: TextWrap::Words,
                         ..kit.style(role)
@@ -151,8 +152,8 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                 kit.setting_row(
                     ui,
                     "import::launcher-row",
-                    "Launcher",
-                    Some("Use Auto-detect unless you know which launcher produced the instance."),
+                    &tr!("Launcher"),
+                    Some(&tr!("Use Auto-detect unless you know which launcher produced the instance.")),
                     |kit, ui| {
                         if let Some(index) = kit.dropdown(
                             ui,
@@ -166,8 +167,8 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                     },
                 );
                 let mut text = path_input_string(import.launcher_path.as_path());
-                kit.setting_row(ui, "import::folder-row", "Instance folder", Some("Choose the instance directory from Modrinth, CurseForge, Prism, ATLauncher, or another launcher."), |kit, ui| {
-                    kit.text_field(ui, "import::folder-path", &mut text, "Path to the instance folder", false, Sizing::Fixed(300.0));
+                kit.setting_row(ui, "import::folder-row", &tr!("Instance folder"), Some(&tr!("Choose the instance directory from Modrinth, CurseForge, Prism, ATLauncher, or another launcher.")), |kit, ui| {
+                    kit.text_field(ui, "import::folder-path", &mut text, &tr!("Path to the instance folder"), false, Sizing::Fixed(300.0));
                 });
                 if update_path_from_input(&mut import.launcher_path, &text)
                     || import.launcher_kind_index != previous_kind
@@ -179,14 +180,14 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
                 pick_folder = kit.button(
                     ui,
                     "import::choose-folder",
-                    "Choose folder",
+                    &tr!("Choose folder"),
                     ButtonKind::Neutral,
                     true,
                 );
                 if kit.button(
                     ui,
                     "import::inspect-folder",
-                    "Inspect folder",
+                    &tr!("Inspect folder"),
                     ButtonKind::Neutral,
                     true,
                 ) {
@@ -198,14 +199,14 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
         kit.setting_row(
             ui,
             "import::name-row",
-            "Imported profile name",
-            Some("Defaults to the package name, but you can override it."),
+            &tr!("Imported profile name"),
+            Some(&tr!("Defaults to the package name, but you can override it.")),
             |kit, ui| {
                 kit.text_field(
                     ui,
                     "import::name",
                     &mut import.instance_name,
-                    "Profile name",
+                    &tr!("Profile name"),
                     false,
                     Sizing::Fixed(300.0),
                 );
@@ -214,16 +215,12 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
 
         if let Some(preview) = import.preview.as_ref() {
             let _card = kit.card(ui, "import::preview", kit::SPACE_XS);
-            kit.text(ui, TextRole::Heading, "Detected package");
-            kit.text(ui, TextRole::Body, preview.kind.label());
-            let versions = format!(
-                "Minecraft {} • {}",
-                preview.game_version,
-                loader_label_for_display(
+            kit.text(ui, TextRole::Heading, &tr!("Detected package"));
+            kit.text(ui, TextRole::Body, &vertex_i18n::t(preview.kind.label()));
+            let versions = tr!("Minecraft {game_version} • {loader}", game_version = preview.game_version, loader = loader_label_for_display(
                     preview.modloader.as_str(),
                     preview.modloader_version.as_str()
-                )
-            );
+                )).into_owned();
             kit.text(ui, TextRole::Body, &versions);
             kit::label(
                 ui,
@@ -248,8 +245,9 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             let message = import
                 .preview_status_message
                 .as_deref()
-                .unwrap_or("Inspecting import source in the background...");
-            kit.text(ui, TextRole::Muted, message);
+                .unwrap_or(&tr!("Inspecting import source in the background..."))
+                .to_owned();
+            kit.text(ui, TextRole::Muted, &message);
         }
         if import.import_in_flight {
             let progress = import.import_latest_progress.as_ref();
@@ -260,19 +258,15 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             kit.text(
                 ui,
                 TextRole::Body,
-                progress.map_or("Importing profile in the background...", |p| {
+                progress.map_or(&tr!("Importing profile in the background..."), |p| {
                     p.message.as_str()
                 }),
             );
             let counts = progress
                 .map(|p| {
-                    format!(
-                        "{} of {} steps complete",
-                        p.completed_steps.min(p.total_steps),
-                        p.total_steps
-                    )
+                    tr!("{done} of {total_steps} steps complete", done = p.completed_steps.min(p.total_steps), total_steps = p.total_steps).into_owned()
                 })
-                .unwrap_or_else(|| "Preparing import task...".to_owned());
+                .unwrap_or_else(|| tr!("Preparing import task...").into_owned());
             kit.text(ui, TextRole::Small, &counts);
             kit.progress(ui, "import::progress", fraction, kit::uptime());
         }
@@ -282,7 +276,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
         if kit.button(
             ui,
             "import::cancel",
-            "Cancel",
+            &tr!("Cancel"),
             ButtonKind::Neutral,
             !import.import_in_flight,
         ) {
@@ -295,7 +289,7 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
         if kit.button(
             ui,
             "import::confirm",
-            "Import profile",
+            &tr!("Import profile"),
             ButtonKind::Primary,
             !import.import_in_flight && !missing_path,
         ) {
@@ -329,10 +323,10 @@ pub fn dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> bool {
             FILE_SLOT,
             Pick::File,
             PickerDialog::new()
-                .filter("Launcher profiles", &["vtmpack", "mrpack", "zip"])
-                .filter("Vertex packs", &["vtmpack"])
-                .filter("Modrinth packs", &["mrpack"])
-                .filter("CurseForge packs", &["zip"]),
+                .filter(tr!("Launcher profiles"), &["vtmpack", "mrpack", "zip"])
+                .filter(tr!("Vertex packs"), &["vtmpack"])
+                .filter(tr!("Modrinth packs"), &["mrpack"])
+                .filter(tr!("CurseForge packs"), &["zip"]),
         );
     }
     if pick_folder {
@@ -358,8 +352,8 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
         return;
     };
     let cancel_label = match pending.continuation {
-        ManualDownloadContinuation::Import(_) => "Cancel Import",
-        ManualDownloadContinuation::DiscoverInstall(_) => "Cancel Install",
+        ManualDownloadContinuation::Import(_) => tr!("Cancel Import"),
+        ManualDownloadContinuation::DiscoverInstall(_) => tr!("Cancel Install"),
     };
     let requirements = pending.pending_files.clone();
     let downloads_dir = pending.downloads_dir.clone();
@@ -376,10 +370,10 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
     let mut open_folder = false;
     let response = kit::modal(ui, "curseforge-manual", &style, true, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Manual CurseForge downloads needed");
+        kit.text(ui, TextRole::Heading, &tr!("Manual CurseForge downloads needed"));
         kit::label(
             ui,
-            "CurseForge does not allow some files to be downloaded by other launchers. Open each file's page, download it in your browser, and Vertex will pick it up from your downloads folder automatically.",
+            &tr!("CurseForge does not allow some files to be downloaded by other launchers. Open each file's page, download it in your browser, and Vertex will pick it up from your downloads folder automatically."),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Body)
@@ -387,7 +381,7 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
         );
         kit::label(
             ui,
-            &format!("Watching: {}", downloads_dir.display()),
+            &tr!("Watching: {downloads_dir}", downloads_dir = downloads_dir.display()),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Muted)
@@ -397,7 +391,7 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
             kit.text(
                 ui,
                 TextRole::Muted,
-                &format!("{staged} file(s) already found."),
+                &vertex_i18n::trn!(staged, "{count} file already found.", "{count} files already found."),
             );
         }
         {
@@ -420,30 +414,23 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
                 kit.text(
                     ui,
                     TextRole::Muted,
-                    &format!("Expected file: {}", requirement.file_name),
+                    &tr!("Expected file: {file_name}", file_name = requirement.file_name),
                 );
                 kit.text(
                     ui,
                     TextRole::Small,
-                    &format!(
-                        "CurseForge project {}, file {}",
-                        requirement.project_id, requirement.file_id
-                    ),
+                    &tr!("CurseForge project {project_id}, file {file_id}", project_id = requirement.project_id, file_id = requirement.file_id),
                 );
                 if kit.button(
                     ui,
                     &format!("curseforge-manual::page::{}", requirement.file_id),
-                    "Open CurseForge file page",
+                    &tr!("Open CurseForge file page"),
                     ButtonKind::Neutral,
                     true,
                 ) && let Err(err) =
                     launcher_ui::desktop::open_url(requirement.download_page_url.as_str())
                 {
-                    launcher_ui::notification::error!(
-                        "curseforge",
-                        "Could not open the browser: {}",
-                        err
-                    );
+                    launcher_ui::notification::error!("curseforge", "Could not open the browser: {err}", err = err);
                 }
             }
         }
@@ -461,7 +448,7 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
         if kit.button(
             ui,
             "curseforge-manual::folder",
-            "Open downloads folder",
+            &tr!("Open downloads folder"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -471,7 +458,7 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
         if kit.button(
             ui,
             "curseforge-manual::cancel",
-            cancel_label,
+            &cancel_label,
             ButtonKind::Neutral,
             true,
         ) {
@@ -479,11 +466,7 @@ pub fn manual_download_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppSta
         }
     });
     if open_folder && let Err(err) = launcher_ui::desktop::open_in_file_manager(&downloads_dir) {
-        launcher_ui::notification::error!(
-            "curseforge",
-            "Could not open the downloads folder: {}",
-            err
-        );
+        launcher_ui::notification::error!("curseforge", "Could not open the downloads folder: {err}", err = err);
     }
     if (response.dismissed || kit.back_pressed()) || cancel {
         state.cancel_manual_downloads();

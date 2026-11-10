@@ -127,6 +127,19 @@ pub fn themes_dir() -> PathBuf {
     fallback_root().join(THEMES_DIR_NAME)
 }
 
+/// Where community language files (`*.toml`) are read from; each one adds a language to the language setting.
+const LANGUAGES_DIR_NAME: &str = "languages";
+
+pub fn languages_dir() -> PathBuf {
+    if let Some(root) = portable_root() {
+        return root.join(LANGUAGES_DIR_NAME);
+    }
+    if let Some(project_dirs) = project_dirs() {
+        return project_dirs.config_dir().join(LANGUAGES_DIR_NAME);
+    }
+    fallback_root().join(LANGUAGES_DIR_NAME)
+}
+
 pub fn legacy_config_base_path() -> Option<PathBuf> {
     legacy_project_dirs().map(|project_dirs| project_dirs.config_dir().join(CONFIG_DIR_NAME))
 }

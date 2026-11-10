@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Mutex;
 
-pub const REDACTED_ACCOUNT_LABEL: &str = "Hidden Account";
+pub const REDACTED_ACCOUNT_LABEL: &str = vertex_i18n::src!("Hidden Account");
 pub const REDACTED_IDENTIFIER_LABEL: &str = "[redacted]";
 const MAX_LOG_TEXT_CHARS: usize = 240;
 

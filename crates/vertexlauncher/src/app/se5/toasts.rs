@@ -2,6 +2,7 @@
 //! with the user's expiry-bar direction, fade time and easing. Every card has the same padding on all sides; the
 //! severity shows as a strip down its left edge.
 
+use vertex_i18n::tr;
 use std::time::Duration;
 
 use config::Config;
@@ -111,9 +112,9 @@ pub fn show(ui: &mut Ui<'_>, kit: &mut Kit, config: &Config) {
                         .align(ChildAlignment::new(AlignX::Left, AlignY::Center)),
                 );
                 let title = if toast.count > 1 {
-                    format!("{} ×{}", severity_name(toast.severity), toast.count)
+                    tr!("{severity} ×{count}", severity = severity_name(toast.severity), count = toast.count).into_owned()
                 } else {
-                    severity_name(toast.severity).to_owned()
+                    severity_name(toast.severity).into_owned()
                 };
                 kit.text_colored(ui, &title, accent.with_w(fade), 0.85);
                 kit.fill(ui);
@@ -220,12 +221,12 @@ fn expiry_bar(ui: &mut Ui<'_>, kit: &Kit, remaining: f32, empty_left: bool, colo
     );
 }
 
-fn severity_name(severity: Severity) -> &'static str {
+fn severity_name(severity: Severity) -> std::borrow::Cow<'static, str> {
     match severity {
-        Severity::Log => "Log",
-        Severity::Info => "Info",
-        Severity::Warn => "Warning",
-        Severity::Error => "Error",
+        Severity::Log => tr!("Log"),
+        Severity::Info => tr!("Info"),
+        Severity::Warn => tr!("Warning"),
+        Severity::Error => tr!("Error"),
     }
 }
 

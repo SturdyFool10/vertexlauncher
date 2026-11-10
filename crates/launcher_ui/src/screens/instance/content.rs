@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::content_lookup_result::ContentLookupResultEntry;
 use super::*;
 use content_resolver::detect_installed_content_kind;
@@ -164,9 +165,9 @@ fn contains_ignore_ascii_case(value: &str, query: &str) -> bool {
 
 pub(super) fn installed_content_count_label(matching: usize, total: usize, filtered: bool) -> String {
     if !filtered || matching == total {
-        format!("{total} installed")
+        tr!("{total} installed", total = total).into_owned()
     } else {
-        format!("{matching} matching / {total} installed")
+        tr!("{matching} matching / {total} installed", matching = matching, total = total).into_owned()
     }
 }
 

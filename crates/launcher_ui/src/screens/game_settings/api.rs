@@ -3,6 +3,7 @@
 //! A [`Session`] owns the live view of an instance's `options.txt`. The UI asks it for [`Row`]s to draw and sends
 //! edits back; schema knowledge (value formats, version translation, key codes, languages, devices) stays here.
 
+use vertex_i18n::tr;
 use super::*;
 
 pub use instances::PackOverride;
@@ -130,8 +131,8 @@ impl Session {
             .map(|instance| instance_root_path(config.minecraft_installations_root_path(), instance))
             .is_some_and(|root| installation::is_instance_running(root.as_path()));
         Header {
-            title: "Game settings".to_owned(),
-            subtitle: format!("{} · Minecraft {} · {}", self.instance_name, self.game_version, self.live.path().display()),
+            title: tr!("Game settings").into_owned(),
+            subtitle: tr!("{instance_name} · Minecraft {game_version} · {path}", instance_name = self.instance_name, game_version = self.game_version, path = self.live.path().display()).into_owned(),
             running,
             error: self.live.last_error().map(str::to_owned),
             saving: self.live.has_pending(),
@@ -145,7 +146,7 @@ impl Session {
         }
         let mut rows = Vec::new();
         for group in Group::ALL {
-            rows.extend(self.group_rows(group, search, Some(group.label())));
+            rows.extend(self.group_rows(group, search, Some(&vertex_i18n::t(group.label()))));
         }
         rows
     }
@@ -175,7 +176,7 @@ impl Session {
                 .map(str::to_owned)
                 .collect();
             if !extra.is_empty() {
-                body.push(Row::Subheading("Mod & other key binds".to_owned()));
+                body.push(Row::Subheading(tr!("Mod & other key binds").into_owned()));
                 for key in extra {
                     let label = pretty_key(&key);
                     body.push(self.keybind_row(&key, &label, "key.keyboard.unknown", &usage));
@@ -199,12 +200,12 @@ impl Session {
                     .map(str::to_owned)
                     .collect();
                 if !unknown.is_empty() {
-                    body.push(Row::Subheading("Other keys (mods and other versions)".to_owned()));
+                    body.push(Row::Subheading(tr!("Other keys (mods and other versions)").into_owned()));
                     for key in unknown {
                         let current = live.get(&key).unwrap_or_default().to_owned();
                         body.push(Row::Setting {
                             label: key.clone(),
-                            tip: Some("Not a setting this launcher knows; edited as raw text.".to_owned()),
+                            tip: Some(tr!("Not a setting this launcher knows; edited as raw text.").into_owned()),
                             control: Control::Raw(current),
                             key,
                         });
@@ -233,7 +234,7 @@ impl Session {
             let mut selected = labels.iter().position(|(stored, _)| *stored == current);
             if selected.is_none() {
                 // Show what the file really holds instead of pretending it's a known choice.
-                labels.push((current.clone(), format!("{current} (unrecognized)")));
+                labels.push((current.clone(), tr!("{current} (unrecognized)", current = current).into_owned()));
                 selected = Some(labels.len() - 1);
             }
             Control::Choice {
@@ -272,10 +273,10 @@ impl Session {
                 }
             }
             Kind::Choice(choices) => {
-                choice(choices.iter().map(|(stored, label)| ((*stored).to_owned(), (*label).to_owned())).collect())
+                choice(choices.iter().map(|(stored, label)| ((*stored).to_owned(), vertex_i18n::t(label).into_owned())).collect())
             }
             Kind::IntChoice(choices) => {
-                choice(choices.iter().map(|(stored, label)| (stored.to_string(), (*label).to_owned())).collect())
+                choice(choices.iter().map(|(stored, label)| (stored.to_string(), vertex_i18n::t(label).into_owned())).collect())
             }
             Kind::Text if def.key == "lang" => choice(language_choices(&shown)),
             Kind::Text if def.key == "soundDevice" => {
@@ -289,20 +290,17 @@ impl Session {
             }
             Kind::Keybind => return None,
         };
-        Some(Row::Setting { key: def.key.to_owned(), label: def.label.to_owned(), tip, control })
+        Some(Row::Setting { key: def.key.to_owned(), label: vertex_i18n::t(def.label).into_owned(), tip, control })
     }
 
     fn keybind_row(&self, key: &str, label: &str, default: &str, usage: &BTreeMap<String, Vec<String>>) -> Row {
         let modern = self.modern_binding(key, default);
         let conflict = usage.get(&modern).filter(|others| others.len() > 1 && modern != "key.keyboard.unknown").map(|others| {
-            format!(
-                "Also used by: {}",
-                others.iter().filter(|other| other.as_str() != label).cloned().collect::<Vec<_>>().join(", ")
-            )
+            tr!("Also used by: {status}", status = others.iter().filter(|other| other.as_str() != label).cloned().collect::<Vec<_>>().join(", ")).into_owned()
         });
         Row::Setting {
             key: key.to_owned(),
-            label: label.to_owned(),
+            label: vertex_i18n::t(label).into_owned(),
             tip: None,
             control: Control::Keybind { shown: keys::display_name(&modern), conflict },
         }
@@ -376,13 +374,13 @@ impl Session {
                 let status = pack_status(instances, &self.instance_id, &self.game_version, &row.name, row.support);
                 let declared = row.support.map_or_else(|| "none".to_owned(), |s| s.serialize());
                 let location = if row.present_here {
-                    "In this instance".to_owned()
+                    tr!("In this instance").into_owned()
                 } else {
-                    format!("Only in {}", row.elsewhere.join(", "))
+                    tr!("Only in {status}", status = row.elsewhere.join(", ")).into_owned()
                 };
                 PackView {
                     name: row.name.clone(),
-                    detail: format!("{location} · declared formats: {declared} · {}", status_text(status, row.support, self.version)),
+                    detail: tr!("{location} · declared formats: {declared} · {status}", location = location, declared = declared, status = status_text(status, row.support, self.version)).into_owned(),
                     verdict: instances.pack_override(&row.name, &self.instance_id),
                 }
             })

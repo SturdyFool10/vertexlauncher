@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub fn export_instance_as_vtmpatch_with_progress<F>(
@@ -19,7 +20,7 @@ where
         "vtmpatch export started"
     );
 
-    progress(progress_update("Reading base .vtmpack...", 0, 5));
+    progress(progress_update(vertex_i18n::src!("Reading base .vtmpack..."), 0, 5));
     let (base_manifest, base_entries) = read_base_snapshot(base_vtmpack_path)?;
     tracing::debug!(
         target: LOG,
@@ -29,7 +30,7 @@ where
         "base vtmpack snapshot loaded"
     );
 
-    progress(progress_update("Scanning current instance files...", 1, 5));
+    progress(progress_update(vertex_i18n::src!("Scanning current instance files..."), 1, 5));
     let current_entries = build_current_snapshot(instance_root, options)?;
     tracing::debug!(
         target: LOG,
@@ -96,7 +97,7 @@ where
 
     // Attempt Modrinth rediscovery for changed mod files.
     progress(progress_update(
-        "Looking up changed mods on Modrinth...",
+        vertex_i18n::src!("Looking up changed mods on Modrinth..."),
         2,
         5,
     ));
@@ -228,21 +229,18 @@ where
     );
 
     // Build output archive.
-    progress(progress_update("Writing patch archive...", 3, 5));
+    progress(progress_update(vertex_i18n::src!("Writing patch archive..."), 3, 5));
 
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
     {
         fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create patch export directory {}: {err}",
-                parent.display()
-            )
+            tr!("failed to create patch export directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
         })?;
     }
 
     let output_file = fs::File::create(output_path)
-        .map_err(|err| format!("failed to create {}: {err}", output_path.display()))?;
+        .map_err(|err| tr!("failed to create {output_path}: {err}", output_path = output_path.display(), err = err).into_owned())?;
     let encoder = xz2::write::XzEncoder::new(
         output_file,
         xz_preset_for_compression_mode(options.compression_mode),
@@ -264,12 +262,12 @@ where
     };
 
     let manifest_toml = toml::to_string_pretty(&patch_manifest)
-        .map_err(|err| format!("failed to serialize vtmpatch manifest: {err}"))?
+        .map_err(|err| tr!("failed to serialize vtmpatch manifest: {err}", err = err).into_owned())?
         .into_bytes();
     append_bytes_to_archive(&mut archive, PATCH_MANIFEST_PATH, &manifest_toml)?;
 
     // Embed only files that couldn't be resolved via Modrinth.
-    progress(progress_update("Embedding bundled files...", 4, 5));
+    progress(progress_update(vertex_i18n::src!("Embedding bundled files..."), 4, 5));
     for path in &bundled_paths {
         let Some(entry) = current_entries.get(path) else {
             tracing::warn!(
@@ -290,7 +288,7 @@ where
             );
             archive
                 .append_path_with_name(source_path.as_path(), path.as_path())
-                .map_err(|err| format!("failed to append {}: {err}", source_path.display()))?;
+                .map_err(|err| tr!("failed to append {source_path}: {err}", source_path = source_path.display(), err = err).into_owned())?;
         } else {
             tracing::trace!(
                 target: LOG,
@@ -309,13 +307,13 @@ where
 
     archive
         .finish()
-        .map_err(|err| format!("failed to finalize patch archive: {err}"))?;
+        .map_err(|err| tr!("failed to finalize patch archive: {err}", err = err).into_owned())?;
     let encoder = archive
         .into_inner()
-        .map_err(|err| format!("failed to flush patch archive: {err}"))?;
+        .map_err(|err| tr!("failed to flush patch archive: {err}", err = err).into_owned())?;
     encoder
         .finish()
-        .map_err(|err| format!("failed to finalize patch xz stream: {err}"))?;
+        .map_err(|err| tr!("failed to finalize patch xz stream: {err}", err = err).into_owned())?;
 
     let bundled_mod_count = bundled_paths
         .iter()
@@ -342,7 +340,7 @@ where
         "vtmpatch export complete"
     );
 
-    progress(progress_update("Patch export complete.", 5, 5));
+    progress(progress_update(vertex_i18n::src!("Patch export complete."), 5, 5));
 
     Ok(VtmpackExportStats {
         bundled_mod_files: bundled_mod_count,

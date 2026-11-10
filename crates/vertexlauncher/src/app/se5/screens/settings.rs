@@ -1,6 +1,7 @@
 //! Settings, in the same sections, labels and help text as the egui screen. Every control edits `Config` directly;
 //! the app saves the change and the engine appliers apply it on the next frame. Nothing needs a restart.
 
+use vertex_i18n::{tr, trn};
 use std::path::Path;
 
 use config::{
@@ -18,7 +19,7 @@ use super::super::super::better_blur::BetterBlurDx;
 use super::super::kit::{self, ButtonKind, Kit, TextRole};
 use super::super::{AppState, Dialog};
 
-const INSECURE_STORAGE_WARNING: &str = "Warning: this keeps your sign-in tokens in a plain-text file instead of your system's secure keyring. Doing so can improve compatibility with the Steam Deck, but it also means you need to be extra careful with your security, because it can make it really easy for your login details to be compromised: anyone or anything that can read that file can sign in as you.";
+const INSECURE_STORAGE_WARNING: &str = vertex_i18n::src!("Warning: this keeps your sign-in tokens in a plain-text file instead of your system's secure keyring. Doing so can improve compatibility with the Steam Deck, but it also means you need to be extra careful with your security, because it can make it really easy for your login details to be compromised: anyone or anything that can read that file can sign in as you.");
 
 /// Per-screen caches that are expensive to rebuild every frame.
 #[derive(Default)]
@@ -83,30 +84,38 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     }
     poll_purge(state);
     let _scroll = kit.scroll(ui, "settings::scroll", kit::SPACE_LG, kit::SPACE_XL);
-    kit.text(ui, TextRole::Title, "Settings");
+    kit.text(ui, TextRole::Title, &tr!("Settings"));
 
     section(
         ui,
         kit,
+        "language",
+        &tr!("Language"),
+        &tr!("The language the launcher's interface is shown in."),
+        |ui, kit| language(ui, kit, &mut state.config),
+    );
+    section(
+        ui,
+        kit,
         "appearance",
-        "Appearance",
-        "Theme and launcher chrome settings.",
+        &tr!("Appearance"),
+        &tr!("Theme and launcher chrome settings."),
         |ui, kit| appearance(ui, kit, state),
     );
     section(
         ui,
         kit,
         "privacy",
-        "Privacy",
-        "On-stream safety and account security settings.",
+        &tr!("Privacy"),
+        &tr!("On-stream safety and account security settings."),
         |ui, kit| privacy(ui, kit, state),
     );
     section(
         ui,
         kit,
         "notifications",
-        "Notifications",
-        "How notification popups expire and fade away.",
+        &tr!("Notifications"),
+        &tr!("How notification popups expire and fade away."),
         |ui, kit| {
             toggles(
                 ui,
@@ -123,8 +132,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             if let Some(easing) = kit.choice_setting(
             ui,
             "settings::notification-easing",
-            "Notification Fade Out Easing",
-            Some("The curve of the fade-out animation. Linear fades at a constant rate; Cubic and Exponential ease in, out, or both, and the Exponential curves are the most abrupt. Changes apply immediately. Default: Cubic In/Out."),
+            &tr!("Notification Fade Out Easing"),
+            Some(&tr!("The curve of the fade-out animation. Linear fades at a constant rate; Cubic and Exponential ease in, out, or both, and the Exponential curves are the most abrupt. Changes apply immediately. Default: Cubic In/Out.")),
             state.config.notification_easing(),
             &NotificationEasing::ALL,
             |easing| easing.label().to_owned(),
@@ -134,14 +143,14 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             if kit.button(
                 ui,
                 "settings::test-notification",
-                "Test notification",
+                &tr!("Test notification"),
                 ButtonKind::Neutral,
                 true,
             ) {
                 notification::emit(
                     notification::Severity::Info,
-                    "Settings",
-                    "This is a test notification.",
+                    tr!("Settings"),
+                    tr!("This is a test notification."),
                 );
             }
         },
@@ -150,16 +159,16 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "text",
-        "Text",
-        "Font, shaping, and glyph rendering settings that affect launcher text.",
+        &tr!("Text"),
+        &tr!("Font, shaping, and glyph rendering settings that affect launcher text."),
         |ui, kit| text(ui, kit, state),
     );
     section(
         ui,
         kit,
         "discord",
-        "Discord Rich Presence",
-        "Discord integration and launcher-owned activity reporting.",
+        &tr!("Discord Rich Presence"),
+        &tr!("Discord integration and launcher-owned activity reporting."),
         |ui, kit| {
             toggles(
                 ui,
@@ -173,8 +182,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "sync",
-        "Instance Sync",
-        "Keep multiplayer servers, command history, and creative hotbars in step across your instances. Sync runs before an instance launches and after it closes; right-click a server on Home to choose which instances it goes to.",
+        &tr!("Instance Sync"),
+        &tr!("Keep multiplayer servers, command history, and creative hotbars in step across your instances. Sync runs before an instance launches and after it closes; right-click a server on Home to choose which instances it goes to."),
         |ui, kit| {
             toggles(
                 ui,
@@ -193,19 +202,19 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "graphics",
-        "Graphics & Performance",
-        "GPU, skin preview rendering, frame pacing, and download throughput behavior.",
+        &tr!("Graphics & Performance"),
+        &tr!("GPU, skin preview rendering, frame pacing, and download throughput behavior."),
         |ui, kit| graphics(ui, kit, state),
     );
     section(
         ui,
         kit,
         "minecraft",
-        "Minecraft",
-        "Version catalog behavior and content provider access.",
+        &tr!("Minecraft"),
+        &tr!("Version catalog behavior and content provider access."),
         |ui, kit| {
-            kit.text(ui, TextRole::Heading, "Minecraft Version Groups");
-            kit.text(ui, TextRole::Muted, "Controls which non-default Minecraft version categories appear in version pickers.");
+            kit.text(ui, TextRole::Heading, &tr!("Minecraft Version Groups"));
+            kit.text(ui, TextRole::Muted, &tr!("Controls which non-default Minecraft version categories appear in version pickers."));
             toggles(
                 ui,
                 kit,
@@ -220,8 +229,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             if kit.text_setting(
             ui,
             "settings::curseforge-key",
-            "CurseForge API Key",
-            Some("Required for CurseForge modpack zip imports. Overrides VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY and enables CurseForge browsing/download metadata."),
+            &tr!("CurseForge API Key"),
+            Some(&tr!("Required for CurseForge modpack zip imports. Overrides VERTEX_CURSEFORGE_API_KEY/CURSEFORGE_API_KEY and enables CurseForge browsing/download metadata.")),
             &mut key,
             "",
             false,
@@ -234,8 +243,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "launching",
-        "Launching",
-        "What the launcher does when you start a game.",
+        &tr!("Launching"),
+        &tr!("What the launcher does when you start a game."),
         |ui, kit| {
             toggles(
                 ui,
@@ -252,14 +261,14 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "logging",
-        "Logging",
-        "How much the console shows. The console keeps its recent history, so choosing a more verbose level also shows lines that were hidden when they were logged.",
+        &tr!("Logging"),
+        &tr!("How much the console shows. The console keeps its recent history, so choosing a more verbose level also shows lines that were hidden when they were logged."),
         |ui, kit| {
             if let Some(level) = kit.choice_setting(
                 ui,
                 "settings::vertex-log-level",
-                "Vertex Log Level",
-                Some("The least severe line shown in Vertex's own console. Debug lines are always kept; trace lines (the engine's progress and timings) are only kept while Trace is chosen. Default: Info."),
+                &tr!("Vertex Log Level"),
+                Some(&tr!("The least severe line shown in Vertex's own console. Debug lines are always kept; trace lines (the engine's progress and timings) are only kept while Trace is chosen. Default: Info.")),
                 state.config.console_log_level(),
                 &config::ConsoleLogLevel::ALL,
                 |level| level.label().to_owned(),
@@ -270,8 +279,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             if let Some(level) = kit.choice_setting(
                 ui,
                 "settings::game-log-level",
-                "Game Log Level",
-                Some("The least severe line shown in a game's console. Default: Info."),
+                &tr!("Game Log Level"),
+                Some(&tr!("The least severe line shown in a game's console. Default: Info.")),
                 state.config.game_console_log_level(),
                 &config::ConsoleLogLevel::ALL,
                 |level| level.label().to_owned(),
@@ -285,8 +294,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "java",
-        "Java",
-        "Shared Java behavior for launches that use managed runtime selection.",
+        &tr!("Java"),
+        &tr!("Shared Java behavior for launches that use managed runtime selection."),
         |ui, kit| {
             toggles(
                 ui,
@@ -301,8 +310,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "defaults",
-        "Instance Defaults",
-        "Used when creating new instances. You can still override values per instance.",
+        &tr!("Instance Defaults"),
+        &tr!("Used when creating new instances. You can still override values per instance."),
         |ui, kit| instance_defaults(ui, kit, state),
     );
     platform_section(ui, kit, state);
@@ -310,16 +319,16 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         ui,
         kit,
         "displayed-time",
-        "Displayed Time",
-        "How dates, times and \"how long ago\" are written, such as on screenshots.",
+        &tr!("Displayed Time"),
+        &tr!("How dates, times and \"how long ago\" are written, such as on screenshots."),
         |ui, kit| displayed_time(ui, kit, &mut state.config),
     );
     section(
         ui,
         kit,
         "debug",
-        "Debug",
-        "Live performance readouts drawn over the launcher.",
+        &tr!("Debug"),
+        &tr!("Live performance readouts drawn over the launcher."),
         |ui, kit| {
             toggles(
                 ui,
@@ -332,6 +341,38 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     info_section(ui, kit);
 }
 
+/// The interface language picker. Languages are the files in the launcher's `languages` folder, plus English.
+fn language(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
+    let languages = vertex_i18n::available_languages();
+    // Choice 0 follows the system language; choice `n` is `languages[n - 1]`.
+    let current = if config.language().is_empty() {
+        0
+    } else {
+        languages
+            .iter()
+            .position(|language| language.tag.eq_ignore_ascii_case(config.language()))
+            .map_or(0, |index| index + 1)
+    };
+    let choices: Vec<usize> = (0..=languages.len()).collect();
+    if let Some(choice) = kit.choice_setting(
+        ui,
+        "settings::language",
+        &tr!("Interface Language"),
+        Some(&tr!("The language the launcher's text is shown in. Automatic follows your system's language and shows English when the launcher has no translation for it. More languages appear here when you add a translation file to the launcher's languages folder. Default: Automatic.")),
+        current,
+        &choices,
+        |index| match index {
+            0 => tr!("Automatic (system language)").into_owned(),
+            n => languages[n - 1].native_name.clone(),
+        },
+    ) {
+        match choice {
+            0 => config.set_language(""),
+            n => config.set_language(languages[n - 1].tag.clone()),
+        }
+    }
+}
+
 /// Every date and time format setting, with a live example under them.
 fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     use config::{
@@ -342,15 +383,15 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     kit.toggle_setting(
         ui,
         "settings::time::screenshot-info",
-        "Show Screenshot Time Card",
-        Some("Shows when a screenshot was taken, and how long ago, in the corner of the screenshot viewer. The time comes from the screenshot's file name when it has one, otherwise from the file's modified time. Default: On."),
+        &tr!("Show Screenshot Time Card"),
+        Some(&tr!("Shows when a screenshot was taken, and how long ago, in the corner of the screenshot viewer. The time comes from the screenshot's file name when it has one, otherwise from the file's modified time. Default: On.")),
         &mut settings.show_screenshot_info,
     );
     if let Some(value) = kit.choice_setting(
         ui,
         "settings::time::zone",
-        "Time Zone",
-        Some("Which time zone times are shown in. Default: this computer's."),
+        &tr!("Time Zone"),
+        Some(&tr!("Which time zone times are shown in. Default: this computer's.")),
         settings.time_zone,
         DisplayTimeZone::ALL,
         |value| value.label().to_owned(),
@@ -360,8 +401,8 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     if let Some(value) = kit.choice_setting(
         ui,
         "settings::time::date-format",
-        "Date Format",
-        Some("A ready-made date layout from around the world, or Custom to build your own from the settings below. Default: United States (mm/dd/yyyy)."),
+        &tr!("Date Format"),
+        Some(&tr!("A ready-made date layout from around the world, or Custom to build your own from the settings below. Default: United States (mm/dd/yyyy).")),
         settings.date_format,
         DateFormat::ALL,
         |value| value.label().to_owned(),
@@ -372,8 +413,8 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         if let Some(value) = kit.choice_setting(
             ui,
             "settings::time::date-order",
-            "Date Order",
-            Some("The order the day, month and year come in. Default: Month, day, year."),
+            &tr!("Date Order"),
+            Some(&tr!("The order the day, month and year come in. Default: Month, day, year.")),
             settings.date_order,
             DateOrder::ALL,
             |value| value.label().to_owned(),
@@ -383,8 +424,8 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         if let Some(value) = kit.choice_setting(
             ui,
             "settings::time::month-style",
-            "Month Style",
-            Some("Write the month as a number or as a name. Default: Number."),
+            &tr!("Month Style"),
+            Some(&tr!("Write the month as a number or as a name. Default: Number.")),
             settings.month_style,
             MonthStyle::ALL,
             |value| value.label().to_owned(),
@@ -395,8 +436,8 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
             if let Some(value) = kit.choice_setting(
                 ui,
                 "settings::time::date-separator",
-                "Date Separator",
-                Some("What goes between the numbers of a date. Default: Dash."),
+                &tr!("Date Separator"),
+                Some(&tr!("What goes between the numbers of a date. Default: Dash.")),
                 settings.date_separator,
                 DateSeparator::ALL,
                 |value| value.label().to_owned(),
@@ -407,15 +448,15 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         kit.toggle_setting(
             ui,
             "settings::time::four-digit-year",
-            "Four-Digit Year",
-            Some("2026 rather than 26. Default: On."),
+            &tr!("Four-Digit Year"),
+            Some(&tr!("2026 rather than 26. Default: On.")),
             &mut settings.four_digit_year,
         );
         kit.toggle_setting(
             ui,
             "settings::time::pad-date",
-            "Pad Day and Month With Zeros",
-            Some("03 rather than 3 (for a numeric month and the day). Default: On."),
+            &tr!("Pad Day and Month With Zeros"),
+            Some(&tr!("03 rather than 3 (for a numeric month and the day). Default: On.")),
             &mut settings.pad_date,
         );
     }
@@ -423,23 +464,23 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         kit.toggle_setting(
             ui,
             "settings::time::human-era",
-            "Human Era Years",
-            Some("Counts years in the Human Era (Holocene) calendar and marks them HE, so 2026 becomes 12026 HE. It adds 10,000 to the year, a big commitment for a calendar whose main feature is a leading 1. Also a nice way to show some love for your favorite infographics channel with the cheerful little birds, the one that makes humanity's whole story look like a tidy timeline. Not available for layouts that already count years their own way (Thailand, Taiwan). Default: Off."),
+            &tr!("Human Era Years"),
+            Some(&tr!("Counts years in the Human Era (Holocene) calendar and marks them HE, so 2026 becomes 12026 HE. It adds 10,000 to the year, a big commitment for a calendar whose main feature is a leading 1. Also a nice way to show some love for your favorite infographics channel with the cheerful little birds, the one that makes humanity's whole story look like a tidy timeline. Not available for layouts that already count years their own way (Thailand, Taiwan). Default: Off.")),
             &mut settings.human_era,
         );
     }
     kit.toggle_setting(
         ui,
         "settings::time::weekday",
-        "Show Day of the Week",
-        Some("Puts Mon, Tue... in front of the date. Default: Off."),
+        &tr!("Show Day of the Week"),
+        Some(&tr!("Puts Mon, Tue... in front of the date. Default: Off.")),
         &mut settings.show_weekday,
     );
     if let Some(value) = kit.choice_setting(
         ui,
         "settings::time::clock",
-        "Clock",
-        Some("A 12-hour clock with AM and PM, or a 24-hour clock. Default: 12-hour."),
+        &tr!("Clock"),
+        Some(&tr!("A 12-hour clock with AM and PM, or a 24-hour clock. Default: 12-hour.")),
         settings.clock,
         ClockStyle::ALL,
         |value| value.label().to_owned(),
@@ -450,8 +491,8 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         if let Some(value) = kit.choice_setting(
             ui,
             "settings::time::meridiem",
-            "AM / PM Style",
-            Some("How AM and PM are written. Default: AM / PM."),
+            &tr!("AM / PM Style"),
+            Some(&tr!("How AM and PM are written. Default: AM / PM.")),
             settings.meridiem,
             MeridiemStyle::ALL,
             |value| value.label().to_owned(),
@@ -462,22 +503,22 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     kit.toggle_setting(
         ui,
         "settings::time::pad-hour",
-        "Pad Hour With a Zero",
-        Some("09:05 rather than 9:05. Default: On."),
+        &tr!("Pad Hour With a Zero"),
+        Some(&tr!("09:05 rather than 9:05. Default: On.")),
         &mut settings.pad_hour,
     );
     kit.toggle_setting(
         ui,
         "settings::time::seconds",
-        "Show Seconds",
-        Some("Include seconds in the time. Default: On."),
+        &tr!("Show Seconds"),
+        Some(&tr!("Include seconds in the time. Default: On.")),
         &mut settings.show_seconds,
     );
     if let Some(value) = kit.choice_setting(
         ui,
         "settings::time::time-separator",
-        "Time Separator",
-        Some("What goes between hours, minutes and seconds. Default: Colon."),
+        &tr!("Time Separator"),
+        Some(&tr!("What goes between hours, minutes and seconds. Default: Colon.")),
         settings.time_separator,
         TimeSeparator::ALL,
         |value| value.label().to_owned(),
@@ -487,16 +528,16 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     kit.toggle_setting(
         ui,
         "settings::time::relative",
-        "Show How Long Ago",
-        Some("A second line saying how long ago it was, or how far in the future if the clock was set ahead. Default: On."),
+        &tr!("Show How Long Ago"),
+        Some(&tr!("A second line saying how long ago it was, or how far in the future if the clock was set ahead. Default: On.")),
         &mut settings.show_relative,
     );
     if settings.show_relative {
         if let Some(value) = kit.slider_setting(
             ui,
             "settings::time::relative-units",
-            "Most Units Shown",
-            Some("The most units the \"how long ago\" line shows, largest first: years, days, hours, minutes, seconds. Default: 5."),
+            &tr!("Most Units Shown"),
+            Some(&tr!("The most units the \"how long ago\" line shows, largest first: years, days, hours, minutes, seconds. Default: 5.")),
             f64::from(settings.relative_max_units),
             f64::from(RELATIVE_MAX_UNITS_MIN),
             f64::from(RELATIVE_MAX_UNITS_MAX),
@@ -508,22 +549,22 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         kit.toggle_setting(
             ui,
             "settings::time::relative-hide-zero",
-            "Hide Zero Units",
-            Some("Leave out units that are zero, so 1 hour 4 seconds is not 1 hour 0 minutes 4 seconds. Default: On."),
+            &tr!("Hide Zero Units"),
+            Some(&tr!("Leave out units that are zero, so 1 hour 4 seconds is not 1 hour 0 minutes 4 seconds. Default: On.")),
             &mut settings.relative_hide_zero,
         );
         kit.toggle_setting(
             ui,
             "settings::time::relative-abbreviate",
-            "Abbreviate Units",
-            Some("1y 2d 3h rather than 1 year 2 days 3 hours. Default: Off."),
+            &tr!("Abbreviate Units"),
+            Some(&tr!("1y 2d 3h rather than 1 year 2 days 3 hours. Default: Off.")),
             &mut settings.relative_abbreviate,
         );
     }
     // A fixed example moment, so the effect of each setting is visible without a screenshot.
     let now = config::unix_now();
     let example = now - (400 * 86_400 + 3 * 3_600 + 25 * 60 + 12);
-    kit.text(ui, TextRole::Muted, "Example");
+    kit.text(ui, TextRole::Muted, &tr!("Example"));
     kit.text(ui, TextRole::Body, &settings.taken_at(example));
     if settings.show_relative {
         kit.text(ui, TextRole::Body, &settings.time_ago(example, now));
@@ -667,15 +708,12 @@ fn appearance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         .iter()
         .position(|theme| theme.id == state.config.theme_id())
         .unwrap_or(0);
-    let tooltip = format!(
-        "Themes are loaded from {}. Add or edit a theme file there and it appears here without restarting.",
-        app_paths::themes_dir().display()
-    );
+    let tooltip = tr!("Themes are loaded from {folder}. Add or edit a theme file there and it appears here without restarting.", folder = app_paths::themes_dir().display()).into_owned();
     let mut chosen = None;
     kit.setting_row(
         ui,
         "settings::theme-row",
-        "Theme",
+        &tr!("Theme"),
         Some(&tooltip),
         |kit, ui| {
             chosen = kit.dropdown(ui, "settings::theme", current, &labels, 280.0);
@@ -689,7 +727,7 @@ fn appearance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.button(
         ui,
         "settings::theme-export",
-        "Export theme as JSON",
+        &tr!("Export theme as JSON"),
         ButtonKind::Neutral,
         true,
     ) {
@@ -698,7 +736,7 @@ fn appearance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     kit.tooltip(
         ui,
         "settings::theme-export",
-        "Saves the selected theme as a JSON file in the themes folder, to use as a starting point for your own theme.",
+        &tr!("Saves the selected theme as a JSON file in the themes folder, to use as a starting point for your own theme."),
     );
 
     let spec = config::DropdownSettingId::WindowTransparency.spec();
@@ -716,8 +754,8 @@ fn appearance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(style) = kit.choice_setting(
         ui,
         "settings::fullscreen-style",
-        "Fullscreen Style",
-        Some("How F11 and the title bar's fullscreen button take the window fullscreen. Borderless covers the screen without changing the display mode, so it switches instantly. Exclusive takes over the display and its video mode where the system supports it. Default: Borderless."),
+        &tr!("Fullscreen Style"),
+        Some(&tr!("How F11 and the title bar's fullscreen button take the window fullscreen. Borderless covers the screen without changing the display mode, so it switches instantly. Exclusive takes over the display and its video mode where the system supports it. Default: Borderless.")),
         state.config.fullscreen_style(),
         &config::FullscreenStyle::ALL,
         |style| style.label().to_owned(),
@@ -741,8 +779,8 @@ fn appearance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(value) = kit.slider_setting_ex(
         ui,
         "settings::ui-opacity",
-        "UI Opacity",
-        Some("Only active when Window Transparency is Transparent or Blurred. 100% is fully opaque UI chrome and 0% is fully transparent. Default: 100%."),
+        &tr!("UI Opacity"),
+        Some(&tr!("Only active when Window Transparency is Transparent or Blurred. 100% is fully opaque UI chrome and 0% is fully transparent. Default: 100%.")),
         f64::from(state.config.ui_opacity_percent()),
         f64::from(config::UI_OPACITY_PERCENT_MIN),
         f64::from(config::UI_OPACITY_PERCENT_MAX),
@@ -755,14 +793,14 @@ fn appearance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(value) = kit.slider_setting_ex(
         ui,
         "settings::corner-radius",
-        "Window Corner Radius",
-        Some("How round the window's corners are, in pixels (0 is square). Works with every Window Transparency mode; set it to 0 on an Opaque window to keep your OS's own corners. Default: 12."),
+        &tr!("Window Corner Radius"),
+        Some(&tr!("How round the window's corners are, in pixels (0 is square). Works with every Window Transparency mode; set it to 0 on an Opaque window to keep your OS's own corners. Default: 12.")),
         f64::from(state.config.window_corner_radius()),
         f64::from(config::WINDOW_CORNER_RADIUS_MIN),
         f64::from(config::WINDOW_CORNER_RADIUS_MAX),
         1.0,
         true,
-        |value| format!("{value:.0} px"),
+        |value| tr!("{value:.0} px", value = value).into_owned(),
     ) {
         state.config.set_window_corner_radius(value.round() as u8);
     }
@@ -781,29 +819,21 @@ fn export_theme(theme: &vertex_theme::Theme) {
             let folder = path.parent().map(Path::to_path_buf);
             notification::emit_with_actions(
                 notification::Severity::Info,
-                "Settings",
-                format!(
-                    "Exported {} to {}. Give the copy a new \"id\" and it loads as its own theme.",
-                    theme.name,
-                    path.display()
-                ),
+                tr!("Settings"),
+                tr!("Exported {name} to {path}. Give the copy a new \"id\" and it loads as its own theme.", name = theme.name, path = path.display()).into_owned(),
                 vec![notification::NotificationAction::new(
-                    "Open folder",
+                    tr!("Open folder"),
                     move || {
                         if let Some(folder) = folder.as_deref()
                             && let Err(err) = launcher_ui::desktop::open_in_file_manager(folder)
                         {
-                            notification::error!(
-                                "Settings",
-                                "Failed to open the themes folder: {}",
-                                err
-                            );
+                            notification::error!("Settings", "Failed to open the themes folder: {err}", err = err);
                         }
                     },
                 )],
             );
         }
-        Err(err) => notification::error!("Settings", "Failed to export theme: {}", err),
+        Err(err) => notification::error!("Settings", "Failed to export theme: {err}", err = err),
     }
 }
 
@@ -822,22 +852,19 @@ fn privacy(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     );
     kit::label(
         ui,
-        INSECURE_STORAGE_WARNING,
+        &vertex_i18n::t(INSECURE_STORAGE_WARNING),
         &TextStyle {
             wrap: TextWrap::Words,
             ..kit.style(TextRole::Danger)
         },
     );
-    let tooltip = format!(
-        "Stores sign-in tokens in {} instead of the system keyring. The file is not encrypted. Turn this off to move them back into the keyring. Default: Off.",
-        auth::insecure_token_file_path().display()
-    );
+    let tooltip = tr!("Stores sign-in tokens in {path} instead of the system keyring. The file is not encrypted. Turn this off to move them back into the keyring. Default: Off.", path = auth::insecure_token_file_path().display()).into_owned();
     let current = state.config.insecure_file_account_storage();
     let mut requested = current;
     kit.toggle_setting(
         ui,
         "settings::insecure-storage",
-        "Use Unsecured File Account Storage",
+        &tr!("Use Unsecured File Account Storage"),
         Some(&tooltip),
         &mut requested,
     );
@@ -887,8 +914,8 @@ fn text(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     kit.setting_row(
         ui,
         "settings::emoji-font-row",
-        "Emoji Font",
-        Some("The font colour emoji are drawn with."),
+        &tr!("Emoji Font"),
+        Some(&tr!("The font colour emoji are drawn with.")),
         |kit, ui| {
             chosen = kit.dropdown(
                 ui,
@@ -911,8 +938,8 @@ fn text(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     kit.setting_row(
         ui,
         "settings::cjk-font-row",
-        "CJK Font",
-        Some("The font Chinese, Japanese and Korean text falls back to."),
+        &tr!("CJK Font"),
+        Some(&tr!("The font Chinese, Japanese and Korean text falls back to.")),
         |kit, ui| {
             chosen = kit.dropdown(
                 ui,
@@ -929,8 +956,8 @@ fn text(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(path) = kit.choice_setting(
         ui,
         "settings::text-path",
-        "Text Rendering Path",
-        Some("Controls how glyphs are rasterized for the launcher UI. Auto keeps the default path. SDF/MSDF are mainly useful for testing the new text pipeline. Default: Auto."),
+        &tr!("Text Rendering Path"),
+        Some(&tr!("Controls how glyphs are rasterized for the launcher UI. Auto keeps the default path. SDF/MSDF are mainly useful for testing the new text pipeline. Default: Auto.")),
         state.config.text_rendering_path(),
         &TextRenderingPath::ALL,
         |path| path.label().to_owned(),
@@ -955,19 +982,19 @@ fn text(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
 }
 
 fn typography(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
-    kit.collapsible(ui, "settings::text-styles", "Text styles", |ui, kit| {
+    kit.collapsible(ui, "settings::text-styles", &tr!("Text styles"), |ui, kit| {
         typography_body(ui, kit, state)
     });
 }
 
 fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
-    kit.text(ui, TextRole::Muted, "Size, weight, and font for each kind of text. These stack with the UI font size and weight above.");
+    kit.text(ui, TextRole::Muted, &tr!("Size, weight, and font for each kind of text. These stack with the UI font size and weight above."));
     let options = state.font_options.clone();
-    let mut font_labels = vec!["Launcher UI font (default)".to_owned()];
+    let mut font_labels = vec![tr!("Launcher UI font (default)").into_owned()];
     font_labels.extend(options.ui_labels.iter().cloned());
-    let mut cjk_labels = vec!["Use general CJK font".to_owned()];
+    let mut cjk_labels = vec![tr!("Use general CJK font").into_owned()];
     cjk_labels.extend(options.cjk_labels.iter().cloned());
-    let mut emoji_labels = vec!["Use general emoji font".to_owned()];
+    let mut emoji_labels = vec![tr!("Use general emoji font").into_owned()];
     emoji_labels.extend(options.emoji_labels.iter().cloned());
 
     for role in config::TextRole::ALL {
@@ -979,8 +1006,8 @@ fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         if let Some(size) = kit.slider_setting(
             ui,
             &format!("settings::type::{slug}::size"),
-            "Size",
-            Some("Font size for this text role, in points."),
+            &tr!("Size"),
+            Some(&tr!("Font size for this text role, in points.")),
             f64::from(current.size.unwrap_or(defaults.size)),
             f64::from(config::ROLE_FONT_SIZE_MIN),
             f64::from(config::ROLE_FONT_SIZE_MAX),
@@ -992,8 +1019,8 @@ fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         if let Some(weight) = kit.slider_setting(
             ui,
             &format!("settings::type::{slug}::weight"),
-            "Weight",
-            Some("Font weight from 100 (thin) to 900 (black), in steps of 100; 400 is regular and 700 is bold. Fonts that lack the chosen weight may look different. Default: 400."),
+            &tr!("Weight"),
+            Some(&tr!("Font weight from 100 (thin) to 900 (black), in steps of 100; 400 is regular and 700 is bold. Fonts that lack the chosen weight may look different. Default: 400.")),
             f64::from(current.weight.unwrap_or(defaults.weight)),
             f64::from(config::UI_FONT_WEIGHT_MIN),
             f64::from(config::UI_FONT_WEIGHT_MAX),
@@ -1017,8 +1044,8 @@ fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.setting_row(
             ui,
             &format!("settings::type::{slug}::font-row"),
-            "Font",
-            Some("Font family used for this text role."),
+            &tr!("Font"),
+            Some(&tr!("Font family used for this text role.")),
             |kit, ui| {
                 chosen = kit.dropdown(
                     ui,
@@ -1045,8 +1072,8 @@ fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.setting_row(
             ui,
             &format!("settings::type::{slug}::cjk-row"),
-            "CJK font",
-            Some("Font for Chinese, Japanese and Korean characters in this kind of text. Leave on the general setting to follow the CJK Font choice above."),
+            &tr!("CJK font"),
+            Some(&tr!("Font for Chinese, Japanese and Korean characters in this kind of text. Leave on the general setting to follow the CJK Font choice above.")),
             |kit, ui| chosen = kit.dropdown(ui, &format!("settings::type::{slug}::cjk"), cjk_index, &cjk_labels, 300.0),
         );
         if let Some(index) = chosen {
@@ -1065,8 +1092,8 @@ fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.setting_row(
             ui,
             &format!("settings::type::{slug}::emoji-row"),
-            "Emoji font",
-            Some("Font for emoji in this kind of text. Leave on the general setting to follow the Emoji Font choice above."),
+            &tr!("Emoji font"),
+            Some(&tr!("Font for emoji in this kind of text. Leave on the general setting to follow the Emoji Font choice above.")),
             |kit, ui| chosen = kit.dropdown(ui, &format!("settings::type::{slug}::emoji"), emoji_index, &emoji_labels, 300.0),
         );
         if let Some(index) = chosen {
@@ -1078,7 +1105,7 @@ fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         if kit.button(
             ui,
             &format!("settings::type::{slug}::reset"),
-            "Reset to default",
+            &tr!("Reset to default"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -1123,8 +1150,8 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(mode) = kit.choice_setting(
         ui,
         "settings::texel-aa",
-        "Skin Preview Texel Edge AA",
-        Some("Smooths the hard pixel edges between skin texels inside the skin shader, on top of the post anti-aliasing below. Off keeps crisp pixel-art edges. Default: Off."),
+        &tr!("Skin Preview Texel Edge AA"),
+        Some(&tr!("Smooths the hard pixel edges between skin texels inside the skin shader, on top of the post anti-aliasing below. Off keeps crisp pixel-art edges. Default: Off.")),
         state.config.skin_preview_texel_aa_mode(),
         &SkinPreviewTexelAaMode::ALL,
         |mode| mode.label().to_owned(),
@@ -1134,8 +1161,8 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(mode) = kit.choice_setting(
         ui,
         "settings::skin-aa",
-        "Skin Preview Post Anti-Aliasing",
-        Some("How the skin preview is smoothed. MSAA samples the scene itself (see MSAA Samples); SMAA and FXAA are post-process filters; TAA blends frames over time; Off is fastest. Changes apply immediately. Default: FXAA (Post)."),
+        &tr!("Skin Preview Post Anti-Aliasing"),
+        Some(&tr!("How the skin preview is smoothed. MSAA samples the scene itself (see MSAA Samples); SMAA and FXAA are post-process filters; TAA blends frames over time; Off is fastest. Changes apply immediately. Default: FXAA (Post).")),
         state.config.skin_preview_aa_mode(),
         &SkinPreviewAaMode::ALL,
         |mode| mode.label().to_owned(),
@@ -1153,8 +1180,8 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(mode) = kit.choice_setting(
         ui,
         "settings::svg-aa",
-        "SVG Anti-Aliasing",
-        Some("Controls supersampled SVG rasterization for launcher icons. Changes apply immediately. Default: Balanced (SSAA 2x)."),
+        &tr!("SVG Anti-Aliasing"),
+        Some(&tr!("Controls supersampled SVG rasterization for launcher icons. Changes apply immediately. Default: Balanced (SSAA 2x).")),
         state.config.svg_aa_mode(),
         &SvgAaMode::ALL,
         |mode| mode.label().to_owned(),
@@ -1175,8 +1202,8 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.toggle_setting(
         ui,
         "settings::motion-blur",
-        "Enable Skin Preview Motion Blur",
-        Some("Blurs the moving 3D skin preview by blending several moments across the shutter interval. Applies immediately. Default: Off."),
+        &tr!("Enable Skin Preview Motion Blur"),
+        Some(&tr!("Blurs the moving 3D skin preview by blending several moments across the shutter interval. Applies immediately. Default: Off.")),
         &mut blur,
     ) {
         state.config.set_skin_preview_motion_blur_enabled(blur);
@@ -1187,7 +1214,7 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             "settings::motion-blur-amount",
             amount.label,
-            Some("Longer shutter intervals produce stronger blur but more trailing. Best paired with SMAA, FXAA, or TAA."),
+            Some(&tr!("Longer shutter intervals produce stronger blur but more trailing. Best paired with SMAA, FXAA, or TAA.")),
             f64::from(state.config.skin_preview_motion_blur_amount()),
             f64::from(amount.min),
             f64::from(amount.max),
@@ -1201,7 +1228,7 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             "settings::motion-blur-shutter",
             shutter.label,
-            Some("Total shutter interval measured in 60 FPS frames. Higher values create longer streaks."),
+            Some(&tr!("Total shutter interval measured in 60 FPS frames. Higher values create longer streaks.")),
             f64::from(state.config.skin_preview_motion_blur_shutter_frames()),
             f64::from(shutter.min),
             f64::from(shutter.max),
@@ -1215,7 +1242,7 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             "settings::motion-blur-samples",
             samples.label,
-            Some("How many snapshots of the skin preview are blended across the shutter interval (2\u{2013}16). More samples make smoother blur and cost more GPU work. Default: 5."),
+            Some(&tr!("How many snapshots of the skin preview are blended across the shutter interval (2–16). More samples make smoother blur and cost more GPU work. Default: 5.")),
             f64::from(state.config.skin_preview_motion_blur_sample_count()),
             f64::from(samples.min),
             f64::from(samples.max),
@@ -1250,8 +1277,8 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.toggle_setting(
         ui,
         "settings::hdr",
-        "HDR When Available",
-        Some("Render the launcher in HDR on displays that support it. Default: Off."),
+        &tr!("HDR When Available"),
+        Some(&tr!("Render the launcher in HDR on displays that support it. Default: Off.")),
         &mut hdr,
     ) {
         state.config.set_hdr_when_available(hdr);
@@ -1273,8 +1300,8 @@ fn hdr_controls(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     if let Some(value) = kit.choice_setting(
         ui,
         "settings::hdr-color-space",
-        "HDR Color Space",
-        Some("The signal sent to the display while HDR is on. HDR10 (PQ) suits most monitors; scRGB is Windows' native HDR format; HLG and Dolby Vision need display and platform support. Default: HDR10 (PQ)."),
+        &tr!("HDR Color Space"),
+        Some(&tr!("The signal sent to the display while HDR is on. HDR10 (PQ) suits most monitors; scRGB is Windows' native HDR format; HLG and Dolby Vision need display and platform support. Default: HDR10 (PQ).")),
         config.hdr_color_space(),
         &config::HdrColorSpace::ALL,
         |value| value.label().to_owned(),
@@ -1284,8 +1311,8 @@ fn hdr_controls(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     if let Some(value) = kit.slider_setting(
         ui,
         "settings::hdr-ui-white",
-        "HDR UI Brightness",
-        Some("A multiplier on the launcher's interface brightness, applied on top of the UI paper white below (1.00 = unchanged). Lower it if the interface looks blown out. Default: 1.00."),
+        &tr!("HDR UI Brightness"),
+        Some(&tr!("A multiplier on the launcher's interface brightness, applied on top of the UI paper white below (1.00 = unchanged). Lower it if the interface looks blown out. Default: 1.00.")),
         f64::from(config.hdr_ui_white_scale()),
         f64::from(config::HDR_UI_WHITE_SCALE_MIN),
         f64::from(config::HDR_UI_WHITE_SCALE_MAX),
@@ -1297,13 +1324,13 @@ fn hdr_controls(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
     if let Some(value) = kit.slider_setting(
         ui,
         "settings::hdr-ui-paper-white",
-        "HDR UI Paper White",
-        Some("The brightness, in nits, of the interface's white. 0 uses the display's own SDR white level, which can be too bright when the system does not report it; try 80-200 if the interface looks blown out. Default: 0 (automatic)."),
+        &tr!("HDR UI Paper White"),
+        Some(&tr!("The brightness, in nits, of the interface's white. 0 uses the display's own SDR white level, which can be too bright when the system does not report it; try 80-200 if the interface looks blown out. Default: 0 (automatic).")),
         f64::from(config.hdr_ui_paper_white_nits()),
         f64::from(config::HDR_UI_PAPER_WHITE_NITS_MIN),
         f64::from(config::HDR_UI_PAPER_WHITE_NITS_MAX),
         5.0,
-        |value| if value < 1.0 { "Auto".to_owned() } else { format!("{value:.0} nits") },
+        |value| if value < 1.0 { "Auto".to_owned() } else { tr!("{value:.0} nits", value = value).into_owned() },
     ) {
         config.set_hdr_ui_paper_white_nits(value.round() as i32);
     }
@@ -1312,26 +1339,26 @@ fn hdr_controls(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         if let Some(value) = kit.slider_setting(
             ui,
             "settings::hdr-max-cll",
-            "HDR Max Content Light Level",
-            Some("MaxCLL: the brightest pixel the launcher reports to the display, in nits. Displays use it to decide how to tone-map. Default: 1000."),
+            &tr!("HDR Max Content Light Level"),
+            Some(&tr!("MaxCLL: the brightest pixel the launcher reports to the display, in nits. Displays use it to decide how to tone-map. Default: 1000.")),
             f64::from(config.hdr_max_cll_nits()),
             f64::from(config::HDR_LIGHT_LEVEL_NITS_MIN),
             f64::from(config::HDR_LIGHT_LEVEL_NITS_MAX),
             50.0,
-            |value| format!("{value:.0} nits"),
+            |value| tr!("{value:.0} nits", value = value).into_owned(),
         ) {
             config.set_hdr_max_cll_nits(value.round() as i32);
         }
         if let Some(value) = kit.slider_setting(
             ui,
             "settings::hdr-max-fall",
-            "HDR Max Frame-Average Light Level",
-            Some("MaxFALL: the brightest average frame the launcher reports to the display, in nits (never above Max Content Light Level). Default: 400."),
+            &tr!("HDR Max Frame-Average Light Level"),
+            Some(&tr!("MaxFALL: the brightest average frame the launcher reports to the display, in nits (never above Max Content Light Level). Default: 400.")),
             f64::from(config.hdr_max_fall_nits()),
             f64::from(config::HDR_LIGHT_LEVEL_NITS_MIN),
             f64::from(config::HDR_LIGHT_LEVEL_NITS_MAX),
             50.0,
-            |value| format!("{value:.0} nits"),
+            |value| tr!("{value:.0} nits", value = value).into_owned(),
         ) {
             config.set_hdr_max_fall_nits(value.round() as i32);
         }
@@ -1380,11 +1407,11 @@ fn adapters(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             if missing {
                 labels.insert(
                     0,
-                    "Missing adapter (falls back to High Performance)".to_owned(),
+                    tr!("Missing adapter (falls back to High Performance)").into_owned(),
                 );
             }
             if labels.is_empty() {
-                labels.push("No graphics adapters detected".to_owned());
+                labels.push(tr!("No graphics adapters detected").into_owned());
             }
             let selected = found.map_or(0, |index| index + usize::from(missing));
             let mut chosen = None;
@@ -1431,7 +1458,7 @@ fn supported_graphics_apis() -> &'static [GraphicsApiPreference] {
 fn graphics_api_label(value: GraphicsApiPreference) -> String {
     match value {
         // The engine drives macOS through WebGPU; the stored value keeps its old name.
-        GraphicsApiPreference::Metal => "WebGPU".to_owned(),
+        GraphicsApiPreference::Metal => tr!("WebGPU").into_owned(),
         other => other.settings_label().to_owned(),
     }
 }
@@ -1441,8 +1468,8 @@ fn downloads(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(value) = kit.slider_setting(
         ui,
         "settings::downloads",
-        "Max Concurrent Downloads",
-        Some("How many files the launcher downloads at the same time (1\u{2013}128) for game files, libraries and mods. Higher can be faster on fast connections but may trigger rate limits from download servers. Default: 8."),
+        &tr!("Max Concurrent Downloads"),
+        Some(&tr!("How many files the launcher downloads at the same time (1–128) for game files, libraries and mods. Higher can be faster on fast connections but may trigger rate limits from download servers. Default: 8.")),
         concurrency,
         f64::from(config::DOWNLOAD_CONCURRENCY_MIN),
         f64::from(config::DOWNLOAD_CONCURRENCY_MAX),
@@ -1455,8 +1482,8 @@ fn downloads(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.toggle_setting(
         ui,
         "settings::speed-limit-on",
-        "Enable Download Speed Limit",
-        Some("Limits how fast the launcher downloads. Turn it on to set the speed; if the speed is empty or not valid, no limit is applied. Default: Off."),
+        &tr!("Enable Download Speed Limit"),
+        Some(&tr!("Limits how fast the launcher downloads. Turn it on to set the speed; if the speed is empty or not valid, no limit is applied. Default: Off.")),
         &mut limit,
     ) {
         state.config.set_download_speed_limit_enabled(limit);
@@ -1467,10 +1494,10 @@ fn downloads(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         if kit.text_setting(
             ui,
             "settings::speed-limit",
-            "Download Speed Limit",
-            Some("How fast downloads may go, for example 250Mbps, 250 Mbps, 30MB/s or 1.5 Gbps. Lowercase b (Mbps, Mbit/s) is bits and uppercase B (MB/s, MiB/s) is bytes, so 80Mbps is about 10 MB/s. A bare number is Mbps. Default: empty (no limit)."),
+            &tr!("Download Speed Limit"),
+            Some(&tr!("How fast downloads may go, for example 250Mbps, 250 Mbps, 30MB/s or 1.5 Gbps. Lowercase b (Mbps, Mbit/s) is bits and uppercase B (MB/s, MiB/s) is bytes, so 80Mbps is about 10 MB/s. A bare number is Mbps. Default: empty (no limit).")),
             &mut speed,
-            "250Mbps",
+            &tr!("250Mbps"),
             false,
         ) {
             // Digits, a decimal point, the unit's letters and its "/" ("30MB/s"): nothing else can be part of a speed.
@@ -1484,19 +1511,19 @@ fn downloads(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             kit.text(
                 ui,
                 TextRole::Muted,
-                "Speed limit is on but empty, so no limit is applied. Enter something like 250Mbps or 30MB/s.",
+                &tr!("Speed limit is on but empty, so no limit is applied. Enter something like 250Mbps or 30MB/s."),
             );
         } else if let Some(bps) = config::parse_bitrate_to_bps(&value) {
             kit.text(
                 ui,
                 TextRole::Muted,
-                &format!("Downloads limited to {}.", config::describe_bitrate(bps)),
+                &tr!("Downloads limited to {limit}.", limit = config::describe_bitrate(bps)),
             );
         } else {
             kit.text(
                 ui,
                 TextRole::Danger,
-                "Not a speed this understands; try 250Mbps or 30MB/s. No limit is applied until it is.",
+                &tr!("Not a speed this understands; try 250Mbps or 30MB/s. No limit is applied until it is."),
             );
         }
     }
@@ -1521,7 +1548,7 @@ fn java_paths(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     kit.collapsible(
         ui,
         "settings::java-paths",
-        "Java JVM Paths (Optional)",
+        &tr!("Java JVM Paths (Optional)"),
         |ui, kit| java_paths_body(ui, kit, state, views),
     );
 }
@@ -1535,7 +1562,7 @@ fn java_paths_body(
     kit.text(
         ui,
         TextRole::Muted,
-        "Leave blank for None. Configure only versions you actually use.",
+        &tr!("Leave blank for None. Configure only versions you actually use."),
     );
     for (runtime, view) in views {
         let mut path = state
@@ -1561,14 +1588,14 @@ fn java_paths_body(
         let current = (!path.trim().is_empty()).then(|| path.trim().to_owned());
         let busy = view.in_flight.is_some();
         let download_label = if view.in_flight == Some(JavaActionKind::Download) {
-            "Downloading...".to_owned()
+            tr!("Downloading...").into_owned()
         } else {
-            format!("Download OpenJDK {}", runtime.major())
+            tr!("Download OpenJDK {version}", version = runtime.major()).into_owned()
         };
         let validate_label = if view.in_flight == Some(JavaActionKind::Validate) {
-            "Testing..."
+            &tr!("Testing...")
         } else {
-            "Test Java"
+            &tr!("Test Java")
         };
         {
             let _row = kit.row(ui, kit::SPACE_SM);
@@ -1596,7 +1623,7 @@ fn java_paths_body(
             kit.text(
                 ui,
                 TextRole::Muted,
-                "Set a Java executable path before testing, or download OpenJDK.",
+                &tr!("Set a Java executable path before testing, or download OpenJDK."),
             );
         }
         if let Some(message) = &view.message {
@@ -1633,8 +1660,8 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.text_setting(
         ui,
         "settings::installations-root",
-        "Minecraft installations folder",
-        Some("New instances are created under this folder as <folder>/<instance.minecraft_root>. Relative paths are resolved from the launcher working directory."),
+        &tr!("Minecraft installations folder"),
+        Some(&tr!("New instances are created under this folder as <folder>/<instance.minecraft_root>. Relative paths are resolved from the launcher working directory.")),
         &mut root,
         "",
         false,
@@ -1647,10 +1674,10 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.button(
         ui,
         "settings::purge-cache",
-        if purging {
-            "Purging..."
+        &if purging {
+            tr!("Purging...")
         } else {
-            "Purge metadata cache"
+            tr!("Purge metadata cache")
         },
         ButtonKind::Neutral,
         !purging,
@@ -1660,10 +1687,10 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         launcher_runtime::spawn_detached(async move {
             let message = match installation::purge_cache_async().await {
                 Ok(()) => {
-                    "Purged local metadata cache. Version lists will be re-fetched on next refresh."
-                        .to_owned()
+                    tr!("Purged local metadata cache. Version lists will be re-fetched on next refresh.")
+                        .into_owned()
                 }
-                Err(err) => format!("Failed to purge metadata cache: {err}"),
+                Err(err) => tr!("Failed to purge metadata cache: {err}", err = err).into_owned(),
             };
             let _ = tx.send(message);
         });
@@ -1691,13 +1718,13 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(value) = kit.slider_setting(
         ui,
         "settings::default-memory",
-        "Default max memory allocation (MiB)",
-        Some("Maximum memory (Java -Xmx) for every instance that does not set its own memory in its instance settings. Changing it affects those instances the next time they launch. The slider stops at the RAM this computer has. Default: 4096 MiB."),
+        &tr!("Default max memory allocation (MiB)"),
+        Some(&tr!("Maximum memory (Java -Xmx) for every instance that does not set its own memory in its instance settings. Changing it affects those instances the next time they launch. The slider stops at the RAM this computer has. Default: 4096 MiB.")),
         memory as f64,
         config::INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN as f64,
         max_memory.max(config::INSTANCE_DEFAULT_MAX_MEMORY_MIB_MIN + 1) as f64,
         config::INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP as f64,
-        |value| format!("{value:.0} MiB"),
+        |value| tr!("{value:.0} MiB", value = value).into_owned(),
     ) {
         state.config.set_default_instance_max_memory_mib(value as u128);
     }
@@ -1705,8 +1732,8 @@ fn instance_defaults(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.text_setting(
         ui,
         "settings::default-args",
-        "Default CLI args",
-        Some("Extra JVM arguments for every instance that does not set its own in its instance settings (for example: -XX:+UseZGC). An instance's own arguments replace these rather than adding to them. Applied the next time the instance launches. Default: empty (no extra arguments)."),
+        &tr!("Default CLI args"),
+        Some(&tr!("Extra JVM arguments for every instance that does not set its own in its instance settings (for example: -XX:+UseZGC). An instance's own arguments replace these rather than adding to them. Applied the next time the instance launches. Default: empty (no extra arguments).")),
         &mut args,
         "",
         false,
@@ -1727,8 +1754,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             kit,
             "linux",
-            "Linux",
-            "Linux-specific settings that apply across the launcher.",
+            &tr!("Linux"),
+            &tr!("Linux-specific settings that apply across the launcher."),
             |ui, kit| {
                 // Better Blur DX is offered, first, only where the effect exists: otherwise it is not an option at all.
                 let blur_choices: Vec<LinuxBlurProtocol> = LinuxBlurProtocol::ALL
@@ -1743,8 +1770,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 if let Some(value) = kit.choice_setting(
                 ui,
                 "settings::linux-blur",
-                "Blur Protocol",
-                Some("Linux compositor blur protocol used when Window Transparency is Blurred. Auto prefers ext_background_effect_v1 and falls back to KDE blur. Better Blur DX, offered only where that KWin effect is installed, is not a protocol: Vertex asks for no blur and the effect blurs the window by its window class."),
+                &tr!("Blur Protocol"),
+                Some(&tr!("Linux compositor blur protocol used when Window Transparency is Blurred. Auto prefers ext_background_effect_v1 and falls back to KDE blur. Better Blur DX, offered only where that KWin effect is installed, is not a protocol: Vertex asks for no blur and the effect blurs the window by its window class.")),
                 state.config.linux_blur_protocol(),
                 &blur_choices,
                 |value| value.label().to_owned(),
@@ -1757,25 +1784,25 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                         kit.text(
                             ui,
                             TextRole::Muted,
-                            "Better Blur DX blurs this window itself, by window class: Vertex asks the compositor for no blur. Its strength, noise, saturation, brightness, contrast, corner radius and refraction are settings of the effect, not of any one window.",
+                            &tr!("Better Blur DX blurs this window itself, by window class: Vertex asks the compositor for no blur. Its strength, noise, saturation, brightness, contrast, corner radius and refraction are settings of the effect, not of any one window."),
                         );
                         if state.better_blur.blurs_vertex() {
                             kit.text(
                                 ui,
                                 TextRole::Muted,
-                                "Vertex's window class (org.sturdyfool10.VertexLauncher) is on the effect's list, so the window is blurred.",
+                                &tr!("Vertex's window class (org.sturdyfool10.VertexLauncher) is on the effect's list, so the window is blurred."),
                             );
                         } else {
                             kit.text(
                                 ui,
                                 TextRole::Muted,
-                                "Vertex's window class (org.sturdyfool10.VertexLauncher) is not on the effect's list, so the window stays plain transparent. Vertex adds it when this is chosen; if that did not work, add it here.",
+                                &tr!("Vertex's window class (org.sturdyfool10.VertexLauncher) is not on the effect's list, so the window stays plain transparent. Vertex adds it when this is chosen; if that did not work, add it here."),
                             );
-                            if kit.button(ui, "settings::cover-better-blur", "Add Vertex to Better Blur DX's window classes", ButtonKind::Primary, true) {
+                            if kit.button(ui, "settings::cover-better-blur", &tr!("Add Vertex to Better Blur DX's window classes"), ButtonKind::Primary, true) {
                                 state.better_blur.cover_vertex();
                             }
                         }
-                        if kit.button(ui, "settings::open-better-blur", "Open Desktop Effects (Better Blur DX settings)", ButtonKind::Neutral, true) {
+                        if kit.button(ui, "settings::open-better-blur", &tr!("Open Desktop Effects (Better Blur DX settings)"), ButtonKind::Neutral, true) {
                             super::super::super::better_blur::open_settings();
                         }
                     }
@@ -1783,26 +1810,26 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                         kit.text(
                             ui,
                             TextRole::Muted,
-                            "Better Blur DX is on, so KWin blurs this window through the protocol above. Choose Better Blur DX as the protocol to let the effect blur it by window class instead.",
+                            &tr!("Better Blur DX is on, so KWin blurs this window through the protocol above. Choose Better Blur DX as the protocol to let the effect blur it by window class instead."),
                         );
                     }
                     BetterBlurDx::Installed => kit.text(
                         ui,
                         TextRole::Muted,
-                        "Better Blur DX is installed but not switched on. Turn it on in System Settings > Window Management > Desktop Effects (and turn KWin's own Blur off); Vertex then needs nothing else.",
+                        &tr!("Better Blur DX is installed but not switched on. Turn it on in System Settings > Window Management > Desktop Effects (and turn KWin's own Blur off); Vertex then needs nothing else."),
                     ),
                     BetterBlurDx::NotFound => kit.text(
                         ui,
                         TextRole::Muted,
-                        "Linux blur protocols expose only blur regions to clients; Vertex requests a full-window region. Blur strength, radius, saturation, and noise are controlled by the compositor.",
+                        &tr!("Linux blur protocols expose only blur regions to clients; Vertex requests a full-window region. Blur strength, radius, saturation, and noise are controlled by the compositor."),
                     ),
                 }
                 let mut opengl = state.config.linux_set_opengl_driver();
                 if kit.toggle_setting(
                 ui,
                 "settings::linux-opengl",
-                "Set Linux OpenGL Driver",
-                Some("Linux-only. Vertex will explicitly manage OpenGL driver environment variables for launched games. This affects all launched versions by default; versions using Vulkan directly should ignore it."),
+                &tr!("Set Linux OpenGL Driver"),
+                Some(&tr!("Linux-only. Vertex will explicitly manage OpenGL driver environment variables for launched games. This affects all launched versions by default; versions using Vulkan directly should ignore it.")),
                 &mut opengl,
             ) {
                 state.config.set_linux_set_opengl_driver(opengl);
@@ -1811,8 +1838,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 if kit.toggle_setting_ex(
                 ui,
                 "settings::linux-zink",
-                "Use Zink Driver (Experimental)",
-                Some("Linux-only. Experimental. When the setting above is enabled, forces Mesa Zink so OpenGL runs over Vulkan. Disable it to keep Mesa's default OpenGL driver selection. Versions using Vulkan directly should ignore it."),
+                &tr!("Use Zink Driver (Experimental)"),
+                Some(&tr!("Linux-only. Experimental. When the setting above is enabled, forces Mesa Zink so OpenGL runs over Vulkan. Disable it to keep Mesa's default OpenGL driver selection. Versions using Vulkan directly should ignore it.")),
                 &mut zink,
                 state.config.linux_set_opengl_driver(),
             ) {
@@ -1825,14 +1852,14 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             kit,
             "windows",
-            "Windows",
-            "Windows-specific window composition and compatibility settings.",
+            &tr!("Windows"),
+            &tr!("Windows-specific window composition and compatibility settings."),
             |ui, kit| {
                 if let Some(value) = kit.choice_setting(
                 ui,
                 "settings::windows-backdrop",
-                "Window Backdrop Type",
-                Some("Windows DWM system backdrop material used when Window Transparency is Blurred. Auto tries modern backdrops before legacy blur; None requests DWMSBT_NONE."),
+                &tr!("Window Backdrop Type"),
+                Some(&tr!("Windows DWM system backdrop material used when Window Transparency is Blurred. Auto tries modern backdrops before legacy blur; None requests DWMSBT_NONE.")),
                 state.config.windows_backdrop_type(),
                 &WindowsBackdropType::ALL,
                 |value| value.label().to_owned(),
@@ -1846,8 +1873,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 if let Some(value) = kit.slider_setting_ex(
                     ui,
                     "settings::windows-blur-tint-opacity",
-                    "Blur Tint Strength",
-                    Some("How strongly the blur is tinted with the colour below. 0 is no tint. Only the Legacy Blur and Legacy Acrylic backdrops can be tinted."),
+                    &tr!("Blur Tint Strength"),
+                    Some(&tr!("How strongly the blur is tinted with the colour below. 0 is no tint. Only the Legacy Blur and Legacy Acrylic backdrops can be tinted.")),
                     f64::from(state.config.windows_blur_tint_opacity_percent()),
                     f64::from(config::WINDOWS_BLUR_TINT_OPACITY_MIN),
                     f64::from(config::WINDOWS_BLUR_TINT_OPACITY_MAX),
@@ -1865,8 +1892,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                     && kit.text_setting(
                         ui,
                         "settings::windows-blur-tint",
-                        "Blur Tint Colour",
-                        Some("The tint colour as #rrggbb. Ignored until it is a complete colour."),
+                        &tr!("Blur Tint Colour"),
+                        Some(&tr!("The tint colour as #rrggbb. Ignored until it is a complete colour.")),
                         tint_text,
                         "#000000",
                         false,
@@ -1879,7 +1906,7 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 kit.text(
                 ui,
                 TextRole::Muted,
-                "Applied only when Window Transparency is Blurred. Mica, Mica Alt and the system Acrylic are drawn by Windows with no strength or tint control; the two Legacy backdrops accept a tint.",
+                &tr!("Applied only when Window Transparency is Blurred. Mica, Mica Alt and the system Acrylic are drawn by Windows with no strength or tint control; the two Legacy backdrops accept a tint."),
             );
             },
         );
@@ -1888,14 +1915,14 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             kit,
             "macos",
-            "macOS",
-            "macOS-specific settings.",
+            &tr!("macOS"),
+            &tr!("macOS-specific settings."),
             |ui, kit| {
                 if let Some(value) = kit.choice_setting(
                     ui,
                     "settings::mac-material",
-                    "Visual Effect Material",
-                    Some("NSVisualEffectView material used when macOS native blur is active."),
+                    &tr!("Visual Effect Material"),
+                    Some(&tr!("NSVisualEffectView material used when macOS native blur is active.")),
                     state.config.macos_visual_effect_material(),
                     &MacosVisualEffectMaterial::ALL,
                     |value| value.label().to_owned(),
@@ -1905,8 +1932,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 if let Some(value) = kit.choice_setting(
                     ui,
                     "settings::mac-blending",
-                    "Visual Effect Blending Mode",
-                    Some("NSVisualEffectView blending mode used when macOS native blur is active."),
+                    &tr!("Visual Effect Blending Mode"),
+                    Some(&tr!("NSVisualEffectView blending mode used when macOS native blur is active.")),
                     state.config.macos_visual_effect_blending_mode(),
                     &MacosVisualEffectBlendingMode::ALL,
                     |value| value.label().to_owned(),
@@ -1916,8 +1943,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 if let Some(value) = kit.choice_setting(
                     ui,
                     "settings::mac-state",
-                    "Visual Effect State",
-                    Some("NSVisualEffectView state used when macOS native blur is active."),
+                    &tr!("Visual Effect State"),
+                    Some(&tr!("NSVisualEffectView state used when macOS native blur is active.")),
                     state.config.macos_visual_effect_state(),
                     &MacosVisualEffectState::ALL,
                     |value| value.label().to_owned(),
@@ -1928,8 +1955,8 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 if kit.toggle_setting(
                 ui,
                 "settings::mac-emphasized",
-                "Visual Effect Emphasized",
-                Some("Controls NSVisualEffectView.isEmphasized when macOS native blur is active."),
+                &tr!("Visual Effect Emphasized"),
+                Some(&tr!("Controls NSVisualEffectView.isEmphasized when macOS native blur is active.")),
                 &mut emphasized,
             ) {
                 state.config.set_macos_visual_effect_emphasized(emphasized);
@@ -1937,7 +1964,7 @@ fn platform_section(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 kit.text(
                     ui,
                     TextRole::Muted,
-                    "Applied only when Window Transparency is Blurred.",
+                    &tr!("Applied only when Window Transparency is Blurred."),
                 );
             },
         );
@@ -1949,20 +1976,20 @@ fn info_section(ui: &mut Ui<'_>, kit: &mut Kit) {
         ui,
         kit,
         "info",
-        "Info",
-        "Runtime and hardware information for this installation.",
+        &tr!("Info"),
+        &tr!("Runtime and hardware information for this installation."),
         |ui, kit| {
             let Some(info) = super::super::super::app_metadata::try_settings_info() else {
-                kit.text(ui, TextRole::Muted, "Collecting system information…");
+                kit.text(ui, TextRole::Muted, &tr!("Collecting system information…"));
                 return;
             };
             for (label, value) in [
-                ("CPU", info.cpu.as_str()),
-                ("GPU", info.gpu.as_str()),
-                ("Memory", info.memory.as_str()),
-                ("Graphics API", info.graphics_api.as_str()),
-                ("Graphics Driver + Version", info.graphics_driver.as_str()),
-                ("App Version + Commit Hash", info.app_version.as_str()),
+                (tr!("CPU"), info.cpu.as_str()),
+                (tr!("GPU"), info.gpu.as_str()),
+                (tr!("Memory"), info.memory.as_str()),
+                (tr!("Graphics API"), info.graphics_api.as_str()),
+                (tr!("Graphics Driver + Version"), info.graphics_driver.as_str()),
+                (tr!("App Version + Commit Hash"), info.app_version.as_str()),
             ] {
                 let _row = kit.row(ui, kit::SPACE_LG);
                 {
@@ -1971,7 +1998,7 @@ fn info_section(ui: &mut Ui<'_>, kit: &mut Kit) {
                             .width(Sizing::Fixed(220.0))
                             .height(Sizing::Fit),
                     );
-                    kit.text(ui, TextRole::Strong, label);
+                    kit.text(ui, TextRole::Strong, &label);
                 }
                 kit::label(
                     ui,
@@ -2003,10 +2030,10 @@ pub fn confirm_insecure_storage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppS
         true,
         |ui| {
             let _column = kit.column(ui, kit::SPACE_MD);
-            kit.text(ui, TextRole::Heading, "Use unsecured account storage?");
+            kit.text(ui, TextRole::Heading, &tr!("Use unsecured account storage?"));
             kit::label(
                 ui,
-                INSECURE_STORAGE_WARNING,
+                &vertex_i18n::t(INSECURE_STORAGE_WARNING),
                 &TextStyle {
                     wrap: TextWrap::Words,
                     ..kit.style(TextRole::Danger)
@@ -2014,10 +2041,7 @@ pub fn confirm_insecure_storage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppS
             );
             kit::label(
                 ui,
-                &format!(
-                    "Tokens will be written, unencrypted, to {}. Keep that file private, never share it, and leave it out of backups and screenshots.",
-                    auth::insecure_token_file_path().display()
-                ),
+                &tr!("Tokens will be written, unencrypted, to {path}. Keep that file private, never share it, and leave it out of backups and screenshots.", path = auth::insecure_token_file_path().display()),
                 &TextStyle {
                     wrap: TextWrap::Words,
                     ..kit.style(TextRole::Body)
@@ -2029,14 +2053,14 @@ pub fn confirm_insecure_storage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppS
             cancelled = kit.button(
                 ui,
                 "settings-insecure::cancel",
-                "Cancel",
+                &tr!("Cancel"),
                 ButtonKind::Primary,
                 true,
             );
             confirmed = kit.button(
                 ui,
                 "settings-insecure::confirm",
-                "Enable anyway",
+                &tr!("Enable anyway"),
                 ButtonKind::Danger,
                 true,
             );

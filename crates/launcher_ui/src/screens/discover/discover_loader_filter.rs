@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) enum DiscoverLoaderFilter {
     #[default]
@@ -17,13 +18,13 @@ impl DiscoverLoaderFilter {
         Self::Quilt,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Any => "Any Loader",
-            Self::Fabric => "Fabric",
-            Self::Forge => "Forge",
-            Self::NeoForge => "NeoForge",
-            Self::Quilt => "Quilt",
+            Self::Any => tr!("Any Loader"),
+            Self::Fabric => tr!("Fabric"),
+            Self::Forge => tr!("Forge"),
+            Self::NeoForge => tr!("NeoForge"),
+            Self::Quilt => tr!("Quilt"),
         }
     }
 

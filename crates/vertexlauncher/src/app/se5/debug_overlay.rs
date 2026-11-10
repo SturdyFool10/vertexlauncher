@@ -2,6 +2,7 @@
 //! without taking the pointer. The pass times come from the engine's last completed frame (CPU always, GPU where the
 //! device supports timestamp queries), so they trail what is on screen by a frame or two.
 
+use vertex_i18n::tr;
 use std::collections::VecDeque;
 
 use config::Config;
@@ -123,28 +124,28 @@ impl DebugOverlay {
         let _card = Self::card(ui, kit, "debug-overlay::fps");
         match self.stats() {
             Some((fps, latest, worst)) => {
-                kit.text(ui, TextRole::Body, &format!("{fps:.0} FPS"));
+                kit.text(ui, TextRole::Body, &tr!("{fps:.0} FPS", fps = fps));
                 kit.text(
                     ui,
                     TextRole::Muted,
-                    &format!("{latest:.2} ms frame  ·  {worst:.1} ms worst of {}", self.frame_ms.len()),
+                    &tr!("{latest:.2} ms frame  ·  {worst:.1} ms worst of {count}", latest = latest, worst = worst, count = self.frame_ms.len()),
                 );
             }
-            None => kit.text(ui, TextRole::Muted, "Measuring..."),
+            None => kit.text(ui, TextRole::Muted, &tr!("Measuring...")),
         }
     }
 
     fn graph_card(&self, ui: &mut Ui<'_>, kit: &Kit) {
         let _card = Self::card(ui, kit, "debug-overlay::graph");
-        kit.text(ui, TextRole::Body, "Frame graph");
+        kit.text(ui, TextRole::Body, &tr!("Frame graph"));
         self.history_strip(ui, kit);
         if !self.timings.has_data {
-            kit.text(ui, TextRole::Muted, "Waiting for the engine's first timings...");
+            kit.text(ui, TextRole::Muted, &tr!("Waiting for the engine's first timings..."));
             return;
         }
-        pass_list(ui, kit, "GPU passes", &self.timings.gpu_passes, "No GPU timings: this device has no timestamp queries.");
-        pass_list(ui, kit, "CPU passes", &self.timings.cpu_passes, "No CPU pass timings.");
-        pass_list(ui, kit, "CPU stages", &self.timings.cpu_stages, "No CPU stage timings.");
+        pass_list(ui, kit, &tr!("GPU passes"), &self.timings.gpu_passes, &tr!("No GPU timings: this device has no timestamp queries."));
+        pass_list(ui, kit, &tr!("CPU passes"), &self.timings.cpu_passes, &tr!("No CPU pass timings."));
+        pass_list(ui, kit, &tr!("CPU stages"), &self.timings.cpu_stages, &tr!("No CPU stage timings."));
     }
 
     /// One bar per recent frame, tall for slow ones, over a line at the 60 Hz budget.
@@ -201,7 +202,7 @@ impl DebugOverlay {
 /// A titled list of passes with a bar each, scaled so the 60 Hz budget is a full bar (longer passes overflow to full).
 fn pass_list(ui: &mut Ui<'_>, kit: &Kit, title: &str, passes: &[(String, f64)], empty: &str) {
     let total: f64 = passes.iter().map(|(_, ms)| ms).sum();
-    kit.text(ui, TextRole::Muted, &if passes.is_empty() { title.to_owned() } else { format!("{title}  ({total:.2} ms)") });
+    kit.text(ui, TextRole::Muted, &if passes.is_empty() { title.to_owned() } else { tr!("{title}  ({total:.2} ms)", title = title, total = total).into_owned() });
     if passes.is_empty() {
         kit.text(ui, TextRole::Muted, empty);
         return;
@@ -211,7 +212,7 @@ fn pass_list(ui: &mut Ui<'_>, kit: &Kit, title: &str, passes: &[(String, f64)], 
     }
     if passes.len() > MAX_ROWS {
         let rest: f64 = passes[MAX_ROWS..].iter().map(|(_, ms)| ms).sum();
-        row(ui, kit, &format!("{} more", passes.len() - MAX_ROWS), rest);
+        row(ui, kit, &tr!("{count} more", count = passes.len() - MAX_ROWS), rest);
     }
 }
 

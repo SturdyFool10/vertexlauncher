@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::sync::Arc;
 
 use image::{
@@ -11,13 +12,13 @@ pub async fn load_image_path_for_memory(path: std::path::PathBuf) -> Result<Arc<
     let path_label = path.display().to_string();
     let bytes = launcher_runtime::fs::read(path.as_path())
         .await
-        .map_err(|err| format!("failed to read '{path_label}': {err}"))?;
+        .map_err(|err| tr!("failed to read '{path_label}': {err}", path_label = path_label, err = err).into_owned())?;
 
     if should_recompress_for_memory(bytes.as_slice()) {
         let task =
             tokio_runtime::spawn_blocking(move || prepare_owned_image_bytes_for_memory(bytes));
         task.await
-            .map_err(|err| format!("failed to optimize '{path_label}' for memory: {err}"))
+            .map_err(|err| tr!("failed to optimize '{path_label}' for memory: {err}", path_label = path_label, err = err).into_owned())
     } else {
         Ok(Arc::<[u8]>::from(bytes.into_boxed_slice()))
     }

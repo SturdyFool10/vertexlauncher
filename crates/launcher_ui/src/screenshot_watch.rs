@@ -3,6 +3,7 @@
 //! Minecraft writes screenshots to `<instance root>/screenshots`, the same folders the Home and
 //! Instance galleries scan. Those galleries only scan while visible, so this polls independently.
 
+use vertex_i18n::tr;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
@@ -140,10 +141,9 @@ fn list_screenshots(dir: &Path) -> Vec<PathBuf> {
 
 /// `player` is an account mention (see [`crate::account_text`]).
 fn screenshot_message(player: Option<&str>, count: usize) -> String {
-    use notification::natural_language::a_or_count;
     match player {
-        Some(name) => format!("{name} took {}!", a_or_count(count, "screenshot")),
-        None => format!("We detected {}!", a_or_count(count, "new screenshot")),
+        Some(name) => vertex_i18n::trn!(count, "{name} took a screenshot!", "{name} took {amount} screenshots!", name = name, amount = notification::natural_language::count_word(count)),
+        None => vertex_i18n::trn!(count, "We detected a new screenshot!", "We detected {amount} new screenshots!", amount = notification::natural_language::count_word(count)),
     }
 }
 
@@ -152,13 +152,13 @@ fn screenshot_actions(path: PathBuf) -> Vec<NotificationAction> {
     let copy_path = path.clone();
     let remove_path = path;
     vec![
-        NotificationAction::new("View", move || {
+        NotificationAction::new(tr!("View"), move || {
             crate::app_commands::push(crate::app_commands::AppCommand::ViewScreenshot(view_path.clone()));
         }),
-        NotificationAction::new("Copy", move || {
+        NotificationAction::new(tr!("Copy"), move || {
             crate::app_commands::push(crate::app_commands::AppCommand::CopyImage(copy_path.clone()));
         }),
-        NotificationAction::new("Remove", move || {
+        NotificationAction::new(tr!("Remove"), move || {
             let path = remove_path.clone();
             tokio_runtime::spawn_detached(async move {
                 match launcher_runtime::fs::remove_file(path.as_path()).await {
@@ -171,7 +171,7 @@ fn screenshot_actions(path: PathBuf) -> Vec<NotificationAction> {
                             error = %err,
                             context = "delete screenshot from notification"
                         );
-                        notification::error!("screenshots", "Failed to delete screenshot: {}", err);
+                        notification::error!("screenshots", "Failed to delete screenshot: {err}", err = err);
                     }
                 }
             });

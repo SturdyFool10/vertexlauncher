@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use content_resolver::detect_installed_content_kind;
 use curseforge::{Client as CurseForgeClient, MINECRAFT_GAME_ID};
 use installation::{
@@ -249,7 +250,7 @@ pub(crate) fn bulk_update_installed_content(
                     project = %update.entry.name,
                     "could not plan a content update: {err}"
                 );
-                outcome.failed.push(format!("{}: {err}", update.entry.name));
+                outcome.failed.push(tr!("{name}: {err}", name = update.entry.name, err = err).into_owned());
             }
         }
     }
@@ -287,7 +288,7 @@ pub(crate) fn bulk_update_installed_content(
             }];
             match download_batch_with_progress(single, download_policy, InstallStage::DownloadingCore, progress) {
                 Ok(_) => kept.push(plan),
-                Err(err) => outcome.failed.push(format!("{}: {err}", plan.update.entry.name)),
+                Err(err) => outcome.failed.push(tr!("{name}: {err}", name = plan.update.entry.name, err = err).into_owned()),
             }
         }
         planned = kept;
@@ -312,7 +313,7 @@ pub(crate) fn bulk_update_installed_content(
                     project = %plan.update.entry.name,
                     "content update failed: {err}"
                 );
-                outcome.failed.push(format!("{}: {err}", plan.update.entry.name));
+                outcome.failed.push(tr!("{name}: {err}", name = plan.update.entry.name, err = err).into_owned());
             }
         }
     }
@@ -426,7 +427,7 @@ fn update_installed_content_to_version_with_prefetched_downloads(
         version_id = %version_id,
         "completed content version update"
     );
-    Ok(format!("Updated {}.", entry.name))
+    Ok(tr!("Updated {name}.", name = entry.name).into_owned())
 }
 
 fn resolve_installed_file_paths_for_update(
@@ -480,10 +481,7 @@ fn collect_content_download_tasks_for_request(
         if planned_version_id == &resolved.version_id {
             return Ok(false);
         }
-        return Err(format!(
-            "Bulk update requires conflicting versions of {}.",
-            entry.name
-        ));
+        return Err(tr!("Bulk update requires conflicting versions of {name}.", name = entry.name).into_owned());
     }
 
     if existing.is_some_and(|project| {
@@ -512,10 +510,7 @@ fn collect_content_download_tasks_for_request(
         let dep_resolved =
             resolve_best_download(&dep_entry, game_version, loader, modrinth, curseforge)?
                 .ok_or_else(|| {
-                    format!(
-                        "No compatible downloadable file found for dependency {}.",
-                        dep_entry.name
-                    )
+                    tr!("No compatible downloadable file found for dependency {name}.", name = dep_entry.name).into_owned()
                 })?;
         let _ = collect_content_download_tasks_for_request(
             instance_root,

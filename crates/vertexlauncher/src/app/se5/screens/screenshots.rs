@@ -1,5 +1,6 @@
 //! Screenshot viewer dialog: one screenshot at full size with copy, open-folder and delete.
 
+use vertex_i18n::tr;
 use std::path::Path;
 
 use launcher_ui::app_commands::{self, AppCommand};
@@ -55,9 +56,9 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
                 );
             }
             None if kit.images.failed(&key) => {
-                kit.text(ui, TextRole::Danger, "This screenshot could not be opened.")
+                kit.text(ui, TextRole::Danger, &tr!("This screenshot could not be opened."))
             }
-            None => kit.text(ui, TextRole::Muted, "Loading…"),
+            None => kit.text(ui, TextRole::Muted, &tr!("Loading…")),
         }
         let name = path
             .file_name()
@@ -68,7 +69,7 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
         if kit.button(
             ui,
             "screenshot-viewer::copy",
-            "Copy",
+            &tr!("Copy"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -77,19 +78,19 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
         if kit.button(
             ui,
             "screenshot-viewer::folder",
-            "Show in folder",
+            &tr!("Show in folder"),
             ButtonKind::Neutral,
             true,
         ) && let Some(parent) = path.parent()
             && let Err(err) = launcher_ui::desktop::open_in_file_manager(parent)
         {
-            launcher_ui::notification::error!("screenshots", "Failed to open the folder: {}", err);
+            launcher_ui::notification::error!("screenshots", "Failed to open the folder: {err}", err = err);
         }
         kit.fill(ui);
         if kit.button(
             ui,
             "screenshot-viewer::delete",
-            "Delete",
+            &tr!("Delete"),
             ButtonKind::Danger,
             true,
         ) {
@@ -98,7 +99,7 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
         if kit.button(
             ui,
             "screenshot-viewer::close",
-            "Close",
+            &tr!("Close"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -111,11 +112,7 @@ pub fn viewer(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, path: &Path)
             Ok(()) => {
                 launcher_ui::notification::info!("screenshots", "Deleted screenshot from disk.")
             }
-            Err(err) => launcher_ui::notification::error!(
-                "screenshots",
-                "Failed to delete screenshot: {}",
-                err
-            ),
+            Err(err) => launcher_ui::notification::error!("screenshots", "Failed to delete screenshot: {err}", err = err),
         });
         close = true;
     }

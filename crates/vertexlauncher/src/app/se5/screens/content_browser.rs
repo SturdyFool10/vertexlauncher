@@ -2,6 +2,7 @@
 //! Search, filtering, paging, installed-state and the install queue are `launcher_ui`'s `content_browser_api`.
 
 
+use vertex_i18n::tr;
 use launcher_ui::screens::AppScreen;
 use launcher_ui::screens::content_browser_api as api;
 use vertex_shell::sturdy::ui::{
@@ -24,11 +25,11 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         .cloned()
     else {
         let _scroll = kit.scroll(ui, SCROLL_ID, kit::SPACE_LG, kit::SPACE_XL);
-        kit.text(ui, TextRole::Title, "Content Browser");
+        kit.text(ui, TextRole::Title, &tr!("Content Browser"));
         kit.text(
             ui,
             TextRole::Muted,
-            "Select an instance first. Content Browser installs into the selected instance.",
+            &tr!("Select an instance first. Content Browser installs into the selected instance."),
         );
         return;
     };
@@ -38,7 +39,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     }
 
     let _scroll = kit.scroll(ui, SCROLL_ID, kit::SPACE_LG, kit::SPACE_XL);
-    kit.text(ui, TextRole::Title, "Content Browser");
+    kit.text(ui, TextRole::Title, &tr!("Content Browser"));
     kit.text(ui, TextRole::Small, &api::context_line(&instance));
     let (message, warnings) = api::status(&state.content);
     if let Some(message) = message {
@@ -66,7 +67,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         && kit.button(
             ui,
             "content::back-browser",
-            "Back to Mod Browser",
+            &tr!("Back to Mod Browser"),
             ButtonKind::Neutral,
             true,
         )
@@ -76,7 +77,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.button(
         ui,
         "content::back-instance",
-        "Back to Instance",
+        &tr!("Back to Instance"),
         ButtonKind::Neutral,
         true,
     ) {
@@ -97,7 +98,7 @@ fn browse(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &
     }
     let groups = api::results(&mut state.content, instance_root);
     if groups.is_empty() && api::searching(&state.content).is_none() {
-        kit.text_wrapped(ui, TextRole::Muted, api::empty_message(&state.content));
+        kit.text_wrapped(ui, TextRole::Muted, &api::empty_message(&state.content));
     }
     let mut open = None;
     let mut install = Vec::new();
@@ -132,7 +133,7 @@ fn controls(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ui,
             "content::query",
             api::query_mut(&mut state.content),
-            "Search project names, summaries, and tags. Press Enter to search",
+            &tr!("Search project names, summaries, and tags. Press Enter to search"),
             false,
             Sizing::Grow,
         );
@@ -140,7 +141,7 @@ fn controls(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             submit = true;
             as_tag = ui.engine().input().modifiers().shift;
         }
-        if kit.button(ui, "content::search", "Search", ButtonKind::Primary, true) {
+        if kit.button(ui, "content::search", &tr!("Search"), ButtonKind::Primary, true) {
             submit = true;
         }
     }
@@ -262,17 +263,17 @@ fn result_tile(ui: &mut Ui<'_>, kit: &mut Kit, tile: &api::TileView) -> (bool, b
             }
         }
     }
-    kit.tooltip(ui, &info_id, "Open mod details");
+    kit.tooltip(ui, &info_id, &tr!("Open mod details"));
     if tile.queued && !tile.downloading {
-        kit.tooltip(ui, &install_id, "Queued: installs after the downloads ahead of it");
+        kit.tooltip(ui, &install_id, &tr!("Queued: installs after the downloads ahead of it"));
     } else if !tile.downloading {
         match &tile.installed {
             Some(installed) => kit.tooltip(
                 ui,
                 &install_id,
-                &format!("Already installed in this instance\nCurrent: {installed}"),
+                &tr!("Already installed in this instance\nCurrent: {installed}", installed = installed),
             ),
-            None => kit.tooltip(ui, &install_id, "Quick install latest compatible version"),
+            None => kit.tooltip(ui, &install_id, &tr!("Quick install latest compatible version")),
         }
     }
     let install = tile.installed.is_none() && !tile.downloading && !tile.queued && kit.clicked(ui, &install_id);
@@ -282,7 +283,7 @@ fn result_tile(ui: &mut Ui<'_>, kit: &mut Kit, tile: &api::TileView) -> (bool, b
 }
 
 fn chips(ui: &mut Ui<'_>, kit: &Kit, tile: &api::TileView) {
-    chip(ui, kit, tile.kind, false);
+    chip(ui, kit, &tile.kind, false);
     for source in &tile.sources {
         chip(ui, kit, source, false);
     }
@@ -373,20 +374,20 @@ fn pagination(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.button(
         ui,
         "content::prev",
-        "Previous",
+        &tr!("Previous"),
         ButtonKind::Neutral,
         !searching && page > 1,
     ) {
         target = Some(page - 1);
     }
-    kit.text(ui, TextRole::Muted, "Page");
+    kit.text(ui, TextRole::Muted, &tr!("Page"));
     let mut text = page.to_string();
     kit.number_text_field(ui, "content::page", &mut text, 72.0, false, false);
     let typed = text.trim().parse::<u32>().ok();
     if kit.button(
         ui,
         "content::go",
-        "Go",
+        &tr!("Go"),
         ButtonKind::Neutral,
         !searching && typed.is_some_and(|value| value != page),
     ) {
@@ -395,13 +396,13 @@ fn pagination(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if kit.button(
         ui,
         "content::next",
-        "Next",
+        &tr!("Next"),
         ButtonKind::Neutral,
         !searching && api::has_next_page(&state.content),
     ) {
         target = Some(page + 1);
     }
-    kit.text(ui, TextRole::Muted, &format!("Current: {page}"));
+    kit.text(ui, TextRole::Muted, &tr!("Current: {page}", page = page));
     drop(_row);
     if let Some(page) = target {
         api::go_to_page(&mut state.content, page);
@@ -410,7 +411,7 @@ fn pagination(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
 
 fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &std::path::Path) {
     let Some(view) = api::detail(&mut state.content, instance_root) else {
-        kit.text(ui, TextRole::Muted, "No content item selected.");
+        kit.text(ui, TextRole::Muted, &tr!("No content item selected."));
         return;
     };
     {
@@ -437,7 +438,7 @@ fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &
     }
     {
         let _tabs = kit.row(ui, kit::SPACE_SM);
-        for (index, label) in ["Overview", "Versions"].iter().enumerate() {
+        for (index, label) in [tr!("Overview"), tr!("Versions")].iter().enumerate() {
             if kit.nav_item(
                 ui,
                 &format!("content::tab::{index}"),
@@ -466,7 +467,7 @@ fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &
     kit.setting_row(
         ui,
         "content::detail-loader-row",
-        "Loader",
+        &tr!("Loader"),
         None,
         |kit, ui| {
             if let Some(index) =
@@ -479,7 +480,7 @@ fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &
     kit.setting_row(
         ui,
         "content::detail-version-row",
-        "Minecraft Version",
+        &tr!("Minecraft Version"),
         None,
         |kit, ui| {
             if let Some(index) = kit.dropdown(
@@ -505,12 +506,12 @@ fn detail(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, instance_root: &
         );
     }
     if view.loading {
-        kit.text(ui, TextRole::Muted, "Loading versions...");
+        kit.text(ui, TextRole::Muted, &tr!("Loading versions..."));
     } else if view.rows.is_empty() {
         kit.text(
             ui,
             TextRole::Muted,
-            "No versions match the current filters.",
+            &tr!("No versions match the current filters."),
         );
     }
     let mut queue = None;

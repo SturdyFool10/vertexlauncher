@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -18,11 +19,11 @@ impl GraphicsApiPreference {
 
     pub const fn settings_label(self) -> &'static str {
         match self {
-            Self::Auto => "Auto",
-            Self::Vulkan => "Vulkan",
-            Self::Metal => "Metal",
-            Self::Dx12 => "DirectX 12",
-            Self::WebGpu => "WebGPU",
+            Self::Auto => src!("Auto"),
+            Self::Vulkan => src!("Vulkan"),
+            Self::Metal => src!("Metal"),
+            Self::Dx12 => src!("DirectX 12"),
+            Self::WebGpu => src!("WebGPU"),
         }
     }
 }

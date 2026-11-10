@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// App-wide window translucency mode.
@@ -21,9 +22,9 @@ impl WindowTransparency {
 
     pub const fn label(self) -> &'static str {
         match self {
-            WindowTransparency::Opaque => "Opaque",
-            WindowTransparency::Transparent => "Transparent",
-            WindowTransparency::Blurred => "Blurred",
+            WindowTransparency::Opaque => src!("Opaque"),
+            WindowTransparency::Transparent => src!("Transparent"),
+            WindowTransparency::Blurred => src!("Blurred"),
         }
     }
 

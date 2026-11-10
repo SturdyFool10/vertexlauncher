@@ -1,5 +1,6 @@
 //! Legal: the licences of the fonts and icons Vertex bundles, as an accordion: open a notice to read its full text.
 
+use vertex_i18n::{tr, trn};
 use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
 
@@ -22,22 +23,12 @@ struct Notice {
 impl Notice {
     /// "Tabler Icons (MIT)", "fmt, spdlog and glm (MIT)", "stb (MIT or Public Domain)"-style heading.
     fn title(&self) -> String {
-        let names = join_natural(&self.names, "and");
+        let names = launcher_ui::notification::natural_language::join_natural(&self.names);
         if self.licenses.is_empty() {
             names
         } else {
-            format!("{names} ({})", join_natural(&self.licenses, "and"))
+            tr!("{names} ({licenses})", names = names, licenses = launcher_ui::notification::natural_language::join_natural(&self.licenses)).into_owned()
         }
-    }
-}
-
-/// "A", "A and B", "A, B, and C".
-fn join_natural(items: &[String], conjunction: &str) -> String {
-    match items {
-        [] => String::new(),
-        [one] => one.clone(),
-        [a, b] => format!("{a} {conjunction} {b}"),
-        [rest @ .., last] => format!("{}, {conjunction} {last}", rest.join(", ")),
     }
 }
 
@@ -183,17 +174,17 @@ static OPEN: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit) {
     let _scroll = kit.scroll(ui, "legal::scroll", kit::SPACE_LG, kit::SPACE_XL);
-    kit.text(ui, TextRole::Title, "Legal");
+    kit.text(ui, TextRole::Title, &tr!("Legal"));
     {
         let _header = kit.card(ui, "legal::header", kit::SPACE_SM);
-        kit.text(ui, TextRole::Heading, "Included Notices");
+        kit.text(ui, TextRole::Heading, &tr!("Included Notices"));
         kit.separator(ui);
         kit.text(
             ui,
             TextRole::Body,
-            "Open a notice below to read its full legal text.",
+            &tr!("Open a notice below to read its full legal text."),
         );
-        kit.text(ui, TextRole::Small, &format!("{} total", notices().len()));
+        kit.text(ui, TextRole::Small, &trn!(notices().len(), "{count} notice", "{count} notices"));
     }
     for (index, notice) in notices().iter().enumerate() {
         let open = OPEN.lock().is_ok_and(|open| open.contains(&index));

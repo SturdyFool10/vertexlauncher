@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Easing curve applied to the notification fade-out animation.
@@ -41,15 +42,15 @@ impl NotificationEasing {
     /// Human-readable label for UI display.
     pub const fn label(self) -> &'static str {
         match self {
-            NotificationEasing::Linear => "Linear",
-            NotificationEasing::QuadraticInOut => "Quadratic In/Out",
-            NotificationEasing::CubicIn => "Cubic In",
-            NotificationEasing::CubicOut => "Cubic Out",
-            NotificationEasing::CubicInOut => "Cubic In/Out",
-            NotificationEasing::SineInOut => "Sine In/Out",
-            NotificationEasing::ExponentialIn => "Exponential In",
-            NotificationEasing::ExponentialOut => "Exponential Out",
-            NotificationEasing::ExponentialInOut => "Exponential In/Out",
+            NotificationEasing::Linear => src!("Linear"),
+            NotificationEasing::QuadraticInOut => src!("Quadratic In/Out"),
+            NotificationEasing::CubicIn => src!("Cubic In"),
+            NotificationEasing::CubicOut => src!("Cubic Out"),
+            NotificationEasing::CubicInOut => src!("Cubic In/Out"),
+            NotificationEasing::SineInOut => src!("Sine In/Out"),
+            NotificationEasing::ExponentialIn => src!("Exponential In"),
+            NotificationEasing::ExponentialOut => src!("Exponential Out"),
+            NotificationEasing::ExponentialInOut => src!("Exponential In/Out"),
         }
     }
 

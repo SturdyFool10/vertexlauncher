@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{LANG}}" dir="{{DIR}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -108,8 +108,8 @@
       <p>{{MESSAGE}}</p>
       {{DETAIL_HTML}}
       <div class="footer">
-        <span>This tab should close automatically.</span>
-        <span class="timer">Closing in <span id="countdown">{{AUTO_CLOSE_SECS}}</span>s</span>
+        <span>{{FOOTER}}</span>
+        <span class="timer">{{CLOSING_BEFORE}}<span id="countdown">{{AUTO_CLOSE_SECS}}</span>{{CLOSING_AFTER}}</span>
       </div>
     </section>
   </main>

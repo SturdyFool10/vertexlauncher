@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[derive(Clone)]
@@ -260,7 +261,7 @@ impl SkinManagerState {
                             error = %err,
                             "Failed to load cached accounts while preparing skin-manager snapshot."
                         );
-                        notification::error!("skin_manager", "Failed to load account cache: {err}");
+                        notification::error!("skin_manager", "Failed to load account cache: {err}", err = err);
                     }
                 }
             }
@@ -318,10 +319,7 @@ impl SkinManagerState {
                 Err(_) => {
                     self.save_in_progress = false;
                     self.refresh_in_progress = false;
-                    notification::error!(
-                        "skin_manager",
-                        "Background profile task lock was poisoned."
-                    );
+                    notification::error!("skin_manager", "Background profile task lock was poisoned.");
                     keep_rx = false;
                     break;
                 }
@@ -357,7 +355,7 @@ impl SkinManagerState {
                                 error = %err,
                                 "Skin manager refresh failed."
                             );
-                            notification::error!("skin_manager", "{err}");
+                            notification::error!("skin_manager", "{err}", err = err);
                         }
                     }
                     // The worker is done and its sender gone: stop here, or the next read finds the channel closed and
@@ -391,7 +389,7 @@ impl SkinManagerState {
                                 error = %err,
                                 "Skin manager save failed."
                             );
-                            notification::error!("skin_manager", "{err}");
+                            notification::error!("skin_manager", "{err}", err = err);
                         }
                     }
                     keep_rx = false;
@@ -446,7 +444,7 @@ impl SkinManagerState {
                     error = %err,
                     "Pick-skin operation failed."
                 );
-                notification::error!("skin_manager", "{err}");
+                notification::error!("skin_manager", "{err}", err = err);
             }
         }
     }
@@ -543,12 +541,12 @@ impl SkinManagerState {
         let _ = tokio_runtime::spawn_detached(async move {
             let result = launcher_runtime::fs::read(path.as_path())
                 .await
-                .map_err(|err| format!("Failed to read image: {err}"))
+                .map_err(|err| tr!("Failed to read image: {err}", err = err).into_owned())
                 .and_then(|bytes| {
                     if decode_skin_rgba(&bytes).is_none() {
                         Err(
-                            "Selected image must be a valid PNG skin (expected 64x64 or 64x32)."
-                                .to_owned(),
+                            tr!("Selected image must be a valid PNG skin (expected 64x64 or 64x32).")
+                                .into_owned(),
                         )
                     } else {
                         Ok((path, bytes))
@@ -574,7 +572,7 @@ impl SkinManagerState {
         self.pick_skin_results_rx = Some(Arc::new(Mutex::new(rx)));
         let _ = tokio_runtime::spawn_detached(async move {
             let result = if decode_skin_rgba(&bytes).is_none() {
-                Err("Selected image must be a valid PNG skin (expected 64x64 or 64x32).".to_owned())
+                Err(tr!("Selected image must be a valid PNG skin (expected 64x64 or 64x32).").into_owned())
             } else {
                 Ok((path, bytes))
             };
@@ -618,10 +616,7 @@ impl SkinManagerState {
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
         else {
-            notification::error!(
-                "skin_manager",
-                "Missing Minecraft access token for active account."
-            );
+            notification::error!("skin_manager", "Missing Minecraft access token for active account.");
             return;
         };
 
@@ -695,10 +690,7 @@ impl SkinManagerState {
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
         else {
-            notification::error!(
-                "skin_manager",
-                "Missing Minecraft access token for active account."
-            );
+            notification::error!("skin_manager", "Missing Minecraft access token for active account.");
             return;
         };
 
@@ -749,7 +741,7 @@ impl SkinManagerState {
                     );
                     latest_profile = Some(
                         auth::upload_minecraft_skin(&token, bytes, pending_variant)
-                            .map_err(|err| format_auth_error("upload skin", &err))?,
+                            .map_err(|err| format_auth_error(&tr!("upload skin"), &err))?,
                     );
                     tracing::info!(
                         target: "vertexlauncher/skins",
@@ -768,7 +760,7 @@ impl SkinManagerState {
                         );
                         latest_profile = Some(
                             auth::set_active_minecraft_cape(&token, cape_id)
-                                .map_err(|err| format_auth_error("set cape", &err))?,
+                                .map_err(|err| format_auth_error(&tr!("set cape"), &err))?,
                         );
                         tracing::info!(
                             target: "vertexlauncher/skins",
@@ -783,7 +775,7 @@ impl SkinManagerState {
                         );
                         latest_profile = Some(
                             auth::clear_active_minecraft_cape(&token)
-                                .map_err(|err| format_auth_error("clear cape", &err))?,
+                                .map_err(|err| format_auth_error(&tr!("clear cape"), &err))?,
                         );
                         tracing::info!(
                             target: "vertexlauncher/skins",

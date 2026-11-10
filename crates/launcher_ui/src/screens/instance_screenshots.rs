@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 use crate::screens::home::screenshot_common::is_supported_screenshot_path;
 
@@ -68,7 +69,7 @@ pub(super) fn request_instance_screenshot_delete(
     let _ = tokio_runtime::spawn_detached(async move {
         let result = launcher_runtime::fs::remove_file(path.as_path()).await.map_err(|err| {
             tracing::warn!(target: "vertexlauncher/io", op = "remove_file", path = %path.display(), error = %err, context = "delete instance screenshot");
-            format!("failed to remove {}: {err}", path.display())
+            tr!("failed to remove {path}: {err}", path = path.display(), err = err).into_owned()
         });
         if let Err(err) = tx.send((screenshot_key.clone(), file_name.clone(), result)) {
             tracing::error!(
@@ -113,16 +114,11 @@ pub(super) fn poll_instance_screenshot_delete_results(
                 }
                 state.pending_delete_screenshot_key = None;
                 refresh_instance_screenshots(state, instance_root, true);
-                notification::info!("instance/screenshots", "Deleted '{}' from disk.", file_name);
+                notification::info!("instance/screenshots", "Deleted '{file_name}' from disk.", file_name = file_name);
             }
             Err(err) => {
                 state.pending_delete_screenshot_key = None;
-                notification::error!(
-                    "instance/screenshots",
-                    "Failed to delete '{}': {}",
-                    file_name,
-                    err
-                );
+                notification::error!("instance/screenshots", "Failed to delete '{file_name}': {err}", file_name = file_name, err = err);
             }
         }
     }

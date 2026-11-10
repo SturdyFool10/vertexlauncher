@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use launcher_runtime as tokio_runtime;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::sync::{
@@ -28,17 +29,11 @@ pub fn acquire_single_instance() -> Result<SingleInstanceGuard, SingleInstanceEr
             }
             std::thread::sleep(RETRY_DELAY);
             let socket = UdpSocket::bind(endpoint).map_err(|retry_err| {
-                SingleInstanceError::Unavailable(format!(
-                    "single-instance IPC endpoint {} remained unavailable after probe: {retry_err}",
-                    endpoint
-                ))
+                SingleInstanceError::Unavailable(tr!("single-instance IPC endpoint {endpoint} remained unavailable after probe: {retry_err}", endpoint = endpoint, retry_err = retry_err).into_owned())
             })?;
             start_responder(socket, endpoint)
         }
-        Err(err) => Err(SingleInstanceError::Unavailable(format!(
-            "failed to bind single-instance IPC endpoint {}: {err}",
-            endpoint
-        ))),
+        Err(err) => Err(SingleInstanceError::Unavailable(tr!("failed to bind single-instance IPC endpoint {endpoint}: {err}", endpoint = endpoint, err = err).into_owned())),
     }
 }
 
@@ -93,45 +88,30 @@ fn existing_instance_responded(endpoint: SocketAddrV4) -> Result<bool, SingleIns
         if response.is_empty() {
             continue;
         }
-        return Err(SingleInstanceError::Unavailable(format!(
-            "single-instance IPC endpoint {} replied with an unexpected payload",
-            endpoint
-        )));
+        return Err(SingleInstanceError::Unavailable(tr!("single-instance IPC endpoint {endpoint} replied with an unexpected payload", endpoint = endpoint).into_owned()));
     }
     Ok(false)
 }
 
 fn send_probe(endpoint: SocketAddrV4, payload: &[u8]) -> Result<Vec<u8>, SingleInstanceError> {
     let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).map_err(|err| {
-        SingleInstanceError::Unavailable(format!(
-            "failed to create single-instance probe socket: {err}"
-        ))
+        SingleInstanceError::Unavailable(tr!("failed to create single-instance probe socket: {err}", err = err).into_owned())
     })?;
     socket
         .set_read_timeout(Some(PROBE_TIMEOUT))
         .map_err(|err| {
-            SingleInstanceError::Unavailable(format!(
-                "failed to configure single-instance probe timeout: {err}"
-            ))
+            SingleInstanceError::Unavailable(tr!("failed to configure single-instance probe timeout: {err}", err = err).into_owned())
         })?;
     socket
         .set_write_timeout(Some(PROBE_TIMEOUT))
         .map_err(|err| {
-            SingleInstanceError::Unavailable(format!(
-                "failed to configure single-instance probe timeout: {err}"
-            ))
+            SingleInstanceError::Unavailable(tr!("failed to configure single-instance probe timeout: {err}", err = err).into_owned())
         })?;
     socket.connect(endpoint).map_err(|err| {
-        SingleInstanceError::Unavailable(format!(
-            "failed to connect single-instance probe to {}: {err}",
-            endpoint
-        ))
+        SingleInstanceError::Unavailable(tr!("failed to connect single-instance probe to {endpoint}: {err}", endpoint = endpoint, err = err).into_owned())
     })?;
     socket.send(payload).map_err(|err| {
-        SingleInstanceError::Unavailable(format!(
-            "failed to send single-instance probe to {}: {err}",
-            endpoint
-        ))
+        SingleInstanceError::Unavailable(tr!("failed to send single-instance probe to {endpoint}: {err}", endpoint = endpoint, err = err).into_owned())
     })?;
 
     let mut buffer = [0_u8; 128];
@@ -145,9 +125,6 @@ fn send_probe(endpoint: SocketAddrV4, payload: &[u8]) -> Result<Vec<u8>, SingleI
         {
             Ok(Vec::new())
         }
-        Err(err) => Err(SingleInstanceError::Unavailable(format!(
-            "failed to receive single-instance probe response from {}: {err}",
-            endpoint
-        ))),
+        Err(err) => Err(SingleInstanceError::Unavailable(tr!("failed to receive single-instance probe response from {endpoint}: {err}", endpoint = endpoint, err = err).into_owned())),
     }
 }

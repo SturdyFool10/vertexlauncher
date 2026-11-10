@@ -1,6 +1,7 @@
 //! Mod config sync (Iris, Distant Horizons, Voxy): settings are copied key by key into the
 //! same file of other instances, leaving the rest of each file (and its formatting) alone.
 
+use vertex_i18n::tr;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -304,10 +305,7 @@ fn sync_one(
         if let Some(merged) = merge(&source, &target, config, &instance.root) {
             match write_atomic_bytes(&path, merged.as_bytes(), Some(master_modified)) {
                 Ok(()) => report.mod_config_files += 1,
-                Err(err) => report.errors.push(format!(
-                    "{}: failed to write {}: {err}",
-                    instance.id, config.file
-                )),
+                Err(err) => report.errors.push(tr!("{id}: failed to write {file}: {err}", id = instance.id, file = config.file, err = err).into_owned()),
             }
         }
     }
@@ -321,7 +319,7 @@ fn sync_shaderpack_options(
 ) {
     static PACK_OPTIONS: ModConfig = ModConfig {
         id: "iris_pack",
-        name: "Shader pack options",
+        name: vertex_i18n::src!("Shader pack options"),
         file: "",
         format: Format::Properties,
         excluded_keys: &[],
@@ -375,10 +373,7 @@ fn sync_shaderpack_options(
             if let Some(text) = new_text {
                 match write_atomic_bytes(&path, text.as_bytes(), Some(master_modified)) {
                     Ok(()) => report.mod_config_files += 1,
-                    Err(err) => report.errors.push(format!(
-                        "{}: failed to write shaderpacks/{name}: {err}",
-                        instance.id
-                    )),
+                    Err(err) => report.errors.push(tr!("{id}: failed to write shaderpacks/{name}: {err}", id = instance.id, name = name, err = err).into_owned()),
                 }
             }
         }

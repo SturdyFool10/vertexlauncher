@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(super) fn request_detail_versions(state: &mut ContentBrowserState) {
@@ -47,10 +48,7 @@ pub(super) fn request_detail_versions(state: &mut ContentBrowserState) {
             Ok(join_result) => join_result
                 .map_err(|err| err.to_string())
                 .and_then(|result| result),
-            Err(_) => Err(format!(
-                "detail version request timed out after {}s",
-                DETAIL_VERSIONS_FETCH_TIMEOUT.as_secs()
-            )),
+            Err(_) => Err(tr!("detail version request timed out after {seconds}s", seconds = DETAIL_VERSIONS_FETCH_TIMEOUT.as_secs()).into_owned()),
         };
         if let Err(err) = tx.send(DetailVersionsResult {
             project_key,
@@ -90,10 +88,7 @@ pub(super) fn request_version_catalog(state: &mut ContentBrowserState) {
             Ok(join_result) => join_result
                 .map_err(|err| err.to_string())
                 .and_then(|result| result),
-            Err(_) => Err(format!(
-                "version catalog request timed out after {}s",
-                VERSION_CATALOG_FETCH_TIMEOUT.as_secs()
-            )),
+            Err(_) => Err(tr!("version catalog request timed out after {seconds}s", seconds = VERSION_CATALOG_FETCH_TIMEOUT.as_secs()).into_owned()),
         };
         if let Err(err) = tx.send(result) {
             tracing::error!(
@@ -131,11 +126,11 @@ pub(super) fn browser_entry_from_unified_content(
     entry: &UnifiedContentEntry,
 ) -> Result<BrowserProjectEntry, String> {
     let Some(content_type) = parse_content_type(entry.content_type.as_str()) else {
-        return Err(format!("Unsupported content type for {}.", entry.name));
+        return Err(tr!("Unsupported content type for {name}.", name = entry.name).into_owned());
     };
     let name_key = normalize_search_key(entry.name.as_str());
     if name_key.is_empty() {
-        return Err("Content entry name cannot be empty.".to_owned());
+        return Err(tr!("Content entry name cannot be empty.").into_owned());
     }
 
     let mut browser_entry = BrowserProjectEntry {
@@ -181,7 +176,7 @@ pub(super) fn poll_version_catalog(state: &mut ContentBrowserState) {
         );
         state.version_catalog_in_flight = false;
         state.version_catalog_error =
-            Some("Version catalog worker stopped unexpectedly.".to_owned());
+            Some(tr!("Version catalog worker stopped unexpectedly.").into_owned());
     }
     let updates = drained.items;
 
@@ -205,20 +200,14 @@ pub(super) fn request_identify_file(state: &mut ContentBrowserState, selected_pa
         return;
     }
     if detect_installed_content_kind(selected_path.as_path()).is_none() {
-        state.status_message = Some(format!(
-            "Unsupported content file: {}. Expected a mod .jar or supported pack .zip.",
-            selected_path.display()
-        ));
+        state.status_message = Some(tr!("Unsupported content file: {selected_path}. Expected a mod .jar or supported pack .zip.", selected_path = selected_path.display()).into_owned());
         return;
     }
 
     let tx = state.identify.sender();
 
     state.identify_in_flight = true;
-    state.status_message = Some(format!(
-        "Identifying {} in the background...",
-        selected_path.display()
-    ));
+    state.status_message = Some(tr!("Identifying {selected_path} in the background...", selected_path = selected_path.display()).into_owned());
     let _ = tokio_runtime::spawn_detached(async move {
         let path_for_result = selected_path.clone();
         let join = tokio_runtime::spawn_blocking(move || {
@@ -226,7 +215,7 @@ pub(super) fn request_identify_file(state: &mut ContentBrowserState, selected_pa
         });
         let result = match join.await {
             Ok(r) => r,
-            Err(err) => Err(format!("content identification worker panicked: {err}")),
+            Err(err) => Err(tr!("content identification worker panicked: {err}", err = err).into_owned()),
         };
         if let Err(err) = tx.send((path_for_result.clone(), result)) {
             tracing::error!(
@@ -247,7 +236,7 @@ pub(super) fn poll_identify_results(state: &mut ContentBrowserState) {
         tracing::error!(target: "vertexlauncher/content_browser", "identify worker channel stopped unexpectedly.");
         state.identify_in_flight = false;
         state.status_message =
-            Some("Content identification worker stopped unexpectedly.".to_owned());
+            Some(tr!("Content identification worker stopped unexpectedly.").into_owned());
     }
 
     for (path, result) in updates {
@@ -257,11 +246,7 @@ pub(super) fn poll_identify_results(state: &mut ContentBrowserState) {
                 let project_name = entry.name.clone();
                 request_open_detail_for_content(entry);
                 apply_pending_external_detail_open(state);
-                state.status_message = Some(format!(
-                    "Identified {} from {}.",
-                    project_name,
-                    path.display()
-                ));
+                state.status_message = Some(tr!("Identified {project_name} from {path}.", project_name = project_name, path = path.display()).into_owned());
             }
             Err(err) => {
                 tracing::warn!(
@@ -271,7 +256,7 @@ pub(super) fn poll_identify_results(state: &mut ContentBrowserState) {
                     "Content identification failed."
                 );
                 state.status_message =
-                    Some(format!("Could not identify {}: {err}", path.display()));
+                    Some(tr!("Could not identify {path}: {err}", path = path.display(), err = err).into_owned());
             }
         }
     }
@@ -314,7 +299,7 @@ pub(super) fn request_search(state: &mut ContentBrowserState, request: BrowserSe
         let join = tokio_runtime::spawn_blocking(move || run_search_request(request, worker_tx));
         let result = match join.await {
             Ok(r) => r,
-            Err(err) => Err(format!("content search worker panicked: {err}")),
+            Err(err) => Err(tr!("content search worker panicked: {err}", err = err).into_owned()),
         };
         match result {
             Ok(()) => {}
@@ -344,7 +329,7 @@ fn fetch_versions_for_entry(
     if let Some(project_id) = entry.modrinth_project_id.as_deref() {
         let project_versions = modrinth
             .list_project_versions(project_id, &[], &[])
-            .map_err(|err| format!("Modrinth versions failed for {project_id}: {err}"))?;
+            .map_err(|err| tr!("Modrinth versions failed for {project_id}: {err}", project_id = project_id, err = err).into_owned())?;
         let dependency_version_projects = modrinth_dependency_project_ids(
             &modrinth,
             project_versions
@@ -428,14 +413,14 @@ pub(super) fn fetch_exact_version_for_entry(
             let modrinth = ModrinthClient::default();
             let version = modrinth
                 .get_version(version_id)
-                .map_err(|err| format!("Modrinth version lookup failed for {version_id}: {err}"))?;
+                .map_err(|err| tr!("Modrinth version lookup failed for {version_id}: {err}", version_id = version_id, err = err).into_owned())?;
             let file = version
                 .files
                 .iter()
                 .find(|file| file.primary)
                 .or_else(|| version.files.first())
                 .ok_or_else(|| {
-                    format!("No downloadable file found for Modrinth version {version_id}.")
+                    tr!("No downloadable file found for Modrinth version {version_id}.", version_id = version_id).into_owned()
                 })?;
             let dependency_version_projects =
                 modrinth_dependency_project_ids(&modrinth, version.dependencies.as_slice());
@@ -457,28 +442,25 @@ pub(super) fn fetch_exact_version_for_entry(
         }
         ManagedContentSource::CurseForge => {
             let curseforge = CurseForgeClient::from_env()
-                .ok_or_else(|| "CurseForge API key missing.".to_owned())?;
+                .ok_or_else(|| tr!("CurseForge API key missing.").into_owned())?;
             let version_id_u64 = version_id
                 .trim()
                 .parse::<u64>()
-                .map_err(|err| format!("Invalid CurseForge version id {version_id}: {err}"))?;
+                .map_err(|err| tr!("Invalid CurseForge version id {version_id}: {err}", version_id = version_id, err = err).into_owned())?;
             let file = curseforge
                 .get_files(&[version_id_u64])
                 .map_err(|err| {
-                    format!("CurseForge version lookup failed for {version_id_u64}: {err}")
+                    tr!("CurseForge version lookup failed for {version_id_u64}: {err}", version_id_u64 = version_id_u64, err = err).into_owned()
                 })?
                 .into_iter()
                 .next()
                 .ok_or_else(|| {
-                    format!(
-                        "Could not find CurseForge version {} for {}.",
-                        version_id, entry.name
-                    )
+                    tr!("Could not find CurseForge version {version_id} for {name}.", version_id = version_id, name = entry.name).into_owned()
                 })?;
             let download_url = file
                 .download_url
                 .clone()
-                .ok_or_else(|| format!("CurseForge version {} has no download URL.", version_id))?;
+                .ok_or_else(|| tr!("CurseForge version {version_id} has no download URL.", version_id = version_id).into_owned())?;
             let mut dependencies = Vec::new();
             for dep in file.dependencies {
                 if dep.relation_type == CONTENT_DOWNLOAD_REQUIRED_DEPENDENCY_RELATION_TYPE {
@@ -516,7 +498,7 @@ fn fetch_curseforge_versions(
                 index,
                 DETAIL_VERSION_FETCH_PAGE_SIZE,
             )
-            .map_err(|err| format!("CurseForge files failed for {project_id}: {err}"))?;
+            .map_err(|err| tr!("CurseForge files failed for {project_id}: {err}", project_id = project_id, err = err).into_owned())?;
         let batch_len = batch.len() as u32;
         files.extend(batch);
         if batch_len < DETAIL_VERSION_FETCH_PAGE_SIZE {
@@ -568,8 +550,8 @@ fn run_search_request(
         resolve_curseforge_class_ids_cached(client, &mut warnings)
     } else {
         warnings.push(
-            "CurseForge API key missing (set VERTEX_CURSEFORGE_API_KEY or CURSEFORGE_API_KEY). Showing Modrinth results only."
-                .to_owned(),
+            tr!("CurseForge API key missing (set VERTEX_CURSEFORGE_API_KEY or CURSEFORGE_API_KEY). Showing Modrinth results only.")
+                .into_owned(),
         );
         HashMap::new()
     };
@@ -634,10 +616,7 @@ fn run_search_request(
         let mut outcomes = Vec::with_capacity(tasks.len());
         for (content_type, task) in tasks {
             outcomes.push(task.join().map_err(|_| {
-                format!(
-                    "{} search worker panicked unexpectedly.",
-                    content_type.label()
-                )
+                tr!("{content_type} search worker panicked unexpectedly.", content_type = content_type.label()).into_owned()
             })?);
         }
         Ok(outcomes)
@@ -719,10 +698,7 @@ fn search_content_type_providers(
                         }),
                 );
         }
-        Err(err) => outcome.warnings.push(format!(
-            "Modrinth search failed for {}: {err}",
-            content_type.label()
-        )),
+        Err(err) => outcome.warnings.push(tr!("Modrinth search failed for {kind}: {err}", kind = content_type.label(), err = err).into_owned()),
     }
 
     let Some(curseforge) = curseforge.as_ref() else {
@@ -768,10 +744,7 @@ fn search_content_type_providers(
                         }),
                 );
         }
-        Err(err) => outcome.warnings.push(format!(
-            "CurseForge search failed for {}: {err}",
-            content_type.label()
-        )),
+        Err(err) => outcome.warnings.push(tr!("CurseForge search failed for {kind}: {err}", kind = content_type.label(), err = err).into_owned()),
     }
 
     outcome
@@ -819,7 +792,7 @@ fn resolve_curseforge_class_ids(
                 }
             }
         }
-        Err(err) => warnings.push(format!("CurseForge class discovery failed: {err}")),
+        Err(err) => warnings.push(tr!("CurseForge class discovery failed: {err}", err = err).into_owned()),
     }
     by_type.entry(BrowserContentType::Mod).or_insert(6);
     by_type
@@ -837,7 +810,7 @@ pub(super) fn poll_search(state: &mut ContentBrowserState) {
         state
             .results
             .warnings
-            .push("Content search worker stopped unexpectedly.".to_owned());
+            .push(tr!("Content search worker stopped unexpectedly.").into_owned());
     }
 
     for update in updates {
@@ -881,7 +854,7 @@ pub(super) fn poll_search(state: &mut ContentBrowserState) {
                     "Content search failed."
                 );
                 state.results.warnings.push(error.clone());
-                notification::warn!("content-browser/search", "Content search failed: {}", error);
+                notification::warn!("content-browser/search", "Content search failed: {error}", error = error);
             }
         }
     }
@@ -895,7 +868,7 @@ pub(super) fn poll_detail_versions(state: &mut ContentBrowserState) {
         tracing::error!(target: "vertexlauncher/content_browser", "detail_versions worker channel stopped unexpectedly.");
         state.detail_versions_in_flight = false;
         state.detail_versions_error =
-            Some("Version details worker stopped unexpectedly.".to_owned());
+            Some(tr!("Version details worker stopped unexpectedly.").into_owned());
     }
 
     for update in updates {
@@ -1095,14 +1068,9 @@ pub(super) fn maybe_start_queued_download(
     install_activity::set_status(
         instance_name,
         installation::InstallStage::DownloadingCore,
-        "Resolving dependencies...",
+        tr!("Resolving dependencies..."),
     );
-    notification::progress!(
-        notification::Severity::Info,
-        "content-browser/download",
-        0.0f32,
-        "Resolving dependencies..."
-    );
+    notification::progress!(notification::Severity::Info, "content-browser/download", 0.0f32, "Resolving dependencies...");
     let root = instance_root.to_path_buf();
     let policy = state.download_policy.clone();
     let activity_instance = instance_name.to_owned();
@@ -1136,7 +1104,7 @@ pub(super) fn maybe_start_queued_download(
             }
             Err(err) => {
                 for key in keys {
-                    let _ = tx.send((key, Err(format!("content install worker panicked: {err}"))));
+                    let _ = tx.send((key, Err(tr!("content install worker panicked: {err}", err = err).into_owned())));
                 }
             }
         }
@@ -1154,7 +1122,7 @@ pub(super) fn poll_downloads(state: &mut ContentBrowserState) {
         if let Some(instance_name) = state.active_instance_name.as_deref() {
             install_activity::clear_instance(instance_name);
         }
-        state.status_message = Some("Content download worker stopped unexpectedly.".to_owned());
+        state.status_message = Some(tr!("Content download worker stopped unexpectedly.").into_owned());
     }
 
     for (key, update) in updates {
@@ -1170,18 +1138,8 @@ pub(super) fn poll_downloads(state: &mut ContentBrowserState) {
         match update {
             Ok(result) => {
                 state.manifest_dirty = true;
-                state.status_message = Some(format!(
-                    "Applied {}: {} added, {} removed.",
-                    result.project_name,
-                    result.added_files.len(),
-                    result.removed_files.len()
-                ));
-                notification::progress!(
-                    notification::Severity::Info,
-                    "content-browser/download",
-                    1.0f32,
-                    "Content operation complete."
-                );
+                state.status_message = Some(tr!("Applied {project_name}: {count} added, {count2} removed.", project_name = result.project_name, count = result.added_files.len(), count2 = result.removed_files.len()).into_owned());
+                notification::progress!(notification::Severity::Info, "content-browser/download", 1.0f32, "Content operation complete.");
             }
             Err(err) => {
                 tracing::error!(
@@ -1189,12 +1147,8 @@ pub(super) fn poll_downloads(state: &mut ContentBrowserState) {
                     error = %err,
                     "Queued content operation failed."
                 );
-                state.status_message = Some(format!("Content download failed: {err}"));
-                notification::error!(
-                    "content-browser/download",
-                    "Content download failed: {}",
-                    err
-                );
+                state.status_message = Some(tr!("Content download failed: {err}", err = err).into_owned());
+                notification::error!("content-browser/download", "Content download failed: {err}", err = err);
             }
         }
     }

@@ -1,3 +1,4 @@
+use vertex_i18n::{tr, trn};
 use super::*;
 
 
@@ -21,11 +22,7 @@ pub(super) fn request_vtmpack_export(
     state.export_vtmpack_output_path = Some(output_path.clone());
     state.export_vtmpack_latest_progress = None;
     state.show_export_vtmpack_modal = true;
-    state.status_message = Some(format!(
-        "Exporting {} to {}...",
-        instance.name,
-        output_path.display()
-    ));
+    state.status_message = Some(tr!("Exporting {name} to {output_path}...", name = instance.name, output_path = output_path.display()).into_owned());
 
     let instance_name = instance.name.clone();
     let export_path_for_task = output_path.clone();
@@ -84,11 +81,7 @@ pub(super) fn request_vtmpatch_export(
     state.export_vtmpack_output_path = Some(output_path.clone());
     state.export_vtmpack_latest_progress = None;
     state.show_export_vtmpack_modal = true;
-    state.status_message = Some(format!(
-        "Generating patch for {} at {}...",
-        instance_name,
-        output_path.display()
-    ));
+    state.status_message = Some(tr!("Generating patch for {instance_name} at {output_path}...", instance_name = instance_name, output_path = output_path.display()).into_owned());
 
     let instance_name_for_task = instance_name.clone();
     let output_path_for_task = output_path.clone();
@@ -160,27 +153,13 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
         match update.result {
             Ok(stats) => {
                 if update.is_patch {
-                    let msg = format!(
-                        "Generated patch for {} — {} downloadable mod{}, {} bundled mod{}, {} changed config file{}, {} changed additional file{} — saved to {}",
-                        update.instance_name,
-                        stats.downloadable_mod_files,
-                        if stats.downloadable_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        stats.bundled_mod_files,
-                        if stats.bundled_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        stats.config_files,
-                        if stats.config_files == 1 { "" } else { "s" },
-                        stats.additional_files,
-                        if stats.additional_files == 1 { "" } else { "s" },
-                        update.output_path.display()
-                    );
+                    let msg = tr!(
+                        "Generated patch for {instance} — {counts} — saved to {path}",
+                        instance = update.instance_name,
+                        counts = export_counts(&stats, true),
+                        path = update.output_path.display()
+                    )
+                    .into_owned();
                     tracing::info!(
                         target: "vertexlauncher/instance_export",
                         instance_name = %update.instance_name,
@@ -191,46 +170,16 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
                         additional_files = stats.additional_files,
                         "vtmpatch export succeeded"
                     );
-                    notification::info!(
-                        "vtmpatch/export",
-                        "Patch generated — {} — {} downloadable mod{}, {} bundled mod{}",
-                        output_file_name,
-                        stats.downloadable_mod_files,
-                        if stats.downloadable_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        stats.bundled_mod_files,
-                        if stats.bundled_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                    );
+                    notification::info!("vtmpatch/export", "Patch generated — {output_file_name} — {counts}", output_file_name = output_file_name, counts = export_counts(&stats, true));
                     state.status_message = Some(msg);
                 } else {
-                    let msg = format!(
-                        "Exported {} — {} downloadable mod{}, {} bundled mod{}, {} config file{}, {} additional file{} — saved to {}",
-                        update.instance_name,
-                        stats.downloadable_mod_files,
-                        if stats.downloadable_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        stats.bundled_mod_files,
-                        if stats.bundled_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        stats.config_files,
-                        if stats.config_files == 1 { "" } else { "s" },
-                        stats.additional_files,
-                        if stats.additional_files == 1 { "" } else { "s" },
-                        update.output_path.display()
-                    );
+                    let msg = tr!(
+                        "Exported {instance} — {counts} — saved to {path}",
+                        instance = update.instance_name,
+                        counts = export_counts(&stats, false),
+                        path = update.output_path.display()
+                    )
+                    .into_owned();
                     tracing::info!(
                         target: "vertexlauncher/instance_export",
                         instance_name = %update.instance_name,
@@ -241,23 +190,7 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
                         additional_files = stats.additional_files,
                         "vtmpack export succeeded"
                     );
-                    notification::info!(
-                        "vtmpack/export",
-                        "Pack exported — {} — {} downloadable mod{}, {} bundled mod{}",
-                        output_file_name,
-                        stats.downloadable_mod_files,
-                        if stats.downloadable_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                        stats.bundled_mod_files,
-                        if stats.bundled_mod_files == 1 {
-                            ""
-                        } else {
-                            "s"
-                        },
-                    );
+                    notification::info!("vtmpack/export", "Pack exported — {output_file_name} — {counts}", output_file_name = output_file_name, counts = export_counts(&stats, false));
                     state.status_message = Some(msg);
                 }
             }
@@ -275,13 +208,8 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
                 } else {
                     "vtmpack"
                 };
-                notification::error!(
-                    "vtmpack/export",
-                    "{} export failed — {}",
-                    output_file_name,
-                    err
-                );
-                state.status_message = Some(format!("Failed to export .{ext}: {err}"));
+                notification::error!("vtmpack/export", "{output_file_name} export failed — {err}", output_file_name = output_file_name, err = err);
+                state.status_message = Some(tr!("Failed to export .{ext}: {err}", ext = ext, err = err).into_owned());
             }
         }
     }
@@ -292,7 +220,7 @@ pub(super) fn poll_vtmpack_export_results(state: &mut InstanceScreenState) {
         state.export_vtmpack_output_path = None;
         state.show_export_vtmpack_modal = false;
         state.status_message =
-            Some("Failed to export: export task stopped unexpectedly.".to_owned());
+            Some(tr!("Failed to export: export task stopped unexpectedly.").into_owned());
     }
 
     if drained.disconnected || !state.export_vtmpack_in_flight {
@@ -352,11 +280,7 @@ pub(super) fn request_server_export(
     state.export_server_output_path = Some(output_path.clone());
     state.export_server_latest_progress = None;
     state.show_export_server_modal = true;
-    state.status_message = Some(format!(
-        "Building server zip for {} at {}...",
-        instance.name,
-        output_path.display()
-    ));
+    state.status_message = Some(tr!("Building server zip for {name} at {output_path}...", name = instance.name, output_path = output_path.display()).into_owned());
 
     let instance_name = instance.name.clone();
     let output_path_for_task = output_path.clone();
@@ -426,11 +350,7 @@ pub(super) fn poll_server_export_results(state: &mut InstanceScreenState) {
         state.show_export_server_modal = false;
         match update.result {
             Ok(summary) => {
-                state.status_message = Some(format!(
-                    "Server zip ready for {} at {}. {summary}",
-                    update.instance_name,
-                    update.output_path.display()
-                ));
+                state.status_message = Some(tr!("Server zip ready for {instance_name} at {output_path}. {summary}", instance_name = update.instance_name, output_path = update.output_path.display(), summary = summary).into_owned());
             }
             Err(err) => {
                 tracing::error!(
@@ -440,7 +360,7 @@ pub(super) fn poll_server_export_results(state: &mut InstanceScreenState) {
                     error = %err,
                     "Server export failed."
                 );
-                state.status_message = Some(format!("Failed to export server zip: {err}"));
+                state.status_message = Some(tr!("Failed to export server zip: {err}", err = err).into_owned());
             }
         }
     }
@@ -451,7 +371,7 @@ pub(super) fn poll_server_export_results(state: &mut InstanceScreenState) {
         state.export_server_output_path = None;
         state.show_export_server_modal = false;
         state.status_message =
-            Some("Failed to export server zip: export task stopped unexpectedly.".to_owned());
+            Some(tr!("Failed to export server zip: export task stopped unexpectedly.").into_owned());
     }
 
     if drained.disconnected || !state.export_server_in_flight {
@@ -512,4 +432,25 @@ fn unique_file_path(parent: &Path, stem: &str, extension: &str) -> PathBuf {
         }
         attempt = attempt.saturating_add(1);
     }
+}
+
+/// "1 downloadable mod, 2 bundled mods, ..." for an export summary, each count with its noun in the right plural form.
+fn export_counts(stats: &vtmpack::VtmpackExportStats, changed_only: bool) -> String {
+    let (config, additional) = if changed_only {
+        (
+            trn!(stats.config_files, "{count} changed config file", "{count} changed config files"),
+            trn!(stats.additional_files, "{count} changed additional file", "{count} changed additional files"),
+        )
+    } else {
+        (
+            trn!(stats.config_files, "{count} config file", "{count} config files"),
+            trn!(stats.additional_files, "{count} additional file", "{count} additional files"),
+        )
+    };
+    notification::natural_language::join_natural(&[
+        trn!(stats.downloadable_mod_files, "{count} downloadable mod", "{count} downloadable mods"),
+        trn!(stats.bundled_mod_files, "{count} bundled mod", "{count} bundled mods"),
+        config,
+        additional,
+    ])
 }

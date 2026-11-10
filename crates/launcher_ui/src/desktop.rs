@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::{
     io,
     path::Path,
@@ -56,16 +57,16 @@ pub fn open_url(url: &str) -> Result<(), String> {
                 return Ok(());
             }
         }
-        return Err("no supported URL opener found".to_owned());
+        return Err(tr!("no supported URL opener found").into_owned());
     }
 
     #[allow(unreachable_code)]
-    Err("opening URLs is not supported on this platform".to_owned())
+    Err(tr!("opening URLs is not supported on this platform").into_owned())
 }
 
 pub fn open_in_file_manager(path: &Path) -> Result<(), String> {
     if !path.exists() {
-        return Err(format!("path does not exist: {}", path.display()));
+        return Err(tr!("path does not exist: {path}", path = path.display()).into_owned());
     }
 
     #[cfg(target_os = "windows")]
@@ -98,7 +99,7 @@ pub fn open_in_file_manager(path: &Path) -> Result<(), String> {
     }
 
     #[allow(unreachable_code)]
-    Err("opening folders is not supported on this platform".to_owned())
+    Err(tr!("opening folders is not supported on this platform").into_owned())
 }
 
 fn spawn_first_available(path: &Path, candidates: &[ProgramLaunch<'_>]) -> Result<(), String> {
@@ -110,7 +111,7 @@ fn spawn_first_available(path: &Path, candidates: &[ProgramLaunch<'_>]) -> Resul
             Ok(()) => return Ok(()),
             Err(LaunchOutcome::Unavailable) => unavailable.push(candidate.program),
             Err(LaunchOutcome::Failed(error)) => {
-                failures.push(format!("{}: {error}", candidate.program))
+                failures.push(tr!("{program}: {error}", program = candidate.program, error = error).into_owned())
             }
         }
     }
@@ -119,12 +120,9 @@ fn spawn_first_available(path: &Path, candidates: &[ProgramLaunch<'_>]) -> Resul
         return Err(failures.join(" | "));
     }
     if !unavailable.is_empty() {
-        return Err(format!(
-            "no supported file manager launcher was found ({})",
-            unavailable.join(", ")
-        ));
+        return Err(tr!("no supported file manager launcher was found ({launchers})", launchers = unavailable.join(", ")).into_owned());
     }
-    Err("no supported file manager launcher succeeded".to_owned())
+    Err(tr!("no supported file manager launcher succeeded").into_owned())
 }
 
 fn spawn_program(path: &Path, candidate: &ProgramLaunch<'_>) -> Result<(), LaunchOutcome> {

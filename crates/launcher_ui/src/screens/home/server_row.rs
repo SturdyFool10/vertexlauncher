@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 
@@ -7,12 +8,12 @@ pub(super) fn server_player_list_tip(ping: Option<&ServerPingSnapshot>) -> Optio
     let online = snapshot.players_online?;
     if snapshot.players_sample.is_empty() {
         return Some(if online == 0 {
-            "No players online".to_owned()
+            tr!("No players online").into_owned()
         } else {
-            "The server did not share which players are online".to_owned()
+            tr!("The server did not share which players are online").into_owned()
         });
     }
-    let mut tip = format!("Players online ({online}):");
+    let mut tip = tr!("Players online ({online}):", online = online).into_owned();
     for name in &snapshot.players_sample {
         tip.push_str("\n");
         tip.push_str(name);

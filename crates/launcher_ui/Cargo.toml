@@ -15,6 +15,7 @@ serde_json.workspace = true
 directories.workspace = true
 content_resolver.workspace = true
 config.workspace = true
+vertex_i18n.workspace = true
 instance_sync.workspace = true
 mc_options.workspace = true
 instances.workspace = true

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(crate) fn import_mrpack(
@@ -7,9 +8,9 @@ pub(crate) fn import_mrpack(
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<InstanceRecord, String> {
     let ImportSource::ManifestFile(package_path) = &request.source else {
-        return Err("Modrinth pack import requires a manifest file source.".to_owned());
+        return Err(tr!("Modrinth pack import requires a manifest file source.").into_owned());
     };
-    progress(import_progress("Reading .mrpack manifest...", 0, 1));
+    progress(import_progress(vertex_i18n::src!("Reading .mrpack manifest..."), 0, 1));
     let manifest = read_mrpack_manifest(package_path.as_path())?;
     let dependency_info = resolve_mrpack_dependencies(&manifest.dependencies)?;
     let override_steps = count_mrpack_override_entries(package_path.as_path())?;
@@ -28,9 +29,9 @@ pub(crate) fn import_mrpack(
             modloader_version: dependency_info.modloader_version.clone(),
         },
     )
-    .map_err(|err| format!("failed to create imported profile: {err}"))?;
+    .map_err(|err| tr!("failed to create imported profile: {err}", err = err).into_owned())?;
     progress(import_progress(
-        "Created imported profile. Restoring overrides...",
+        vertex_i18n::src!("Created imported profile. Restoring overrides..."),
         1,
         total_steps,
     ));
@@ -66,7 +67,7 @@ pub(crate) fn import_mrpack(
     }
 
     progress(import_progress(
-        "Import complete.",
+        vertex_i18n::src!("Import complete."),
         total_steps,
         total_steps,
     ));
@@ -157,7 +158,7 @@ pub(crate) fn build_mrpack_install_state(
     ModpackInstallState {
         format: "mrpack".to_owned(),
         pack_name: instances::normalize_optional(manifest.name.as_str())
-            .unwrap_or_else(|| "Modpack".to_owned()),
+            .unwrap_or_else(|| tr!("Modpack").into_owned()),
         version_id: resolved
             .as_ref()
             .map(|resolved| resolved.version_id.clone())
@@ -277,17 +278,11 @@ pub(crate) fn populate_mrpack_instance(
         let destination = join_safe(instance_root, file.path.as_path())?;
         if let Some(parent) = destination.parent() {
             fs_create_dir_all_logged(parent).map_err(|err| {
-                format!(
-                    "failed to create import directory {}: {err}",
-                    parent.display()
-                )
+                tr!("failed to create import directory {parent}: {err}", parent = parent.display(), err = err).into_owned()
             })?;
         }
         let download_url = file.downloads.first().cloned().ok_or_else(|| {
-            format!(
-                "Modrinth pack entry {} has no download URL",
-                file.path.display()
-            )
+            tr!("Modrinth pack entry {path} has no download URL", path = file.path.display()).into_owned()
         })?;
         tasks.push(installation::DownloadBatchTask {
             url: download_url,
@@ -297,16 +292,16 @@ pub(crate) fn populate_mrpack_instance(
     }
     if !tasks.is_empty() {
         progress(import_progress(
-            &format!("Downloading {} files...", tasks.len()),
+            &tr!("Downloading {count} files...", count = tasks.len()),
             completed_steps + 1,
             total_steps,
         ));
         let count = tasks.len();
         installation::download_batch(tasks, &installation::shared_download_policy())
-            .map_err(|err| format!("failed to download pack files: {err}"))?;
+            .map_err(|err| tr!("failed to download pack files: {err}", err = err).into_owned())?;
         completed_steps += count;
         progress(import_progress(
-            "Downloaded pack files.",
+            vertex_i18n::src!("Downloaded pack files."),
             completed_steps,
             total_steps,
         ));
@@ -322,16 +317,13 @@ pub(crate) fn extract_mrpack_overrides(
     progress: &mut dyn FnMut(ImportProgress),
 ) -> Result<(), String> {
     let file = fs_file_open_logged(package_path)
-        .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to open {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to read {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|err| {
-            format!(
-                "failed to read zip entry in {}: {err}",
-                package_path.display()
-            )
+            tr!("failed to read zip entry in {package_path}: {err}", package_path = package_path.display(), err = err).into_owned()
         })?;
         let entry_name = entry.name().replace('\\', "/");
         let Some(relative) = entry_name
@@ -346,37 +338,27 @@ pub(crate) fn extract_mrpack_overrides(
         let destination = join_safe(instance_root, Path::new(relative))?;
         *completed_steps += 1;
         progress(import_progress(
-            &format!("Restoring override {}", relative),
+            &tr!("Restoring override {relative}", relative = relative),
             *completed_steps,
             total_steps,
         ));
         if entry.is_dir() {
             fs_create_dir_all_logged(destination.as_path()).map_err(|err| {
-                format!(
-                    "failed to create override directory {}: {err}",
-                    destination.display()
-                )
+                tr!("failed to create override directory {destination}: {err}", destination = destination.display(), err = err).into_owned()
             })?;
             continue;
         }
         if let Some(parent) = destination.parent() {
             fs_create_dir_all_logged(parent).map_err(|err| {
-                format!(
-                    "failed to create override parent {}: {err}",
-                    parent.display()
-                )
+                tr!("failed to create override parent {parent}: {err}", parent = parent.display(), err = err).into_owned()
             })?;
         }
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).map_err(|err| {
-            format!(
-                "failed to read override {} from {}: {err}",
-                entry_name,
-                package_path.display()
-            )
+            tr!("failed to read override {entry_name} from {package_path}: {err}", entry_name = entry_name, package_path = package_path.display(), err = err).into_owned()
         })?;
         fs_write_logged(destination.as_path(), bytes)
-            .map_err(|err| format!("failed to write override {}: {err}", destination.display()))?;
+            .map_err(|err| tr!("failed to write override {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
     }
 
     Ok(())
@@ -384,16 +366,13 @@ pub(crate) fn extract_mrpack_overrides(
 
 pub(crate) fn count_mrpack_override_entries(package_path: &Path) -> Result<usize, String> {
     let file = fs_file_open_logged(package_path)
-        .map_err(|err| format!("failed to open {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to open {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| format!("failed to read {}: {err}", package_path.display()))?;
+        .map_err(|err| tr!("failed to read {package_path}: {err}", package_path = package_path.display(), err = err).into_owned())?;
     let mut count = 0usize;
     for index in 0..archive.len() {
         let entry = archive.by_index(index).map_err(|err| {
-            format!(
-                "failed to read zip entry in {}: {err}",
-                package_path.display()
-            )
+            tr!("failed to read zip entry in {package_path}: {err}", package_path = package_path.display(), err = err).into_owned()
         })?;
         let entry_name = entry.name().replace('\\', "/");
         if entry_name
@@ -409,17 +388,17 @@ pub(crate) fn count_mrpack_override_entries(package_path: &Path) -> Result<usize
 
 pub(crate) fn read_mrpack_manifest(path: &Path) -> Result<MrpackManifest, String> {
     let file = fs_file_open_logged(path)
-        .map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+        .map_err(|err| tr!("failed to open {path}: {err}", path = path.display(), err = err).into_owned())?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+        .map_err(|err| tr!("failed to read {path}: {err}", path = path.display(), err = err).into_owned())?;
     let mut manifest = archive
         .by_name("modrinth.index.json")
-        .map_err(|err| format!("missing modrinth.index.json in {}: {err}", path.display()))?;
+        .map_err(|err| tr!("missing modrinth.index.json in {path}: {err}", path = path.display(), err = err).into_owned())?;
     let mut raw = String::new();
     manifest
         .read_to_string(&mut raw)
-        .map_err(|err| format!("failed to read modrinth.index.json: {err}"))?;
-    serde_json::from_str(&raw).map_err(|err| format!("failed to parse modrinth.index.json: {err}"))
+        .map_err(|err| tr!("failed to read modrinth.index.json: {err}", err = err).into_owned())?;
+    serde_json::from_str(&raw).map_err(|err| tr!("failed to parse modrinth.index.json: {err}", err = err).into_owned())
 }
 
 pub(crate) fn resolve_mrpack_dependencies(
@@ -427,12 +406,9 @@ pub(crate) fn resolve_mrpack_dependencies(
 ) -> Result<MrpackDependencyInfo, String> {
     let raw_game_version = dependencies
         .get("minecraft")
-        .ok_or_else(|| "Modrinth pack is missing the required minecraft dependency.".to_owned())?;
+        .ok_or_else(|| tr!("Modrinth pack is missing the required minecraft dependency.").into_owned())?;
     let game_version = normalize_minecraft_game_version(raw_game_version).ok_or_else(|| {
-        format!(
-            "Modrinth pack declared an invalid Minecraft version: {}",
-            raw_game_version.trim()
-        )
+        tr!("Modrinth pack declared an invalid Minecraft version: {version}", version = raw_game_version.trim()).into_owned()
     })?;
 
     let loader_candidates = [
@@ -453,7 +429,7 @@ pub(crate) fn resolve_mrpack_dependencies(
 
     Ok(MrpackDependencyInfo {
         game_version,
-        modloader: "Vanilla".to_owned(),
+        modloader: tr!("Vanilla").into_owned(),
         modloader_version: String::new(),
     })
 }

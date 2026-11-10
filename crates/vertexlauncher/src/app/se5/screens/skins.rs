@@ -1,6 +1,7 @@
 //! Skins: the active account's skin, model and cape, with a live 3D preview. The preview is drawn by the engine on the
 //! GPU every frame (`skin_gpu`) into an offscreen target that is shown as an image. Everything else is ordinary UI.
 
+use vertex_i18n::tr;
 use crate::app::se5::file_dialog::{Dialog as PickerDialog, Pick};
 use launcher_ui::screens::skins_api::{
     CapeView, MotionMode, PreviewSettings, SkinVariant, SkinsSession,
@@ -96,8 +97,8 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     // "Lazy Account Refresh": the skin service needs a fresh session, so the active account (only it) is renewed first.
     // Nothing below runs, and the screen does not count as opened, until that is done.
     if !state.auth.ensure_active_fresh() {
-        kit.text(ui, TextRole::Title, "Skins");
-        kit.text(ui, TextRole::Muted, "Refreshing your account...");
+        kit.text(ui, TextRole::Title, &tr!("Skins"));
+        kit.text(ui, TextRole::Muted, &tr!("Refreshing your account..."));
         return;
     }
     let opened = !state.skins_view.shown;
@@ -129,7 +130,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     }
 
     let _scroll = kit.scroll(ui, "skins::scroll", kit::SPACE_MD, kit::SPACE_XL);
-    kit.text(ui, TextRole::Title, "Skins");
+    kit.text(ui, TextRole::Title, &tr!("Skins"));
 
     let Some((id, name)) = state
         .skins
@@ -139,7 +140,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit.text(
             ui,
             TextRole::Muted,
-            "Sign in with a Minecraft account to manage skins and capes.",
+            &tr!("Sign in with a Minecraft account to manage skins and capes."),
         );
         return;
     };
@@ -147,10 +148,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     kit.account_label(
         ui,
         TextRole::Body,
-        &format!(
-            "Active account: {}",
-            launcher_ui::account_text::mention(&id, &name)
-        ),
+        &tr!("Active account: {account}", account = launcher_ui::account_text::mention(&id, &name)),
         streamer,
     );
 
@@ -163,22 +161,22 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     preview(ui, kit, skins, skins_view, &settings);
 
     kit.gap(ui, f32::from(kit::SPACE_SM));
-    kit.text(ui, TextRole::Heading, "Skin Image");
+    kit.text(ui, TextRole::Heading, &tr!("Skin Image"));
     drop_zone(ui, kit, skins, file_dialogs);
 
     kit.gap(ui, f32::from(kit::SPACE_XS));
     model_selector(ui, kit, skins);
 
     kit.gap(ui, f32::from(kit::SPACE_SM));
-    kit.text(ui, TextRole::Heading, "Cape");
+    kit.text(ui, TextRole::Heading, &tr!("Cape"));
     cape_grid(ui, kit, skins);
 
     kit.gap(ui, f32::from(kit::SPACE_SM));
-    let label = if skins.saving() { "Saving…" } else { "Save" };
+    let label = if skins.saving() { tr!("Saving…") } else { tr!("Save") };
     if kit.button_sized(
         ui,
         "skins::save",
-        label,
+        &label,
         ButtonKind::Primary,
         skins.can_save(),
         Sizing::Grow,
@@ -245,11 +243,7 @@ fn preview(
             GpuPicture::NoSkin | GpuPicture::Unavailable => None,
         };
     let unavailable = view.gpu_failure.as_ref().map(|failure| {
-        format!(
-            "The skin preview could not be drawn ({}). Trying again in {:.0}s.",
-            failure.message,
-            (failure.retry_at - now).max(0.0).ceil()
-        )
+        tr!("The skin preview could not be drawn ({message}). Trying again in {seconds:.0}s.", message = failure.message, seconds = (failure.retry_at - now).max(0.0).ceil()).into_owned()
     });
 
     let _canvas = ui.element(
@@ -284,7 +278,7 @@ fn preview(
             TextRole::Muted,
             unavailable.as_deref().unwrap_or_default(),
         ),
-        None => kit.text(ui, TextRole::Muted, "No skin loaded"),
+        None => kit.text(ui, TextRole::Muted, &tr!("No skin loaded")),
     }
 
     // Controls floating over the bottom-left corner.
@@ -310,13 +304,13 @@ fn preview(
             })),
     );
     let motion = match skins.motion_mode() {
-        MotionMode::Idle => "Motion: Idle",
-        MotionMode::Walk => "Motion: Walk",
+        MotionMode::Idle => tr!("Motion: Idle"),
+        MotionMode::Walk => tr!("Motion: Walk"),
     };
     if kit.button_sized(
         ui,
         "skins::motion",
-        motion,
+        &motion,
         ButtonKind::Neutral,
         true,
         Sizing::Fit,
@@ -324,9 +318,9 @@ fn preview(
         skins.toggle_motion_mode();
     }
     let elytra = if skins.show_elytra() {
-        "Elytra: On"
+        &tr!("Elytra: On")
     } else {
-        "Elytra: Off"
+        &tr!("Elytra: Off")
     };
     if kit.button_sized(
         ui,
@@ -429,7 +423,7 @@ fn gpu_picture(
                     "The GPU skin preview could not start ({err}); no preview is shown (failure {} in a row, trying again soon).",
                     view.gpu_failures_in_a_row
                 );
-                view.gpu_failure = Some(GpuFailure::new(format!("could not start: {err}"), now, view.gpu_failures_in_a_row));
+                view.gpu_failure = Some(GpuFailure::new(tr!("could not start: {err}", err = err).into_owned(), now, view.gpu_failures_in_a_row));
                 return GpuPicture::Unavailable;
             }
         }
@@ -462,7 +456,7 @@ fn gpu_picture(
             }
         }
         Err(err) => {
-            return gpu_failed(ui, view, skins, now, format!("failed: {err}"));
+            return gpu_failed(ui, view, skins, now, tr!("failed: {err}", err = err).into_owned());
         }
     }
     match renderer.texture(&mut ui.engine()) {
@@ -472,7 +466,7 @@ fn gpu_picture(
         }
         // Drawn without error, yet the engine has no picture for the target (it lost it): the same as a failure, with its own
         // wording, rather than a blank canvas.
-        None => gpu_failed(ui, view, skins, now, "the engine no longer has the preview's picture".to_owned()),
+        None => gpu_failed(ui, view, skins, now, tr!("the engine no longer has the preview's picture").into_owned()),
     }
 }
 
@@ -528,13 +522,13 @@ fn drop_zone(
                     2,
                 )),
         );
-        kit.text(ui, TextRole::Heading, "Drag Skin Image here");
-        kit.text(ui, TextRole::Muted, "or");
+        kit.text(ui, TextRole::Heading, &tr!("Drag Skin Image here"));
+        kit.text(ui, TextRole::Muted, &tr!("or"));
         let picking = skins.picking();
         if kit.button_sized(
             ui,
             "skins::choose",
-            "Choose Skin Image",
+            &tr!("Choose Skin Image"),
             ButtonKind::Neutral,
             !picking,
             Sizing::Fixed(220.0),
@@ -549,7 +543,7 @@ fn drop_zone(
         kit.text(
             ui,
             TextRole::Muted,
-            "Loading selected skin in the background...",
+            &tr!("Loading selected skin in the background..."),
         );
         kit.progress(ui, "skins::loading", None, kit::uptime());
     }
@@ -570,26 +564,26 @@ fn open_picker(file_dialogs: &mut crate::app::se5::file_dialog::FileDialogs) {
         PICK_SLOT,
         Pick::File,
         PickerDialog::new()
-            .title("Select Minecraft Skin")
-            .filter("PNG", &["png"]),
+            .title(tr!("Select Minecraft Skin"))
+            .filter(tr!("PNG"), &["png"]),
     );
 }
 
 // -- Model ----------------------------------------------------------------------------------------------------------------
 
 fn model_selector(ui: &mut Ui<'_>, kit: &mut Kit, skins: &mut SkinsSession) {
-    kit.text(ui, TextRole::Body, "Model:");
+    kit.text(ui, TextRole::Body, &tr!("Model:"));
     let _row = kit.row(ui, kit::SPACE_XS);
     for (variant, label, id) in [
-        (SkinVariant::Classic, "Classic", "skins::model-classic"),
-        (SkinVariant::Slim, "Slim (Alex)", "skins::model-slim"),
+        (SkinVariant::Classic, tr!("Classic"), "skins::model-classic"),
+        (SkinVariant::Slim, tr!("Slim (Alex)"), "skins::model-slim"),
     ] {
         let kind = if skins.variant() == variant {
             ButtonKind::Primary
         } else {
             ButtonKind::Neutral
         };
-        if kit.button_sized(ui, id, label, kind, true, Sizing::Grow) {
+        if kit.button_sized(ui, id, &label, kind, true, Sizing::Grow) {
             skins.set_variant(variant);
         }
     }
@@ -623,7 +617,7 @@ fn cape_grid(ui: &mut Ui<'_>, kit: &mut Kit, skins: &mut SkinsSession) {
                     ui,
                     kit,
                     "skins::cape-none",
-                    "No Cape",
+                    &tr!("No Cape"),
                     None,
                     selected.is_none(),
                 ) {

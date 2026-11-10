@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 pub(super) fn install_discover_modpack_in_background(
@@ -57,7 +58,7 @@ pub(super) fn install_discover_modpack_in_background(
                 let download_url = match download_url {
                     Some(url) => url,
                     None => curseforge::Client::from_env()
-                        .ok_or_else(|| "CurseForge API key missing in settings.".to_owned())?
+                        .ok_or_else(|| tr!("CurseForge API key missing in settings.").into_owned())?
                         .get_mod_file_download_url(project_id, file_id)
                         .map_err(|err| {
                             import_instance_modal::format_curseforge_download_url_error(
@@ -65,9 +66,7 @@ pub(super) fn install_discover_modpack_in_background(
                             )
                         })?
                         .ok_or_else(|| {
-                            format!(
-                                "CurseForge file {file_id} for project {project_id} has no download URL"
-                            )
+                            tr!("CurseForge file {file_id} for project {project_id} has no download URL", file_id = file_id, project_id = project_id).into_owned()
                         })?,
                 };
                 download_discover_modpack_file(
@@ -133,7 +132,7 @@ pub(super) fn finalize_discover_instance(
     let updated = store
         .find(instance.id.as_str())
         .cloned()
-        .ok_or_else(|| format!("instance {} disappeared after install", instance.id))?;
+        .ok_or_else(|| tr!("instance {id} disappeared after install", id = instance.id).into_owned())?;
     Ok((store, updated))
 }
 
@@ -147,7 +146,7 @@ pub(super) fn apply_discover_instance_metadata(
 ) -> Result<(), String> {
     let instance = store
         .find_mut(instance_id)
-        .ok_or_else(|| format!("instance {instance_id} disappeared during discover install"))?;
+        .ok_or_else(|| tr!("instance {instance_id} disappeared during discover install", instance_id = instance_id).into_owned())?;
     instance.name = instance_name.trim().to_owned();
     if let Some(summary) = project_summary
         .map(str::trim)
@@ -172,7 +171,7 @@ pub(super) fn apply_discover_instance_metadata(
         }
     }
 
-    save_instance_store(store).map_err(|err| format!("failed to save instance metadata: {err}"))
+    save_instance_store(store).map_err(|err| tr!("failed to save instance metadata: {err}", err = err).into_owned())
 }
 
 pub(super) fn download_discover_modpack_file(
@@ -182,15 +181,15 @@ pub(super) fn download_discover_modpack_file(
 ) -> Result<PathBuf, String> {
     let mut response = ureq::get(url)
         .call()
-        .map_err(|err| format!("failed to download modpack from {url}: {err}"))?;
+        .map_err(|err| tr!("failed to download modpack from {url}: {err}", url = url, err = err).into_owned())?;
     let mut bytes = Vec::new();
     response
         .body_mut()
         .as_reader()
         .read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read modpack download from {url}: {err}"))?;
+        .map_err(|err| tr!("failed to read modpack download from {url}: {err}", url = url, err = err).into_owned())?;
     if let Err(err) = progress_tx.send(import_instance_modal::ImportProgress {
-        message: "Downloaded modpack package. Importing instance...".to_owned(),
+        message: tr!("Downloaded modpack package. Importing instance...").into_owned(),
         completed_steps: 1,
         total_steps: 1,
     }) {
@@ -208,16 +207,10 @@ pub(super) fn download_discover_modpack_file(
     ));
     let mut file = fs::File::create(temp_path.as_path()).map_err(|err| {
         tracing::warn!(target: "vertexlauncher/io", op = "file_create", path = %temp_path.display(), error = %err, context = "create discover temp package");
-        format!(
-            "failed to create temp package {}: {err}",
-            temp_path.display()
-        )
+        tr!("failed to create temp package {temp_path}: {err}", temp_path = temp_path.display(), err = err).into_owned()
     })?;
     file.write_all(bytes.as_slice()).map_err(|err| {
-        format!(
-            "failed to write temp package {}: {err}",
-            temp_path.display()
-        )
+        tr!("failed to write temp package {temp_path}: {err}", temp_path = temp_path.display(), err = err).into_owned()
     })?;
     Ok(temp_path)
 }
@@ -247,13 +240,13 @@ pub(super) fn download_discover_thumbnail(
 ) -> Result<Option<PathBuf>, String> {
     let mut response = ureq::get(url)
         .call()
-        .map_err(|err| format!("failed to download thumbnail from {url}: {err}"))?;
+        .map_err(|err| tr!("failed to download thumbnail from {url}: {err}", url = url, err = err).into_owned())?;
     let mut bytes = Vec::new();
     response
         .body_mut()
         .as_reader()
         .read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read thumbnail from {url}: {err}"))?;
+        .map_err(|err| tr!("failed to read thumbnail from {url}: {err}", url = url, err = err).into_owned())?;
     if bytes.is_empty() {
         return Ok(None);
     }
@@ -264,7 +257,7 @@ pub(super) fn download_discover_thumbnail(
     ));
     fs::write(path.as_path(), bytes).map_err(|err| {
         tracing::warn!(target: "vertexlauncher/io", op = "write", path = %path.display(), error = %err, context = "write discover thumbnail");
-        format!("failed to write thumbnail {}: {err}", path.display())
+        tr!("failed to write thumbnail {path}: {err}", path = path.display(), err = err).into_owned()
     })?;
     Ok(Some(path))
 }

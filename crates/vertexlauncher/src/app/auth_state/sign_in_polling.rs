@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 impl AuthState {
@@ -44,7 +45,7 @@ impl AuthState {
                             error = %err,
                             "Interactive sign-in flow failed."
                         );
-                        notification::error!("auth", "{err}");
+                        notification::error!("auth", "{err}", err = err);
                         self.status = AuthUiStatus::Error(err);
                         flow_finished = true;
                     }
@@ -56,12 +57,9 @@ impl AuthState {
                             target: "vertexlauncher/auth_state",
                             "Interactive sign-in worker disconnected before completion."
                         );
-                        notification::error!(
-                            "auth",
-                            "Sign-in stopped unexpectedly before completion"
-                        );
+                        notification::error!("auth", "Sign-in stopped unexpectedly before completion");
                         self.status = AuthUiStatus::Error(
-                            "Sign-in stopped unexpectedly before completion".to_owned(),
+                            tr!("Sign-in stopped unexpectedly before completion").into_owned(),
                         );
                     }
                     flow_finished = true;
@@ -94,10 +92,7 @@ impl AuthState {
             for event in device_flow.poll_events() {
                 match event {
                     LoginEvent::DeviceCode(prompt) => {
-                        self.status = AuthUiStatus::AwaitingDeviceCode(format!(
-                            "Go to {} and enter code: {}",
-                            prompt.verification_uri, prompt.user_code
-                        ));
+                        self.status = AuthUiStatus::AwaitingDeviceCode(tr!("Go to {verification_uri} and enter code: {user_code}", verification_uri = prompt.verification_uri, user_code = prompt.user_code).into_owned());
                         self.device_code_expiry =
                             Some(Instant::now() + Duration::from_secs(prompt.expires_in_secs));
                         self.device_code_prompt = Some(prompt);
@@ -128,7 +123,7 @@ impl AuthState {
                             // Code timed out — restart silently with a fresh code
                             device_flow_finished = true;
                         } else {
-                            notification::error!("auth", "{err}");
+                            notification::error!("auth", "{err}", err = err);
                             self.status = AuthUiStatus::Error(err);
                             device_flow_finished = true;
                         }

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[allow(dead_code)]
@@ -28,7 +29,7 @@ pub(crate) fn preserve_non_pack_managed_content(
             continue;
         };
         for entry in entries {
-            let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
+            let entry = entry.map_err(|err| tr!("failed to read directory entry: {err}", err = err).into_owned())?;
             let source_path = entry.path();
             let relative_path = source_path
                 .strip_prefix(existing_root)
@@ -70,11 +71,11 @@ pub(crate) fn preserve_instance_user_state(
 pub(crate) fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(), String> {
     if source.is_dir() {
         fs_create_dir_all_logged(destination)
-            .map_err(|err| format!("failed to create {}: {err}", destination.display()))?;
+            .map_err(|err| tr!("failed to create {destination}: {err}", destination = destination.display(), err = err).into_owned())?;
         let entries = fs_read_dir_logged(source)
-            .map_err(|err| format!("failed to read {}: {err}", source.display()))?;
+            .map_err(|err| tr!("failed to read {source}: {err}", source = source.display(), err = err).into_owned())?;
         for entry in entries {
-            let entry = entry.map_err(|err| format!("failed to read directory entry: {err}"))?;
+            let entry = entry.map_err(|err| tr!("failed to read directory entry: {err}", err = err).into_owned())?;
             copy_path_recursive(
                 entry.path().as_path(),
                 destination.join(entry.file_name()).as_path(),
@@ -84,14 +85,10 @@ pub(crate) fn copy_path_recursive(source: &Path, destination: &Path) -> Result<(
     }
     if let Some(parent) = destination.parent() {
         fs_create_dir_all_logged(parent)
-            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+            .map_err(|err| tr!("failed to create {parent}: {err}", parent = parent.display(), err = err).into_owned())?;
     }
     fs_copy_logged(source, destination).map_err(|err| {
-        format!(
-            "failed to copy {} to {}: {err}",
-            source.display(),
-            destination.display()
-        )
+        tr!("failed to copy {source} to {destination}: {err}", source = source.display(), destination = destination.display(), err = err).into_owned()
     })?;
     Ok(())
 }
@@ -101,30 +98,18 @@ pub(crate) fn swap_instance_root(existing_root: &Path, temp_root: &Path) -> Resu
     let backup_root = existing_root.with_extension("modpack-update-backup");
     if backup_root.exists() {
         fs_remove_dir_all_logged(backup_root.as_path()).map_err(|err| {
-            format!(
-                "failed to remove stale backup {}: {err}",
-                backup_root.display()
-            )
+            tr!("failed to remove stale backup {backup_root}: {err}", backup_root = backup_root.display(), err = err).into_owned()
         })?;
     }
     fs_rename_logged(existing_root, backup_root.as_path()).map_err(|err| {
-        format!(
-            "failed to stage old instance root {}: {err}",
-            existing_root.display()
-        )
+        tr!("failed to stage old instance root {existing_root}: {err}", existing_root = existing_root.display(), err = err).into_owned()
     })?;
     if let Err(err) = fs_rename_logged(temp_root, existing_root) {
         let _ = fs_rename_logged(backup_root.as_path(), existing_root);
-        return Err(format!(
-            "failed to activate updated instance root {}: {err}",
-            existing_root.display()
-        ));
+        return Err(tr!("failed to activate updated instance root {existing_root}: {err}", existing_root = existing_root.display(), err = err).into_owned());
     }
     fs_remove_dir_all_logged(backup_root.as_path()).map_err(|err| {
-        format!(
-            "failed to remove update backup {}: {err}",
-            backup_root.display()
-        )
+        tr!("failed to remove update backup {backup_root}: {err}", backup_root = backup_root.display(), err = err).into_owned()
     })?;
     Ok(())
 }

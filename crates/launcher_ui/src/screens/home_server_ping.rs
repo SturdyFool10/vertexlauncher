@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 
@@ -446,7 +447,7 @@ pub(super) fn server_meta_line(
     now_ms: u64,
 ) -> String {
     // The screen draws the MOTD (or says there is none) on its own, so this is only when the server was last used.
-    format!("last used {}", format_time_ago(server.last_used_at_ms, now_ms))
+    tr!("last used {last_used}", last_used = format_time_ago(server.last_used_at_ms, now_ms)).into_owned()
 }
 
 

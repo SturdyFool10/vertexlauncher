@@ -1,3 +1,4 @@
+use vertex_i18n::src;
 use serde::{Deserialize, Serialize};
 
 /// Linux compositor blur protocol preference.
@@ -25,10 +26,10 @@ impl LinuxBlurProtocol {
 
     pub const fn label(self) -> &'static str {
         match self {
-            LinuxBlurProtocol::Auto => "Auto",
-            LinuxBlurProtocol::ExtBackgroundEffect => "ext_background_effect_v1",
-            LinuxBlurProtocol::KdeBlur => "KDE Blur",
-            LinuxBlurProtocol::BetterBlurDx => "Better Blur DX",
+            LinuxBlurProtocol::Auto => src!("Auto"),
+            LinuxBlurProtocol::ExtBackgroundEffect => src!("ext_background_effect_v1"),
+            LinuxBlurProtocol::KdeBlur => src!("KDE Blur"),
+            LinuxBlurProtocol::BetterBlurDx => src!("Better Blur DX"),
         }
     }
 }

@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::{
     collections::BTreeMap,
     collections::{HashMap, HashSet},
@@ -245,14 +246,14 @@ impl GamepadNavigator {
                     let name = identity
                         .as_ref()
                         .map(|identity| identity.name.as_str())
-                        .unwrap_or("Controller");
+                        .unwrap_or(vertex_i18n::src!("Controller"));
                     if self.known_gamepads.insert(ev.id) {
                         tracing::info!(
                             target: "vertexlauncher/gamepad",
                             gamepad_name = %name,
                             "Gamepad connected."
                         );
-                        notification::info!("gamepad", "Gamepad connected: {name}");
+                        notification::info!("gamepad", "Gamepad connected: {name}", name = name);
                     }
                     if let Some(identity) = identity {
                         self.maybe_queue_calibration_prompt(&identity, calibrations);
@@ -267,7 +268,7 @@ impl GamepadNavigator {
                             gamepad_name = %name,
                             "Gamepad disconnected."
                         );
-                        notification::info!("gamepad", "Gamepad disconnected: {name}");
+                        notification::info!("gamepad", "Gamepad disconnected: {name}", name = name);
                     }
                 }
                 EventType::ButtonPressed(button, _) => match button {
@@ -605,13 +606,13 @@ impl GamepadNavigator {
                         let name = identity
                             .as_ref()
                             .map(|identity| identity.name.as_str())
-                            .unwrap_or("Controller");
+                            .unwrap_or(vertex_i18n::src!("Controller"));
                         tracing::info!(
                             target: "vertexlauncher/gamepad",
                             gamepad_name = %name,
                             "Detected connected controller at startup."
                         );
-                        notification::info!("gamepad", "Detected gamepad: {name}");
+                        notification::info!("gamepad", "Detected gamepad: {name}", name = name);
                         if let Some(identity) = identity {
                             self.maybe_queue_calibration_prompt(&identity, calibrations);
                         }
@@ -628,13 +629,13 @@ impl GamepadNavigator {
                 let name = identity
                     .as_ref()
                     .map(|identity| identity.name.as_str())
-                    .unwrap_or("Controller");
+                    .unwrap_or(vertex_i18n::src!("Controller"));
                 tracing::info!(
                     target: "vertexlauncher/gamepad",
                     gamepad_name = %name,
                     "Detected connected controller after startup."
                 );
-                notification::info!("gamepad", "Detected gamepad: {name}");
+                notification::info!("gamepad", "Detected gamepad: {name}", name = name);
                 if let Some(identity) = identity {
                     self.maybe_queue_calibration_prompt(&identity, calibrations);
                 }
@@ -660,11 +661,7 @@ impl GamepadNavigator {
             return;
         }
         self.pending_calibration_request = Some(identity.clone());
-        notification::info!(
-            "gamepad",
-            "Calibration needed for {}. Open the calibration modal to finish setup.",
-            identity.name
-        );
+        notification::info!("gamepad", "Calibration needed for {name}. Open the calibration modal to finish setup.", name = identity.name);
     }
 
     /// How many tracked controllers are connected.
@@ -841,7 +838,7 @@ impl GamepadNavigator {
                     warning = %message,
                     "Gamepad access diagnostic."
                 );
-                notification::warn!("gamepad", "{message}");
+                notification::warn!("gamepad", "{message}", message = message);
             }
         }
     }
@@ -878,14 +875,12 @@ fn linux_input_access_warning() -> Option<String> {
         Ok(dir) => dir,
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             return Some(
-                "Linux gamepad input unavailable: /dev/input is missing, so evdev devices cannot be opened."
-                    .to_owned(),
+                tr!("Linux gamepad input unavailable: /dev/input is missing, so evdev devices cannot be opened.")
+                    .into_owned(),
             );
         }
         Err(err) => {
-            return Some(format!(
-                "Linux gamepad input unavailable: failed to read /dev/input ({err})."
-            ));
+            return Some(tr!("Linux gamepad input unavailable: failed to read /dev/input ({err}).", err = err).into_owned());
         }
     };
 
@@ -901,7 +896,7 @@ fn linux_input_access_warning() -> Option<String> {
 
     if event_paths.is_empty() {
         return Some(
-            "Linux gamepad input unavailable: no /dev/input/event* devices were found.".to_owned(),
+            tr!("Linux gamepad input unavailable: no /dev/input/event* devices were found.").into_owned(),
         );
     }
 
@@ -917,8 +912,8 @@ fn linux_input_access_warning() -> Option<String> {
         None
     } else {
         Some(
-            "Linux gamepad input may be blocked: VertexLauncher could not open any /dev/input/event* device with read/write access."
-                .to_owned(),
+            tr!("Linux gamepad input may be blocked: VertexLauncher could not open any /dev/input/event* device with read/write access.")
+                .into_owned(),
         )
     }
 }

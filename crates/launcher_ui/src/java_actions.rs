@@ -1,6 +1,7 @@
 //! The "Download OpenJDK" and "Test Java" buttons of the Java settings: background actions that report a status
 //! message and, for a download, the path to select. Toolkit-free.
 
+use vertex_i18n::tr;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -57,14 +58,14 @@ pub fn poll(runtime: JavaRuntimeVersion) -> (JavaActionView, Option<PathBuf>) {
                 state.rx = None;
                 state.message = Some(match result.outcome {
                     Ok(Outcome::Downloaded(path)) => {
-                        let message = format!("Downloaded {} and selected {}.", runtime.label(), path.display());
+                        let message = tr!("Downloaded {runtime} and selected {path}.", runtime = runtime.label(), path = path.display()).into_owned();
                         downloaded = Some(path);
                         message
                     }
-                    Ok(Outcome::Validated(version)) => format!("Java validation passed: {version}"),
+                    Ok(Outcome::Validated(version)) => tr!("Java validation passed: {version}", version = version).into_owned(),
                     Err(err) => match result.kind {
-                        JavaActionKind::Download => format!("Failed to download {}: {err}", runtime.label()),
-                        JavaActionKind::Validate => format!("Java validation failed: {err}"),
+                        JavaActionKind::Download => tr!("Failed to download {runtime}: {err}", runtime = runtime.label(), err = err).into_owned(),
+                        JavaActionKind::Validate => tr!("Java validation failed: {err}", err = err).into_owned(),
                     },
                 });
             }
@@ -72,7 +73,7 @@ pub fn poll(runtime: JavaRuntimeVersion) -> (JavaActionView, Option<PathBuf>) {
             Err(mpsc::TryRecvError::Disconnected) => {
                 state.in_flight = None;
                 state.rx = None;
-                state.message = Some(format!("{} action worker disconnected.", runtime.label()));
+                state.message = Some(tr!("{runtime} action worker disconnected.", runtime = runtime.label()).into_owned());
             }
         }
     }
@@ -85,7 +86,7 @@ pub fn request_download(runtime: JavaRuntimeVersion) {
         let state = states.entry(runtime.major()).or_default();
         state.in_flight = Some(JavaActionKind::Download);
         state.rx = Some(rx);
-        state.message = Some(format!("Downloading {}...", runtime.label()));
+        state.message = Some(tr!("Downloading {runtime}...", runtime = runtime.label()).into_owned());
     }
     let major = runtime.major();
     tokio_runtime::spawn_detached(async move {
@@ -100,7 +101,7 @@ pub fn request_validation(runtime: JavaRuntimeVersion, path: String) {
         let state = states.entry(runtime.major()).or_default();
         state.in_flight = Some(JavaActionKind::Validate);
         state.rx = Some(rx);
-        state.message = Some(format!("Testing {path}..."));
+        state.message = Some(tr!("Testing {path}...", path = path).into_owned());
     }
     tokio_runtime::spawn_detached(async move {
         let outcome = validate_java_executable(path.as_str()).await.map(Outcome::Validated);
@@ -111,29 +112,26 @@ pub fn request_validation(runtime: JavaRuntimeVersion, path: String) {
 async fn validate_java_executable(path: &str) -> Result<String, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
-        return Err("No Java executable path is configured.".to_owned());
+        return Err(tr!("No Java executable path is configured.").into_owned());
     }
     let path = Path::new(trimmed);
-    launcher_runtime::fs::metadata(path).await.map_err(|err| format!("Path is not readable: {trimmed}: {err}"))?;
+    launcher_runtime::fs::metadata(path).await.map_err(|err| tr!("Path is not readable: {trimmed}: {err}", trimmed = trimmed, err = err).into_owned())?;
     let mut command = std::process::Command::new(path);
     command.arg("-version");
     let output = launcher_runtime::process::output(command)
         .await
-        .map_err(|err| format!("Could not run {trimmed}: {err}"))?;
+        .map_err(|err| tr!("Could not run {trimmed}: {err}", trimmed = trimmed, err = err).into_owned())?;
     let stdout = String::from_utf8_lossy(output.stdout.as_slice());
     let stderr = String::from_utf8_lossy(output.stderr.as_slice());
     let combined = format!("{stdout}\n{stderr}");
     let first_line = combined.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("<no version output>");
     let lower = combined.to_ascii_lowercase();
     if !output.status.success() {
-        return Err(format!(
-            "`{trimmed} -version` exited with {}; output: {first_line}",
-            output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "signal".to_owned())
-        ));
+        return Err(tr!("`{trimmed} -version` exited with {status}; output: {first_line}", trimmed = trimmed, status = output.status.code().map(|code| code.to_string()).unwrap_or_else(|| "signal".to_owned()), first_line = first_line).into_owned());
     }
     let looks_like_java = lower.contains("openjdk") || lower.contains("java version") || lower.contains("runtime environment") || lower.contains("java(tm)");
     if !looks_like_java {
-        return Err(format!("`{trimmed} -version` ran, but output did not look like Java: {first_line}"));
+        return Err(tr!("`{trimmed} -version` ran, but output did not look like Java: {first_line}", trimmed = trimmed, first_line = first_line).into_owned());
     }
     Ok(first_line.to_owned())
 }

@@ -1,6 +1,7 @@
 //! Toolkit-free view of the instance settings dialog: metadata, Minecraft version and modloader selection, runtime
 //! overrides and maintenance actions, using the same validation and saving code as the egui dialog.
 
+use vertex_i18n::tr;
 use super::*;
 
 
@@ -156,21 +157,17 @@ pub fn detect_versions(state: &mut InstanceScreenState, instances: &mut Instance
                 detected.modloader_version.clone(),
             ) {
                 Ok(()) => {
-                    state.status_message = Some(format!(
-                        "Detected and saved {} from profile '{}'.",
-                        detected_versions_summary(&detected),
-                        detected.source_profile_id
-                    ));
+                    state.status_message = Some(tr!("Detected and saved {summary} from profile '{source_profile_id}'.", summary = detected_versions_summary(&detected), source_profile_id = detected.source_profile_id).into_owned());
                     true
                 }
                 Err(err) => {
-                    state.status_message = Some(format!("Detected versions, but failed to save them: {err}"));
+                    state.status_message = Some(tr!("Detected versions, but failed to save them: {err}", err = err).into_owned());
                     false
                 }
             }
         }
         Err(err) => {
-            state.status_message = Some(format!("Could not auto-detect installed versions: {err}"));
+            state.status_message = Some(tr!("Could not auto-detect installed versions: {err}", err = err).into_owned());
             false
         }
     }
@@ -204,7 +201,7 @@ pub fn override_limits(config: &Config) -> OverrideLimits {
 pub fn save_overrides(state: &mut InstanceScreenState, instance_id: &str, instances: &mut InstanceStore, limits: &OverrideLimits) -> bool {
     match save_runtime_overrides(state, instance_id, instances, &limits.java_options, limits.memory_max_mib) {
         Ok(()) => {
-            state.status_message = Some("Saved instance settings.".to_owned());
+            state.status_message = Some(tr!("Saved instance settings.").into_owned());
             true
         }
         Err(err) => {

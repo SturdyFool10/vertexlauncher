@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 #[derive(Clone, Debug)]
 pub enum AuthUiStatus {
     Idle,
@@ -12,21 +13,21 @@ pub enum AuthUiStatus {
 }
 
 impl AuthUiStatus {
-    pub(super) fn status_message(&self) -> Option<&str> {
+    pub(super) fn status_message(&self) -> Option<std::borrow::Cow<'_, str>> {
         match self {
             AuthUiStatus::Idle => None,
-            AuthUiStatus::RefreshingCachedSession => Some("Refreshing cached account session..."),
-            AuthUiStatus::RefreshingActiveSession => Some("Refreshing account token..."),
-            AuthUiStatus::Starting => Some("Preparing Microsoft sign-in..."),
+            AuthUiStatus::RefreshingCachedSession => Some(tr!("Refreshing cached account session...")),
+            AuthUiStatus::RefreshingActiveSession => Some(tr!("Refreshing account token...")),
+            AuthUiStatus::Starting => Some(tr!("Preparing Microsoft sign-in...")),
             AuthUiStatus::AwaitingBrowser => {
-                Some("Complete sign-in in the Microsoft webview window...")
+                Some(tr!("Complete sign-in in the Microsoft webview window..."))
             }
             AuthUiStatus::AwaitingExternalBrowser => {
-                Some("Complete sign-in in your default browser...")
+                Some(tr!("Complete sign-in in your default browser..."))
             }
-            AuthUiStatus::AwaitingDeviceCode(message) => Some(message.as_str()),
-            AuthUiStatus::WaitingForAuthorization => Some("Finalizing sign-in..."),
-            AuthUiStatus::Error(message) => Some(message.as_str()),
+            AuthUiStatus::AwaitingDeviceCode(message) => Some(message.as_str().into()),
+            AuthUiStatus::WaitingForAuthorization => Some(tr!("Finalizing sign-in...")),
+            AuthUiStatus::Error(message) => Some(message.as_str().into()),
         }
     }
 }

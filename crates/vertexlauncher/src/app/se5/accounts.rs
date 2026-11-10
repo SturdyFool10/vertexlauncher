@@ -1,6 +1,7 @@
 //! Microsoft account UI: the title-bar account menu and the sign-in dialog. The flows themselves are `AuthState`'s,
 //! shared with the egui front end.
 
+use vertex_i18n::tr;
 use vertex_shell::sturdy::ui::{Sizing, TextStyle, TextWrap, Ui};
 use vertex_shell::sturdy::ui_kit::{ModalStyle, PopupStyle};
 
@@ -22,12 +23,12 @@ const ACCOUNT_MENU_ID: &str = "accounts::menu";
 /// What the title-bar account button says. Streamer mode hides the account name.
 pub fn active_account_label(state: &AppState) -> String {
     if state.auth.sign_in_in_progress() {
-        return "Signing in…".to_owned();
+        return tr!("Signing in…").into_owned();
     }
     match state.auth.display_name() {
-        Some(_) if state.streamer_mode() => "Signed in".to_owned(),
+        Some(_) if state.streamer_mode() => tr!("Signed in").into_owned(),
         Some(name) => name.to_owned(),
-        None => "Sign in".to_owned(),
+        None => tr!("Sign in").into_owned(),
     }
 }
 
@@ -62,13 +63,13 @@ struct MenuActions {
     cancel_device_code: bool,
 }
 
-fn pending_auth_label(state: &AppState) -> &'static str {
+fn pending_auth_label(state: &AppState) -> std::borrow::Cow<'static, str> {
     if state.auth.token_refresh_in_progress() {
-        "Refreshing session..."
+        tr!("Refreshing session...")
     } else if state.auth.sign_in_in_progress() {
-        "Signing in with Microsoft..."
+        tr!("Signing in with Microsoft...")
     } else {
-        "Authenticating..."
+        tr!("Authenticating...")
     }
 }
 
@@ -86,7 +87,7 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
     let entries = state.auth.account_entries();
     let streamer = state.streamer_mode();
     let prompt = state.auth.device_code_prompt().cloned();
-    let status = state.auth.status_message().map(str::to_owned);
+    let status = state.auth.status_message().map(std::borrow::Cow::into_owned);
     let busy = state.auth.auth_busy();
     let pending = pending_auth_label(state);
     let name = state.auth.display_name().map(str::to_owned);
@@ -127,11 +128,11 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                     kit.account_label(
                         ui,
                         TextRole::Strong,
-                        &format!("Signed in as {}", mention(active_id, name)),
+                        &tr!("Signed in as {account}", account = mention(active_id, name)),
                         streamer,
                     );
                 }
-                None => kit.text(ui, TextRole::Strong, "No Microsoft account signed in"),
+                None => kit.text(ui, TextRole::Strong, &tr!("No Microsoft account signed in")),
             }
             if prompt.is_none()
                 && let Some(status) = &status
@@ -153,19 +154,19 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                 kit.text(
                     ui,
                     TextRole::Muted,
-                    "Saved accounts (right-click to set a color)",
+                    &tr!("Saved accounts (right-click to set a color)"),
                 );
                 let _list = kit.card(ui, "accounts::list", kit::SPACE_XS);
                 for (index, entry) in entries.iter().enumerate() {
                     let shown = if streamer {
-                        format!("Account {}", index + 1)
+                        tr!("Account {number}", number = index + 1).into_owned()
                     } else {
                         entry.display_name.clone()
                     };
                     let label = if entry.is_active && entry.is_failed {
-                        format!("{shown} (Failed)")
+                        tr!("{shown} (Failed)", shown = shown).into_owned()
                     } else if entry.is_active {
-                        format!("{shown} (Active)")
+                        tr!("{shown} (Active)", shown = shown).into_owned()
                     } else {
                         shown
                     };
@@ -237,7 +238,7 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                             && kit.button(
                                 ui,
                                 &format!("{ACCOUNT_MENU_ID}::refresh::{}", entry.profile_id),
-                                "Refresh",
+                                &tr!("Refresh"),
                                 ButtonKind::Neutral,
                                 !busy,
                             )
@@ -247,7 +248,7 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                         if kit.button(
                             ui,
                             &format!("{ACCOUNT_MENU_ID}::remove::{}", entry.profile_id),
-                            "Remove",
+                            &tr!("Remove"),
                             ButtonKind::Neutral,
                             true,
                         ) {
@@ -283,7 +284,7 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                 kit.button_sized(
                     ui,
                     &format!("{ACCOUNT_MENU_ID}::pending"),
-                    pending,
+                    &pending,
                     ButtonKind::Neutral,
                     false,
                     Sizing::Grow,
@@ -293,7 +294,7 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                 if kit.button_sized(
                     ui,
                     &format!("{ACCOUNT_MENU_ID}::browser"),
-                    "Browser Sign-in",
+                    &tr!("Browser Sign-in"),
                     ButtonKind::Primary,
                     true,
                     Sizing::Grow,
@@ -303,7 +304,7 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                 if kit.button_sized(
                     ui,
                     &format!("{ACCOUNT_MENU_ID}::webview"),
-                    "Webview Sign-in",
+                    &tr!("Webview Sign-in"),
                     ButtonKind::Neutral,
                     true,
                     Sizing::Grow,
@@ -313,7 +314,7 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                 if kit.button_sized(
                     ui,
                     &format!("{ACCOUNT_MENU_ID}::device"),
-                    "Device Code Sign-in",
+                    &tr!("Device Code Sign-in"),
                     ButtonKind::Neutral,
                     true,
                     Sizing::Grow,
@@ -367,7 +368,7 @@ fn device_code_section(
     launcher_ui::privacy::without_name_scrubbing(|| {
         kit::label(
             ui,
-            "Scan this QR code to continue with device code on another device, or use browser sign-in on this device to avoid typing the code manually.",
+            &tr!("Scan this QR code to continue with device code on another device, or use browser sign-in on this device to avoid typing the code manually."),
             &TextStyle {
                 wrap: TextWrap::Words,
                 ..kit.style(TextRole::Body)
@@ -404,7 +405,7 @@ fn device_code_section(
             if kit.button(
                 ui,
                 "accounts::copy-user-code",
-                "Copy code",
+                &tr!("Copy code"),
                 ButtonKind::Neutral,
                 true,
             ) {
@@ -418,7 +419,7 @@ fn device_code_section(
         if kit.button_sized(
             ui,
             "accounts::device-cancel",
-            "Cancel",
+            &tr!("Cancel"),
             ButtonKind::Neutral,
             true,
             Sizing::Grow,
@@ -428,7 +429,7 @@ fn device_code_section(
         if kit.button_sized(
             ui,
             "accounts::device-browser",
-            "Use Browser Sign-in",
+            &tr!("Use Browser Sign-in"),
             ButtonKind::Primary,
             true,
             Sizing::Grow,
@@ -453,15 +454,15 @@ fn color_editor(
     kit.account_label(
         ui,
         TextRole::Small,
-        &format!("Color for {}", mention(account_id, account_name)),
+        &tr!("Color for {account}", account = mention(account_id, account_name)),
         streamer,
     );
     for (name, colors) in [
-        ("Primary", &account_colors::PRIMARY_COLORS[..]),
-        ("Secondary", &account_colors::SECONDARY_COLORS[..]),
-        ("Tertiary", &account_colors::TERTIARY_COLORS[..]),
+        (tr!("Primary"), &account_colors::PRIMARY_COLORS[..]),
+        (tr!("Secondary"), &account_colors::SECONDARY_COLORS[..]),
+        (tr!("Tertiary"), &account_colors::TERTIARY_COLORS[..]),
     ] {
-        kit.text(ui, TextRole::Small, name);
+        kit.text(ui, TextRole::Small, &name);
         let _row = kit.row(ui, kit::SPACE_XS);
         for PaletteColor { name, color } in colors {
             let id = format!("accounts::swatch::{account_id}::{name}");
@@ -470,21 +471,21 @@ fn color_editor(
             }
         }
     }
-    kit.text(ui, TextRole::Small, "Custom");
+    kit.text(ui, TextRole::Small, &tr!("Custom"));
     {
         let _row = kit.row(ui, kit::SPACE_XS);
         kit.text_field(
             ui,
             &format!("accounts::custom-color::{account_id}"),
             &mut view.input,
-            "#rrggbb",
+            &tr!("#rrggbb"),
             false,
             Sizing::Fixed(150.0),
         );
         if kit.button(
             ui,
             &format!("accounts::custom-set::{account_id}"),
-            "Set",
+            &tr!("Set"),
             ButtonKind::Neutral,
             true,
         ) {
@@ -498,13 +499,13 @@ fn color_editor(
         }
     }
     if view.invalid {
-        kit.text(ui, TextRole::Danger, "Use #rrggbb or rgb(r, g, b)");
+        kit.text(ui, TextRole::Danger, &tr!("Use #rrggbb or rgb(r, g, b)"));
     }
     let _row = kit.row(ui, kit::SPACE_XS);
     if kit.button(
         ui,
         &format!("accounts::clear-color::{account_id}"),
-        "Clear color",
+        &tr!("Clear color"),
         ButtonKind::Neutral,
         current.is_some(),
     ) {
@@ -513,7 +514,7 @@ fn color_editor(
     if kit.button(
         ui,
         &format!("accounts::color-done::{account_id}"),
-        "Done",
+        &tr!("Done"),
         ButtonKind::Primary,
         true,
     ) {
@@ -569,22 +570,22 @@ pub fn sign_in_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> b
     let mut keep_open = true;
     let in_progress = state.auth.sign_in_in_progress();
     let prompt = state.auth.device_code_prompt().cloned();
-    let status = state.auth.status_message().map(str::to_owned);
+    let status = state.auth.status_message().map(std::borrow::Cow::into_owned);
     let mut actions = MenuActions::default();
     let mut close = false;
     let response = kit::modal(ui, "accounts::sign-in", &style, !in_progress, |ui| {
         let _column = kit.column(ui, kit::SPACE_MD);
-        kit.text(ui, TextRole::Heading, "Add a Microsoft account");
+        kit.text(ui, TextRole::Heading, &tr!("Add a Microsoft account"));
         match &prompt {
             Some(prompt) => device_code_section(ui, kit, prompt, &mut actions),
             None if in_progress => {
-                kit.text(ui, TextRole::Body, "Finish signing in in your browser…");
+                kit.text(ui, TextRole::Body, &tr!("Finish signing in in your browser…"));
                 kit.progress(ui, "accounts::progress", None, kit::uptime());
             }
             None => {
                 kit::label(
                     ui,
-                    "Sign in with the Microsoft account that owns Minecraft: Java Edition.",
+                    &tr!("Sign in with the Microsoft account that owns Minecraft: Java Edition."),
                     &TextStyle {
                         wrap: TextWrap::Words,
                         ..kit.style(TextRole::Muted)
@@ -594,7 +595,7 @@ pub fn sign_in_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> b
                 if kit.button(
                     ui,
                     "accounts::browser",
-                    "Browser Sign-in",
+                    &tr!("Browser Sign-in"),
                     ButtonKind::Primary,
                     true,
                 ) {
@@ -603,7 +604,7 @@ pub fn sign_in_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> b
                 if kit.button(
                     ui,
                     "accounts::webview",
-                    "Webview Sign-in",
+                    &tr!("Webview Sign-in"),
                     ButtonKind::Neutral,
                     true,
                 ) {
@@ -612,14 +613,14 @@ pub fn sign_in_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> b
                 if kit.button(
                     ui,
                     "accounts::device",
-                    "Device Code Sign-in",
+                    &tr!("Device Code Sign-in"),
                     ButtonKind::Neutral,
                     true,
                 ) {
                     actions.device_code = true;
                 }
                 kit.fill(ui);
-                if kit.button(ui, "accounts::close", "Close", ButtonKind::Neutral, true) {
+                if kit.button(ui, "accounts::close", &tr!("Close"), ButtonKind::Neutral, true) {
                     close = true;
                 }
             }

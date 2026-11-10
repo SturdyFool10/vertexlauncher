@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
@@ -56,36 +57,30 @@ pub fn read_vtmpack_manifest_from_tar_archive(
 ) -> Result<VtmpackManifest, String> {
     for entry in archive
         .entries()
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?
+        .map_err(|err| tr!("failed to read {path}: {err}", path = path.display(), err = err).into_owned())?
     {
-        let mut entry = entry.map_err(|err| format!("failed to read archive entry: {err}"))?;
+        let mut entry = entry.map_err(|err| tr!("failed to read archive entry: {err}", err = err).into_owned())?;
         let entry_path = entry
             .path()
-            .map_err(|err| format!("failed to decode archive path: {err}"))?;
+            .map_err(|err| tr!("failed to decode archive path: {err}", err = err).into_owned())?;
         if entry_path == Path::new("manifest.toml") {
             let mut raw = String::new();
             entry
                 .read_to_string(&mut raw)
-                .map_err(|err| format!("failed to read manifest.toml: {err}"))?;
+                .map_err(|err| tr!("failed to read manifest.toml: {err}", err = err).into_owned())?;
             return toml::from_str(&raw)
-                .map_err(|err| format!("failed to parse vtmpack manifest: {err}"));
+                .map_err(|err| tr!("failed to parse vtmpack manifest: {err}", err = err).into_owned());
         }
     }
 
-    Err(format!(
-        "No manifest.toml found in Vertex pack {}",
-        path.display()
-    ))
+    Err(tr!("No manifest.toml found in Vertex pack {path}", path = path.display()).into_owned())
 }
 
 pub fn open_vtmpack_tar_archive(path: &Path) -> Result<tar::Archive<Box<dyn Read>>, String> {
     let bytes =
-        std::fs::read(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+        std::fs::read(path).map_err(|err| tr!("failed to open {path}: {err}", path = path.display(), err = err).into_owned())?;
     if !bytes.starts_with(XZ_MAGIC) {
-        return Err(format!(
-            "Unsupported Vertex pack compression in {}. Expected xz.",
-            path.display()
-        ));
+        return Err(tr!("Unsupported Vertex pack compression in {path}. Expected xz.", path = path.display()).into_owned());
     }
     let decoder = xz2::read::XzDecoder::new(Cursor::new(bytes));
     Ok(tar::Archive::new(Box::new(decoder)))

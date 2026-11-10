@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[path = "home_nbt/nbt_cursor.rs"]
@@ -86,21 +87,21 @@ fn parse_world_version_compound(
 
 fn game_mode_label(game_type: i32) -> String {
     match game_type {
-        0 => "survival".to_owned(),
-        1 => "creative".to_owned(),
-        2 => "adventure".to_owned(),
-        3 => "spectator".to_owned(),
-        other => format!("mode {other}"),
+        0 => tr!("survival").into_owned(),
+        1 => tr!("creative").into_owned(),
+        2 => tr!("adventure").into_owned(),
+        3 => tr!("spectator").into_owned(),
+        other => tr!("mode {other}", other = other).into_owned(),
     }
 }
 
 fn difficulty_label(value: u8) -> String {
     match value {
-        0 => "peaceful".to_owned(),
-        1 => "easy".to_owned(),
-        2 => "normal".to_owned(),
-        3 => "hard".to_owned(),
-        other => format!("difficulty {other}"),
+        0 => tr!("peaceful").into_owned(),
+        1 => tr!("easy").into_owned(),
+        2 => tr!("normal").into_owned(),
+        3 => tr!("hard").into_owned(),
+        other => tr!("difficulty {other}", other = other).into_owned(),
     }
 }
 

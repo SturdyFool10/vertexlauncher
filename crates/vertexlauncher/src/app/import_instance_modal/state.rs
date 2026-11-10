@@ -1,3 +1,4 @@
+use vertex_i18n::tr;
 use super::*;
 
 #[path = "state/import_instance_state.rs"]
@@ -52,7 +53,7 @@ pub(crate) fn poll_preview_results(state: &mut ImportInstanceState) {
             "Import preview worker channel disconnected unexpectedly."
         );
         state.preview_in_flight = false;
-        state.error = Some("Import preview worker stopped unexpectedly.".to_owned());
+        state.error = Some(tr!("Import preview worker stopped unexpectedly.").into_owned());
         state.preview_results.reset();
     }
     for (request_serial, result) in drained.items {
@@ -100,11 +101,11 @@ pub(crate) fn poll_preview_results(state: &mut ImportInstanceState) {
 }
 
 pub(crate) const LAUNCHER_KIND_OPTIONS: [&str; 5] = [
-    "Auto-detect",
-    "Modrinth",
-    "CurseForge",
-    "Prism / MultiMC",
-    "ATLauncher",
+    vertex_i18n::src!("Auto-detect"),
+    vertex_i18n::src!("Modrinth"),
+    vertex_i18n::src!("CurseForge"),
+    vertex_i18n::src!("Prism / MultiMC"),
+    vertex_i18n::src!("ATLauncher"),
 ];
 
 pub(crate) fn selected_import_mode(state: &ImportInstanceState) -> ImportMode {

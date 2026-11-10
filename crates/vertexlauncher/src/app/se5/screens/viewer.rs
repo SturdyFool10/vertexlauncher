@@ -1,6 +1,7 @@
 //! A zoomable, pannable picture for the screenshot viewers: the wheel zooms, dragging pans, and a controller's right
 //! stick and triggers do the same.
 
+use vertex_i18n::tr;
 use std::path::Path;
 
 use config::DisplayedTime;
@@ -257,8 +258,8 @@ pub fn tile_actions(ui: &mut Ui<'_>, kit: &mut Kit, tile_id: &str) -> Option<Til
             }
         }
     }
-    kit.tooltip(ui, &copy_id, "Copy image to clipboard");
-    kit.tooltip(ui, &delete_id, "Delete screenshot");
+    kit.tooltip(ui, &copy_id, &tr!("Copy image to clipboard"));
+    kit.tooltip(ui, &delete_id, &tr!("Delete screenshot"));
     let _ = TextRole::Small;
     if kit.clicked_plain(ui, &copy_id) {
         Some(TileAction::Copy)
