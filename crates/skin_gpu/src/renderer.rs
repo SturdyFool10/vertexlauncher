@@ -144,8 +144,6 @@ pub struct PreviewRenderer {
     generation: Option<u64>,
     part_failures: HashMap<PartTag, PartFailure>,
     pending_unloads: Vec<PendingUnload>,
-    churn: Option<(Entity, Asset)>,
-    churn_model: Option<Asset>,
 }
 
 impl PreviewRenderer {
@@ -167,8 +165,6 @@ impl PreviewRenderer {
             generation: None,
             part_failures: HashMap::new(),
             pending_unloads: Vec::new(),
-            churn: None,
-            churn_model: None,
         })
     }
 
@@ -180,179 +176,6 @@ impl PreviewRenderer {
         let (target, size) = self.target?;
         let raw = engine.offscreen_target_texture(target);
         (raw != 0).then(|| (RendererTextureHandle::from_raw(raw), size))
-    }
-
-    /// Reads the picture back and returns the share of its pixels that are not fully transparent, or why that could not be done.
-    /// Stalls the GPU for a moment: a diagnostic, for an occasional status line, not for every frame.
-    pub fn coverage(&self, engine: &mut Engine<'_>) -> Result<f32, String> {
-        use sturdy::rhi::{
-            AccessFlags, BufferDesc, BufferUsage, CommandEncoderDesc, MemoryLocation, PipelineStage, QueueClass, TextureBarrier,
-            TextureLayout, TextureSubresourceRange,
-        };
-        let (handle, size) = self.texture(engine).ok_or("the engine has no picture for the target")?;
-        let resources = engine.assets().rhi_texture(handle).ok_or("the picture has no GPU texture")?;
-        let (w, h) = (size.x, size.y);
-        let row_pitch = (w * 4).div_ceil(256) * 256;
-        let mut rhi = engine.rhi();
-        let readback = rhi
-            .create_buffer(&BufferDesc { size: (row_pitch * h) as u64, usage: BufferUsage::TRANSFER_DST.bits(), memory: MemoryLocation::HostReadback, label: "preview coverage".to_string() })
-            .map_err(|err| format!("readback buffer: {err:?}"))?;
-        let mut encoder = rhi
-            .create_command_encoder(&CommandEncoderDesc { queue: QueueClass::Graphics, label: "preview coverage".to_string() })
-            .map_err(|err| format!("readback encoder: {err:?}"))?;
-        let range = TextureSubresourceRange { base_mip_level: 0, mip_level_count: 1, base_array_layer: 0, array_layer_count: 1 };
-        let barrier = |old_layout, new_layout, src_access: AccessFlags, dst_access: AccessFlags| TextureBarrier {
-            texture: resources.texture,
-            src_stage: PipelineStage::ALL_COMMANDS.bits(),
-            src_access: src_access.bits(),
-            dst_stage: PipelineStage::ALL_COMMANDS.bits(),
-            dst_access: dst_access.bits(),
-            ownership: Default::default(),
-            old_layout,
-            new_layout,
-            range,
-        };
-        encoder.barrier(&[], &[], &[barrier(TextureLayout::ShaderReadOnly, TextureLayout::TransferSrc, AccessFlags::SHADER_READ, AccessFlags::TRANSFER_READ)]);
-        encoder.copy_texture_to_buffer(
-            resources.texture,
-            readback,
-            &sturdy::rhi::BufferTextureCopy {
-                buffer_offset: 0,
-                buffer_row_length: row_pitch / 4,
-                buffer_image_height: h,
-                mip_level: 0,
-                base_array_layer: 0,
-                array_layer_count: 1,
-                offset_x: 0,
-                offset_y: 0,
-                offset_z: 0,
-                extent_width: w,
-                extent_height: h,
-                extent_depth_or_layers: 1,
-            },
-        );
-        encoder.barrier(&[], &[], &[barrier(TextureLayout::TransferSrc, TextureLayout::ShaderReadOnly, AccessFlags::TRANSFER_READ, AccessFlags::SHADER_READ)]);
-        let result = (|| {
-            let commands = encoder.finish().map_err(|err| format!("readback commands: {err:?}"))?;
-            rhi.submit(&[commands]).map_err(|err| format!("readback submit: {err:?}"))?;
-            rhi.wait_idle();
-            let mapped = rhi.map_buffer(readback).map_err(|err| format!("readback map: {err:?}"))?;
-            let mut covered = 0usize;
-            for y in 0..h as usize {
-                let row = &mapped[y * row_pitch as usize..y * row_pitch as usize + w as usize * 4];
-                covered += row.chunks_exact(4).filter(|pixel| pixel[3] != 0).count();
-            }
-            Ok(covered as f32 / (w as usize * h as usize) as f32)
-        })();
-        rhi.destroy_buffer(readback);
-        result
-    }
-
-    /// Diagnostic only: one create/destroy cycle of a throwaway quad, to find what the engine runs out of. `entity` spawns (and
-    /// despawns the previous) entity, `model` creates (and unloads the previous) model; with `entity` and not `model` one shared model is used.
-    pub fn debug_churn(&mut self, engine: &mut Engine<'_>, entity: bool, model: bool) {
-        let skin = self.skin.as_ref().map(|slot| slot.asset);
-        let Some(skin) = skin else { return };
-        let quad = SceneQuad {
-            transform: Mat4::IDENTITY.to_cols_array(),
-            vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
-            normal: [0.0, 0.0, 1.0],
-            uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            texture: SceneTexture::Skin,
-        };
-        let make = |engine: &mut Engine<'_>, shader: Asset| -> Option<Asset> {
-            let (vertices, indices) = mesh_of(&[quad]);
-            let primitive = ModelPrimitive::new(vertices, indices, shader).with_texture("base_color_texture", skin).with_double_sided(true);
-            engine.assets().create_model(ModelBuilder::new("churn").with_primitive(primitive)).ok()
-        };
-        if let Some((old_entity, old_model)) = self.churn.take() {
-            if entity {
-                engine.ecs().despawn(old_entity);
-            }
-            if model {
-                let _ = engine.assets().unload(old_model);
-            }
-        }
-        let current = if model || self.churn_model.is_none() {
-            let Some(created) = make(engine, self.shader) else { return };
-            if !model {
-                self.churn_model = Some(created);
-            }
-            created
-        } else {
-            self.churn_model.unwrap()
-        };
-        let spawned = if entity {
-            engine
-                .ecs()
-                .spawn_builder()
-                .with(WorldTransform::from_matrix(Mat4::from_translation(Vec3::new(500.0, 0.0, 0.0))))
-                .with(ModelRenderer::new(current).with_visibility_mask(self.layer))
-                .build()
-                .ok()
-        } else {
-            None
-        };
-        if let Some(spawned) = spawned {
-            self.churn = Some((spawned, current));
-        } else if model {
-            let _ = engine.assets().unload(current);
-        }
-    }
-
-    /// Diagnostic only: makes `count` throwaway quad models, drops them all, then makes them again, and reports the times. For finding
-    /// what the engine does with very many meshes.
-    pub fn debug_bulk(&mut self, engine: &mut Engine<'_>, count: usize) -> String {
-        let Some(skin) = self.skin.as_ref().map(|slot| slot.asset) else { return "no skin texture yet".to_owned() };
-        let quad = SceneQuad {
-            transform: Mat4::IDENTITY.to_cols_array(),
-            vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
-            normal: [0.0, 0.0, 1.0],
-            uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            texture: SceneTexture::Skin,
-        };
-        let mut report = String::new();
-        let mut models: Vec<Asset> = Vec::with_capacity(count);
-        for round in 0..2 {
-            let started = Instant::now();
-            let mut failed = 0usize;
-            let mut first_error: Option<String> = None;
-            for index in 0..count {
-                let (vertices, indices) = mesh_of(&[quad]);
-                let primitive = ModelPrimitive::new(vertices, indices, self.shader).with_texture("base_color_texture", skin);
-                match engine.assets().create_model(ModelBuilder::new("bulk").with_primitive(primitive)) {
-                    Ok(model) => models.push(model),
-                    Err(err) => {
-                        failed += 1;
-                        if first_error.is_none() {
-                            first_error = Some(format!("first failure at model {index}: {err:?}"));
-                        }
-                    }
-                }
-            }
-            if let Some(error) = first_error {
-                report += &format!("[{error}] ");
-            }
-            let created = started.elapsed();
-            let started = Instant::now();
-            let mut unload_failed = 0usize;
-            for model in models.drain(..) {
-                if engine.assets().unload(model).is_err() {
-                    unload_failed += 1;
-                }
-            }
-            report += &format!(
-                "round {round}: {count} models made in {created:?} ({failed} failed), dropped in {:?} ({unload_failed} failed); ",
-                started.elapsed()
-            );
-        }
-        report
-    }
-
-    /// How many parts are built on the GPU, and the pending (not yet unloaded) models; for diagnostics.
-    pub fn part_count(&self) -> (usize, usize) {
-        let face_built = usize::from(!self.face.is_empty() && self.face.iter().all(Option::is_some));
-        (self.parts.len() + face_built, self.pending_unloads.len())
     }
 
     /// Draws `request` into the target. Returns `true` when the renderer is missing geometry the frame did not carry

@@ -22,8 +22,6 @@ struct Probe {
     blur: bool,
     started: std::time::Instant,
     cached: Option<launcher_ui::screens::skins_api::GpuFrame>,
-    face_quads: Option<Vec<launcher_ui::screens::skins_gpu_scene::SceneQuad>>,
-    churned: u32,
 }
 
 fn test_skin() -> RgbaImage {
@@ -96,21 +94,6 @@ impl GameLogic for Probe {
         // From frame 30 on the same frame is drawn again, so comparing the texel anti-aliasing is a like-for-like picture.
         let stress: Option<u32> = std::env::var("PROBE_FRAMES").ok().and_then(|v| v.parse().ok());
         let frame = if stress.is_none() && self.frames >= 30 && self.cached.is_some() { self.cached.clone() } else { self.session.gpu_frame(now, &settings) };
-        // PROBE_CHURN=n: the face part is rebuilt every n frames (a new model each time, the old one unloaded), the way the launcher's
-        // blinking face does.
-        let mut frame = frame;
-        if let (Some(frame), Some(every)) = (frame.as_mut(), std::env::var("PROBE_CHURN").ok().and_then(|v| v.parse::<u32>().ok())) {
-            for part in frame.parts.iter_mut().filter(|part| part.tag == launcher_ui::screens::skins_gpu_scene::PartTag::Face) {
-                if part.quads.is_some() {
-                    self.face_quads = part.quads.clone();
-                }
-                if self.frames % every == 0 {
-                    self.churned += 1;
-                    part.quads = self.face_quads.clone();
-                }
-                part.geometry_hash = part.geometry_hash.wrapping_add(u64::from(self.churned));
-            }
-        }
         self.cached = frame.clone();
         if let (Some(frame), Some(renderer)) = (frame, self.renderer.as_mut()) {
             let request = RenderRequest {
@@ -142,21 +125,8 @@ impl GameLogic for Probe {
             }
             heads.destroy(engine);
         }
-        if self.frames == 5 {
-            if let (Some(count), Some(renderer)) = (std::env::var("PROBE_BULK").ok().and_then(|v| v.parse::<usize>().ok()), self.renderer.as_mut()) {
-                eprintln!("[probe] bulk: {}", renderer.debug_bulk(engine, count));
-            }
-        }
-        if let (Some(mode), Some(renderer)) = (std::env::var("PROBE_RAW").ok(), self.renderer.as_mut()) {
-            renderer.debug_churn(engine, mode == "entity" || mode == "both", mode == "model" || mode == "both");
-        }
         self.frames += 1;
         if let Some(limit) = stress {
-            if self.frames % 100 == 0 {
-                if let Some(renderer) = self.renderer.as_ref() {
-                    eprintln!("[probe] frame {}: parts {:?}, rebuilds {}, coverage {:?}", self.frames, renderer.part_count(), self.churned, renderer.coverage(engine));
-                }
-            }
             if self.frames >= limit {
                 if let Some(mut window) = engine.primary_window_control() {
                     window.request_close();
@@ -269,8 +239,6 @@ fn install_hook(out: PathBuf, layers: bool) {
     let mut renderer: Option<PreviewRenderer> = None;
     let started = std::time::Instant::now();
     let mut frames = 0u32;
-    let mut face_quads: Option<Vec<launcher_ui::screens::skins_gpu_scene::SceneQuad>> = None;
-    let mut churned = 0u32;
     let mut spent = std::time::Duration::ZERO;
     ui::install_draw_hook(move |ui| {
         let settings = PreviewSettings {
@@ -290,19 +258,7 @@ fn install_hook(out: PathBuf, layers: bool) {
             session.gpu_resend_all();
         }
         let now = started.elapsed().as_secs_f64() + 4.0;
-        let mut hook_frame = session.gpu_frame(now, &settings);
-        if let (Some(frame), Some(every)) = (hook_frame.as_mut(), std::env::var("PROBE_CHURN").ok().and_then(|v| v.parse::<u32>().ok())) {
-            for part in frame.parts.iter_mut().filter(|part| part.tag == launcher_ui::screens::skins_gpu_scene::PartTag::Face) {
-                if part.quads.is_some() {
-                    face_quads = part.quads.clone();
-                }
-                if frames % every == 0 {
-                    churned += 1;
-                    part.quads = face_quads.clone();
-                }
-                part.geometry_hash = part.geometry_hash.wrapping_add(u64::from(churned));
-            }
-        }
+        let hook_frame = session.gpu_frame(now, &settings);
         if let (Some(frame), Some(renderer)) = (hook_frame, renderer.as_mut()) {
             let request = RenderRequest {
                 frame: &frame,
@@ -321,9 +277,6 @@ fn install_hook(out: PathBuf, layers: bool) {
             }
             frames += 1;
             if let Some(limit) = std::env::var("PROBE_FRAMES").ok().and_then(|v| v.parse::<u32>().ok()) {
-                if frames % 100 == 0 {
-                    eprintln!("[probe] hook frame {frames}: parts {:?}, rebuilds {churned}, coverage {:?}", renderer.part_count(), renderer.coverage(&mut ui.engine()));
-                }
                 if frames >= limit {
                     if let Some(mut window) = ui.engine().primary_window_control() {
                         window.request_close();
@@ -374,8 +327,6 @@ fn main() -> std::process::ExitCode {
             blur: rest.iter().any(|a| a == "blur"),
             started: std::time::Instant::now(),
             cached: None,
-            face_quads: None,
-            churned: 0,
         },
     )
 }
