@@ -51,7 +51,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "app_paths"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "directories",
  "vertex_constants",
@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "auth"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "base64 0.22.1",
  "image 0.24.9",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "config"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "app_paths",
  "serde",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "content_resolver"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "curseforge",
  "logged_fs",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "curseforge"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "serde",
  "serde_json",
@@ -1340,7 +1340,7 @@ dependencies = [
 
 [[package]]
 name = "fontloader"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "fontdb",
  "skrifa",
@@ -2164,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "installation"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "app_paths",
  "flate2",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "instance_sync"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "flate2",
  "instances",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "instances"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "app_paths",
  "logged_fs",
@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "launcher_runtime"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "libc",
  "tracing",
@@ -2377,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "launcher_ui"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "ansi_escapers",
  "app_paths",
@@ -2560,14 +2560,14 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "log_redaction"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "url",
 ]
 
 [[package]]
 name = "logged_fs"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "tracing",
 ]
@@ -2600,7 +2600,7 @@ dependencies = [
 
 [[package]]
 name = "managed_content"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "logged_fs",
  "modprovider",
@@ -2641,7 +2641,7 @@ checksum = "2532096657941c2fea9c289d370a250971c689d4f143798ff67113ec042024a5"
 
 [[package]]
 name = "mc_options"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "serde_json",
  "zip",
@@ -2692,7 +2692,7 @@ dependencies = [
 
 [[package]]
 name = "modprovider"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "curseforge",
  "modrinth",
@@ -2703,7 +2703,7 @@ dependencies = [
 
 [[package]]
 name = "modrinth"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "serde",
  "serde_json",
@@ -3991,7 +3991,7 @@ dependencies = [
 
 [[package]]
 name = "shared_lru"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "rustc-hash",
 ]
@@ -4041,7 +4041,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "skin_gpu"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "app_paths",
  "config",
@@ -4962,11 +4962,11 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vertex_constants"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 
 [[package]]
 name = "vertex_shell"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "config",
  "cxx",
@@ -4977,7 +4977,7 @@ dependencies = [
 
 [[package]]
 name = "vertex_theme"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "app_paths",
  "serde",
@@ -4988,7 +4988,7 @@ dependencies = [
 
 [[package]]
 name = "vertexlauncher"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "app_paths",
  "auth",
@@ -5037,7 +5037,7 @@ dependencies = [
 
 [[package]]
 name = "vtmpack"
-version = "0.1.24-Alpha"
+version = "0.1.25-Alpha"
 dependencies = [
  "curseforge",
  "managed_content",
