@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
 use image::RgbaImage;
 use vertex_shell::sturdy::Engine;
@@ -22,14 +23,35 @@ enum Skin {
 
 const MAX_ATTEMPTS: u8 = 4;
 
+/// A head renderer, the engine layer it lives on, and when it was last asked for a picture.
+struct Head {
+    renderer: skin_gpu::HeadRenderer,
+    layer: u32,
+    last_frame: u64,
+    last_used: Instant,
+}
+
+/// Renderers nobody has asked for in this long are released, so skins that were on screen once do not hold GPU memory and one of the
+/// few layers for the rest of the session.
+const IDLE_RELEASE: Duration = Duration::from_secs(120);
+
 pub struct AvatarHeads {
     skins: HashMap<String, Skin>,
     tx: mpsc::Sender<(String, Result<RgbaImage, String>)>,
     rx: mpsc::Receiver<(String, Result<RgbaImage, String>)>,
     /// One renderer (and target) per skin; each lives on a layer of its own so heads do not draw into each other.
-    renderers: HashMap<String, skin_gpu::HeadRenderer>,
-    /// The renderer could not start; the flat avatar picture is used instead.
-    unavailable: bool,
+    renderers: HashMap<String, Head>,
+    /// Counts `pump` calls, i.e. frames: which renderers were used this frame.
+    frame: u64,
+    last_trim: Instant,
+    /// The renderer failed: the flat avatar picture is used until the pause is over, then drawing is tried again. A graphics hiccup
+    /// must not cost the heads for the rest of the session.
+    failure: Option<HeadFailure>,
+    failures_in_a_row: u32,
+}
+
+struct HeadFailure {
+    retry_at: Instant,
 }
 
 impl Default for AvatarHeads {
@@ -40,7 +62,10 @@ impl Default for AvatarHeads {
             tx,
             rx,
             renderers: HashMap::new(),
-            unavailable: false,
+            frame: 0,
+            last_trim: Instant::now(),
+            failure: None,
+            failures_in_a_row: 0,
         }
     }
 }
@@ -48,6 +73,7 @@ impl Default for AvatarHeads {
 impl AvatarHeads {
     /// Takes in skins that finished downloading. Call once per frame.
     pub fn pump(&mut self) {
+        self.frame = self.frame.wrapping_add(1);
         while let Ok((url, result)) = self.rx.try_recv() {
             let previous_attempts = match self.skins.get(&url) {
                 Some(Skin::Failed { attempts, .. }) => *attempts,
@@ -77,9 +103,13 @@ impl AvatarHeads {
         skin_url: &str,
         size: UVec2,
     ) -> Option<RendererTextureHandle> {
-        if self.unavailable {
-            return None;
+        if let Some(failure) = &self.failure {
+            if Instant::now() < failure.retry_at {
+                return None;
+            }
+            self.failure = None;
         }
+        self.release_idle(engine);
         let start = match self.skins.get(skin_url) {
             None => true,
             Some(Skin::Failed { attempts, retry_at }) => {
@@ -114,24 +144,73 @@ impl AvatarHeads {
         let skin = Arc::clone(skin);
         let generation = engine.device_generation();
         if !self.renderers.contains_key(skin_url) {
-            // Layers are few; heads beyond them fall back to the flat picture.
-            let used = self.renderers.len() as u32;
-            let layer = skin_gpu::HEAD_LAYERS.start() + used;
-            if layer > *skin_gpu::HEAD_LAYERS.end() {
-                return None;
-            }
-            self.renderers.insert(skin_url.to_owned(), skin_gpu::HeadRenderer::new(layer));
+            let layer = self.free_layer(engine)?;
+            self.renderers.insert(
+                skin_url.to_owned(),
+                Head { renderer: skin_gpu::HeadRenderer::new(layer), layer, last_frame: self.frame, last_used: Instant::now() },
+            );
         }
-        let renderer = self.renderers.get_mut(skin_url)?;
-        match renderer.render(engine, &skin, size, generation) {
-            Ok(handle) => handle,
+        let head = self.renderers.get_mut(skin_url)?;
+        head.last_frame = self.frame;
+        head.last_used = Instant::now();
+        match head.renderer.render(engine, &skin, size, generation) {
+            Ok(Some(handle)) => {
+                self.failures_in_a_row = 0;
+                Some(handle)
+            }
+            Ok(None) => None,
             Err(err) => {
-                tracing::warn!(target: "vertexlauncher/se5/avatar", "The head avatar could not be drawn ({err}); using the flat picture.");
-                self.unavailable = true;
-                for (_, mut renderer) in self.renderers.drain() {
-                    renderer.destroy(engine);
+                self.failures_in_a_row = self.failures_in_a_row.saturating_add(1);
+                // 2 s, 4 s ... up to a minute.
+                let pause = Duration::from_secs((2_u64 << self.failures_in_a_row.saturating_sub(1).min(5)).min(60));
+                tracing::warn!(
+                    target: "vertexlauncher/se5/avatar",
+                    "The head avatar could not be drawn ({err}); using the flat picture and trying again in {}s (failure {} in a row).",
+                    pause.as_secs(),
+                    self.failures_in_a_row
+                );
+                for (_, mut head) in self.renderers.drain() {
+                    head.renderer.destroy(engine);
                 }
+                self.failure = Some(HeadFailure { retry_at: Instant::now() + pause });
                 None
+            }
+        }
+    }
+
+    /// An engine layer no renderer is using. When all are taken, the one asked for least recently (and not this frame) is released
+    /// and its layer reused; `None` only when every layer is in use by a head drawn this very frame.
+    fn free_layer(&mut self, engine: &mut Engine<'_>) -> Option<u32> {
+        let taken: Vec<u32> = self.renderers.values().map(|head| head.layer).collect();
+        if let Some(layer) = skin_gpu::HEAD_LAYERS.clone().find(|layer| !taken.contains(layer)) {
+            return Some(layer);
+        }
+        let oldest = self
+            .renderers
+            .iter()
+            .filter(|(_, head)| head.last_frame != self.frame)
+            .min_by_key(|(_, head)| head.last_used)
+            .map(|(url, _)| url.clone())?;
+        let mut head = self.renderers.remove(&oldest)?;
+        head.renderer.destroy(engine);
+        Some(head.layer)
+    }
+
+    /// Releases renderers that have not been asked for in a while. Checked at most every ten seconds.
+    fn release_idle(&mut self, engine: &mut Engine<'_>) {
+        if self.last_trim.elapsed() < Duration::from_secs(10) {
+            return;
+        }
+        self.last_trim = Instant::now();
+        let idle: Vec<String> = self
+            .renderers
+            .iter()
+            .filter(|(_, head)| head.last_used.elapsed() > IDLE_RELEASE)
+            .map(|(url, _)| url.clone())
+            .collect();
+        for url in idle {
+            if let Some(mut head) = self.renderers.remove(&url) {
+                head.renderer.destroy(engine);
             }
         }
     }

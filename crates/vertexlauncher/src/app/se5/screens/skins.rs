@@ -33,13 +33,38 @@ pub struct SkinsView {
     last_pointer_x: f32,
     /// The GPU preview, made on first use and dropped when the screen is left.
     gpu: Option<skin_gpu::PreviewRenderer>,
-    /// The GPU preview could not start (or failed): the screen says so instead of showing a picture.
-    gpu_failed: bool,
+    /// The GPU preview could not start (or failed): the screen says why instead of showing a picture, and it is tried again
+    /// after a pause that grows with each failure in a row (a graphics hiccup, a device switch, a full disk must not cost the
+    /// preview for the rest of the session).
+    gpu_failure: Option<GpuFailure>,
+    /// Failures in a row since the preview last drew; sets the length of the pause.
+    gpu_failures_in_a_row: u32,
     /// Physical pixels per layout unit of the display the window is on (0 = not asked yet), and when it was asked.
     display_scale: f32,
     display_scale_checked: f64,
     /// The window position and size `display_scale` was worked out for.
     display_scale_key: Option<(i32, i32, u32, u32)>,
+    /// What the preview showed last frame, so a change (the picture going away) is logged once with its reason.
+    last_picture: Option<&'static str>,
+    /// When the periodic status line was last written.
+    last_status: f64,
+    /// When the picture was last read back to see whether anything was drawn, and how many times in a row it was not.
+    last_blank_check: f64,
+    blank_in_a_row: u32,
+}
+
+/// Why the GPU preview is not showing, and when it will be tried again.
+struct GpuFailure {
+    message: String,
+    retry_at: f64,
+}
+
+impl GpuFailure {
+    fn new(message: String, now: f64, failures_in_a_row: u32) -> Self {
+        // 1 s, 2 s, 4 s ... up to half a minute.
+        let pause = (1_u32 << failures_in_a_row.saturating_sub(1).min(5)).min(30);
+        Self { message, retry_at: now + f64::from(pause) }
+    }
 }
 
 impl SkinsView {
@@ -48,6 +73,10 @@ impl SkinsView {
         if self.shown {
             self.shown = false;
             self.dragging = false;
+            // Coming back is a fresh start: no waiting out a pause that belonged to the last visit.
+            self.gpu_failure = None;
+            self.gpu_failures_in_a_row = 0;
+            self.last_picture = None;
             if let Some(mut renderer) = self.gpu.take() {
                 renderer.destroy(&mut ui.engine());
             }
@@ -214,13 +243,35 @@ fn preview(
     view.last_pointer_x = pointer_x;
 
     // The picture to show and its size, or `None` while there is no skin (or no GPU preview).
+    let outcome = gpu_picture(ui, skins, view, settings, now, frame_w, frame_h, scale);
+    let label = match &outcome {
+        GpuPicture::Shown(_) => "shown",
+        GpuPicture::NoSkin => "no skin loaded",
+        GpuPicture::Unavailable => "renderer unavailable",
+    };
+    if view.last_picture != Some(label) {
+        tracing::info!(
+            target: "vertexlauncher/se5/skins",
+            "Skin preview: {label} (was {}); frame {frame_w}x{frame_h}, display scale {scale}, renderer {}, failures in a row {}.",
+            view.last_picture.unwrap_or("not drawn"),
+            if view.gpu.is_some() { "running" } else { "absent" },
+            view.gpu_failures_in_a_row
+        );
+        view.last_picture = Some(label);
+    }
     let picture: Option<(RendererTextureHandle, u32, u32)> =
-        match gpu_picture(ui, skins, view, settings, now, frame_w, frame_h, scale) {
+        match outcome {
             // Drawn at the layout size whatever resolution the picture was rendered at.
             GpuPicture::Shown(handle) => Some((handle, frame_w, frame_h)),
             GpuPicture::NoSkin | GpuPicture::Unavailable => None,
         };
-    let unavailable = view.gpu_failed;
+    let unavailable = view.gpu_failure.as_ref().map(|failure| {
+        format!(
+            "The skin preview could not be drawn ({}). Trying again in {:.0}s.",
+            failure.message,
+            (failure.retry_at - now).max(0.0).ceil()
+        )
+    });
 
     let _canvas = ui.element(
         &ElementDesc::new()
@@ -249,10 +300,10 @@ fn preview(
                 })),
             handle,
         ),
-        None if unavailable => kit.text(
+        None if unavailable.is_some() => kit.text(
             ui,
             TextRole::Muted,
-            "The skin preview needs GPU rendering, which could not start.",
+            unavailable.as_deref().unwrap_or_default(),
         ),
         None => kit.text(ui, TextRole::Muted, "No skin loaded"),
     }
@@ -337,7 +388,9 @@ fn display_scale(ui: &mut Ui<'_>, view: &mut SkinsView, now: f64) -> f32 {
     };
     let placement = window.position().zip(window.size());
     let key = placement.map(|(position, size)| (position.x, position.y, size.x, size.y));
-    if view.display_scale > 0.0 && key == view.display_scale_key && now - view.display_scale_checked < 30.0 {
+    // Asked again only when the window moved or changed size (the only ways its display changes): the enumeration it takes is a
+    // long frame, and doing it on a timer showed up as a periodic stall.
+    if view.display_scale > 0.0 && key == view.display_scale_key {
         return view.display_scale;
     }
     view.display_scale_checked = now;
@@ -376,8 +429,12 @@ fn gpu_picture(
     height: u32,
     scale: f32,
 ) -> GpuPicture {
-    if view.gpu_failed {
-        return GpuPicture::Unavailable;
+    if let Some(failure) = &view.gpu_failure {
+        if now < failure.retry_at {
+            return GpuPicture::Unavailable;
+        }
+        // The pause is over: try again from scratch.
+        view.gpu_failure = None;
     }
     if view.gpu.is_none() {
         match skin_gpu::PreviewRenderer::new(&mut ui.engine()) {
@@ -387,15 +444,22 @@ fn gpu_picture(
                 skins.gpu_resend_all();
             }
             Err(err) => {
-                tracing::warn!(target: "vertexlauncher/se5/skins", "The GPU skin preview could not start ({err}); no preview is shown.");
-                view.gpu_failed = true;
+                view.gpu_failures_in_a_row = view.gpu_failures_in_a_row.saturating_add(1);
+                tracing::warn!(
+                    target: "vertexlauncher/se5/skins",
+                    "The GPU skin preview could not start ({err}); no preview is shown (failure {} in a row, trying again soon).",
+                    view.gpu_failures_in_a_row
+                );
+                view.gpu_failure = Some(GpuFailure::new(format!("could not start: {err}"), now, view.gpu_failures_in_a_row));
                 return GpuPicture::Unavailable;
             }
         }
     }
+    let frame_started = std::time::Instant::now();
     let Some(frame) = skins.gpu_frame(now, settings) else {
         return GpuPicture::NoSkin;
     };
+    let frame_took = frame_started.elapsed();
     let Some(renderer) = view.gpu.as_mut() else {
         return GpuPicture::Unavailable;
     };
@@ -413,7 +477,20 @@ fn gpu_picture(
             texel_boundary_aa: settings.texel_aa_mode == config::SkinPreviewTexelAaMode::TexelBoundary,
         },
     };
+    let render_started = std::time::Instant::now();
     let rendered = renderer.render(&mut ui.engine(), &request);
+    let render_took = render_started.elapsed();
+    if frame_took + render_took > std::time::Duration::from_millis(16) {
+        let rebuilt: Vec<String> = frame.parts.iter().filter(|part| part.quads.is_some()).map(|part| format!("{:?}", part.tag)).collect();
+        tracing::warn!(
+            target: "vertexlauncher/se5/skins",
+            "Slow skin preview frame: building the scene took {frame_took:?}, drawing it {render_took:?}; parts with new geometry: [{}], missing geometry: {:?}, picture {}x{}.",
+            rebuilt.join(", "),
+            rendered.as_ref().ok(),
+            request.size.x,
+            request.size.y
+        );
+    }
     match rendered {
         Ok(missing_geometry) => {
             if missing_geometry {
@@ -421,18 +498,94 @@ fn gpu_picture(
             }
         }
         Err(err) => {
-            tracing::warn!(target: "vertexlauncher/se5/skins", "The GPU skin preview failed ({err}); no preview is shown.");
-            view.gpu_failed = true;
-            if let Some(mut renderer) = view.gpu.take() {
-                renderer.destroy(&mut ui.engine());
-            }
-            return GpuPicture::Unavailable;
+            return gpu_failed(ui, view, skins, now, format!("failed: {err}"));
         }
     }
-    match renderer.texture(&mut ui.engine()) {
-        Some((handle, _size)) => GpuPicture::Shown(handle),
-        None => GpuPicture::Unavailable,
+    // Drawn without error, with every part built, yet nothing on the picture: the engine drew an empty frame. Reading the picture back
+    // costs a GPU stall, so it is done now and then; when it is empty the renderer is made again from scratch.
+    if now - view.last_blank_check >= 5.0 && !frame.parts.is_empty() {
+        view.last_blank_check = now;
+        let (built, _) = renderer.part_count();
+        let checked = renderer.coverage(&mut ui.engine());
+        if let Err(why) = &checked {
+            tracing::warn!(target: "vertexlauncher/se5/skins", "The skin preview's picture could not be checked: {why}");
+        }
+        if let Ok(share) = checked {
+            if share == 0.0 && built > 0 {
+                view.blank_in_a_row += 1;
+                tracing::warn!(
+                    target: "vertexlauncher/se5/skins",
+                    "The skin preview drew nothing ({built} parts built, picture {}x{}, eye {:?}, {} blank in a row).",
+                    request.size.x,
+                    request.size.y,
+                    frame.camera.eye,
+                    view.blank_in_a_row
+                );
+                // Rebuilding has not been seen to help once it failed twice: stop paying for it every few seconds.
+                if view.blank_in_a_row <= 2 {
+                    if let Some(mut renderer) = view.gpu.take() {
+                        renderer.destroy(&mut ui.engine());
+                    }
+                    skins.gpu_resend_all();
+                    return GpuPicture::Unavailable;
+                }
+            } else if view.blank_in_a_row > 0 {
+                tracing::info!(target: "vertexlauncher/se5/skins", "The skin preview draws again ({:.1}% of the picture) after {} blank check(s).", share * 100.0, view.blank_in_a_row);
+                view.blank_in_a_row = 0;
+            }
+        }
     }
+    let Some(renderer) = view.gpu.as_mut() else {
+        return GpuPicture::Unavailable;
+    };
+    if now - view.last_status >= 30.0 {
+        view.last_status = now;
+        let non_finite = frame.parts.iter().filter(|part| part.transform.iter().any(|v| !v.is_finite())).count();
+        let (built, pending) = renderer.part_count();
+        let coverage = match renderer.coverage(&mut ui.engine()) {
+            Ok(share) => format!("{:.1}% of the picture is not transparent", share * 100.0),
+            Err(why) => format!("picture could not be read back ({why})"),
+        };
+        tracing::info!(
+            target: "vertexlauncher/se5/skins",
+            "Skin preview status: parts built {built}/{} (non-finite transforms {non_finite}, unloads pending {pending}), eye {:?}, near {}, fov {}, yaw velocity {}, picture {}x{}, {coverage}, motion {:?}.",
+            frame.parts.len(),
+            frame.camera.eye,
+            frame.camera.near,
+            frame.camera.vertical_fov_radians,
+            frame.yaw_velocity,
+            request.size.x,
+            request.size.y,
+            skins.motion_mode()
+        );
+    }
+    match renderer.texture(&mut ui.engine()) {
+        Some((handle, _size)) => {
+            view.gpu_failures_in_a_row = 0;
+            GpuPicture::Shown(handle)
+        }
+        // Drawn without error, yet the engine has no picture for the target (it lost it): the same as a failure, with its own
+        // wording, rather than a blank canvas.
+        None => gpu_failed(ui, view, skins, now, "the engine no longer has the preview's picture".to_owned()),
+    }
+}
+
+/// The preview failed: its engine objects are released, the failure is recorded for the screen to show, and drawing is tried
+/// again after a pause (see [`GpuFailure`]).
+fn gpu_failed(ui: &mut Ui<'_>, view: &mut SkinsView, skins: &mut SkinsSession, now: f64, message: String) -> GpuPicture {
+    view.gpu_failures_in_a_row = view.gpu_failures_in_a_row.saturating_add(1);
+    tracing::warn!(
+        target: "vertexlauncher/se5/skins",
+        "The GPU skin preview {message} (failure {} in a row); no preview is shown until it is tried again.",
+        view.gpu_failures_in_a_row
+    );
+    if let Some(mut renderer) = view.gpu.take() {
+        renderer.destroy(&mut ui.engine());
+    }
+    // A renderer made afterwards has none of the geometry the session believes it handed out.
+    skins.gpu_resend_all();
+    view.gpu_failure = Some(GpuFailure::new(message, now, view.gpu_failures_in_a_row));
+    GpuPicture::Unavailable
 }
 
 // -- Skin image -------------------------------------------------------------------------------------------------------

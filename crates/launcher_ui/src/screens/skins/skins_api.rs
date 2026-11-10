@@ -245,7 +245,9 @@ impl SkinsSession {
 
     /// The pointer moved by `dx` points while dragging.
     pub fn dragged(&mut self, dx: f32) {
-        if self.state.camera_drag_active {
+        // A pointer position that is not a number must not reach the camera: one NaN would turn it (and with it every matrix of the
+        // preview) into NaN for good, and nothing would be drawn.
+        if self.state.camera_drag_active && dx.is_finite() {
             self.drag_dx += dx;
         }
     }
@@ -288,7 +290,9 @@ impl SkinsSession {
         // whatever stride phase the walk ended on.
         state.preview_limb_swing += dt.clamp(0.0, 0.1) * 20.0 * PREVIEW_WALK_LIMB_SPEED * state.preview_motion_blend;
         let pose = PreviewPose {
-            time_seconds: now as f32,
+            // An f32 loses its fraction after a few hours of seconds (the preview would judder); the animation only needs the phase, so it
+            // restarts every hour.
+            time_seconds: (now % PREVIEW_TIME_WRAP_SECONDS) as f32,
             locomotion_blend: state.preview_motion_blend,
             limb_swing: state.preview_limb_swing,
         };
@@ -300,7 +304,9 @@ impl SkinsSession {
     fn orbit(&self, now: f64) -> (f32, f32) {
         let state = &self.state;
         let orbit_time = state.effective_orbit_time(now);
-        let yaw = ((orbit_time / PREVIEW_ORBIT_SECONDS) as f32) * std::f32::consts::TAU + state.camera_yaw_offset;
+        // The turn within the current orbit, taken in f64 before narrowing: converting the whole elapsed time loses the angle's precision
+        // after a few hours of uptime.
+        let yaw = ((orbit_time / PREVIEW_ORBIT_SECONDS).fract() as f32) * std::f32::consts::TAU + state.camera_yaw_offset;
         let yaw_velocity = if state.camera_drag_active {
             state.camera_drag_velocity
         } else if state.orbit_pause_started_at.is_some() {
@@ -452,6 +458,18 @@ impl SkinsSession {
                 state.camera_inertial_velocity = 0.0;
                 state.finish_manual_camera_control(now);
             }
+        }
+        // Keep the camera numbers sane for good: a non-finite value never recovers by itself, and an ever-growing angle loses precision.
+        if !state.camera_yaw_offset.is_finite() {
+            state.camera_yaw_offset = 0.0;
+        } else {
+            state.camera_yaw_offset = state.camera_yaw_offset.rem_euclid(std::f32::consts::TAU);
+        }
+        if !state.camera_drag_velocity.is_finite() {
+            state.camera_drag_velocity = 0.0;
+        }
+        if !state.camera_inertial_velocity.is_finite() {
+            state.camera_inertial_velocity = 0.0;
         }
         if !state.camera_drag_active {
             let input = self.gamepad_orbit;
@@ -672,6 +690,37 @@ mod tests {
         assert!(target[1] > 20.0, "the head is above the middle of the body, got {target:?}");
         let distance = ((eye[0] - target[0]).powi(2) + (eye[1] - target[1]).powi(2) + (eye[2] - target[2]).powi(2)).sqrt();
         assert!((10.0..40.0).contains(&distance), "close to the head, got {distance}");
+    }
+
+    #[test]
+    fn a_pointer_that_is_not_a_number_cannot_break_the_camera() {
+        let mut session = SkinsSession::new();
+        session.set_preview_skin(RgbaImage::from_pixel(64, 64, image::Rgba([200, 120, 80, 255])), SkinVariant::Classic);
+        let preview = settings();
+        session.set_preview_settings(&preview);
+        session.drag_started(1.0);
+        session.dragged(f32::NAN);
+        session.dragged(f32::INFINITY);
+        session.dragged(10.0);
+        let frame = session.gpu_frame(1.1, &preview).expect("a skin is set");
+        session.drag_stopped(1.2);
+        assert!(frame.camera.eye.iter().all(|value| value.is_finite()), "the camera stays finite: {:?}", frame.camera.eye);
+        let later = session.gpu_frame(5.0, &preview).expect("a skin is set");
+        assert!(later.camera.eye.iter().all(|value| value.is_finite()), "and stays so afterwards");
+    }
+
+    #[test]
+    fn the_orbit_keeps_its_precision_after_days_of_uptime() {
+        let mut session = SkinsSession::new();
+        session.set_preview_skin(RgbaImage::from_pixel(64, 64, image::Rgba([200, 120, 80, 255])), SkinVariant::Classic);
+        let preview = settings();
+        session.set_preview_settings(&preview);
+        // Three days in, a step of a hundredth of a second must still move the camera by a (small) different amount, not by nothing or a lot.
+        let day3 = 3.0 * 86_400.0;
+        let a = session.gpu_frame(day3, &preview).expect("a skin is set").camera.eye;
+        let b = session.gpu_frame(day3 + 0.01, &preview).expect("a skin is set").camera.eye;
+        let moved = ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        assert!(moved > 0.0 && moved < 1.0, "a 10 ms step moves the camera a little, moved {moved}");
     }
 
     #[test]

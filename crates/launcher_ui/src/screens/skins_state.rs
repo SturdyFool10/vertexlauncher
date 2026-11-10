@@ -143,6 +143,10 @@ impl SkinManagerState {
     pub(super) fn sync_active_account(&mut self, active_launch_auth: Option<&LaunchAuthContext>) {
         let Some(auth) = active_launch_auth else {
             if self.active_profile_id.is_some() {
+                tracing::warn!(
+                    target: "vertexlauncher/skins",
+                    "No active launch account any more; the skin manager (and its preview skin) is reset."
+                );
                 *self = Self::default();
             }
             return;
@@ -238,6 +242,9 @@ impl SkinManagerState {
                 let current = self.active_profile_id.as_deref() == Some(profile_id.as_str())
                     && self.refresh_in_progress;
                 match result {
+                    // A profile that is already loaded is newer than the cache, and the cache carries no skin: applying it would
+                    // blank the preview until the refresh in flight lands (every refresh, on a slow connection).
+                    Ok(_) if current && self.base_skin_png.is_some() => {}
                     Ok(accounts) if current => {
                         let profile_id_lower = profile_id.to_ascii_lowercase();
                         if let Some(account) = accounts.accounts.iter().find(|account| {
@@ -460,7 +467,13 @@ impl SkinManagerState {
         }
 
         let Some(image) = decode_skin_rgba(bytes) else {
-            self.skin_sample = None;
+            // Keep showing the previous skin rather than nothing, and remember this attempt so it is not repeated every frame.
+            tracing::warn!(
+                target: "vertexlauncher/skins",
+                bytes = bytes.len(),
+                "The skin image could not be decoded; keeping the previous preview."
+            );
+            self.skin_texture_hash = Some(hash);
             return;
         };
         let image = Arc::new(image);
@@ -821,13 +834,13 @@ impl SkinManagerState {
         self.available_capes = profile.capes;
         self.initial_cape_id = profile.active_cape_id.clone();
         self.pending_cape_id = profile.active_cape_id;
+        // The pictures on screen stay until `ensure_skin_texture` / `ensure_cape_texture` have decoded the new ones (they clear them
+        // themselves when the profile has none): clearing here made the preview vanish for as long as a reload took, or for good if
+        // the new skin did not decode.
         self.skin_texture_hash = None;
-        self.skin_sample = None;
         self.cape_texture_hash = None;
-        self.cape_sample = None;
         self.cached_expression_layout_hash = None;
         self.cached_expression_layout = None;
-        self.cape_uv = default_cape_uv_layout();
     }
 
     pub(super) fn begin_manual_camera_control(&mut self, now: f64) {

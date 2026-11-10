@@ -67,6 +67,8 @@ use self::worker_event::WorkerEvent;
 use self::{preview_motion_mode::PreviewMotionMode, preview_pose::PreviewPose};
 
 const PREVIEW_ORBIT_SECONDS: f64 = 45.0;
+/// The animation clock is kept in f32, which stops resolving frames after a few hours; it restarts at this many seconds.
+const PREVIEW_TIME_WRAP_SECONDS: f64 = 3600.0;
 
 /// Minecraft's walk-animation speed for a player walking on flat ground (≈0.216 blocks per
 /// tick × 4, capped at 1). Drives the preview's walk cycle.
