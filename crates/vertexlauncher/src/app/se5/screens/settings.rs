@@ -306,6 +306,21 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         |ui, kit| instance_defaults(ui, kit, state),
     );
     platform_section(ui, kit, state);
+    section(
+        ui,
+        kit,
+        "debug",
+        "Debug",
+        "Live performance readouts drawn over the launcher.",
+        |ui, kit| {
+            toggles(
+                ui,
+                kit,
+                &mut state.config,
+                &[ToggleSettingId::DebugFpsCounter, ToggleSettingId::DebugFramegraph],
+            );
+        },
+    );
     info_section(ui, kit);
 }
 
@@ -1061,7 +1076,7 @@ fn hdr_controls(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         ui,
         "settings::hdr-ui-white",
         "HDR UI Brightness",
-        Some("How bright the launcher's interface is drawn relative to the display's SDR white (1.00 = the same). Raise it if the UI looks dim next to HDR content. Default: 1.00."),
+        Some("A multiplier on the launcher's interface brightness, applied on top of the UI paper white below (1.00 = unchanged). Lower it if the interface looks blown out. Default: 1.00."),
         f64::from(config.hdr_ui_white_scale()),
         f64::from(config::HDR_UI_WHITE_SCALE_MIN),
         f64::from(config::HDR_UI_WHITE_SCALE_MAX),
@@ -1069,6 +1084,19 @@ fn hdr_controls(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         |value| format!("{value:.2}x"),
     ) {
         config.set_hdr_ui_white_scale(value as f32);
+    }
+    if let Some(value) = kit.slider_setting(
+        ui,
+        "settings::hdr-ui-paper-white",
+        "HDR UI Paper White",
+        Some("The brightness, in nits, of the interface's white. 0 uses the display's own SDR white level, which can be too bright when the system does not report it; try 80-200 if the interface looks blown out. Default: 0 (automatic)."),
+        f64::from(config.hdr_ui_paper_white_nits()),
+        f64::from(config::HDR_UI_PAPER_WHITE_NITS_MIN),
+        f64::from(config::HDR_UI_PAPER_WHITE_NITS_MAX),
+        5.0,
+        |value| if value < 1.0 { "Auto".to_owned() } else { format!("{value:.0} nits") },
+    ) {
+        config.set_hdr_ui_paper_white_nits(value.round() as i32);
     }
     // Only an HDR10 (PQ) swapchain carries light-level metadata, so the sliders are for that mode alone.
     if config.hdr_color_space() == config::HdrColorSpace::Hdr10St2084 {

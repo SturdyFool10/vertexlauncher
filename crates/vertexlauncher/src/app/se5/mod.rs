@@ -11,6 +11,7 @@
 mod accounts;
 mod avatar;
 mod chrome;
+mod debug_overlay;
 mod create_instance;
 mod flows;
 mod file_dialog;
@@ -812,6 +813,7 @@ struct App {
     kit: Kit,
     bridge: Arc<SettingsBridge>,
     last_frame: Instant,
+    debug_overlay: debug_overlay::DebugOverlay,
     window_feedback: WindowFeedback,
     /// The "start in fullscreen" setting has been acted on.
     started_fullscreen: bool,
@@ -924,6 +926,7 @@ impl App {
             kit,
             bridge,
             last_frame: Instant::now(),
+            debug_overlay: Default::default(),
             window_feedback: WindowFeedback::default(),
             started_fullscreen: false,
         }
@@ -985,6 +988,7 @@ impl App {
         chrome::window(ui, &mut self.kit, &mut self.state, maximized);
         stalls.phase("screen");
         toasts::show(ui, &mut self.kit, &self.state.config);
+        self.debug_overlay.show(ui, &self.kit, &self.state.config, self.kit.delta_seconds);
         self.dialogs(ui);
         stalls.phase("dialogs");
         self.window_feedback.update(ui);

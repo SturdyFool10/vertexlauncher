@@ -85,8 +85,11 @@ pub const INSTANCE_DEFAULT_MAX_MEMORY_MIB_STEP: u128 = 256;
 pub const DOWNLOAD_CONCURRENCY_MIN: u32 = 1;
 pub const DOWNLOAD_CONCURRENCY_MAX: u32 = 128;
 pub const DEFAULT_DOWNLOAD_CONCURRENCY: u32 = 8;
-pub const HDR_UI_WHITE_SCALE_MIN: f32 = 0.5;
-pub const HDR_UI_WHITE_SCALE_MAX: f32 = 4.0;
+pub const HDR_UI_WHITE_SCALE_MIN: f32 = 0.1;
+pub const HDR_UI_WHITE_SCALE_MAX: f32 = 8.0;
+/// 0 means "use the display's own SDR white".
+pub const HDR_UI_PAPER_WHITE_NITS_MIN: i32 = 0;
+pub const HDR_UI_PAPER_WHITE_NITS_MAX: i32 = 1000;
 pub const HDR_LIGHT_LEVEL_NITS_MIN: i32 = 50;
 pub const HDR_LIGHT_LEVEL_NITS_MAX: i32 = 10_000;
 pub const FRAME_LIMIT_FPS_MIN: i32 = 30;
@@ -126,6 +129,10 @@ const fn default_hdr_color_space() -> HdrColorSpace {
 
 const fn default_hdr_ui_white_scale() -> f32 {
     1.0
+}
+
+const fn default_hdr_ui_paper_white_nits() -> i32 {
+    0
 }
 
 const fn default_hdr_max_cll_nits() -> i32 {
@@ -357,6 +364,9 @@ pub struct Config {
     /// UI reference white relative to the display's SDR white (1.0 = same); raise it to brighten the UI.
     #[serde(default = "default_hdr_ui_white_scale")]
     hdr_ui_white_scale: f32,
+    /// UI reference white in nits, in place of the display's reported SDR white; 0 = use the display's.
+    #[serde(default = "default_hdr_ui_paper_white_nits")]
+    hdr_ui_paper_white_nits: i32,
     /// MaxCLL reported to the display, in nits.
     #[serde(default = "default_hdr_max_cll_nits")]
     hdr_max_cll_nits: i32,
@@ -390,6 +400,12 @@ pub struct Config {
     /// default on a Steam Deck.
     #[serde(default = "default_steam_deck_handoff")]
     steam_deck_handoff: bool,
+    /// Debug: a frames-per-second readout over the launcher.
+    #[serde(default)]
+    debug_fps_counter: bool,
+    /// Debug: a live per-pass CPU/GPU timing graph over the launcher.
+    #[serde(default)]
+    debug_framegraph: bool,
     frame_limit_fps: i32,
     ui_font_size: f32,
     ui_font_weight: i32,
@@ -529,6 +545,14 @@ impl Config {
     }
 
     /// Whether the launcher's window is hidden while a game runs.
+    pub fn debug_fps_counter(&self) -> bool {
+        self.debug_fps_counter
+    }
+
+    pub fn debug_framegraph(&self) -> bool {
+        self.debug_framegraph
+    }
+
     pub fn steam_deck_handoff(&self) -> bool {
         self.steam_deck_handoff
     }
@@ -783,6 +807,14 @@ impl Config {
 
     pub fn set_hdr_ui_white_scale(&mut self, value: f32) {
         self.hdr_ui_white_scale = value.clamp(HDR_UI_WHITE_SCALE_MIN, HDR_UI_WHITE_SCALE_MAX);
+    }
+
+    pub fn hdr_ui_paper_white_nits(&self) -> i32 {
+        self.hdr_ui_paper_white_nits
+    }
+
+    pub fn set_hdr_ui_paper_white_nits(&mut self, value: i32) {
+        self.hdr_ui_paper_white_nits = value.clamp(HDR_UI_PAPER_WHITE_NITS_MIN, HDR_UI_PAPER_WHITE_NITS_MAX);
     }
 
     pub fn hdr_max_cll_nits(&self) -> i32 {
@@ -1224,6 +1256,7 @@ impl Config {
         } else {
             default_hdr_ui_white_scale()
         };
+        self.hdr_ui_paper_white_nits = self.hdr_ui_paper_white_nits.clamp(HDR_UI_PAPER_WHITE_NITS_MIN, HDR_UI_PAPER_WHITE_NITS_MAX);
         self.hdr_max_cll_nits = self.hdr_max_cll_nits.clamp(HDR_LIGHT_LEVEL_NITS_MIN, HDR_LIGHT_LEVEL_NITS_MAX);
         self.hdr_max_fall_nits = self.hdr_max_fall_nits.clamp(HDR_LIGHT_LEVEL_NITS_MIN, HDR_LIGHT_LEVEL_NITS_MAX);
         self.ui_font_weight = self
@@ -1363,6 +1396,8 @@ impl Config {
         );
         visit(ToggleSettingId::StartFullscreen.spec(), b.start_fullscreen);
         visit(ToggleSettingId::SteamDeckHandoff.spec(), b.steam_deck_handoff);
+        visit(ToggleSettingId::DebugFpsCounter.spec(), b.debug_fps_counter);
+        visit(ToggleSettingId::DebugFramegraph.spec(), b.debug_framegraph);
     }
 
     /// Visits each dropdown setting with mutable access to its backing value.
@@ -1485,6 +1520,7 @@ impl Default for Config {
             hdr_when_available: false,
             hdr_color_space: default_hdr_color_space(),
             hdr_ui_white_scale: default_hdr_ui_white_scale(),
+            hdr_ui_paper_white_nits: default_hdr_ui_paper_white_nits(),
             hdr_max_cll_nits: default_hdr_max_cll_nits(),
             hdr_max_fall_nits: default_hdr_max_fall_nits(),
             frame_limiter_enabled: false,
@@ -1500,6 +1536,8 @@ impl Default for Config {
             start_fullscreen: false,
             // Off here; a first run (and a saved config that predates the setting) turns it on for a Steam Deck.
             steam_deck_handoff: false,
+            debug_fps_counter: false,
+            debug_framegraph: false,
             frame_limit_fps: 120,
             ui_font_size: 18.0,
             ui_font_weight: 400,

@@ -9,7 +9,7 @@ use vertex_shell::sturdy::assets::RendererTextureHandle;
 use vertex_shell::sturdy::glam::Vec2;
 use vertex_shell::sturdy::ui::{
     AlignX, AlignY, AttachPoint, Border, ChildAlignment, Clip, CornerRadius, Direction,
-    ElementDesc, FloatTarget, Floating, Padding, Sizing, TextStyle, TextWrap, Ui,
+    ElementDesc, FloatTarget, Floating, Padding, Sizing, TextAlign, TextStyle, TextWrap, Ui,
 };
 
 use super::super::AppState;
@@ -21,7 +21,9 @@ const MAX_PREVIEW_WIDTH: u32 = 600;
 const CANVAS_ID: &str = "skins::canvas";
 const PICK_SLOT: &str = "skins::pick";
 const CAPE_TILE_WIDTH: f32 = 140.0;
-const CAPE_TILE_HEIGHT: f32 = 186.0;
+/// A cape tile is at least this tall; a long name wraps onto more lines and makes it (and its whole row) taller.
+const CAPE_TILE_MIN_HEIGHT: f32 = 186.0;
+const CAPE_TILE_PADDING: u16 = 12;
 
 /// Per-screen UI state; the profile and preview state live in the `SkinsSession`.
 #[derive(Default)]
@@ -670,10 +672,9 @@ fn cape_tile(
             &ElementDesc::new()
                 .id(id.into())
                 .width(Sizing::Fixed(CAPE_TILE_WIDTH))
-                .height(Sizing::Fixed(CAPE_TILE_HEIGHT))
-                .direction(Direction::TopToBottom)
-                .child_gap(kit::SPACE_SM)
-                .padding(Padding::all(12))
+                .height(Sizing::Grow)
+                .direction(Direction::LeftToRight)
+                .padding(Padding::all(CAPE_TILE_PADDING))
                 .align(ChildAlignment::new(AlignX::Center, AlignY::Top))
                 .background(fill)
                 .corner_radius(CornerRadius::all(10.0))
@@ -685,6 +686,25 @@ fn cape_tile(
                     },
                     if selected { 2 } else { 1 },
                 )),
+        );
+        // Holds the tile open to its minimum height; the tile grows past it when the name wraps, and `Grow` makes
+        // every tile in a row as tall as the tallest.
+        drop(
+            ui.element(
+                &ElementDesc::new()
+                    .width(Sizing::Fixed(0.0))
+                    .height(Sizing::Fixed(
+                        CAPE_TILE_MIN_HEIGHT - 2.0 * f32::from(CAPE_TILE_PADDING),
+                    )),
+            ),
+        );
+        let _column = ui.element(
+            &ElementDesc::new()
+                .width(Sizing::Grow)
+                .height(Sizing::Fit)
+                .direction(Direction::TopToBottom)
+                .child_gap(kit::SPACE_SM)
+                .align(ChildAlignment::new(AlignX::Center, AlignY::Top)),
         );
         {
             // The picture box; "No Cape" is an empty outlined box, a cape shows its outer face.
@@ -709,7 +729,16 @@ fn cape_tile(
                 );
             }
         }
-        kit.text_clipped(ui, TextRole::Body, label, CAPE_TILE_WIDTH - 24.0);
+        let style = TextStyle {
+            align: TextAlign::Center,
+            ..kit.style(TextRole::Body)
+        };
+        kit::wrapped_label(
+            ui,
+            label,
+            &style,
+            CAPE_TILE_WIDTH - 2.0 * f32::from(CAPE_TILE_PADDING),
+        );
     }
     kit.clicked(ui, id)
 }

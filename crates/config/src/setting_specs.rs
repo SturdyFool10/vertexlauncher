@@ -35,6 +35,8 @@ pub enum ToggleSettingId {
     FollowConsoleOnLaunch,
     StartFullscreen,
     SteamDeckHandoff,
+    DebugFpsCounter,
+    DebugFramegraph,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -194,6 +196,20 @@ impl ToggleSettingId {
                 label: "Hand Off to Minecraft (Steam Deck)",
                 info_tooltip: Some(
                     "Hides Vertex's window while Minecraft runs, so the game takes the screen instead of Vertex staying in front of it in Steam Deck game mode, and brings Vertex back when the game closes. Turned on automatically on a Steam Deck. Default: Off.",
+                ),
+            },
+            ToggleSettingId::DebugFpsCounter => ToggleSettingSpec {
+                id: ToggleSettingId::DebugFpsCounter,
+                label: "Show FPS Counter",
+                info_tooltip: Some(
+                    "Draws the launcher's frames per second and frame time in the top-right corner of the window. Default: Off.",
+                ),
+            },
+            ToggleSettingId::DebugFramegraph => ToggleSettingSpec {
+                id: ToggleSettingId::DebugFramegraph,
+                label: "Show Frame Graph",
+                info_tooltip: Some(
+                    "Draws a live graph of how long each render pass takes on the CPU and GPU, plus a history of recent frame times, over the launcher. GPU times need a GPU that supports timestamp queries. Default: Off.",
                 ),
             },
             ToggleSettingId::FollowConsoleOnLaunch => ToggleSettingSpec {

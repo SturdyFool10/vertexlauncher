@@ -150,6 +150,7 @@ impl Config {
             hdr_when_available,
             hdr_color_space,
             hdr_ui_white_scale,
+            hdr_ui_paper_white_nits,
             hdr_max_cll_nits,
             hdr_max_fall_nits,
             frame_limiter_enabled,
@@ -162,6 +163,8 @@ impl Config {
             follow_console_on_launch,
             start_fullscreen: _,
             steam_deck_handoff,
+            debug_fps_counter: _,
+            debug_framegraph: _,
             frame_limit_fps,
             ui_font_size,
             ui_font_weight,
@@ -216,6 +219,7 @@ impl Config {
             *hdr_when_available != new.hdr_when_available
                 || *hdr_color_space != new.hdr_color_space
                 || *hdr_ui_white_scale != new.hdr_ui_white_scale
+                || *hdr_ui_paper_white_nits != new.hdr_ui_paper_white_nits
                 || *hdr_max_cll_nits != new.hdr_max_cll_nits
                 || *hdr_max_fall_nits != new.hdr_max_fall_nits
                 || *frame_limiter_enabled != new.frame_limiter_enabled

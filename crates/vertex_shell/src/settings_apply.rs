@@ -427,6 +427,7 @@ impl Appliers {
         // The UI brightness applies at once. The light levels need the HDR swapchain to exist, which the engine
         // recreates a frame or so after the change, so they are sent by `poll_hdr_metadata` instead.
         sturdy::ui::set_hdr_reference_white(config.hdr_ui_white_scale());
+        sturdy::ui::set_hdr_paper_white_nits(config.hdr_ui_paper_white_nits() as f32);
         self.pending_light_levels = (config.hdr_when_available() && config.hdr_color_space() == config::HdrColorSpace::Hdr10St2084)
             .then(|| (config.hdr_max_cll_nits() as f32, (config.hdr_max_fall_nits() as f32).min(config.hdr_max_cll_nits() as f32), 0));
         Applied::Ok
