@@ -361,7 +361,7 @@ fn displayed_time(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config) {
         ui,
         "settings::time::date-format",
         "Date Format",
-        Some("A ready-made date layout from around the world, or Custom to build your own from the settings below. Default: Custom."),
+        Some("A ready-made date layout from around the world, or Custom to build your own from the settings below. Default: United States (mm/dd/yyyy)."),
         settings.date_format,
         DateFormat::ALL,
         |value| value.label().to_owned(),

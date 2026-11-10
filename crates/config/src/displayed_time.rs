@@ -146,7 +146,7 @@ impl Default for DisplayedTime {
     fn default() -> Self {
         Self {
             show_screenshot_info: true,
-            date_format: DateFormat::Custom,
+            date_format: DateFormat::UnitedStates,
             human_era: false,
             date_order: DateOrder::MonthDayYear,
             date_separator: DateSeparator::Space,
@@ -413,12 +413,13 @@ mod tests {
 
     #[test]
     fn default_matches_the_requested_layout() {
-        assert_eq!(utc().taken_at(SAMPLE), "Taken at 11 10, 2026 at 09:15:30 PM");
+        assert_eq!(utc().taken_at(SAMPLE), "Taken at 11/10/2026 at 09:15:30 PM");
     }
 
     #[test]
     fn date_and_clock_settings_apply() {
         let settings = DisplayedTime {
+            date_format: DateFormat::Custom,
             date_order: DateOrder::YearMonthDay,
             date_separator: DateSeparator::Dash,
             clock: ClockStyle::Hour24,
@@ -427,6 +428,7 @@ mod tests {
         };
         assert_eq!(settings.taken_at(SAMPLE), "Taken at 2026-11-10 at 21:15");
         let named = DisplayedTime {
+            date_format: DateFormat::Custom,
             month_style: MonthStyle::Long,
             meridiem: MeridiemStyle::LowerDotted,
             pad_hour: false,
