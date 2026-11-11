@@ -336,6 +336,8 @@ fn account_button(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 .width(Sizing::Fit)
                 .height(Sizing::Fixed(30.0))
                 .padding(Padding::symmetric(kit::SPACE_MD, 0))
+                // The space between the player head and the name; streamer mode has no head, so no gap.
+                .child_gap(kit::SPACE_SM)
                 .align(ChildAlignment::center())
                 .background(if hovered {
                     kit.palette.hovered_fill()
