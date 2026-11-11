@@ -57,7 +57,6 @@ use self::world_row::*;
 
 const HOME_SCAN_INTERVAL: Duration = Duration::from_secs(3);
 const SERVER_PING_REFRESH_INTERVAL: Duration = Duration::from_secs(20);
-const SERVER_PING_CONNECT_TIMEOUT: Duration = Duration::from_millis(350);
 const SERVER_PINGS_PER_SCAN: usize = 3;
 
 

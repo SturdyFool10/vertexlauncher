@@ -87,6 +87,7 @@ pub(super) fn collapse_servers(servers: Vec<ServerEntry>) -> Vec<ServerEntry> {
         |server| server.last_used_at_ms,
         |winner, loser| {
             winner.favorite |= loser.favorite;
+            winner.protocol_version = winner.protocol_version.or(loser.protocol_version);
             winner.last_used_at_ms = winner.last_used_at_ms.max(loser.last_used_at_ms);
             if winner.icon_png.is_none() {
                 winner.icon_png = loser.icon_png;
@@ -116,6 +117,7 @@ mod tests {
             icon_png: None,
             last_used_at_ms: Some(last_used),
             favorite,
+            protocol_version: None,
             instances: vec![EntryInstance {
                 instance_id: instance.to_owned(),
                 instance_name: name.to_owned(),

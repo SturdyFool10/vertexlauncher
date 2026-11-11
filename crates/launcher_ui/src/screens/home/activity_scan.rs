@@ -24,6 +24,7 @@ pub(super) fn build_home_activity_scan_request(
             instance_id: instance.id.clone(),
             instance_name: instance.name.clone(),
             instance_root: instance_root_path(installations_root.as_path(), instance),
+            game_version: instance.game_version.clone(),
             favorite_world_ids: instance.favorite_world_ids.clone(),
             favorite_server_ids: instance.favorite_server_ids.clone(),
         })

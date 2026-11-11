@@ -1,0 +1,11 @@
+[package]
+name = "mc_server_ping"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+idna = "1"
+hickory-resolver = { version = "0.25", default-features = false, features = ["tokio", "system-config"] }
+tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+serde_json.workspace = true
+tracing.workspace = true

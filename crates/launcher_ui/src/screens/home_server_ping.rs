@@ -1,6 +1,4 @@
 use vertex_i18n::tr;
-use std::io::Write;
-use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 
 use base64::Engine;
 
@@ -70,6 +68,7 @@ pub(super) fn collect_servers_from_request(request: &HomeActivityScanRequest) ->
                     .favorite_server_ids
                     .iter()
                     .any(|id| id == &favorite_id),
+                protocol_version: protocol_version_of(instance.instance_root.as_path(), instance.game_version.as_str()),
                 instances: vec![EntryInstance {
                     instance_id: instance.instance_id.clone(),
                     instance_name: instance.instance_name.clone(),
@@ -107,7 +106,7 @@ pub(super) fn retain_known_server_pings(state: &mut HomeState) {
 
 pub(super) fn queue_server_pings(state: &mut HomeState) {
     retain_known_server_pings(state);
-    let mut stale_addresses = Vec::new();
+    let mut stale_addresses: Vec<(String, String, Option<i32>)> = Vec::new();
     for server in &state.servers {
         let key = normalize_server_address(server.address.as_str());
         let stale = state
@@ -116,9 +115,9 @@ pub(super) fn queue_server_pings(state: &mut HomeState) {
             .is_none_or(|snapshot| snapshot.checked_at.elapsed() >= SERVER_PING_REFRESH_INTERVAL);
         if stale
             && !state.server_ping_in_flight.contains(&key)
-            && !stale_addresses.iter().any(|candidate| candidate == &key)
+            && !stale_addresses.iter().any(|(candidate, _, _)| candidate == &key)
         {
-            stale_addresses.push(key);
+            stale_addresses.push((key, server.address.clone(), server.protocol_version));
         }
     }
 
@@ -133,12 +132,12 @@ pub(super) fn queue_server_pings(state: &mut HomeState) {
     let result_tx = channel.tx.clone();
     drop(channel);
 
-    for address in stale_addresses.into_iter().take(SERVER_PINGS_PER_SCAN) {
+    for (address, typed_address, protocol_version) in stale_addresses.into_iter().take(SERVER_PINGS_PER_SCAN) {
         state.server_ping_in_flight.insert(address.clone());
-        let worker_address = address.clone();
         let result_tx = result_tx.clone();
-        let _ = tokio_runtime::spawn_detached(async move {
-            let snapshot = query_server_snapshot(worker_address.as_str());
+        // A ping can wait the game's 30 seconds for a server that does not answer, so it runs where blocking is fine.
+        let _ = tokio_runtime::spawn_blocking_detached(move || {
+            let snapshot = query_server_snapshot(typed_address.as_str(), protocol_version.unwrap_or(-1));
             if let Err(err) = result_tx.send(ServerPingResult {
                 address: address.clone(),
                 snapshot,
@@ -158,199 +157,72 @@ pub(super) fn normalize_server_address(address: &str) -> String {
     instances::normalize_server_key(address)
 }
 
-fn split_server_address(address: &str) -> (String, u16) {
-    let trimmed = address.trim();
-    if trimmed.is_empty() {
-        return (String::new(), 25565);
-    }
-    if let Ok(socket) = trimmed.parse::<SocketAddr>() {
-        return (socket.ip().to_string(), socket.port());
-    }
-    if let Some(host) = trimmed
-        .strip_prefix('[')
-        .and_then(|value| value.split(']').next())
-        && let Some(port) = trimmed
-            .rsplit_once(':')
-            .and_then(|(_, value)| value.parse().ok())
-    {
-        return (host.to_owned(), port);
-    }
-    if let Some((host, port)) = trimmed.rsplit_once(':')
-        && !host.is_empty()
-        && !host.contains(':')
-        && let Ok(port) = port.parse::<u16>()
-    {
-        return (host.to_owned(), port);
-    }
-    (trimmed.to_owned(), 25565)
-}
-
-fn query_server_snapshot(address: &str) -> ServerPingSnapshot {
-    let unknown = || ServerPingSnapshot {
-        status: ServerPingStatus::Unknown,
-        motd: Vec::new(),
-        players_online: None,
-        players_max: None,
-        players_sample: Vec::new(),
+/// Pings a server the way Minecraft's server list does (see `mc_server_ping`): `address` is the text exactly as the
+/// game stores it, `protocol_version` is what the game sends in its handshake.
+fn query_server_snapshot(address: &str, protocol_version: i32) -> ServerPingSnapshot {
+    use mc_server_ping::{Outcome, Timeouts};
+    let snapshot = |status, motd, players_online, players_max, players_sample| ServerPingSnapshot {
+        status,
+        motd,
+        players_online,
+        players_max,
+        players_sample,
         checked_at: Instant::now(),
     };
-    let (host, port) = split_server_address(address);
-    if host.is_empty() {
-        return unknown();
-    }
-    let mut stream = match connect_to_server(host.as_str(), port) {
-        Some(stream) => stream,
-        None => {
-            return ServerPingSnapshot {
-                status: ServerPingStatus::Offline,
-                motd: Vec::new(),
-                players_online: None,
-                players_max: None,
-                players_sample: Vec::new(),
-                checked_at: Instant::now(),
-            };
+    match mc_server_ping::ping(address, protocol_version, Timeouts::default()) {
+        Outcome::InvalidAddress => snapshot(ServerPingStatus::Unknown, Vec::new(), None, None, Vec::new()),
+        // Can't resolve, can't connect, or no answer the game would accept.
+        Outcome::Unresolved | Outcome::ConnectFailed | Outcome::NoResponse => {
+            snapshot(ServerPingStatus::Offline, Vec::new(), None, None, Vec::new())
         }
+        Outcome::Modern { json, latency_ms } => match parse_status_json(json.as_str()) {
+            Ok(status) => snapshot(
+                ServerPingStatus::Online { latency_ms },
+                status.motd,
+                status.players_online,
+                status.players_max,
+                status.players_sample,
+            ),
+            Err(()) => snapshot(ServerPingStatus::Offline, Vec::new(), None, None, Vec::new()),
+        },
+        Outcome::Legacy { motd, online, max, .. } => {
+            let spans = crate::mc_text::parse_legacy(&motd, crate::mc_text::Style::default());
+            let lines = crate::mc_text::split_lines(&spans);
+            // The legacy ping has no ping packet, so the game shows no latency for it either.
+            snapshot(
+                ServerPingStatus::Online { latency_ms: 0 },
+                lines,
+                u32::try_from(online).ok(),
+                u32::try_from(max).ok(),
+                Vec::new(),
+            )
+        }
+    }
+}
+
+/// The protocol version of the client jar for `game_version` in `instance_root`, from the `version.json` inside it.
+fn protocol_version_of(instance_root: &Path, game_version: &str) -> Option<i32> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<i32>>>> = OnceLock::new();
+    let jar = instance_root.join("versions").join(game_version).join(format!("{game_version}.jar"));
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(found) = cache.lock().ok().and_then(|cache| cache.get(&jar).copied()) {
+        return found;
+    }
+    let read = || -> Option<i32> {
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&jar).ok()?).ok()?;
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("version.json").ok()?, &mut text).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+        i32::try_from(value.get("protocol_version")?.as_i64()?).ok()
     };
-    let _ = stream.set_read_timeout(Some(SERVER_PING_CONNECT_TIMEOUT));
-    let _ = stream.set_write_timeout(Some(SERVER_PING_CONNECT_TIMEOUT));
-
-    let start = Instant::now();
-    match request_server_status(&mut stream, host.as_str(), port) {
-        Ok(status) => ServerPingSnapshot {
-            status: ServerPingStatus::Online {
-                latency_ms: start.elapsed().as_millis() as u64,
-            },
-            motd: status.motd,
-            players_online: status.players_online,
-            players_max: status.players_max,
-            players_sample: status.players_sample,
-            checked_at: Instant::now(),
-        },
-        Err(_) => ServerPingSnapshot {
-            status: ServerPingStatus::Online {
-                latency_ms: start.elapsed().as_millis() as u64,
-            },
-            motd: Vec::new(),
-            players_online: None,
-            players_max: None,
-            players_sample: Vec::new(),
-            checked_at: Instant::now(),
-        },
-    }
-}
-
-fn connect_to_server(host: &str, port: u16) -> Option<TcpStream> {
-    let mut saw_target = false;
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        saw_target = true;
-        if let Ok(stream) =
-            TcpStream::connect_timeout(&SocketAddr::new(ip, port), SERVER_PING_CONNECT_TIMEOUT)
-        {
-            return Some(stream);
-        }
-    } else if let Ok(candidates) = (host, port).to_socket_addrs() {
-        for candidate in candidates {
-            saw_target = true;
-            if let Ok(stream) = TcpStream::connect_timeout(&candidate, SERVER_PING_CONNECT_TIMEOUT)
-            {
-                return Some(stream);
-            }
+    let protocol = read();
+    // A jar that is not there yet is worth asking about again later; one without the field is not.
+    if protocol.is_some() || jar.exists() {
+        if let Ok(mut cache) = cache.lock() {
+            cache.insert(jar, protocol);
         }
     }
-    if !saw_target {
-        return None;
-    }
-    None
-}
-
-fn request_server_status(
-    stream: &mut TcpStream,
-    host: &str,
-    port: u16,
-) -> Result<ParsedServerStatus, ()> {
-    send_handshake_packet(stream, host, port)?;
-    send_status_request_packet(stream)?;
-    let json = read_status_response_packet(stream)?;
-    parse_status_json(json.as_str())
-}
-
-fn send_handshake_packet(stream: &mut TcpStream, host: &str, port: u16) -> Result<(), ()> {
-    let mut payload = Vec::new();
-    write_varint(&mut payload, 0);
-    write_varint_i32(&mut payload, -1);
-    write_mc_string(&mut payload, host)?;
-    payload.extend_from_slice(&port.to_be_bytes());
-    write_varint(&mut payload, 1);
-    write_framed_packet(stream, &payload)
-}
-
-fn send_status_request_packet(stream: &mut TcpStream) -> Result<(), ()> {
-    write_framed_packet(stream, &[0])
-}
-
-fn read_status_response_packet(stream: &mut TcpStream) -> Result<String, ()> {
-    let _packet_len = read_varint_from_stream(stream)?;
-    let packet_id = read_varint_from_stream(stream)?;
-    if packet_id != 0 {
-        return Err(());
-    }
-    read_mc_string_from_stream(stream)
-}
-
-fn write_framed_packet(stream: &mut TcpStream, payload: &[u8]) -> Result<(), ()> {
-    let mut frame = Vec::new();
-    write_varint(&mut frame, payload.len() as u32);
-    frame.extend_from_slice(payload);
-    stream.write_all(frame.as_slice()).map_err(|_| ())
-}
-
-fn write_varint(buf: &mut Vec<u8>, mut value: u32) {
-    loop {
-        if (value & !0x7F) == 0 {
-            buf.push(value as u8);
-            return;
-        }
-        buf.push(((value & 0x7F) as u8) | 0x80);
-        value >>= 7;
-    }
-}
-
-fn write_varint_i32(buf: &mut Vec<u8>, value: i32) {
-    write_varint(buf, value as u32);
-}
-
-fn read_varint_from_stream(stream: &mut TcpStream) -> Result<u32, ()> {
-    let mut num_read = 0u32;
-    let mut result = 0u32;
-    loop {
-        let mut byte = [0u8; 1];
-        stream.read_exact(&mut byte).map_err(|_| ())?;
-        let value = (byte[0] & 0x7F) as u32;
-        result |= value << (7 * num_read);
-        num_read += 1;
-        if num_read > 5 {
-            return Err(());
-        }
-        if (byte[0] & 0x80) == 0 {
-            break;
-        }
-    }
-    Ok(result)
-}
-
-fn write_mc_string(buf: &mut Vec<u8>, value: &str) -> Result<(), ()> {
-    let bytes = value.as_bytes();
-    let len = u32::try_from(bytes.len()).map_err(|_| ())?;
-    write_varint(buf, len);
-    buf.extend_from_slice(bytes);
-    Ok(())
-}
-
-fn read_mc_string_from_stream(stream: &mut TcpStream) -> Result<String, ()> {
-    let len = read_varint_from_stream(stream)? as usize;
-    let mut bytes = vec![0u8; len];
-    stream.read_exact(bytes.as_mut_slice()).map_err(|_| ())?;
-    Ok(String::from_utf8_lossy(bytes.as_slice()).to_string())
+    protocol
 }
 
 struct ParsedServerStatus {

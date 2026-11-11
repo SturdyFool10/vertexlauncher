@@ -26,6 +26,7 @@ members = [
     "crates/vertex_shell",
     "crates/vertex_theme",
     "crates/vertex_i18n",
+    "crates/mc_server_ping",
 ]
 default-members = [
     "crates/vertexlauncher",
@@ -82,6 +83,7 @@ vtmpack = { path = "crates/vtmpack" }
 vertex_shell = { path = "crates/vertex_shell" }
 vertex_theme = { path = "crates/vertex_theme" }
 vertex_i18n = { path = "crates/vertex_i18n" }
+mc_server_ping = { path = "crates/mc_server_ping" }
 vertex_constants = { path = "crates/vertex_constants" }
 
 [profile.dev]
