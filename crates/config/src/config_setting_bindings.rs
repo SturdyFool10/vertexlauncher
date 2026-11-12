@@ -56,6 +56,7 @@ impl Config {
             lazy_account_refresh,
             window_transparency: _,
             fullscreen_style: _,
+            window_controls_style: _,
             legacy_window_blur_enabled: _,
             windows_backdrop_type: _,
             linux_blur_protocol: _,

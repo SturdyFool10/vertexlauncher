@@ -22,6 +22,7 @@ mod text_rendering_path;
 mod typography;
 mod ui_fonts;
 mod fullscreen_style;
+mod window_controls_style;
 mod window_transparency;
 mod windows_backdrop_type;
 mod windows_transparency_level;
@@ -54,6 +55,7 @@ pub use typography::{
 };
 pub use ui_fonts::{UiCjkFontFamily, UiEmojiFontFamily, UiFontFamily};
 pub use fullscreen_style::FullscreenStyle;
+pub use window_controls_style::WindowControlsStyle;
 pub use window_transparency::WindowTransparency;
 pub use windows_backdrop_type::WindowsBackdropType;
 pub use windows_transparency_level::WindowsTransparencyLevel;
@@ -112,6 +114,14 @@ pub const SKIN_PREVIEW_MOTION_BLUR_SHUTTER_FRAMES_STEP: f32 = 0.05;
 pub const SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_MIN: i32 = 2;
 pub const SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_MAX: i32 = 16;
 pub const SKIN_PREVIEW_MOTION_BLUR_SAMPLE_COUNT_STEP: i32 = 1;
+
+const fn default_window_controls_style() -> WindowControlsStyle {
+    if cfg!(windows) {
+        WindowControlsStyle::Windows
+    } else {
+        WindowControlsStyle::Linux
+    }
+}
 
 const fn default_fullscreen_style() -> FullscreenStyle {
     FullscreenStyle::Borderless
@@ -311,6 +321,8 @@ pub struct Config {
     window_transparency: WindowTransparency,
     #[serde(default = "default_fullscreen_style")]
     fullscreen_style: FullscreenStyle,
+    #[serde(default = "default_window_controls_style")]
+    window_controls_style: WindowControlsStyle,
     #[serde(default, rename = "window_blur_enabled", skip_serializing)]
     legacy_window_blur_enabled: Option<bool>,
     #[serde(default = "default_windows_backdrop_type")]
@@ -784,6 +796,15 @@ impl Config {
 
     pub fn set_fullscreen_style(&mut self, value: FullscreenStyle) {
         self.fullscreen_style = value;
+    }
+
+    /// The look of the title bar's minimize, maximize and restore buttons.
+    pub fn window_controls_style(&self) -> WindowControlsStyle {
+        self.window_controls_style
+    }
+
+    pub fn set_window_controls_style(&mut self, value: WindowControlsStyle) {
+        self.window_controls_style = value;
     }
 
     /// Returns the app-wide window transparency mode.
@@ -1508,6 +1529,7 @@ impl Default for Config {
             lazy_account_refresh: false,
             window_transparency: default_window_transparency(),
             fullscreen_style: default_fullscreen_style(),
+            window_controls_style: default_window_controls_style(),
             legacy_window_blur_enabled: None,
             windows_backdrop_type: default_windows_backdrop_type(),
             linux_blur_protocol: default_linux_blur_protocol(),

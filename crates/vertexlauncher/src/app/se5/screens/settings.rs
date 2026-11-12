@@ -769,6 +769,17 @@ fn appearance(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             });
         }
     }
+    if let Some(style) = kit.choice_setting(
+        ui,
+        "settings::window-controls-style",
+        &tr!("Window Controls"),
+        Some(&tr!("The look of the title bar's minimize, maximize and restore buttons. Windows uses a dash, a window outline and overlapping squares; Linux uses a down arrow, an up arrow and a diamond. Default: the style of your operating system.")),
+        state.config.window_controls_style(),
+        &config::WindowControlsStyle::ALL,
+        |style| style.label().to_owned(),
+    ) {
+        state.config.set_window_controls_style(style);
+    }
     toggles(
         ui,
         kit,

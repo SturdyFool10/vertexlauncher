@@ -147,15 +147,18 @@ fn title_bar(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, maximized: bo
         // Fullscreen, the window's own controls are hidden (F11 leaves fullscreen).
         if vertex_shell::fullscreen() == vertex_shell::Fullscreen::Off {
             window_button(ui, kit, FULLSCREEN_ID, Some(Icon::ArrowsMaximize), false, 0.0);
-            window_button(ui, kit, MINIMIZE_ID, Some(Icon::Minus), false, 0.0);
-            window_button(
-                ui,
-                kit,
-                MAXIMIZE_ID,
-                maximized.then_some(Icon::Restore),
-                false,
-                0.0,
-            );
+            let (minimize, maximize) = match state.config.window_controls_style() {
+                config::WindowControlsStyle::Windows => (
+                    Icon::Minus,
+                    if maximized { Icon::Restore } else { Icon::Browser },
+                ),
+                config::WindowControlsStyle::Linux => (
+                    Icon::ChevronDown,
+                    if maximized { Icon::SquareRotated } else { Icon::ChevronUp },
+                ),
+            };
+            window_button(ui, kit, MINIMIZE_ID, Some(minimize), false, 0.0);
+            window_button(ui, kit, MAXIMIZE_ID, Some(maximize), false, 0.0);
             window_button(ui, kit, CLOSE_ID, Some(Icon::Close), true, radius);
         }
     }
