@@ -126,6 +126,17 @@ impl SkinsSession {
         state.refresh_in_progress || state.save_in_progress || state.pick_skin_in_progress
     }
 
+    /// Asks for the profile (skin, model and capes) to be fetched again. It starts as soon as nothing else is running.
+    pub fn refresh(&mut self) {
+        self.state.refresh_on_open_pending = true;
+    }
+
+    /// Whether a profile refresh is running. (One that is only waiting to start, for a token or another task, does not
+    /// count: the refresh button stays usable instead of being stuck behind a wait that may never end.)
+    pub fn refreshing(&self) -> bool {
+        self.state.refresh_in_progress
+    }
+
     /// Takes the preview options without following an account; [`tick`](Self::tick) does this every frame.
     pub fn set_preview_settings(&mut self, settings: &PreviewSettings) {
         self.state.apply_preview_settings(settings);

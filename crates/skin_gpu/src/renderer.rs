@@ -101,9 +101,9 @@ fn canonical_quad(quad: &SceneQuad) -> CanonicalQuad {
     }
 }
 
-struct TextureSlot {
-    asset: Asset,
-    hash: u64,
+pub(crate) struct TextureSlot {
+    pub(crate) asset: Asset,
+    pub(crate) hash: u64,
 }
 
 /// A part that could not be built, and when to try again: retrying every frame would repeat the same failure (and its log line)
@@ -504,7 +504,7 @@ fn load_shader(engine: &mut Engine<'_>) -> Result<Asset, sturdy::Error> {
     Err(sturdy::Error::new(format!("the preview shader could not be prepared: {}", problems.join("; "))))
 }
 
-fn sync_texture(
+pub(crate) fn sync_texture(
     engine: &mut Engine<'_>,
     slot: &mut Option<TextureSlot>,
     image: Option<(&Arc<RgbaImage>, u64)>,
@@ -662,7 +662,7 @@ fn shader_paths() -> Vec<PathBuf> {
     ]
 }
 
-fn write_if_changed(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+pub(crate) fn write_if_changed(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
     if std::fs::read_to_string(path).is_ok_and(|existing| existing == contents) {
         return Ok(());
     }

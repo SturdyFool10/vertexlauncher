@@ -14,6 +14,7 @@ use vertex_shell::sturdy::ui::{
 };
 
 use super::super::AppState;
+use super::super::icons::Icon;
 use super::super::kit::{self, ButtonKind, Kit, TextRole};
 
 const PREVIEW_HEIGHT: f32 = 460.0;
@@ -167,9 +168,15 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     kit.gap(ui, f32::from(kit::SPACE_XS));
     model_selector(ui, kit, skins);
 
-    kit.gap(ui, f32::from(kit::SPACE_SM));
-    kit.text(ui, TextRole::Heading, &tr!("Cape"));
-    cape_grid(ui, kit, skins);
+    // Players with no capes are not reminded of it: the whole section stays out.
+    let cape_count = skins.capes().len();
+    if cape_count > 0 {
+        kit.gap(ui, f32::from(kit::SPACE_SM));
+        // "Cape" for one; "Capes (3)" for several, so the player sees how many they own.
+        let heading = vertex_i18n::trn!(cape_count, "Cape", "Capes ({count})");
+        kit.text(ui, TextRole::Heading, &heading);
+        cape_grid(ui, kit, skins);
+    }
 
     kit.gap(ui, f32::from(kit::SPACE_SM));
     let label = if skins.saving() { tr!("Saving…") } else { tr!("Save") };
@@ -215,7 +222,7 @@ fn preview(
     // drag running. Treat the cursor leaving the window as the end of the drag.
     let pointer_down = ui.pointer_down() && !(view.dragging && cursor_outside_window(ui));
     let pointer_x = ui.pointer_position().x;
-    let over_controls = ui.hovered("skins::motion") || ui.hovered("skins::elytra");
+    let over_controls = ui.hovered("skins::motion") || ui.hovered("skins::elytra") || ui.hovered("skins::refresh");
     // A press also counts when the engine never saw the previous release (it was outside the window).
     let pressed = !view.pointer_was_down || ui.pointer_state().pressed_this_frame;
     if pointer_down && pressed && ui.hovered(CANVAS_ID) && !over_controls {
@@ -331,6 +338,43 @@ fn preview(
         Sizing::Fit,
     ) {
         skins.toggle_elytra();
+    }
+    drop(_controls);
+    refresh_button(ui, kit, skins);
+}
+
+/// A large refresh button over the viewer's top-right corner: fetches the skin, model and capes again.
+fn refresh_button(ui: &mut Ui<'_>, kit: &mut Kit, skins: &mut SkinsSession) {
+    const ID: &str = "skins::refresh";
+    let busy = skins.refreshing();
+    let hovered = ui.hovered(ID) && !busy;
+    {
+        let _button = ui.element(
+            &ElementDesc::new()
+                .id(ID.into())
+                .width(Sizing::Fixed(48.0))
+                .height(Sizing::Fixed(48.0))
+                .align(ChildAlignment::center())
+                .background(if hovered { kit.palette.hovered_fill() } else { kit.palette.bg_dark.with_w(0.85) })
+                .corner_radius(CornerRadius::all(12.0))
+                .border(Border::all(kit.palette.border_muted, 1))
+                .floating(Some(Floating {
+                    element_attach_point: AttachPoint::RightTop,
+                    parent_attach_point: AttachPoint::RightTop,
+                    offset: Vec2::new(-14.0, 14.0),
+                    z_index: 10,
+                    // Like the other viewer controls: not capturing, so the mouse wheel still scrolls the page over it.
+                    capture_pointer: false,
+                    clip_to_target: true,
+                    ..Floating::new(FloatTarget::Element(CANVAS_ID.to_owned()))
+                })),
+        );
+        let color = if busy { kit.palette.text_muted.with_w(0.5) } else { kit.palette.text };
+        kit.icon(ui, Icon::Refresh, 26.0, color);
+    }
+    kit.tooltip(ui, ID, &tr!("Refresh skin and capes"));
+    if !busy && kit.clicked_plain(ui, ID) {
+        skins.refresh();
     }
 }
 
@@ -596,7 +640,11 @@ fn cape_grid(ui: &mut Ui<'_>, kit: &mut Kit, skins: &mut SkinsSession) {
     let width = content_width(ui);
     let gap = f32::from(kit::SPACE_MD);
     let columns = (((width + gap) / (CAPE_TILE_WIDTH + gap)).floor() as usize).max(1);
-    let total = capes.len() + 1;
+    // "Random" only makes sense when there is a choice to make.
+    let has_random = capes.len() >= 2;
+    // One cape a second under the dice, drawn by the engine into a single reused target.
+    let random_picture = if has_random { kit.cape_dice.texture(&mut ui.engine(), &capes) } else { None };
+    let total = capes.len() + 1 + usize::from(has_random);
     let selected = skins.selected_cape().map(str::to_owned);
     let mut choice: Option<Option<String>> = None;
     let mut start = 0;
@@ -619,12 +667,28 @@ fn cape_grid(ui: &mut Ui<'_>, kit: &mut Kit, skins: &mut SkinsSession) {
                     "skins::cape-none",
                     &tr!("No Cape"),
                     None,
+                    None,
+                    None,
                     selected.is_none(),
                 ) {
                     choice = Some(None);
                 }
+            } else if has_random && index == 1 {
+                if cape_tile(
+                    ui,
+                    kit,
+                    "skins::cape-random",
+                    &tr!("Random"),
+                    None,
+                    Some(Icon::Dice),
+                    random_picture,
+                    false,
+                ) {
+                    choice = Some(random_cape(&capes, selected.as_deref()));
+                }
             } else {
-                let cape: &CapeView = &capes[index - 1];
+                // Capes come after "No Cape" and, when it is there, "Random".
+                let cape: &CapeView = &capes[index - 1 - usize::from(has_random)];
                 let is_selected = selected.as_deref() == Some(cape.id.as_str());
                 if cape_tile(
                     ui,
@@ -632,6 +696,8 @@ fn cape_grid(ui: &mut Ui<'_>, kit: &mut Kit, skins: &mut SkinsSession) {
                     &format!("skins::cape::{}", cape.id),
                     &cape.label,
                     Some(cape),
+                    None,
+                    None,
                     is_selected,
                 ) {
                     choice = Some(Some(cape.id.clone()));
@@ -645,12 +711,29 @@ fn cape_grid(ui: &mut Ui<'_>, kit: &mut Kit, skins: &mut SkinsSession) {
     }
 }
 
+/// A random cape other than the one already worn.
+fn random_cape(capes: &[CapeView], current: Option<&str>) -> Option<String> {
+    let others: Vec<&CapeView> = capes.iter().filter(|cape| Some(cape.id.as_str()) != current).collect();
+    if others.is_empty() {
+        return current.map(str::to_owned);
+    }
+    // No `rand` dependency for one pick: the clock's nanoseconds are random enough for choosing a cape.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.subsec_nanos() as usize);
+    Some(others[nanos % others.len()].id.clone())
+}
+
 fn cape_tile(
     ui: &mut Ui<'_>,
     kit: &mut Kit,
     id: &str,
     label: &str,
     cape: Option<&CapeView>,
+    // Drawn in the picture box when there is no picture of the cape: the dice on the "Random" tile.
+    icon: Option<Icon>,
+    // A ready-made picture for the box (the "Random" tile's changing cape under the dice).
+    picture: Option<vertex_shell::sturdy::assets::RendererTextureHandle>,
     selected: bool,
 ) -> bool {
     let hovered = ui.hovered(id);
@@ -710,6 +793,18 @@ fn cape_tile(
                     .border(Border::all(kit.palette.text_muted.with_w(0.6), 1))
                     .corner_radius(CornerRadius::all(6.0)),
             );
+            match (picture, icon) {
+                (Some(texture), _) => ui.image(
+                    &ElementDesc::new()
+                        .id(format!("{id}::picture"))
+                        .width(Sizing::Fixed(64.0))
+                        .height(Sizing::Fixed(100.0))
+                        .corner_radius(CornerRadius::all(4.0)),
+                    texture,
+                ),
+                (None, Some(icon)) => kit.icon(ui, icon, 40.0, kit.palette.text_muted),
+                (None, None) => {}
+            }
             if let Some(face) = cape.and_then(|cape| cape.face_png.clone()) {
                 let key = format!("{id}::face::{}", face.len());
                 kit.image(

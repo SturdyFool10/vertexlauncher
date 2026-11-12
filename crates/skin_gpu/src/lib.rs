@@ -9,8 +9,10 @@
 //! Draw with [`PreviewRenderer::render`] from the engine's per-frame hook, then show [`PreviewRenderer::texture`] with
 //! `Ui::image`.
 
+mod cape_dice;
 mod renderer;
 
+pub use cape_dice::CapeDice;
 pub use renderer::{HEAD_LAYERS, HeadRenderer, PreviewRenderer, RenderRequest, RenderSettings};
 
 /// The shader that lights the preview: see the file's own comment.

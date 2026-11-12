@@ -40,6 +40,7 @@ icons! {
     ChevronRight => ("chevron-right", assets::CHEVRON_RIGHT_SVG),
     ChevronUp => ("chevron-up", assets::CHEVRON_UP_SVG),
     Copy => ("copy", assets::COPY_SVG),
+    Dice => ("dice", assets::DICE_SVG),
     Discover => ("discover", assets::DISCOVER_SVG),
     Download => ("download", assets::DOWNLOAD_SVG),
     Edit => ("edit", assets::EDIT_SVG),

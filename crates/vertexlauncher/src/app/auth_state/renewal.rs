@@ -12,9 +12,10 @@ impl AuthState {
                     succeeded_profile_ids,
                 }) => {
                     match result {
-                        Ok(renewed) => {
+                        Ok(mut renewed) => {
                             let active_refresh =
                                 matches!(self.status, AuthUiStatus::RefreshingActiveSession);
+                            self.keep_known_access_tokens(&mut renewed);
                             self.apply_accounts_state(renewed, true);
                             self.refreshed.extend(
                                 self.accounts_state
@@ -71,7 +72,8 @@ impl AuthState {
                 Ok(RenewalResult::Single { profile_id, result }) => {
                     self.refreshed.insert(profile_id.clone());
                     match result {
-                        Ok(renewed) => {
+                        Ok(mut renewed) => {
+                            self.keep_known_access_tokens(&mut renewed);
                             self.apply_accounts_state(renewed, true);
                             self.failed_account_errors.remove(&profile_id);
                             self.retain_failed_accounts_for_known_profiles();
@@ -220,6 +222,29 @@ impl AuthState {
         } else {
             AuthUiStatus::RefreshingCachedSession
         };
+    }
+
+    /// A renewal hands back the accounts as the cache has them, and the cache never stores Minecraft access tokens, so
+    /// every account but the renewed one comes back without its token. The ones renewed earlier this session are marked
+    /// as done and are never renewed again, so dropping their tokens here left them unable to do anything that needs one
+    /// (the skin manager waited for a token that never came). Their tokens are carried over instead.
+    fn keep_known_access_tokens(&self, renewed: &mut CachedAccountsState) {
+        for account in &mut renewed.accounts {
+            let has_token = account.minecraft_access_token.as_deref().is_some_and(|token| !token.trim().is_empty());
+            if has_token {
+                continue;
+            }
+            let known = self
+                .accounts_state
+                .accounts
+                .iter()
+                .find(|known| known.minecraft_profile.id.eq_ignore_ascii_case(&account.minecraft_profile.id))
+                .and_then(|known| known.minecraft_access_token.clone())
+                .filter(|token| !token.trim().is_empty());
+            if known.is_some() {
+                account.minecraft_access_token = known;
+            }
+        }
     }
 
     pub(super) fn apply_accounts_state(

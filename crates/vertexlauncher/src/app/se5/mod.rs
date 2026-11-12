@@ -10,6 +10,7 @@
 
 mod accounts;
 mod avatar;
+mod cape_dice;
 mod chrome;
 mod debug_overlay;
 mod create_instance;

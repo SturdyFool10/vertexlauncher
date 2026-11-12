@@ -19,6 +19,7 @@ pub const CHEVRON_UP_SVG: &[u8] = include_bytes!("chevron-up.svg");
 pub const COPY_SVG: &[u8] = include_bytes!("copy.svg");
 pub const CREDIT_CARD_SVG: &[u8] = include_bytes!("credit-card.svg");
 pub const DOWNLOAD_SVG: &[u8] = include_bytes!("download.svg");
+pub const DICE_SVG: &[u8] = include_bytes!("dice.svg");
 pub const DISCOVER_SVG: &[u8] = include_bytes!("discover.svg");
 pub const EDIT_SVG: &[u8] = include_bytes!("edit.svg");
 pub const ERROR_SVG: &[u8] = include_bytes!("error.svg");

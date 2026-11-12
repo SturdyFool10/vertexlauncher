@@ -593,6 +593,8 @@ pub struct Kit {
     pub images: ImageCache,
     /// The heads drawn by the engine (the sign-in button's avatar).
     pub heads: super::avatar::AvatarHeads,
+    /// The picture on the skins screen's "Random" cape tile.
+    pub cape_dice: super::cape_dice::CapeDiceFx,
     /// Icon render scale from the anti-aliasing setting.
     pub svg_supersample: u32,
     /// Which bold/italic faces the current font has, per styled role (see `fonts::StyledFaces`).
@@ -655,6 +657,7 @@ impl Kit {
             delta_seconds: 0.016,
             images: ImageCache::default(),
             heads: Default::default(),
+            cape_dice: Default::default(),
             svg_supersample: 2,
             styled_faces: Default::default(),
             buttons: HashMap::new(),

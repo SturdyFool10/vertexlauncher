@@ -63,6 +63,9 @@ pub(super) struct SkinManagerState {
     pub(super) orbit_pause_accumulated_secs: f64,
     pub(super) camera_last_frame_time: Option<f64>,
     pub(super) refresh_on_open_pending: bool,
+    /// The last profile refresh failed (often because the account's token was still being renewed), so a new token is a reason
+    /// to try again.
+    pub(super) last_refresh_failed: bool,
 }
 
 impl Default for SkinManagerState {
@@ -124,6 +127,7 @@ impl Default for SkinManagerState {
             orbit_pause_accumulated_secs: 0.0,
             camera_last_frame_time: None,
             refresh_on_open_pending: false,
+            last_refresh_failed: false,
         }
     }
 }
@@ -166,6 +170,11 @@ impl SkinManagerState {
         if !profile_changed {
             self.access_token = auth.access_token.clone();
             self.active_player_name = Some(auth.player_name.clone());
+            // A new token for a profile that never loaded (the refresh ran on the old, expiring token and failed, or had
+            // no token at all) gets another try instead of leaving the screen empty.
+            if token_changed && auth.access_token.is_some() && (self.base_skin_png.is_none() || self.last_refresh_failed) {
+                self.refresh_on_open_pending = true;
+            }
             tracing::info!(
                 target: "vertexlauncher/skins",
                 display_name = auth.player_name.as_str(),
@@ -183,6 +192,7 @@ impl SkinManagerState {
         self.pick_skin_results_rx = None;
         self.status_message = None;
         self.show_elytra = false;
+        self.last_refresh_failed = false;
         self.active_profile_id = Some(normalized_profile_id.clone());
         self.active_player_name = Some(auth.player_name.clone());
         self.access_token = auth.access_token.clone();
@@ -211,7 +221,10 @@ impl SkinManagerState {
         self.camera_last_frame_time = None;
 
         self.load_snapshot_from_cache_for_profile(normalized_profile_id.as_str());
-        self.start_refresh();
+        // Not started here: the new account's token may not be there yet (it is being refreshed as the account is
+        // switched) or another task may still be winding down. `try_consume_open_refresh` starts it as soon as it can,
+        // and keeps waiting until then instead of giving up and leaving the screen empty.
+        self.refresh_on_open_pending = true;
     }
 
     /// Starts reading the cached account on a worker; [`Self::poll_snapshot`] shows it when it arrives.
@@ -238,10 +251,10 @@ impl SkinManagerState {
             Err(mpsc::TryRecvError::Disconnected) => self.snapshot_rx = None,
             Ok((profile_id, result)) => {
                 self.snapshot_rx = None;
-                // The refresh that follows is newer than the cache: once it has landed, or the profile changed, the
-                // cache is stale and must not be drawn over it.
-                let current = self.active_profile_id.as_deref() == Some(profile_id.as_str())
-                    && self.refresh_in_progress;
+                // The refresh is newer than the cache: once it has landed, or the profile changed, the cache is
+                // stale and must not be drawn over it. A refresh that has not started yet (it waits for the account's
+                // token) does not make the cache stale, so the profile alone decides.
+                let current = self.active_profile_id.as_deref() == Some(profile_id.as_str());
                 match result {
                     // A profile that is already loaded is newer than the cache, and the cache carries no skin: applying it would
                     // blank the preview until the refresh in flight lands (every refresh, on a slow connection).
@@ -331,6 +344,7 @@ impl SkinManagerState {
                         "Skin manager refresh worker completed."
                     );
                     self.refresh_in_progress = false;
+                    self.last_refresh_failed = result.is_err();
                     match result {
                         Ok((profile_id, profile)) => {
                             if self.active_profile_id.as_deref() != Some(profile_id.as_str()) {

@@ -1646,6 +1646,7 @@ translators = []
 "Quick install latest compatible version" = ""
 "Quilt" = ""
 "Quit Shortcuts" = ""
+"Random" = ""
 "Raw Input" = ""
 "Read CurseForge manifest." = ""
 "Reading .mrpack manifest..." = ""
@@ -1667,6 +1668,7 @@ translators = []
 "Refresh" = ""
 "Refresh local files" = ""
 "Refresh modloader versions" = ""
+"Refresh skin and capes" = ""
 "Refresh version list" = ""
 "Refreshed installed content metadata and hash cache." = ""
 "Refreshing account token..." = ""
@@ -3018,6 +3020,11 @@ translators = []
 
 [plurals."Adding {count} local content files..."]
 # English one: "Adding {count} local content file..."
+one = ""
+other = ""
+
+[plurals."Capes ({count})"]
+# English one: "Cape"
 one = ""
 other = ""
 
