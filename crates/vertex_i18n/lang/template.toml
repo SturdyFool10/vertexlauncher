@@ -1790,6 +1790,7 @@ translators = []
 "Search installed {kind} by name, file, version, or provider" = ""
 "Search modpacks and press Enter" = ""
 "Search project names, summaries, and tags. Press Enter to search" = ""
+"Search settings" = ""
 "Searching content..." = ""
 # placeholders: {search_completed_tasks} {search_total_tasks}
 "Searching content... {search_completed_tasks}/{search_total_tasks} result groups loaded." = ""

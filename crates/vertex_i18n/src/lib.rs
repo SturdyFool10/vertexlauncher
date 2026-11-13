@@ -317,6 +317,21 @@ pub fn t(source: &str) -> Cow<'_, str> {
     }
 }
 
+/// `source` in every language the launcher has (the source language's own text included), for finding something by a
+/// word in a language other than the one the interface is in. Languages that do not translate it add nothing new.
+pub fn translations_everywhere(source: &str) -> Vec<String> {
+    let state = state().read().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut found = vec![source.to_owned()];
+    for language in &state.languages {
+        if let Some(translated) = language.catalog.string(None, source) {
+            if !found.iter().any(|known| known == translated) {
+                found.push(translated.to_owned());
+            }
+        }
+    }
+    found
+}
+
 /// A value for a placeholder, as text.
 pub fn arg(value: &dyn std::fmt::Display) -> String {
     value.to_string()

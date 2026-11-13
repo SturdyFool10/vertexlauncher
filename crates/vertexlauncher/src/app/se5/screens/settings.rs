@@ -35,6 +35,14 @@ pub struct SettingsView {
     graphics_signature: Option<(GraphicsApiPreference, u64, u8)>,
     /// A device switch lands a frame or two after the setting changes, so the info is re-read until this passes.
     graphics_refresh_until: Option<std::time::Instant>,
+    /// What is typed in the search box at the top.
+    search: String,
+}
+
+thread_local! {
+    /// The search being applied while the page is drawn, and how many sections it left showing.
+    static SEARCH: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SHOWN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
@@ -85,6 +93,16 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     poll_purge(state);
     let _scroll = kit.scroll(ui, "settings::scroll", kit::SPACE_LG, kit::SPACE_XL);
     kit.text(ui, TextRole::Title, &tr!("Settings"));
+    kit.text_field(
+        ui,
+        "settings::search",
+        &mut state.settings.search,
+        &tr!("Search settings"),
+        false,
+        Sizing::Grow,
+    );
+    SEARCH.with(|search| *search.borrow_mut() = state.settings.search.trim().to_owned());
+    SHOWN.with(|shown| shown.set(0));
 
     section(
         ui,
@@ -339,6 +357,9 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         },
     );
     info_section(ui, kit);
+    if SHOWN.with(|shown| shown.get()) == 0 {
+        kit.text(ui, TextRole::Muted, &tr!("No settings match your search."));
+    }
 }
 
 /// The interface language picker. Languages are the files in the launcher's `languages` folder, plus English.
@@ -581,6 +602,8 @@ fn apply_log_levels(config: &config::Config) {
     );
 }
 
+/// A settings card. Its header folds the body away; while a search is typed, only the cards it matches are listed, open,
+/// and a card matched through a setting inside it lists just the settings that match. What matched is lit.
 fn section(
     ui: &mut Ui<'_>,
     kit: &mut Kit,
@@ -589,9 +612,192 @@ fn section(
     description: &str,
     body: impl FnOnce(&mut Ui<'_>, &mut Kit),
 ) {
-    let _card = kit.card(ui, &format!("settings::section::{id}"), kit::SPACE_MD);
-    kit.section_header(ui, heading, description);
-    body(ui, kit);
+    let query = SEARCH.with(|search| search.borrow().clone());
+    let searching = !query.is_empty();
+    // A search that names the section lists all of it; one that names settings inside it lists only those.
+    let mut filter = None;
+    let mut heading_found = false;
+    if searching {
+        let mut names = vec![heading.to_owned()];
+        names.extend(section_aliases(id));
+        heading_found = kit::fuzzy_matches(&query, &names);
+        if !heading_found {
+            let found = section_keywords(id)
+                .into_iter()
+                .any(|keyword| kit::fuzzy_matches(&query, &[keyword]));
+            if !found {
+                return;
+            }
+            filter = Some(query);
+        }
+    }
+    SHOWN.with(|shown| shown.set(shown.get() + 1));
+    kit.collapsible_card(ui, &format!("settings::section::{id}"), heading, description, searching, heading_found, |ui, kit| {
+        kit.set_setting_filter(filter);
+        body(ui, kit);
+        kit.set_setting_filter(None);
+    });
+}
+
+/// Other names a section is found by. The language section is found by the word for "language" in any language the
+/// launcher has, so someone who cannot read the current one can still get back to it.
+fn section_aliases(id: &str) -> Vec<String> {
+    if id != "language" {
+        return Vec::new();
+    }
+    let mut names = vertex_i18n::translations_everywhere("Language");
+    names.extend(vertex_i18n::translations_everywhere("Interface Language"));
+    names
+}
+
+/// The names of the settings inside a section, so a search finds a section by what is in it.
+fn section_keywords(id: &str) -> Vec<String> {
+    use vertex_i18n::t;
+    let toggle = |id: ToggleSettingId| t(id.spec().label).into_owned();
+    let float = |id: FloatSettingId| t(id.spec().label).into_owned();
+    let int = |id: IntSettingId| t(id.spec().label).into_owned();
+    match id {
+        "language" => vec![tr!("Interface Language").into_owned()],
+        "appearance" => vec![
+            tr!("Theme").into_owned(),
+            tr!("Fullscreen Style").into_owned(),
+            tr!("Window Controls").into_owned(),
+            tr!("UI Opacity").into_owned(),
+            tr!("Window Corner Radius").into_owned(),
+            t(config::DropdownSettingId::WindowTransparency.spec().label).into_owned(),
+            toggle(ToggleSettingId::StartFullscreen),
+            toggle(ToggleSettingId::DragScrollEnabled),
+        ],
+        "privacy" => vec![
+            toggle(ToggleSettingId::StreamerModeEnabled),
+            toggle(ToggleSettingId::ObsDetectionEnabled),
+            toggle(ToggleSettingId::LazyAccountRefresh),
+            tr!("Use Unsecured File Account Storage").into_owned(),
+        ],
+        "notifications" => vec![
+            toggle(ToggleSettingId::NotificationExpiryBarsEmptyLeft),
+            float(FloatSettingId::NotificationFadeOutSeconds),
+            tr!("Notification Fade Out Easing").into_owned(),
+        ],
+        "text" => vec![
+            t(config::DropdownSettingId::UiFontFamily.spec().label).into_owned(),
+            float(FloatSettingId::UiFontSize),
+            int(IntSettingId::UiFontWeight),
+            toggle(ToggleSettingId::OpenTypeFeaturesEnabled),
+            t(TextSettingId::OpenTypeFeaturesToEnable.spec().label).into_owned(),
+            tr!("Emoji Font").into_owned(),
+            tr!("CJK Font").into_owned(),
+            tr!("Text Rendering Path").into_owned(),
+            tr!("Size").into_owned(),
+            tr!("Weight").into_owned(),
+            tr!("Font").into_owned(),
+            tr!("CJK font").into_owned(),
+            tr!("Emoji font").into_owned(),
+        ],
+        "discord" => vec![toggle(ToggleSettingId::DiscordRichPresenceEnabled)],
+        "sync" => vec![
+            toggle(ToggleSettingId::SyncServersEnabled),
+            toggle(ToggleSettingId::SyncServersToAllInstancesByDefault),
+            toggle(ToggleSettingId::SyncCommandHistoryEnabled),
+            toggle(ToggleSettingId::SyncHotbarsEnabled),
+        ],
+        "graphics" => vec![
+            int(IntSettingId::SkinPreviewMsaaSamples),
+            toggle(ToggleSettingId::SkinPreviewFreshFormatEnabled),
+            toggle(ToggleSettingId::SkinPreview3dLayersEnabled),
+            float(FloatSettingId::SkinPreviewMotionBlurAmount),
+            float(FloatSettingId::SkinPreviewMotionBlurShutterFrames),
+            int(IntSettingId::SkinPreviewMotionBlurSampleCount),
+            tr!("HDR Max Content Light Level").into_owned(),
+            tr!("HDR Max Frame-Average Light Level").into_owned(),
+            t(config::DropdownSettingId::GraphicsAdapterPreferenceType.spec().label).into_owned(),
+            tr!("Enable Download Speed Limit").into_owned(),
+            tr!("Skin Preview Texel Edge AA").into_owned(),
+            tr!("Skin Preview Post Anti-Aliasing").into_owned(),
+            tr!("SVG Anti-Aliasing").into_owned(),
+            tr!("Enable Skin Preview Motion Blur").into_owned(),
+            tr!("HDR When Available").into_owned(),
+            tr!("HDR Color Space").into_owned(),
+            tr!("HDR UI Brightness").into_owned(),
+            tr!("HDR UI Paper White").into_owned(),
+            t(config::DropdownSettingId::GraphicsApiPreference.spec().label).into_owned(),
+            t(config::DropdownSettingId::GraphicsAdapterPreference.spec().label).into_owned(),
+            toggle(ToggleSettingId::FrameLimiterEnabled),
+            int(IntSettingId::FrameLimitFps),
+            tr!("Max Concurrent Downloads").into_owned(),
+            tr!("Download Speed Limit").into_owned(),
+        ],
+        "minecraft" => vec![
+            tr!("Minecraft Version Groups").into_owned(),
+            toggle(ToggleSettingId::SnapshotsAndBetasEnabled),
+            toggle(ToggleSettingId::AlphaVersionsEnabled),
+            toggle(ToggleSettingId::ExperimentalVersionsEnabled),
+            tr!("CurseForge API Key").into_owned(),
+        ],
+        "launching" => vec![
+            toggle(ToggleSettingId::FollowConsoleOnLaunch),
+            toggle(ToggleSettingId::SteamDeckHandoff),
+        ],
+        "logging" => vec![tr!("Vertex Log Level").into_owned(), tr!("Game Log Level").into_owned()],
+        "java" => vec![
+            toggle(ToggleSettingId::ForceJava21Minimum),
+            tr!("Java JVM Paths (Optional)").into_owned(),
+        ],
+        "defaults" => vec![
+            tr!("Minecraft installations folder").into_owned(),
+            tr!("Default max memory allocation (MiB)").into_owned(),
+            tr!("Default CLI args").into_owned(),
+        ],
+        "linux" => vec![
+            tr!("Blur Protocol").into_owned(),
+            tr!("Set Linux OpenGL Driver").into_owned(),
+            tr!("Use Zink Driver (Experimental)").into_owned(),
+        ],
+        "windows" => vec![
+            tr!("Window Backdrop Type").into_owned(),
+            tr!("Blur Tint Strength").into_owned(),
+            tr!("Blur Tint Colour").into_owned(),
+        ],
+        "macos" => vec![
+            tr!("Visual Effect Material").into_owned(),
+            tr!("Visual Effect Blending Mode").into_owned(),
+            tr!("Visual Effect State").into_owned(),
+            tr!("Visual Effect Emphasized").into_owned(),
+        ],
+        "displayed-time" => vec![
+            tr!("Show Screenshot Time Card").into_owned(),
+            tr!("Time Zone").into_owned(),
+            tr!("Date Format").into_owned(),
+            tr!("Date Order").into_owned(),
+            tr!("Month Style").into_owned(),
+            tr!("Date Separator").into_owned(),
+            tr!("Four-Digit Year").into_owned(),
+            tr!("Pad Day and Month With Zeros").into_owned(),
+            tr!("Human Era Years").into_owned(),
+            tr!("Show Day of the Week").into_owned(),
+            tr!("Clock").into_owned(),
+            tr!("AM / PM Style").into_owned(),
+            tr!("Pad Hour With a Zero").into_owned(),
+            tr!("Show Seconds").into_owned(),
+            tr!("Time Separator").into_owned(),
+            tr!("Show How Long Ago").into_owned(),
+            tr!("Most Units Shown").into_owned(),
+            tr!("Hide Zero Units").into_owned(),
+            tr!("Abbreviate Units").into_owned(),
+        ],
+        "debug" => vec![
+            toggle(ToggleSettingId::DebugFpsCounter),
+            toggle(ToggleSettingId::DebugFramegraph),
+        ],
+        "info" => vec![
+            tr!("CPU").into_owned(),
+            tr!("GPU").into_owned(),
+            tr!("Memory").into_owned(),
+            tr!("Graphics Driver + Version").into_owned(),
+            tr!("App Version + Commit Hash").into_owned(),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 fn toggles(ui: &mut Ui<'_>, kit: &mut Kit, config: &mut Config, ids: &[ToggleSettingId]) {
@@ -2083,4 +2289,89 @@ pub fn confirm_insecure_storage(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppS
     }
     kit.forget("settings-insecure::");
     !(confirmed || cancelled || (response.dismissed || kit.back_pressed()))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::se5::kit::fuzzy_matches;
+
+    fn fields(list: &[&str]) -> Vec<String> {
+        list.iter().map(|field| (*field).to_owned()).collect()
+    }
+
+    #[test]
+    fn search_finds_substrings_and_near_misses() {
+        let fields = fields(&["Graphics & Performance", "Frame Limiter"]);
+        assert!(fuzzy_matches("graph", &fields));
+        assert!(fuzzy_matches("graphcs", &fields));
+        assert!(fuzzy_matches("frame limit", &fields));
+        assert!(fuzzy_matches("", &fields));
+        assert!(fuzzy_matches("grpahics", &fields));
+        assert!(fuzzy_matches("perfromance", &fields));
+        assert!(fuzzy_matches("themme", &["Theme".to_owned()]));
+        assert!(!fuzzy_matches("them", &["Time Zone".to_owned()]));
+        assert!(!fuzzy_matches("zzz", &fields));
+    }
+
+    const SECTION_IDS: [&str; 19] = [
+        "language", "appearance", "privacy", "notifications", "text", "discord", "sync", "graphics", "minecraft",
+        "launching", "logging", "java", "defaults", "linux", "windows", "macos", "displayed-time", "debug", "info",
+    ];
+
+    fn every_keyword() -> Vec<String> {
+        SECTION_IDS.iter().flat_map(|id| super::section_keywords(id)).collect()
+    }
+
+    /// A setting nobody can find by searching is a bug: every row the page draws must be named in the search lists.
+    #[test]
+    fn every_setting_row_is_searchable() {
+        let keywords = every_keyword();
+        let source = include_str!("settings.rs");
+        let source = &source[..source.find("#[cfg(test)]").unwrap()];
+        let mut missing = Vec::new();
+        for call in ["choice_setting(", "text_setting(", "toggle_setting(", "slider_setting(", "setting_row("] {
+            for (at, _) in source.match_indices(call) {
+                if source[..at].ends_with("fn ") || source[..at].ends_with("pub fn ") {
+                    continue;
+                }
+                let rest = &source[at..source.len().min(at + 700)];
+                let Some(start) = rest.find("tr!(\"") else { continue };
+                let literal = &rest[start + 5..];
+                let label = &literal[..literal.find('"').unwrap()];
+                // The first message after a call that takes its label from a spec is the tooltip, and a button's
+                // label can come first; neither is a setting's name.
+                if label.ends_with('.') || label.ends_with('…') {
+                    continue;
+                }
+                if !keywords.iter().any(|keyword| keyword == label) {
+                    missing.push(label.to_owned());
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(missing.is_empty(), "settings missing from section_keywords: {missing:?}");
+    }
+
+    #[test]
+    fn every_config_setting_spec_is_searchable() {
+        let keywords = every_keyword();
+        let mut config = config::Config::default();
+        let mut missing = Vec::new();
+        config.for_each_toggle_mut(|spec, _| missing.push(spec.label));
+        config.for_each_float_mut(|spec, _| missing.push(spec.label));
+        config.for_each_int_mut(|spec, _| missing.push(spec.label));
+        config.for_each_text_mut(|spec, _| missing.push(spec.label));
+        config.for_each_dropdown_mut(|spec, _| missing.push(spec.label));
+        // Not drawn on the page (the adapter profile choice stands for it), so there is nothing to find.
+        missing.retain(|label| *label != config::ToggleSettingId::LowPowerGpuPreferred.spec().label);
+        missing.retain(|label| !keywords.iter().any(|keyword| keyword == label));
+        assert!(missing.is_empty(), "setting specs missing from section_keywords: {missing:?}");
+    }
+
+    #[test]
+    fn language_is_found_by_its_name_in_any_language() {
+        let names = vertex_i18n::translations_everywhere("Language");
+        assert!(names.iter().any(|name| name == "Language"));
+    }
 }

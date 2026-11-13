@@ -330,8 +330,9 @@ fn entry_row(
     let menu_target = format!("{section}:{}", entry.key);
     let star_id = format!("{id}::star");
     let text_id = format!("{id}::text");
-    // Servers are not a button to point at: no hover highlight (a click still launches).
-    let hovered = entry.kind == EntryKind::World && ui.hovered(&id);
+    // A server with several instances is not one button to point at (each instance has its own), so only a server with
+    // a single place to launch from highlights, like a world does.
+    let hovered = (entry.kind == EntryKind::World || entry.targets.len() == 1) && ui.hovered(&id);
     let mut result = None;
     {
         let _row = ui.element(

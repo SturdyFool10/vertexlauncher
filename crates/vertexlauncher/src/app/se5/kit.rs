@@ -625,6 +625,8 @@ pub struct Kit {
     menu_items: HashMap<String, Vec<MenuEntry>>,
     /// Open/close progress of every collapsible section, by id.
     collapsibles: HashMap<String, Collapse>,
+    /// While set, a settings row whose label does not match is left out (a settings search).
+    setting_filter: Option<String>,
     /// What the pointer shows over each interactive element declared this frame (see [`CursorKind`]).
     cursor_targets: Vec<(String, CursorKind)>,
     /// Number fields that were being edited last frame, to notice when editing ends.
@@ -670,6 +672,7 @@ impl Kit {
             menu_anim: HashMap::new(),
             menu_items: HashMap::new(),
             collapsibles: HashMap::new(),
+            setting_filter: None,
             cursor_targets: Vec::new(),
             numbers_editing: std::collections::HashSet::new(),
             icon_after: false,
@@ -2520,6 +2523,71 @@ impl Kit {
         });
     }
 
+    /// Leaves out the settings rows whose label does not match `query`, until it is set back to `None`.
+    pub fn set_setting_filter(&mut self, query: Option<String>) {
+        self.setting_filter = query;
+    }
+
+    /// A card whose header (the heading, its description and a chevron) folds the body away when clicked. Cards start
+    /// closed. `force_open` shows the body regardless (a search is listing it) without touching what the user chose;
+    /// `highlight` lights the header (the search matched the card's own name).
+    pub fn collapsible_card(
+        &mut self,
+        ui: &mut Ui<'_>,
+        id: &str,
+        heading: &str,
+        description: &str,
+        force_open: bool,
+        highlight: bool,
+        body: impl FnOnce(&mut Ui<'_>, &mut Kit),
+    ) {
+        const CHEVRON: f32 = 20.0;
+        let header_id = format!("{id}::header");
+        let was_open = self.collapsibles.get(id).is_some_and(|c| c.open);
+        let open = if self.clicked(ui, &header_id) {
+            !was_open
+        } else {
+            was_open
+        };
+        let (progress, eased) = self.animate_collapse(id, open);
+        let (progress, eased) = if force_open { (1.0, 1.0) } else { (progress, eased) };
+        let hovered = ui.hovered(&header_id);
+        let _card = self.card(ui, id, 0);
+        {
+            let _header = ui.element(
+                &ElementDesc::new()
+                    .id(header_id.clone())
+                    .width(Sizing::Grow)
+                    .height(Sizing::Fit)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(SPACE_MD)
+                    .padding(if highlight { Padding::symmetric(SPACE_SM, SPACE_XS) } else { Padding::default() })
+                    .align(ChildAlignment::new(AlignX::Left, AlignY::Center))
+                    .background(if highlight { self.palette.primary.with_w(0.18) } else { Vec4::ZERO })
+                    .corner_radius(CornerRadius::all(if highlight { 8.0 } else { 0.0 })),
+            );
+            self.section_header(ui, heading, description);
+            // Pointing right when closed, a quarter-turn clockwise to point down when open (as in `collapsible`).
+            icons::draw_turned(
+                ui,
+                Icon::ChevronDown,
+                270.0 + 90.0 * eased,
+                CHEVRON,
+                if hovered { self.palette.text } else { self.palette.text_muted },
+                self.svg_supersample,
+            );
+        }
+        // The space under the header grows and shrinks with the body.
+        drop(
+            ui.element(
+                &ElementDesc::new()
+                    .width(Sizing::Fixed(0.0))
+                    .height(Sizing::Fixed(f32::from(SPACE_MD) * eased)),
+            ),
+        );
+        self.collapse_body(ui, id, progress, eased, SPACE_MD, body);
+    }
+
     /// Moves the open/close animation of section `id` toward `open` and returns its (progress, eased progress), both
     /// 0 when closed and 1 when open. A section seen for the first time starts at its target, with no animation.
     pub fn animate_collapse(&mut self, id: &str, open: bool) -> (f32, f32) {
@@ -2946,8 +3014,15 @@ impl Kit {
         info: Option<&str>,
         control: impl FnOnce(&mut Self, &mut Ui<'_>),
     ) {
+        if let Some(query) = &self.setting_filter
+            && !fuzzy_matches(query, &[vertex_i18n::t(label).into_owned()])
+        {
+            return;
+        }
         let label_id = format!("{id}::label");
         let info_id = format!("{id}::info");
+        // A row a search lists is a match: lit, so it stands out from the rest of the page.
+        let found = self.setting_filter.is_some();
         {
             let _row = ui.element(
                 &ElementDesc::new()
@@ -2955,7 +3030,10 @@ impl Kit {
                     .height(Sizing::Fit)
                     .direction(Direction::LeftToRight)
                     .child_gap(SPACE_MD)
-                    .align(ChildAlignment::new(AlignX::Left, AlignY::Center)),
+                    .padding(if found { Padding::symmetric(SPACE_SM, SPACE_XS) } else { Padding::default() })
+                    .align(ChildAlignment::new(AlignX::Left, AlignY::Center))
+                    .background(if found { self.palette.primary.with_w(0.18) } else { Vec4::ZERO })
+                    .corner_radius(CornerRadius::all(if found { 8.0 } else { 0.0 })),
             );
             {
                 let _label = ui.element(
@@ -3213,4 +3291,70 @@ mod tests {
         assert!(selection.active());
         assert_eq!(selection.range(), None);
     }
+}
+
+/// Whether every word of `query` is found in some field. A word is found when it is a substring, when its letters
+/// appear in order with no more than three skipped between neighbours ("grphcs" finds Graphics), or when it is a
+/// near-miss of one of the field's words: a prefix of one, or one that is a letter or two off ("themme", "setings").
+pub fn fuzzy_matches(query: &str, fields: &[String]) -> bool {
+    let fields: Vec<Vec<char>> = fields.iter().map(|field| field.to_lowercase().chars().collect()).collect();
+    query.to_lowercase().split_whitespace().all(|word| {
+        let word: Vec<char> = word.chars().collect();
+        fields.iter().any(|field| fuzzy_in(&word, field) || near_a_word(&word, field))
+    })
+}
+
+fn fuzzy_in(word: &[char], field: &[char]) -> bool {
+    const MAX_GAP: usize = 3;
+    let Some(first) = word.first() else {
+        return true;
+    };
+    (0..field.len()).filter(|&start| field[start] == *first).any(|start| {
+        let mut at = start;
+        for letter in &word[1..] {
+            let window_end = (at + 1 + MAX_GAP + 1).min(field.len());
+            match field[at + 1..window_end].iter().position(|c| c == letter) {
+                Some(offset) => at += 1 + offset,
+                None => return false,
+            }
+        }
+        true
+    })
+}
+
+/// Whether `word` is within a couple of edits of a whole word of `field`, or of the start of one.
+fn near_a_word(word: &[char], field: &[char]) -> bool {
+    if word.len() < 3 {
+        return false;
+    }
+    let allowed = if word.len() >= 7 { 2 } else { 1 };
+    field
+        .split(|c| !c.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .any(|token| {
+            let prefix = &token[..token.len().min(word.len())];
+            edit_distance(word, token) <= allowed || edit_distance(word, prefix) <= allowed
+        })
+}
+
+/// Levenshtein distance, with a swap of two neighbouring letters counting as one edit.
+fn edit_distance(a: &[char], b: &[char]) -> usize {
+    let mut rows = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in rows.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        rows[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut best = (rows[i - 1][j] + 1).min(rows[i][j - 1] + 1).min(rows[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                best = best.min(rows[i - 2][j - 2] + 1);
+            }
+            rows[i][j] = best;
+        }
+    }
+    rows[a.len()][b.len()]
 }
