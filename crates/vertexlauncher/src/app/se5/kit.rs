@@ -2477,6 +2477,18 @@ impl Kit {
         label: &str,
         body: impl FnOnce(&mut Ui<'_>, &mut Kit),
     ) {
+        self.collapsible_ex(ui, id, label, false, body);
+    }
+
+    /// [`Kit::collapsible`] that `force_open` shows open without changing what the user chose (a search is in it).
+    pub fn collapsible_ex(
+        &mut self,
+        ui: &mut Ui<'_>,
+        id: &str,
+        label: &str,
+        force_open: bool,
+        body: impl FnOnce(&mut Ui<'_>, &mut Kit),
+    ) {
         const CHEVRON: f32 = 18.0;
         let header_id = format!("{id}::header");
         let was_open = self.collapsibles.get(id).is_some_and(|c| c.open);
@@ -2486,6 +2498,7 @@ impl Kit {
             was_open
         };
         let (progress, eased) = self.animate_collapse(id, open);
+        let (progress, eased) = if force_open { (1.0, 1.0) } else { (progress, eased) };
 
         let hovered = ui.hovered(&header_id);
         {
@@ -2521,6 +2534,11 @@ impl Kit {
             body(ui, kit);
             kit.fill_rule(ui, kit.palette.border_muted);
         });
+    }
+
+    /// The search that is leaving out non-matching settings rows, if one is.
+    pub fn setting_filter(&self) -> Option<&str> {
+        self.setting_filter.as_deref()
     }
 
     /// Leaves out the settings rows whose label does not match `query`, until it is set back to `None`.

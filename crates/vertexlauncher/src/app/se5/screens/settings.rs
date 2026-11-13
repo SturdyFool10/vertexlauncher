@@ -650,6 +650,49 @@ fn section_aliases(id: &str) -> Vec<String> {
     names
 }
 
+/// The names of the settings in the Graphics group of the Graphics & Performance section.
+fn graphics_keywords() -> Vec<String> {
+    use vertex_i18n::t;
+    vec![
+        t(IntSettingId::SkinPreviewMsaaSamples.spec().label).into_owned(),
+        t(ToggleSettingId::SkinPreviewFreshFormatEnabled.spec().label).into_owned(),
+        t(ToggleSettingId::SkinPreview3dLayersEnabled.spec().label).into_owned(),
+        t(FloatSettingId::SkinPreviewMotionBlurAmount.spec().label).into_owned(),
+        t(FloatSettingId::SkinPreviewMotionBlurShutterFrames.spec().label).into_owned(),
+        t(IntSettingId::SkinPreviewMotionBlurSampleCount.spec().label).into_owned(),
+        t(config::DropdownSettingId::GraphicsAdapterPreferenceType.spec().label).into_owned(),
+        t(config::DropdownSettingId::GraphicsAdapterPreference.spec().label).into_owned(),
+        t(config::DropdownSettingId::GraphicsApiPreference.spec().label).into_owned(),
+        t(ToggleSettingId::FrameLimiterEnabled.spec().label).into_owned(),
+        t(IntSettingId::FrameLimitFps.spec().label).into_owned(),
+        tr!("Skin Preview Texel Edge AA").into_owned(),
+        tr!("Skin Preview Post Anti-Aliasing").into_owned(),
+        tr!("SVG Anti-Aliasing").into_owned(),
+        tr!("Enable Skin Preview Motion Blur").into_owned(),
+    ]
+}
+
+/// The names of the settings in the HDR group.
+fn hdr_keywords() -> Vec<String> {
+    [
+        tr!("HDR When Available"),
+        tr!("HDR Color Space"),
+        tr!("HDR UI Brightness"),
+        tr!("HDR UI Paper White"),
+        tr!("HDR Max Content Light Level"),
+        tr!("HDR Max Frame-Average Light Level"),
+    ]
+    .map(std::borrow::Cow::into_owned)
+    .to_vec()
+}
+
+/// The names of the settings in the Downloads group.
+fn download_keywords() -> Vec<String> {
+    [tr!("Max Concurrent Downloads"), tr!("Enable Download Speed Limit"), tr!("Download Speed Limit")]
+        .map(std::borrow::Cow::into_owned)
+        .to_vec()
+}
+
 /// The names of the settings inside a section, so a search finds a section by what is in it.
 fn section_keywords(id: &str) -> Vec<String> {
     use vertex_i18n::t;
@@ -701,32 +744,12 @@ fn section_keywords(id: &str) -> Vec<String> {
             toggle(ToggleSettingId::SyncCommandHistoryEnabled),
             toggle(ToggleSettingId::SyncHotbarsEnabled),
         ],
-        "graphics" => vec![
-            int(IntSettingId::SkinPreviewMsaaSamples),
-            toggle(ToggleSettingId::SkinPreviewFreshFormatEnabled),
-            toggle(ToggleSettingId::SkinPreview3dLayersEnabled),
-            float(FloatSettingId::SkinPreviewMotionBlurAmount),
-            float(FloatSettingId::SkinPreviewMotionBlurShutterFrames),
-            int(IntSettingId::SkinPreviewMotionBlurSampleCount),
-            tr!("HDR Max Content Light Level").into_owned(),
-            tr!("HDR Max Frame-Average Light Level").into_owned(),
-            t(config::DropdownSettingId::GraphicsAdapterPreferenceType.spec().label).into_owned(),
-            tr!("Enable Download Speed Limit").into_owned(),
-            tr!("Skin Preview Texel Edge AA").into_owned(),
-            tr!("Skin Preview Post Anti-Aliasing").into_owned(),
-            tr!("SVG Anti-Aliasing").into_owned(),
-            tr!("Enable Skin Preview Motion Blur").into_owned(),
-            tr!("HDR When Available").into_owned(),
-            tr!("HDR Color Space").into_owned(),
-            tr!("HDR UI Brightness").into_owned(),
-            tr!("HDR UI Paper White").into_owned(),
-            t(config::DropdownSettingId::GraphicsApiPreference.spec().label).into_owned(),
-            t(config::DropdownSettingId::GraphicsAdapterPreference.spec().label).into_owned(),
-            toggle(ToggleSettingId::FrameLimiterEnabled),
-            int(IntSettingId::FrameLimitFps),
-            tr!("Max Concurrent Downloads").into_owned(),
-            tr!("Download Speed Limit").into_owned(),
-        ],
+        "graphics" => {
+            let mut all = graphics_keywords();
+            all.extend(hdr_keywords());
+            all.extend(download_keywords());
+            all
+        }
         "minecraft" => vec![
             tr!("Minecraft Version Groups").into_owned(),
             toggle(ToggleSettingId::SnapshotsAndBetasEnabled),
@@ -1199,9 +1222,33 @@ fn text(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
 }
 
 fn typography(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
-    kit.collapsible(ui, "settings::text-styles", &tr!("Text styles"), |ui, kit| {
+    let keywords = [tr!("Size"), tr!("Weight"), tr!("Font"), tr!("CJK font"), tr!("Emoji font")]
+        .map(std::borrow::Cow::into_owned);
+    group(ui, kit, "settings::text-styles", &tr!("Text styles"), &keywords, |ui, kit| {
         typography_body(ui, kit, state)
     });
+}
+
+/// A folding group inside a section. While a search lists only matching settings, a group with none is left out and
+/// one with some is open, so what matched is not hidden in a folded group.
+fn group(
+    ui: &mut Ui<'_>,
+    kit: &mut Kit,
+    id: &str,
+    label: &str,
+    keywords: &[String],
+    body: impl FnOnce(&mut Ui<'_>, &mut Kit),
+) {
+    let searching = match kit.setting_filter() {
+        Some(query) => {
+            if !keywords.iter().any(|keyword| kit::fuzzy_matches(query, &[keyword.clone()])) {
+                return;
+            }
+            true
+        }
+        None => false,
+    };
+    kit.collapsible_ex(ui, id, label, searching, body);
 }
 
 fn typography_body(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
@@ -1364,6 +1411,16 @@ fn script_index(current: Option<&str>, names: &[&str]) -> usize {
 // -- Graphics -------------------------------------------------------------------------------------------------------
 
 fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
+    group(ui, kit, "settings::graphics-general", &tr!("Graphics"), &graphics_keywords(), |ui, kit| {
+        graphics_general(ui, kit, state)
+    });
+    group(ui, kit, "settings::graphics-hdr", &tr!("HDR"), &hdr_keywords(), |ui, kit| hdr_group(ui, kit, state));
+    group(ui, kit, "settings::graphics-downloads", &tr!("Downloads"), &download_keywords(), |ui, kit| {
+        downloads(ui, kit, state)
+    });
+}
+
+fn graphics_general(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if let Some(mode) = kit.choice_setting(
         ui,
         "settings::texel-aa",
@@ -1490,6 +1547,16 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     ) {
         state.config.set_graphics_api_preference(value);
     }
+    toggles(
+        ui,
+        kit,
+        &mut state.config,
+        &[ToggleSettingId::FrameLimiterEnabled],
+    );
+}
+
+/// HDR on or off, and its controls while it is on.
+fn hdr_group(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     let mut hdr = state.config.hdr_when_available();
     if kit.toggle_setting(
         ui,
@@ -1503,13 +1570,6 @@ fn graphics(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     if state.config.hdr_when_available() {
         hdr_controls(ui, kit, &mut state.config);
     }
-    toggles(
-        ui,
-        kit,
-        &mut state.config,
-        &[ToggleSettingId::FrameLimiterEnabled],
-    );
-    downloads(ui, kit, state);
 }
 
 /// Every HDR control, shown while HDR is on.

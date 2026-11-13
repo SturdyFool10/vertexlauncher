@@ -612,6 +612,7 @@ translators = []
 # placeholders: {version_name}
 "Downloading {version_name}..." = ""
 "Downloading..." = ""
+"Downloads" = ""
 # placeholders: {limit}
 "Downloads limited to {limit}." = ""
 # placeholders: {count}
@@ -906,6 +907,7 @@ translators = []
 "Graphics Driver + Version" = ""
 "Graphics Preset" = ""
 "Greek" = ""
+"HDR" = ""
 "HDR Color Space" = ""
 "HDR Max Content Light Level" = ""
 "HDR Max Frame-Average Light Level" = ""
