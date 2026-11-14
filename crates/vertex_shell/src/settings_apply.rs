@@ -122,12 +122,15 @@ pub fn presentation_settings(config: &Config, base: PresentationSettings) -> Pre
         FrameRateLimit::Unlimited
     };
     // Immediate mode: frames are drawn as fast as the GPU allows, so vsync stays off and the limiter (when set) is
-    // the only thing pacing them.
+    // the only thing pacing them. The limit is the number the user typed: the engine would otherwise round it down to a
+    // fraction of the display's refresh rate (60 on a 175 Hz display became 58, 120 became 87), which only matters
+    // when frames are locked to the display.
     PresentationSettings {
         hdr_enabled: config.hdr_when_available(),
         hdr_color_space: hdr_color_space(config.hdr_color_space()),
         frame_rate_limit: limit,
         vsync: sturdy::VSync::Off,
+        snap_frame_rate_limit_to_refresh: false,
         ..base
     }
 }
@@ -426,6 +429,7 @@ impl Appliers {
         }
         // The UI brightness applies at once. The light levels need the HDR swapchain to exist, which the engine
         // recreates a frame or so after the change, so they are sent by `poll_hdr_metadata` instead.
+        sturdy::ui::set_bindless_textures(config.ui_bindless_textures());
         sturdy::ui::set_hdr_reference_white(config.hdr_ui_white_scale());
         sturdy::ui::set_hdr_paper_white_nits(config.hdr_ui_paper_white_nits() as f32);
         self.pending_light_levels = (config.hdr_when_available() && config.hdr_color_space() == config::HdrColorSpace::Hdr10St2084)
@@ -448,6 +452,20 @@ mod tests {
     fn default_config_has_no_frame_cap() {
         let settings = presentation_settings(&Config::default(), PresentationSettings::default());
         assert_eq!(settings.frame_rate_limit, FrameRateLimit::Unlimited);
+    }
+
+    #[test]
+    fn the_frame_limit_is_not_rounded_to_the_display_refresh() {
+        let mut config = Config::default();
+        config.for_each_toggle_mut(|spec, value| {
+            if spec.id == config::ToggleSettingId::FrameLimiterEnabled {
+                *value = true;
+            }
+        });
+        config.set_frame_limit_fps(60);
+        let settings = presentation_settings(&config, PresentationSettings::default());
+        assert_eq!(settings.frame_rate_limit, FrameRateLimit::Fps(60.0));
+        assert!(!settings.snap_frame_rate_limit_to_refresh);
     }
 
     #[test]

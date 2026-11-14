@@ -1119,6 +1119,7 @@ fn restore_domain(config: &mut Config, from: &Config, domain: SettingsDomain) {
         }
         SettingsDomain::Presentation => {
             config.set_hdr_when_available(from.hdr_when_available());
+            config.set_ui_bindless_textures(from.ui_bindless_textures());
             config.set_hdr_color_space(from.hdr_color_space());
             config.set_hdr_ui_white_scale(from.hdr_ui_white_scale());
             config.set_hdr_max_cll_nits(from.hdr_max_cll_nits());

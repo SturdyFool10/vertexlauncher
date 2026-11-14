@@ -1,4 +1,4 @@
-//! Legal: the licences of the fonts and icons Vertex bundles, as an accordion: open a notice to read its full text.
+//! Legal: Vertex's own licence and the licences of the fonts and icons it bundles, as an accordion: open a notice to read its full text.
 
 use vertex_i18n::{tr, trn};
 use std::collections::BTreeSet;
@@ -32,8 +32,20 @@ impl Notice {
     }
 }
 
-/// Vertex's own bundled fonts and icons: (projects, licence, file, text).
+/// Vertex's own licence, and its bundled fonts and icons: (projects, licence, file, text).
 const BUNDLED: &[(&[&str], &str, &str, &str)] = &[
+    (
+        &["Vertex Launcher"],
+        "GPL-3.0",
+        "LICENSE.md",
+        include_str!("../../../../../../LICENSE.md"),
+    ),
+    (
+        &["SturdyEngine"],
+        "MIT",
+        "legal/STURDY_ENGINE_LICENSE.txt",
+        include_str!("../../../../../launcher_ui/src/legal/STURDY_ENGINE_LICENSE.txt"),
+    ),
     (
         &["Tabler Icons"],
         "MIT",

@@ -669,6 +669,7 @@ fn graphics_keywords() -> Vec<String> {
         tr!("Skin Preview Post Anti-Aliasing").into_owned(),
         tr!("SVG Anti-Aliasing").into_owned(),
         tr!("Enable Skin Preview Motion Blur").into_owned(),
+        tr!("Bindless UI Textures").into_owned(),
     ]
 }
 
@@ -1471,6 +1472,17 @@ fn graphics_general(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             ToggleSettingId::SkinPreview3dLayersEnabled,
         ],
     );
+
+    let mut bindless = state.config.ui_bindless_textures();
+    if kit.toggle_setting(
+        ui,
+        "settings::bindless-ui",
+        &tr!("Bindless UI Textures"),
+        Some(&tr!("Draws the launcher's interface through one shared texture table, which needs fewer draw calls and descriptor updates. Only used when your graphics driver supports it; otherwise the launcher falls back automatically. Turn it off if you see missing or wrong images in the interface. Default: On.")),
+        &mut bindless,
+    ) {
+        state.config.set_ui_bindless_textures(bindless);
+    }
 
     let mut blur = state.config.skin_preview_motion_blur_enabled();
     if kit.toggle_setting(

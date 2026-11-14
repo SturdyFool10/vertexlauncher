@@ -21,6 +21,8 @@ instances.json
 .flatpak-builder/
 build-dir/
 data/
+# The language crate's locale tables are compiled in (include_str!), so they must be in a fresh clone.
+!/crates/vertex_i18n/data/
 cargo-sources.json
 # Keep the launcher icon asset tracked even if a broader image ignore is added later.
 !/Vertex.webp

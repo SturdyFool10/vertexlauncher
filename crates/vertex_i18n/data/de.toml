@@ -1,0 +1,44 @@
+tag = "de"
+
+[number]
+decimal = ","
+group = "."
+group_from = 4
+
+[words]
+count = ["null", "ein", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun", "zehn"]
+several = "mehrere"
+less_than_a_second = "weniger als eine Sekunde"
+just_now = "gerade eben"
+about = "etwa {amount}"
+ago = "vor {span}"
+from_now = "in {span}"
+remainder = "{count} weitere"
+
+[units]
+day = { one = "Tag", other = "Tage" }
+hour = { one = "Stunde", other = "Stunden" }
+minute = { one = "Minute", other = "Minuten" }
+second = { one = "Sekunde", other = "Sekunden" }
+byte = { one = "Byte", other = "Bytes" }
+
+[lists.and]
+two = "{0} und {1}"
+start = "{0}, {1}"
+middle = "{0}, {1}"
+end = "{0} und {1}"
+
+[lists.or]
+two = "{0} oder {1}"
+start = "{0}, {1}"
+middle = "{0}, {1}"
+end = "{0} oder {1}"
+
+[ordinal]
+rule = "single"
+other = "{n}."
+
+[calendar]
+months_long = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"]
+months_short = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."]
+weekdays_short = ["Mo.", "Di.", "Mi.", "Do.", "Fr.", "Sa.", "So."]

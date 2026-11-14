@@ -373,6 +373,8 @@ pub struct Config {
     skin_preview_fresh_format_enabled: bool,
     skin_preview_3d_layers_enabled: bool,
     hdr_when_available: bool,
+    /// Draw the UI's textures through one descriptor table where the graphics device supports it (on by default).
+    ui_bindless_textures: bool,
     #[serde(default = "default_hdr_color_space")]
     hdr_color_space: HdrColorSpace,
     /// UI reference white relative to the display's SDR white (1.0 = same); raise it to brighten the UI.
@@ -772,6 +774,15 @@ impl Config {
 
     pub fn set_hdr_when_available(&mut self, enabled: bool) {
         self.hdr_when_available = enabled;
+    }
+
+    /// Whether the UI may draw its textures through one bindless descriptor table (used only where the device supports it).
+    pub fn ui_bindless_textures(&self) -> bool {
+        self.ui_bindless_textures
+    }
+
+    pub fn set_ui_bindless_textures(&mut self, enabled: bool) {
+        self.ui_bindless_textures = enabled;
     }
 
     /// Returns whether frame limiter is enabled.
@@ -1565,6 +1576,7 @@ impl Default for Config {
             skin_preview_fresh_format_enabled: false,
             skin_preview_3d_layers_enabled: false,
             hdr_when_available: false,
+            ui_bindless_textures: true,
             hdr_color_space: default_hdr_color_space(),
             hdr_ui_white_scale: default_hdr_ui_white_scale(),
             hdr_ui_paper_white_nits: default_hdr_ui_paper_white_nits(),

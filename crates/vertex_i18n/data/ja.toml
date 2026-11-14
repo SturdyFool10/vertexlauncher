@@ -1,0 +1,46 @@
+tag = "ja"
+
+[number]
+decimal = "."
+group = ","
+group_from = 4
+
+[words]
+count = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+several = "数"
+less_than_a_second = "1秒未満"
+just_now = "たった今"
+about = "約{amount}"
+ago = "{span}前"
+from_now = "{span}後"
+remainder = "他{count}件"
+
+[units]
+day = { other = "日" }
+hour = { other = "時間" }
+minute = { other = "分" }
+second = { other = "秒" }
+byte = { other = "バイト" }
+counted = "{number}{unit}"
+duration_join = "{0}{1}"
+
+[lists.and]
+two = "{0}、{1}"
+start = "{0}、{1}"
+middle = "{0}、{1}"
+end = "{0}、{1}"
+
+[lists.or]
+two = "{0}または{1}"
+start = "{0}、{1}"
+middle = "{0}、{1}"
+end = "{0}、または{1}"
+
+[ordinal]
+rule = "single"
+other = "第{n}"
+
+[calendar]
+months_long = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"]
+months_short = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"]
+weekdays_short = ["月", "火", "水", "木", "金", "土", "日"]

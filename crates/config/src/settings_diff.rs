@@ -149,6 +149,7 @@ impl Config {
             skin_preview_fresh_format_enabled,
             skin_preview_3d_layers_enabled,
             hdr_when_available,
+            ui_bindless_textures,
             hdr_color_space,
             hdr_ui_white_scale,
             hdr_ui_paper_white_nits,
@@ -220,6 +221,7 @@ impl Config {
         );
         diff.mark(
             *hdr_when_available != new.hdr_when_available
+                || *ui_bindless_textures != new.ui_bindless_textures
                 || *hdr_color_space != new.hdr_color_space
                 || *hdr_ui_white_scale != new.hdr_ui_white_scale
                 || *hdr_ui_paper_white_nits != new.hdr_ui_paper_white_nits

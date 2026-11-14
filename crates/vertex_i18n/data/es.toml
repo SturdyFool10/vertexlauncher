@@ -1,0 +1,46 @@
+tag = "es"
+
+[number]
+decimal = ","
+group = "."
+group_from = 5
+
+[words]
+count = ["cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez"]
+several = "varios"
+less_than_a_second = "menos de un segundo"
+just_now = "ahora mismo"
+about = "aproximadamente {amount}"
+ago = "hace {span}"
+from_now = "dentro de {span}"
+remainder = "{count} más"
+
+[units]
+day = { one = "día", other = "días" }
+hour = { one = "hora", other = "horas" }
+minute = { one = "minuto", other = "minutos" }
+second = { one = "segundo", other = "segundos" }
+byte = { one = "byte", other = "bytes" }
+
+[lists.and]
+two = "{0} y {1}"
+start = "{0}, {1}"
+middle = "{0}, {1}"
+end = "{0} y {1}"
+swaps = [{ from = " y ", to = " e ", when_next_starts_with = ["i", "hi"], except = ["hia", "hie"] }]
+
+[lists.or]
+two = "{0} o {1}"
+start = "{0}, {1}"
+middle = "{0}, {1}"
+end = "{0} o {1}"
+swaps = [{ from = " o ", to = " u ", when_next_starts_with = ["o", "ho"] }]
+
+[ordinal]
+rule = "single"
+other = "{n}.º"
+
+[calendar]
+months_long = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+months_short = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+weekdays_short = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]

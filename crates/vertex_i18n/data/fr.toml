@@ -1,0 +1,46 @@
+tag = "fr"
+
+[number]
+decimal = ","
+group = " "
+group_from = 4
+
+[words]
+count = ["zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix"]
+several = "plusieurs"
+less_than_a_second = "moins d'une seconde"
+just_now = "à l'instant"
+about = "environ {amount}"
+ago = "il y a {span}"
+from_now = "dans {span}"
+remainder = "{count} autres"
+
+[units]
+day = { one = "jour", other = "jours" }
+hour = { one = "heure", other = "heures" }
+minute = { one = "minute", other = "minutes" }
+second = { one = "seconde", other = "secondes" }
+byte = { one = "octet", other = "octets" }
+byte_prefixes = ["Ko", "Mo", "Go", "To"]
+
+[lists.and]
+two = "{0} et {1}"
+start = "{0}, {1}"
+middle = "{0}, {1}"
+end = "{0} et {1}"
+
+[lists.or]
+two = "{0} ou {1}"
+start = "{0}, {1}"
+middle = "{0}, {1}"
+end = "{0} ou {1}"
+
+[ordinal]
+rule = "first_only"
+one = "{n}er"
+other = "{n}e"
+
+[calendar]
+months_long = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+months_short = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+weekdays_short = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]

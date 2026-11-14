@@ -94,6 +94,7 @@ impl Config {
             skin_preview_fresh_format_enabled,
             skin_preview_3d_layers_enabled,
             hdr_when_available: _,
+            ui_bindless_textures: _,
             hdr_color_space: _,
             hdr_ui_white_scale: _,
             hdr_ui_paper_white_nits: _,
