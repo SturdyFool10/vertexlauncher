@@ -1,8 +1,11 @@
 //! Legal: Vertex's own licence and the licences of the fonts and icons it bundles, as an accordion: open a notice to read its full text.
 
 use vertex_i18n::{tr, trn};
-use std::collections::BTreeSet;
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
+
+use super::super::markdown::Document;
 
 use vertex_shell::sturdy::ui::{
     AlignX, AlignY, ChildAlignment, Clip, CornerRadius, Direction, ElementDesc, Padding,
@@ -156,7 +159,8 @@ fn notices() -> &'static [Notice] {
                         }
                     }
                 }
-                None => notices.push(Notice { names, licenses, source, text }),
+                // Windows line endings would reach the text layout as stray control characters.
+                None => notices.push(Notice { names, licenses, source, text: text.replace("\r\n", "\n").replace('\r', "\n") }),
             }
         };
         for (names, license, source, text) in BUNDLED {
@@ -184,6 +188,14 @@ fn normalize(text: &str) -> String {
 /// Which notices are open, by index; it survives leaving the screen.
 static OPEN: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
 
+/// Which notices are shown as Markdown rather than as plain text, by index. Off until switched on, per notice.
+static MARKDOWN: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
+
+thread_local! {
+    /// The parsed document of each notice shown as Markdown (parsed once, on first use; the texts never change).
+    static VIEWS: RefCell<HashMap<usize, Document>> = RefCell::new(HashMap::new());
+}
+
 pub fn render(ui: &mut Ui<'_>, kit: &mut Kit) {
     let _scroll = kit.scroll(ui, "legal::scroll", kit::SPACE_LG, kit::SPACE_XL);
     kit.text(ui, TextRole::Title, &tr!("Legal"));
@@ -204,6 +216,15 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit) {
         let _card = kit.card(ui, &card_id, kit::SPACE_SM);
         let (progress, eased) = kit.animate_collapse(&card_id, open);
         let header_id = format!("legal::notice::{index}::header");
+        let markdown = MARKDOWN.lock().is_ok_and(|on| on.contains(&index));
+        let _top = ui.element(
+            &ElementDesc::new()
+                .width(Sizing::Grow)
+                .height(Sizing::Fit)
+                .direction(Direction::LeftToRight)
+                .child_gap(kit::SPACE_SM)
+                .align(ChildAlignment::new(AlignX::Left, AlignY::Center)),
+        );
         {
             let hovered = ui.hovered(&header_id);
             let _header = ui.element(
@@ -241,6 +262,17 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit) {
                 },
             );
         }
+        // A radial toggle at the right of the heading, outside the heading so pressing it does not open or close the notice.
+        {
+            let _toggle = ui.element(&ElementDesc::new().width(Sizing::Fit).height(Sizing::Fixed(34.0)));
+            if kit.radio(ui, &format!("legal::notice::{index}::markdown"), &tr!("Enable Markdown"), markdown)
+                && let Ok(mut on) = MARKDOWN.lock()
+                && !on.remove(&index)
+            {
+                on.insert(index);
+            }
+        }
+        drop(_top);
         if kit.clicked(ui, &header_id) {
             if let Ok(mut open) = OPEN.lock()
                 && !open.remove(&index)
@@ -274,14 +306,33 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit) {
                         .clip(Clip::vertical()),
                 );
                 kit.scrollbar(ui, &text_id);
-                kit::label(
-                    ui,
-                    notice.text.trim(),
-                    &TextStyle {
-                        wrap: TextWrap::Words,
-                        ..kit.style(TextRole::Small)
-                    },
-                );
+                if markdown {
+                    // The room the text has: the box as last drawn, less its padding and the scrollbar.
+                    let width = ui
+                        .element_bounds(&text_id)
+                        .map_or(480.0, |(_, size)| size.x - 2.0 * f32::from(kit::SPACE_MD) - 14.0);
+                    let clicked = VIEWS.with(|views| {
+                        views
+                            .borrow_mut()
+                            .entry(index)
+                            .or_insert_with(|| Document::new(&notice.text))
+                            .show(ui, kit, &format!("legal::notice::{index}::markdown-view"), width)
+                    });
+                    if let Some(url) = clicked
+                        && let Err(err) = launcher_ui::desktop::open_url(&url)
+                    {
+                        tracing::warn!(target: "vertexlauncher/legal", "could not open {url}: {err}");
+                    }
+                } else {
+                    kit::label(
+                        ui,
+                        notice.text.trim(),
+                        &TextStyle {
+                            wrap: TextWrap::Words,
+                            ..kit.style(TextRole::Small)
+                        },
+                    );
+                }
             }
         });
     }

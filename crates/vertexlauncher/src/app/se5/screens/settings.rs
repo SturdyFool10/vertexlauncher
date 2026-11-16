@@ -346,7 +346,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         kit,
         "debug",
         &tr!("Debug"),
-        &tr!("Live performance readouts drawn over the launcher."),
+        &tr!("Live performance readouts and the layout inspector, drawn over the launcher."),
         |ui, kit| {
             toggles(
                 ui,
@@ -354,6 +354,16 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
                 &mut state.config,
                 &[ToggleSettingId::DebugFpsCounter, ToggleSettingId::DebugFramegraph],
             );
+            let mut shortcut = state.config.layout_inspector_shortcut();
+            if kit.toggle_setting(
+                ui,
+                "settings::layout-inspector-shortcut",
+                &tr!("Layout Inspector Shortcut"),
+                Some(&tr!("Lets Ctrl+Shift+D open and close the layout inspector: a panel on the right of the launcher that lists every element with its id, size and settings, highlighting the one under the pointer. The interface is laid out narrower by the panel's width while it is open. For development. Default: Off.")),
+                &mut shortcut,
+            ) {
+                state.config.set_layout_inspector_shortcut(shortcut);
+            }
         },
     );
     info_section(ui, kit);
@@ -812,6 +822,7 @@ fn section_keywords(id: &str) -> Vec<String> {
         "debug" => vec![
             toggle(ToggleSettingId::DebugFpsCounter),
             toggle(ToggleSettingId::DebugFramegraph),
+            tr!("Layout Inspector Shortcut").into_owned(),
         ],
         "info" => vec![
             tr!("CPU").into_owned(),

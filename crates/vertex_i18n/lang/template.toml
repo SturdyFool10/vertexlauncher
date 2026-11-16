@@ -651,6 +651,7 @@ translators = []
 "Enable Discord Rich Presence" = ""
 "Enable Download Speed Limit" = ""
 "Enable Frame Limiter" = ""
+"Enable Markdown" = ""
 "Enable OpenType Features" = ""
 "Enable Skin Expressions" = ""
 "Enable Skin Preview Motion Blur" = ""
@@ -1179,6 +1180,7 @@ translators = []
 "Launcher profiles" = ""
 "Launching" = ""
 "Launching…" = ""
+"Layout Inspector Shortcut" = ""
 "Lazy Account Refresh" = ""
 "Leave blank for None. Configure only versions you actually use." = ""
 "Leave blank to use launcher instance default JVM args." = ""
@@ -1190,6 +1192,7 @@ translators = []
 "Legacy Acrylic" = ""
 "Legacy Blur" = ""
 "Legal" = ""
+"Lets Ctrl+Shift+D open and close the layout inspector: a panel on the right of the launcher that lists every element with its id, size and settings, highlighting the one under the pointer. The interface is laid out narrower by the panel's width while it is open. For development. Default: Off." = ""
 "Lets friends see what you're playing." = ""
 "Lets the game change the mouse cursor's shape." = ""
 "Lets you scroll lists and pages by clicking and dragging their contents. Turn off if dragging keeps scrolling when you meant to select text or drag something. The mouse wheel and scroll bars always work. Default: On." = ""
@@ -1231,7 +1234,7 @@ translators = []
 "Lithuanian" = ""
 # placeholders: {x} {y}
 "Live left stick: x={x:.3}, y={y:.3}" = ""
-"Live performance readouts drawn over the launcher." = ""
+"Live performance readouts and the layout inspector, drawn over the launcher." = ""
 "Load Hotbar Activator" = ""
 "Loaded cached accounts, but token renewal failed" = ""
 # placeholders: {err}

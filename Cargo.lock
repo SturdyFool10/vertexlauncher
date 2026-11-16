@@ -1612,6 +1612,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "getopts"
+version = "0.2.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe4fbac503b8d1f88e6676011885f34b7174f46e59956bba534ba83abded4df"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3595,9 +3604,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c3a14896dfa883796f1cb410461aef38810ea05f2b2c33c5aded3649095fdad"
 dependencies = [
  "bitflags 2.11.1",
+ "getopts",
  "memchr",
+ "pulldown-cmark-escape",
  "unicase",
 ]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "pxfm"
@@ -4444,7 +4461,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "sturdy"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=65f10b6303f9a1bd73dd89b67747f287e3e6f577#65f10b6303f9a1bd73dd89b67747f287e3e6f577"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=fdc1945b94676609a792a31d2c28c62a9e11f298#fdc1945b94676609a792a31d2c28c62a9e11f298"
 dependencies = [
  "bytemuck",
  "cxx",
@@ -4460,7 +4477,7 @@ dependencies = [
 [[package]]
 name = "sturdy-macros"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=65f10b6303f9a1bd73dd89b67747f287e3e6f577#65f10b6303f9a1bd73dd89b67747f287e3e6f577"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=fdc1945b94676609a792a31d2c28c62a9e11f298#fdc1945b94676609a792a31d2c28c62a9e11f298"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4470,12 +4487,12 @@ dependencies = [
 [[package]]
 name = "sturdy-net"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=65f10b6303f9a1bd73dd89b67747f287e3e6f577#65f10b6303f9a1bd73dd89b67747f287e3e6f577"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=fdc1945b94676609a792a31d2c28c62a9e11f298#fdc1945b94676609a792a31d2c28c62a9e11f298"
 
 [[package]]
 name = "sturdy-script"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=65f10b6303f9a1bd73dd89b67747f287e3e6f577#65f10b6303f9a1bd73dd89b67747f287e3e6f577"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=fdc1945b94676609a792a31d2c28c62a9e11f298#fdc1945b94676609a792a31d2c28c62a9e11f298"
 dependencies = [
  "sturdy-net",
 ]
@@ -4483,7 +4500,7 @@ dependencies = [
 [[package]]
 name = "sturdy-sys"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=65f10b6303f9a1bd73dd89b67747f287e3e6f577#65f10b6303f9a1bd73dd89b67747f287e3e6f577"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=fdc1945b94676609a792a31d2c28c62a9e11f298#fdc1945b94676609a792a31d2c28c62a9e11f298"
 dependencies = [
  "cxx",
  "cxx-gen",
@@ -5321,6 +5338,7 @@ dependencies = [
  "managed_content",
  "modrinth",
  "objc",
+ "pulldown-cmark",
  "raw-window-handle 0.6.2",
  "regex",
  "serde",
@@ -5699,7 +5717,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

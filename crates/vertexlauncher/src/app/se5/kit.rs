@@ -14,7 +14,8 @@ use vertex_shell::palette::Palette;
 use vertex_shell::sturdy::glam::{Vec2, Vec4};
 use vertex_shell::sturdy::ui::{
     AlignX, AlignY, AttachPoint, Border, ChildAlignment, Clip, CornerRadius, Direction,
-    ElementDesc, ElementScope, FloatTarget, Floating, Padding, Sizing, TextStyle, TextWrap, Ui,
+    ElementDesc, ElementScope, FloatTarget, Floating, ImageFit, ImageSampling, Padding, Sizing, TextStyle,
+    TextWrap, Ui,
 };
 use vertex_shell::sturdy::Key;
 use vertex_shell::sturdy::ui_kit::{
@@ -1114,7 +1115,15 @@ impl Kit {
             .height(Sizing::Fixed(height))
             .corner_radius(CornerRadius::all(radius));
         match picture {
-            Some(picture) => ui.image(&desc, picture.texture),
+            // Cover: a non-square picture (a screenshot, a banner) is cropped to the box rather than squashed into it.
+            Some(picture) => ui.image_fitted(
+                &desc,
+                picture.texture,
+                ImageSampling::Linear,
+                ImageFit::Cover,
+                Vec2::splat(0.5),
+                Vec2::new(picture.width as f32, picture.height as f32),
+            ),
             None => {
                 drop(ui.element(&desc.background(self.palette.bg_light)));
             }

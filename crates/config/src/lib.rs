@@ -375,6 +375,8 @@ pub struct Config {
     hdr_when_available: bool,
     /// Draw the UI's textures through one descriptor table where the graphics device supports it (on by default).
     ui_bindless_textures: bool,
+    /// Ctrl+Shift+D opens and closes the layout inspector, a developer tool (off by default).
+    layout_inspector_shortcut: bool,
     #[serde(default = "default_hdr_color_space")]
     hdr_color_space: HdrColorSpace,
     /// UI reference white relative to the display's SDR white (1.0 = same); raise it to brighten the UI.
@@ -783,6 +785,15 @@ impl Config {
 
     pub fn set_ui_bindless_textures(&mut self, enabled: bool) {
         self.ui_bindless_textures = enabled;
+    }
+
+    /// Whether Ctrl+Shift+D opens and closes the layout inspector.
+    pub fn layout_inspector_shortcut(&self) -> bool {
+        self.layout_inspector_shortcut
+    }
+
+    pub fn set_layout_inspector_shortcut(&mut self, enabled: bool) {
+        self.layout_inspector_shortcut = enabled;
     }
 
     /// Returns whether frame limiter is enabled.
@@ -1577,6 +1588,7 @@ impl Default for Config {
             skin_preview_3d_layers_enabled: false,
             hdr_when_available: false,
             ui_bindless_textures: true,
+            layout_inspector_shortcut: false,
             hdr_color_space: default_hdr_color_space(),
             hdr_ui_white_scale: default_hdr_ui_white_scale(),
             hdr_ui_paper_white_nits: default_hdr_ui_paper_white_nits(),

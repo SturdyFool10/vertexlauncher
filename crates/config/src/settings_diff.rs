@@ -150,6 +150,7 @@ impl Config {
             skin_preview_3d_layers_enabled,
             hdr_when_available,
             ui_bindless_textures,
+            layout_inspector_shortcut,
             hdr_color_space,
             hdr_ui_white_scale,
             hdr_ui_paper_white_nits,
@@ -315,6 +316,7 @@ impl Config {
         );
         diff.mark(
             *drag_scroll_enabled != new.drag_scroll_enabled
+                || *layout_inspector_shortcut != new.layout_inspector_shortcut
                 || *gamepad_calibrations != new.gamepad_calibrations,
             SettingsDomain::Input,
         );

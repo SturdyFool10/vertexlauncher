@@ -21,6 +21,7 @@ mod gamepad;
 mod icons;
 mod images;
 mod kit;
+mod markdown;
 mod mc_text;
 mod link_profile;
 mod screens;
@@ -48,6 +49,7 @@ use launcher_ui::screens::{
 };
 use vertex_shell::palette::Palette;
 use vertex_shell::sturdy::glam::Vec2;
+use vertex_shell::sturdy::Key;
 use vertex_shell::sturdy::ui::Ui;
 use vertex_shell::sturdy::ui_kit::PopupState;
 use vertex_shell::sturdy::widgets::TextRasterMode;
@@ -791,6 +793,10 @@ struct App {
     started_fullscreen: bool,
     /// The language setting last acted on (`""` follows the system), so a change is applied once.
     applied_language: Option<String>,
+    /// The inspector colours last handed to the engine, so a theme change is sent once.
+    applied_debug_theme: Option<vertex_shell::sturdy::ui::DebugViewTheme>,
+    /// The layout inspector is open (Ctrl+Shift+D, when the setting allows it).
+    inspector_open: bool,
 }
 
 impl App {
@@ -907,6 +913,8 @@ impl App {
             window_feedback: WindowFeedback::default(),
             started_fullscreen: false,
             applied_language: None,
+            applied_debug_theme: None,
+            inspector_open: false,
         }
     }
 
@@ -925,6 +933,31 @@ impl App {
         // A language that is not installed (a deleted file, a system language with no translation) shows English.
         vertex_i18n::set_language(&tag);
         self.applied_language = Some(setting);
+    }
+
+    /// Ctrl+Shift+D opens and closes the layout inspector, when the setting allows it. The engine only knows whether it is on; how it is
+    /// opened is up to the application. The inspector's own close button is followed back into `inspector_open`.
+    fn layout_inspector_shortcut(&mut self, ui: &mut Ui<'_>) {
+        let allowed = self.state.config.layout_inspector_shortcut();
+        let engine_on = vertex_shell::sturdy::ui::debug_view();
+        if self.inspector_open && !engine_on {
+            // It was on and the engine turned it off: the user pressed its close button.
+            self.inspector_open = false;
+        }
+        let (pressed, modifiers) = {
+            let engine = ui.engine();
+            let input = engine.input();
+            (input.key_just_pressed(Key::D), input.modifiers())
+        };
+        if allowed && pressed && modifiers.control && modifiers.shift {
+            self.inspector_open = !self.inspector_open;
+        }
+        if !allowed {
+            self.inspector_open = false;
+        }
+        if self.inspector_open != vertex_shell::sturdy::ui::debug_view() {
+            vertex_shell::sturdy::ui::set_debug_view(self.inspector_open);
+        }
     }
 
     fn draw(&mut self, ui: &mut Ui<'_>) {
@@ -971,6 +1004,11 @@ impl App {
             &self.state.theme,
             effective_ui_opacity_percent(&self.state.config),
         );
+        let debug_theme = self.kit.palette.debug_view_theme();
+        if self.applied_debug_theme != Some(debug_theme) {
+            vertex_shell::sturdy::ui::set_debug_view_theme(&debug_theme);
+            self.applied_debug_theme = Some(debug_theme);
+        }
         self.kit.font_size = self.state.config.ui_font_size();
         self.kit.typography = self.state.config.typography().clone();
         self.apply_fonts(ui);
@@ -992,6 +1030,7 @@ impl App {
         update_hit_regions(ui);
         self.kit.resolve_cursor(ui);
 
+        self.layout_inspector_shortcut(ui);
         self.state.commit(&self.bridge);
         stalls.phase("commit");
         stalls.finish();

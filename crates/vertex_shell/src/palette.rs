@@ -73,6 +73,32 @@ impl Palette {
         }
     }
 
+    /// The layout inspector's colours drawn from this palette, so the inspector looks like the launcher in whatever theme it is in.
+    /// Everything is opaque (the UI opacity setting is for the launcher's own panels): the inspector sits on top of the window.
+    pub fn debug_view_theme(&self) -> sturdy::ui::DebugViewTheme {
+        let opaque = |color: Vec4| color.with_w(1.0);
+        let surface = opaque(self.bg_dark);
+        let surface_alt = opaque(mix(self.bg_dark, self.bg_light, 0.6));
+        sturdy::ui::DebugViewTheme {
+            surface,
+            surface_alt,
+            muted: opaque(self.text_muted),
+            text: opaque(self.text),
+            selected_row: opaque(mix(surface, self.primary, 0.45)),
+            highlight: self.primary.with_w(0.35),
+            close: opaque(self.danger),
+            warning: opaque(self.warning),
+            tag_border: opaque(self.border),
+            tag_floating: opaque(self.secondary),
+            tag_scroll: opaque(self.warning),
+            tag_aspect: opaque(self.highlight),
+            tag_image: opaque(self.success),
+            tag_text: opaque(self.info),
+            tag_custom: opaque(self.danger),
+            tag_shared: opaque(self.primary),
+        }
+    }
+
     pub fn hovered_fill(&self) -> Vec4 {
         mix(self.bg_light, self.text, HOVER_FILL_TEXT_MIX)
     }
@@ -176,6 +202,20 @@ mod tests {
 
     fn palette(opacity: u8) -> Palette {
         Palette::new(&Theme::default(), opacity)
+    }
+
+    #[test]
+    fn the_inspector_theme_is_opaque_and_follows_the_palette() {
+        let p = palette(40);
+        let theme = p.debug_view_theme();
+        assert_eq!(theme.surface.w, 1.0);
+        assert_eq!(theme.surface_alt.w, 1.0);
+        assert_eq!(theme.text, p.text.with_w(1.0));
+        assert_eq!(theme.close, p.danger.with_w(1.0));
+        assert!(theme.highlight.w < 1.0, "the row highlight lets the element underneath show");
+        let mut other = Palette::new(&Theme::default(), 40);
+        other.bg_dark = Vec4::new(0.9, 0.9, 0.9, 1.0);
+        assert_ne!(other.debug_view_theme().surface, theme.surface);
     }
 
     #[test]
