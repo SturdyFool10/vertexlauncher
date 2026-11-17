@@ -1,0 +1,9 @@
+# Windows executables carry their own C and C++ runtime, so a machine without the Visual C++ Redistributable can run them.
+# The engine reads this target feature and builds all of its C++ with the same static runtime (sturdy-sys build script).
+# Windows only: on Linux the C library stays dynamic (the GPU, windowing and audio libraries are loaded with dlopen at run time,
+# which a statically linked glibc cannot do), and macOS cannot link its system library statically.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

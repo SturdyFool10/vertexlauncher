@@ -3,6 +3,8 @@
 /.vscode
 config.json
 config.toml
+# The one cargo config that is tracked: it only selects the static C runtime on Windows. Machine-specific settings go in the environment.
+!/.cargo/config.toml
 cache
 logs/
 instances.json
