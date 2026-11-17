@@ -23,6 +23,7 @@ mod gamepad;
 mod gamepad_calibration_modal;
 mod import_flow;
 mod import_instance_modal;
+mod log_sanitize;
 mod obs_detection;
 mod platform;
 mod se5;
@@ -30,12 +31,10 @@ mod single_instance;
 mod startup;
 mod system_browser_sign_in;
 mod tracing_setup;
-mod webview_runtime;
-mod webview_sign_in;
 
 use self::import_flow::*;
 pub use single_instance::{SingleInstanceError, acquire_single_instance};
 pub(self) use startup::InitialInstanceInstallResult;
 pub use startup::{
-    RunError, init_tracing, maybe_run_cli_command, maybe_run_webview_helper, run_se5,
+    RunError, init_tracing, maybe_run_cli_command, run_se5,
 };

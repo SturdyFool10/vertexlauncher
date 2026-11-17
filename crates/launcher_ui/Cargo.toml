@@ -39,7 +39,7 @@ flate2 = "1.1"
 base64.workspace = true
 qrcode.workspace = true
 tar = "0.4"
-xz2 = "0.1"
+xz2 = { version = "0.1", features = ["static"] }
 vtmpack.workspace = true
 humantime.workspace = true
 regex = "1"

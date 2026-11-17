@@ -13,7 +13,7 @@ use instances::{InstanceRecord, instance_root_path};
 use launcher_runtime as tokio_runtime;
 use launcher_ui::{install_activity, notification};
 
-use super::{cli, se5, tracing_setup, webview_sign_in};
+use super::{cli, se5, tracing_setup};
 
 #[derive(Debug)]
 pub enum RunError {
@@ -289,10 +289,6 @@ fn log_startup() {
             "Launcher started. File logging unavailable; using stderr/console only."
         ),
     }
-}
-
-pub fn maybe_run_webview_helper() -> Result<bool, String> {
-    webview_sign_in::maybe_run_helper_from_args()
 }
 
 pub fn maybe_run_cli_command() -> Result<bool, String> {

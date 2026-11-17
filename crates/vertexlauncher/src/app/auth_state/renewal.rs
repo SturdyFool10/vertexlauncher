@@ -210,7 +210,7 @@ impl AuthState {
             }) {
                 tracing::error!(
                     target: "vertexlauncher/auth/renew",
-                    profile_fingerprint = %webview_sign_in::fingerprint_for_log(&profile_id),
+                    profile_fingerprint = %log_sanitize::fingerprint_for_log(&profile_id),
                     error = %err,
                     "Failed to deliver single-account renewal result."
                 );

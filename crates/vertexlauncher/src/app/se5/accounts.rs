@@ -57,7 +57,6 @@ struct MenuActions {
     select: Option<String>,
     remove: Option<String>,
     refresh: Option<String>,
-    webview: bool,
     browser: bool,
     device_code: bool,
     cancel_device_code: bool,
@@ -303,16 +302,6 @@ pub fn account_menu(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, anchor
                 }
                 if kit.button_sized(
                     ui,
-                    &format!("{ACCOUNT_MENU_ID}::webview"),
-                    &tr!("Webview Sign-in"),
-                    ButtonKind::Neutral,
-                    true,
-                    Sizing::Grow,
-                ) {
-                    actions.webview = true;
-                }
-                if kit.button_sized(
-                    ui,
                     &format!("{ACCOUNT_MENU_ID}::device"),
                     &tr!("Device Code Sign-in"),
                     ButtonKind::Neutral,
@@ -341,9 +330,6 @@ fn apply_actions(state: &mut AppState, actions: MenuActions) {
     }
     if let Some(profile_id) = actions.refresh {
         state.auth.refresh_account_token(&profile_id);
-    }
-    if actions.webview {
-        state.auth.start_webview_sign_in();
     }
     if actions.browser {
         let theme = state.theme.clone();
@@ -600,15 +586,6 @@ pub fn sign_in_dialog(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) -> b
                     true,
                 ) {
                     actions.browser = true;
-                }
-                if kit.button(
-                    ui,
-                    "accounts::webview",
-                    &tr!("Webview Sign-in"),
-                    ButtonKind::Neutral,
-                    true,
-                ) {
-                    actions.webview = true;
                 }
                 if kit.button(
                     ui,

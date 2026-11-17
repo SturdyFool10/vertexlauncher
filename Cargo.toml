@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/libudev-shim",
     "crates/app_paths",
     "crates/auth",
     "crates/config",
@@ -171,3 +172,8 @@ opt-level = 3
 
 [profile.release]
 debug = true
+
+# gilrs reads gamepads through libudev. The real libudev-sys links libudev, which would make the launcher refuse to start on a machine
+# without it; this stand-in has the same API and opens libudev at run time instead (see crates/libudev-shim).
+[patch.crates-io]
+libudev-sys = { path = "crates/libudev-shim" }

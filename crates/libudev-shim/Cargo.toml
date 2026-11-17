@@ -1,0 +1,16 @@
+[package]
+name = "libudev-sys"
+version = "0.1.4"
+edition = "2021"
+authors = ["David Cuddeback <david.cuddeback@gmail.com>"]
+build = "build.rs"
+links = "libudev"
+description = "libudev-sys with libudev opened at run time instead of linked, so a program using it starts on a machine without libudev"
+license = "MIT"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1"

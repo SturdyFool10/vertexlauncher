@@ -303,7 +303,6 @@ translators = []
 "Compatibility unknown for this version" = ""
 "Compatible with this version" = ""
 "Complete" = ""
-"Complete sign-in in the Microsoft webview window..." = ""
 "Complete sign-in in your default browser..." = ""
 "Compression" = ""
 "Configuring Vertex" = ""
@@ -715,7 +714,6 @@ translators = []
 # placeholders: {err}
 "Failed to apply content changes: {err}" = ""
 # placeholders: {err}
-"Failed to build webview: {err}" = ""
 # placeholders: {err}
 "Failed to copy screenshot: {err}" = ""
 # placeholders: {parent} {err}
@@ -753,7 +751,6 @@ translators = []
 # placeholders: {err}
 "Failed to import profile: {err}" = ""
 # placeholders: {err}
-"Failed to initialize webview builder: {err}" = ""
 # placeholders: {err}
 "Failed to link existing profile folder: {err}" = ""
 # placeholders: {err}
@@ -1323,7 +1320,6 @@ translators = []
 "Microsoft sign-in finished successfully." = ""
 "Microsoft sign-in was canceled" = ""
 # placeholders: {seconds}
-"Microsoft sign-in webview never showed page activity within {seconds} seconds and likely failed to render the login page. See launcher logs for details." = ""
 "Minecraft" = ""
 "Minecraft Version" = ""
 "Minecraft Version Groups" = ""
@@ -2236,8 +2232,6 @@ translators = []
 "Weather Radius" = ""
 "Web Links" = ""
 "WebGPU" = ""
-"Webview Sign-in" = ""
-"Webview sign-in is not supported on this platform" = ""
 "Weight" = ""
 "Welcome back" = ""
 # placeholders: {name}

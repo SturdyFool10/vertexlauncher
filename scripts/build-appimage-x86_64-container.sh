@@ -126,7 +126,6 @@ podman "${PODMAN_ARGS[@]}" \
       rustup default stable >/dev/null
       rustup target add x86_64-unknown-linux-gnu >/dev/null
 
-      bash /workspace/scripts/patch-wry-source.sh
 
       echo "[appimage-x86_64] building native x86_64 binary..."
 

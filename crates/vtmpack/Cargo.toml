@@ -16,4 +16,4 @@ toml.workspace = true
 tracing.workspace = true
 vertex_constants.workspace = true
 tar = "0.4"
-xz2 = "0.1"
+xz2 = { version = "0.1", features = ["static"] }

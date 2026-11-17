@@ -2,7 +2,7 @@
 #[cfg(all(target_os = "windows", target_env = "gnu"))]
 compile_error!(
     "Windows GNU builds are not supported for Vertex Launcher. \
-Use the MSVC target (for example: x86_64-pc-windows-msvc) so WebView2 loader libraries are statically linked."
+Use the MSVC target (for example: x86_64-pc-windows-msvc) so the Windows runtime is linked the way the engine expects."
 );
 
 mod app;
@@ -13,14 +13,6 @@ fn main() -> std::process::ExitCode {
     let log_path = app::init_tracing();
     vertex_shell::watchdog::step("logging ready");
 
-    match app::maybe_run_webview_helper() {
-        Ok(true) => return std::process::ExitCode::SUCCESS,
-        Ok(false) => {}
-        Err(err) => {
-            eprintln!("{err}");
-            std::process::exit(1);
-        }
-    }
     match app::maybe_run_cli_command() {
         Ok(true) => return std::process::ExitCode::SUCCESS,
         Ok(false) => {}

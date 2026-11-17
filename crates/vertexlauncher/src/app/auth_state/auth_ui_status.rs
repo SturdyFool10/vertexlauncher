@@ -5,7 +5,6 @@ pub enum AuthUiStatus {
     RefreshingCachedSession,
     RefreshingActiveSession,
     Starting,
-    AwaitingBrowser,
     AwaitingExternalBrowser,
     AwaitingDeviceCode(String),
     WaitingForAuthorization,
@@ -19,9 +18,6 @@ impl AuthUiStatus {
             AuthUiStatus::RefreshingCachedSession => Some(tr!("Refreshing cached account session...")),
             AuthUiStatus::RefreshingActiveSession => Some(tr!("Refreshing account token...")),
             AuthUiStatus::Starting => Some(tr!("Preparing Microsoft sign-in...")),
-            AuthUiStatus::AwaitingBrowser => {
-                Some(tr!("Complete sign-in in the Microsoft webview window..."))
-            }
             AuthUiStatus::AwaitingExternalBrowser => {
                 Some(tr!("Complete sign-in in your default browser..."))
             }

@@ -34,7 +34,7 @@ TLS is done with rustls, so OpenSSL is not needed.
 
 ### Linux
 
-Native builds need `pkg-config` plus the development packages for GTK 3 and the WebKitGTK 4.1 / libsoup 3 stack used by the embedded Microsoft sign-in webview, and `libudev`. Wayland and X11 libraries are loaded at runtime and are not build dependencies.
+Native builds need `pkg-config`. Wayland and X11 libraries are loaded at runtime and are not build dependencies.
 
 Debian/Ubuntu (22.04+ / Debian 12+):
 
@@ -73,7 +73,7 @@ Install the Xcode Command Line Tools (`xcode-select --install`). Only Apple Sili
 
 ### Portable Linux builds
 
-Linux release binaries should not be built on a rolling distro with plain `cargo build`, because that inherits the host glibc baseline and the host GTK/WebKit stack. The x86-64 release scripts build in a CentOS 7 container so the binary links against a `glibc 2.17` baseline, and print the highest required glibc symbol version after each build (enforcing `VERTEX_MAX_GLIBC_VERSION=2.17` by default). Dependency versions are fixed by `Cargo.lock`; native builds need no source patching (the container scripts still run `scripts/patch-wry-source.sh`, which is a no-op when the locked `wry` does not need it).
+Linux release binaries should not be built on a rolling distro with plain `cargo build`, because that inherits the host glibc baseline. The x86-64 release scripts build in a CentOS 7 container so the binary links against a `glibc 2.17` baseline, and print the highest required glibc symbol version after each build (enforcing `VERTEX_MAX_GLIBC_VERSION=2.17` by default). Dependency versions are fixed by `Cargo.lock`; native builds need no source patching.
 
 If you want the portable Linux deliverables instead of a host-linked binary, use the dedicated helper:
 

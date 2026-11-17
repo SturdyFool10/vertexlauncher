@@ -2,7 +2,7 @@ use vertex_i18n::tr;
 use super::*;
 
 impl AuthState {
-    /// Drains events from the interactive (webview / system browser) sign-in worker.
+    /// Drains events from the interactive (system browser) sign-in worker.
     pub(super) fn poll_interactive_flow(&mut self) {
         let mut flow_finished = false;
 
@@ -15,9 +15,6 @@ impl AuthState {
             };
             match next_event {
                 Ok(event) => match event {
-                    AuthFlowEvent::AwaitingBrowser => {
-                        self.status = AuthUiStatus::AwaitingBrowser;
-                    }
                     AuthFlowEvent::AwaitingExternalBrowser => {
                         self.status = AuthUiStatus::AwaitingExternalBrowser;
                     }

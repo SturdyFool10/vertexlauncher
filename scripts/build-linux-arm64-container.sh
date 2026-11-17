@@ -79,10 +79,10 @@ podman run --rm \
     export CFLAGS_aarch64_unknown_linux_gnu="${CROSS_FLAGS}"
     export CXXFLAGS_aarch64_unknown_linux_gnu="${CROSS_FLAGS}"
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=clang
-    # --allow-shlib-undefined: the transitive libraries of WebKitGTK resolve at run time on the target.
+    # --allow-shlib-undefined: shared libraries in the sysroot resolve their own dependencies at run time on the target.
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=--target=${TRIPLE} -C link-arg=--sysroot=${SYSROOT} -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--allow-shlib-undefined"
 
-    # pkg-config (GTK/WebKit for wry) against the sysroot.
+    # pkg-config against the sysroot.
     export PKG_CONFIG_ALLOW_CROSS=1
     export PKG_CONFIG_SYSROOT_DIR="${SYSROOT}"
     export PKG_CONFIG_LIBDIR="${SYSROOT}/usr/lib/${TRIPLE}/pkgconfig:${SYSROOT}/usr/share/pkgconfig"
@@ -115,7 +115,6 @@ set(ENV{PKG_CONFIG_LIBDIR} ${SYSROOT}/usr/lib/${TRIPLE}/pkgconfig:${SYSROOT}/usr
 EOF
     export CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu="${TOOLCHAIN_FILE}"
 
-    bash /workspace/scripts/patch-wry-source.sh
 
     echo "[linux-arm64] cleaning stale workspace build-script artifacts..."
     cargo clean --package vertexlauncher --package launcher_ui || true

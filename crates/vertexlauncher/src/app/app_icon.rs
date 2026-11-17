@@ -13,16 +13,6 @@ pub(crate) fn rgba() -> Option<(u32, u32, Vec<u8>)> {
     Some((width, height, decoded.into_raw()))
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-pub(crate) fn tao_icon() -> Option<crate::app::webview_runtime::tao::window::Icon> {
-    let decoded = image::load_from_memory_with_format(APP_ICON_WEBP, ImageFormat::WebP)
-        .ok()?
-        .into_rgba8();
-    let (width, height) = decoded.dimensions();
-    crate::app::webview_runtime::tao::window::Icon::from_rgba(decoded.into_raw(), width, height)
-        .ok()
-}
-
 #[cfg(target_os = "macos")]
 pub(crate) fn apply_macos_dock_icon() {
     if let Err(err) = apply_macos_dock_icon_inner() {

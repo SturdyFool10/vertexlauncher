@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use super::{system_browser_sign_in, webview_sign_in};
+use super::{log_sanitize, system_browser_sign_in};
 
 #[path = "auth_state/account_ui_entry.rs"]
 mod account_ui_entry;
@@ -48,7 +48,7 @@ use self::error_classification::{is_http_auth_error, is_nonfatal_account_cache_e
 pub use self::launch_auth_context::LaunchAuthContext;
 use self::renewal_notifications::emit_cached_account_renewal_notification;
 use self::renewal_result::RenewalResult;
-use self::sign_in_workers::{run_sign_in_flow, run_system_browser_sign_in_flow};
+use self::sign_in_workers::run_system_browser_sign_in_flow;
 
 pub struct AuthState {
     accounts_state: CachedAccountsState,
@@ -219,29 +219,6 @@ impl AuthState {
         self.poll_renewal();
         self.poll_interactive_flow();
         self.poll_device_code_flow();
-    }
-
-    pub fn start_webview_sign_in(&mut self) {
-        if self.pending_load.is_some() || self.flow.is_some() || self.device_code_flow.is_some() || self.renewal.is_some() {
-            return;
-        }
-
-        let client_id = match microsoft_client_id() {
-            Ok(client_id) => client_id,
-            Err(err) => {
-                self.status = AuthUiStatus::Error(err);
-                return;
-            }
-        };
-
-        self.status = AuthUiStatus::Starting;
-
-        let (sender, receiver) = mpsc::channel();
-        let _ = tokio_runtime::spawn_blocking_detached(move || {
-            run_sign_in_flow(client_id, sender);
-        });
-
-        self.flow = Some(receiver);
     }
 
     pub fn start_device_code_sign_in(&mut self) {

@@ -90,7 +90,6 @@ podman run --rm \
     export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
     export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 
-    bash /workspace/scripts/patch-wry-source.sh
 
     # Purge any stale build artifacts that may have been compiled against a
     # newer glibc version on the host. Without cleaning the target directory

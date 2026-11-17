@@ -48,8 +48,8 @@ pub(super) fn emit_cached_account_renewal_notification(event: CachedAccountRenew
             let name = mention(&profile_id, &display_name);
             tracing::warn!(
                 target: "vertexlauncher/auth/renew",
-                profile_fingerprint = %webview_sign_in::fingerprint_for_log(&profile_id),
-                error = %webview_sign_in::sanitize_message_for_log(&error),
+                profile_fingerprint = %log_sanitize::fingerprint_for_log(&profile_id),
+                error = %log_sanitize::sanitize_message_for_log(&error),
                 "Auto-renew login notification reported an error."
             );
             retract_from_stack(RENEWING_KEY, vec![name.clone()]);
