@@ -6,12 +6,15 @@ mod async_helpers;
 mod install_types;
 #[path = "installation_core/installation_error.rs"]
 mod installation_error;
+#[path = "installation_core/java_update.rs"]
+mod java_update;
 #[path = "installation_core/version_catalog_types.rs"]
 mod version_catalog_types;
 
 use async_helpers::*;
 pub use install_types::*;
 pub use installation_error::*;
+pub use java_update::*;
 pub use version_catalog_types::*;
 
 pub fn download_batch(
@@ -77,87 +80,6 @@ pub fn fetch_version_catalog_with_refresh(
             }
         }
     }
-}
-
-pub fn ensure_openjdk_runtime(runtime_major: u8) -> Result<PathBuf, InstallationError> {
-    let (os, arch, arch_cache_key) = platform_for_adoptium()?;
-    let install_root = cache_root_dir()
-        .join("java")
-        .join(format!("openjdk-{runtime_major}-{arch_cache_key}"));
-    if let Some(existing) = find_java_executable_under(install_root.as_path())? {
-        return Ok(canonicalize_existing_path(existing));
-    }
-
-    fs_create_dir_all(install_root.parent().unwrap_or_else(|| Path::new(".")))?;
-    if install_root.exists() {
-        fs_remove_dir_all(&install_root)?;
-    }
-    fs_create_dir_all(&install_root)?;
-
-    let metadata_url = format!(
-        "https://api.adoptium.net/v3/assets/latest/{runtime_major}/hotspot?architecture={arch}&image_type=jdk&jvm_impl=hotspot&os={os}&vendor=eclipse"
-    );
-    let metadata: serde_json::Value =
-        get_json_with_user_agent(metadata_url.as_str(), OPENJDK_USER_AGENT)?;
-    let (package_url, package_name) = extract_adoptium_package(&metadata)
-        .ok_or(InstallationError::OpenJdkMetadataMissing { runtime_major })?;
-
-    let downloads_dir = cache_root_dir().join("downloads");
-    fs_create_dir_all(&downloads_dir)?;
-    let archive_path = downloads_dir.join(package_name.as_str());
-    download_file_simple(package_url.as_str(), archive_path.as_path())?;
-    extract_archive(archive_path.as_path(), install_root.as_path())?;
-
-    let installed = find_java_executable_under(install_root.as_path())?
-        .ok_or(InstallationError::OpenJdkMetadataMissing { runtime_major })?;
-    Ok(canonicalize_existing_path(installed))
-}
-
-pub async fn ensure_openjdk_runtime_async(runtime_major: u8) -> Result<PathBuf, InstallationError> {
-    let (os, arch, arch_cache_key) = platform_for_adoptium()?;
-    let install_root = cache_root_dir()
-        .join("java")
-        .join(format!("openjdk-{runtime_major}-{arch_cache_key}"));
-    if let Some(existing) = find_java_executable_under_async(install_root.clone()).await? {
-        return Ok(canonicalize_existing_path_async(existing).await);
-    }
-
-    if let Some(parent) = install_root.parent() {
-        launcher_runtime::fs::create_dir_all(parent).await?;
-    }
-    if launcher_runtime::fs::try_exists(&install_root).await? {
-        launcher_runtime::fs::remove_dir_all(&install_root).await?;
-    }
-    launcher_runtime::fs::create_dir_all(&install_root).await?;
-
-    let metadata_url = format!(
-        "https://api.adoptium.net/v3/assets/latest/{runtime_major}/hotspot?architecture={arch}&image_type=jdk&jvm_impl=hotspot&os={os}&vendor=eclipse"
-    );
-    let metadata: serde_json::Value =
-        get_json_with_user_agent_async(metadata_url.as_str(), OPENJDK_USER_AGENT).await?;
-    let (package_url, package_name) = extract_adoptium_package(&metadata)
-        .ok_or(InstallationError::OpenJdkMetadataMissing { runtime_major })?;
-
-    let downloads_dir = cache_root_dir().join("downloads");
-    launcher_runtime::fs::create_dir_all(&downloads_dir).await?;
-    let archive_path = downloads_dir.join(package_name.as_str());
-    download_file_simple_async(package_url.as_str(), archive_path.as_path()).await?;
-
-    let archive_path_for_extract = archive_path.clone();
-    let install_root_for_extract = install_root.clone();
-    launcher_runtime::spawn_blocking(move || {
-        extract_archive(
-            archive_path_for_extract.as_path(),
-            install_root_for_extract.as_path(),
-        )
-    })
-    .await
-    .map_err(map_join_error)??;
-
-    let installed = find_java_executable_under_async(install_root.clone())
-        .await?
-        .ok_or(InstallationError::OpenJdkMetadataMissing { runtime_major })?;
-    Ok(canonicalize_existing_path_async(installed).await)
 }
 
 pub fn purge_cache() -> Result<(), InstallationError> {

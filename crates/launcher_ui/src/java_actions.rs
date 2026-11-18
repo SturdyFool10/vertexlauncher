@@ -8,18 +8,22 @@ use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 
 use config::JavaRuntimeVersion;
-use installation::ensure_openjdk_runtime_async;
+use installation::{JavaUpdateReport, ensure_openjdk_runtime_async, remove_replaced_openjdk_async, update_openjdk_runtime_async};
 use launcher_runtime as tokio_runtime;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JavaActionKind {
     Download,
     Validate,
+    /// Looks up the newest release of the major version and, if the configured runtime is older, installs it.
+    Update,
 }
 
 enum Outcome {
     Downloaded(PathBuf),
     Validated(String),
+    /// The update check's report and the executable that was configured when it started.
+    Checked(JavaUpdateReport, Option<PathBuf>),
 }
 
 struct ActionResult {
@@ -63,9 +67,21 @@ pub fn poll(runtime: JavaRuntimeVersion) -> (JavaActionView, Option<PathBuf>) {
                         message
                     }
                     Ok(Outcome::Validated(version)) => tr!("Java validation passed: {version}", version = version).into_owned(),
+                    Ok(Outcome::Checked(report, previous)) => match report.installed {
+                        Some(path) => {
+                            let message = tr!("Updated {runtime} to {release} and selected {path}.", runtime = runtime.label(), release = report.latest_release, path = path.display()).into_owned();
+                            if let Some(previous) = previous {
+                                remove_replaced_runtime(previous, path.clone());
+                            }
+                            downloaded = Some(path);
+                            message
+                        }
+                        None => tr!("{runtime} is up to date ({release}).", runtime = runtime.label(), release = report.installed_release.unwrap_or(report.latest_release)).into_owned(),
+                    },
                     Err(err) => match result.kind {
                         JavaActionKind::Download => tr!("Failed to download {runtime}: {err}", runtime = runtime.label(), err = err).into_owned(),
                         JavaActionKind::Validate => tr!("Java validation failed: {err}", err = err).into_owned(),
+                        JavaActionKind::Update => tr!("Failed to check {runtime} for updates: {err}", runtime = runtime.label(), err = err).into_owned(),
                     },
                 });
             }
@@ -92,6 +108,38 @@ pub fn request_download(runtime: JavaRuntimeVersion) {
     tokio_runtime::spawn_detached(async move {
         let outcome = ensure_openjdk_runtime_async(major).await.map(Outcome::Downloaded).map_err(|err| err.to_string());
         let _ = tx.send(ActionResult { kind: JavaActionKind::Download, outcome });
+    });
+}
+
+/// Checks for a newer release of `runtime` than the executable at `current` (if any). A newer release is downloaded and returned from
+/// [`poll`] like a download, and the runtime it replaces is removed afterwards when the launcher installed it.
+pub fn request_update(runtime: JavaRuntimeVersion, current: Option<String>) {
+    let (tx, rx) = mpsc::channel();
+    if let Ok(mut states) = states().lock() {
+        let state = states.entry(runtime.major()).or_default();
+        state.in_flight = Some(JavaActionKind::Update);
+        state.rx = Some(rx);
+        state.message = Some(tr!("Checking for a newer {runtime}...", runtime = runtime.label()).into_owned());
+    }
+    let major = runtime.major();
+    let current = current.map(|path| PathBuf::from(path.trim())).filter(|path| !path.as_os_str().is_empty());
+    tokio_runtime::spawn_detached(async move {
+        let outcome = update_openjdk_runtime_async(major, current.clone())
+            .await
+            .map(|report| Outcome::Checked(report, current))
+            .map_err(|err| err.to_string());
+        let _ = tx.send(ActionResult { kind: JavaActionKind::Update, outcome });
+    });
+}
+
+/// Removes the runtime an update replaced, in the background. Anything outside the launcher's own java folder is left alone.
+fn remove_replaced_runtime(previous: PathBuf, replacement: PathBuf) {
+    tokio_runtime::spawn_detached(async move {
+        match remove_replaced_openjdk_async(previous.clone(), replacement).await {
+            Ok(true) => tracing::info!(target: "vertexlauncher/java/update", previous = %previous.display(), "Removed the Java runtime replaced by an update."),
+            Ok(false) => tracing::info!(target: "vertexlauncher/java/update", previous = %previous.display(), "Kept the previous Java runtime: it is not one the launcher installed."),
+            Err(err) => tracing::warn!(target: "vertexlauncher/java/update", previous = %previous.display(), error = %err, "Could not remove the Java runtime replaced by an update."),
+        }
     });
 }
 

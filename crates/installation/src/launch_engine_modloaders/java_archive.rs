@@ -1,16 +1,5 @@
 use super::*;
 
-pub(crate) fn extract_adoptium_package(metadata: &serde_json::Value) -> Option<(String, String)> {
-    let package = metadata
-        .as_array()?
-        .first()?
-        .get("binary")?
-        .get("package")?;
-    let link = package.get("link")?.as_str()?.to_owned();
-    let name = package.get("name")?.as_str()?.to_owned();
-    Some((link, name))
-}
-
 pub(crate) fn download_file_simple(url: &str, destination: &Path) -> Result<(), InstallationError> {
     if destination.exists() {
         return Ok(());

@@ -14,5 +14,6 @@ ureq.workspace = true
 launcher_runtime.workspace = true
 vertex_constants.workspace = true
 flate2 = "1.1"
+sha2 = "0.10"
 tar = "0.4"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }

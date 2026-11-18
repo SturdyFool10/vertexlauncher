@@ -245,10 +245,14 @@ translators = []
 "Chat Width" = ""
 "Chat height while chat is closed." = ""
 "Chat height while you have chat open." = ""
+"Check for update" = ""
 "Checking CurseForge download restrictions..." = ""
+# placeholders: {runtime}
+"Checking for a newer {runtime}..." = ""
 "Checking logs" = ""
 "Checking mods against Modrinth hashes..." = ""
 "Checking which mods are client-only..." = ""
+"Checking..." = ""
 "Chinese (Hong Kong)" = ""
 "Chinese (Simplified)" = ""
 "Chinese (Traditional)" = ""
@@ -713,15 +717,14 @@ translators = []
 "Failed to add local content: {failures}." = ""
 # placeholders: {err}
 "Failed to apply content changes: {err}" = ""
-# placeholders: {err}
+# placeholders: {runtime} {err}
+"Failed to check {runtime} for updates: {err}" = ""
 # placeholders: {err}
 "Failed to copy screenshot: {err}" = ""
 # placeholders: {parent} {err}
 "Failed to create destination directory {parent}: {err}" = ""
 # placeholders: {dest_path} {err}
 "Failed to create destination file {dest_path}: {err}" = ""
-# placeholders: {err}
-"Failed to create sign-in window: {err}" = ""
 # placeholders: {err}
 "Failed to create the settings file: {err}" = ""
 # placeholders: {path} {err}
@@ -750,7 +753,6 @@ translators = []
 "Failed to fetch version catalog: {error}" = ""
 # placeholders: {err}
 "Failed to import profile: {err}" = ""
-# placeholders: {err}
 # placeholders: {err}
 "Failed to link existing profile folder: {err}" = ""
 # placeholders: {err}
@@ -792,8 +794,6 @@ translators = []
 "Failed to resolve account avatar in background worker: {error}" = ""
 # placeholders: {what} {err}
 "Failed to save {what}: {err}" = ""
-# placeholders: {err}
-"Failed to set sign-in URL: {err}" = ""
 # placeholders: {operation} {message}
 "Failed to {operation}: {message}" = ""
 # placeholders: {operation} {message}
@@ -1312,14 +1312,10 @@ translators = []
 "Metal" = ""
 "Mica" = ""
 "Mica Alt" = ""
-"Microsoft Sign-In" = ""
 # placeholders: {error}
 "Microsoft returned an authorization error: {error}." = ""
 "Microsoft returned to Vertex Launcher, but no authorization code was included." = ""
-"Microsoft sign-in ended without a callback URL" = ""
 "Microsoft sign-in finished successfully." = ""
-"Microsoft sign-in was canceled" = ""
-# placeholders: {seconds}
 "Minecraft" = ""
 "Minecraft Version" = ""
 "Minecraft Version Groups" = ""
@@ -1879,7 +1875,6 @@ translators = []
 "Sign in with an account that owns Minecraft to launch." = ""
 "Sign in with the Microsoft account that owns Minecraft: Java Edition." = ""
 "Sign-in Failed" = ""
-"Sign-in state was poisoned unexpectedly" = ""
 "Sign-in stopped unexpectedly before completion" = ""
 "Signed in" = ""
 # placeholders: {account}
@@ -2127,6 +2122,8 @@ translators = []
 "Updated 1 {kind} entry." = ""
 # placeholders: {name}
 "Updated {name}." = ""
+# placeholders: {runtime} {release} {path}
+"Updated {runtime} to {release} and selected {path}." = ""
 # placeholders: {updated_count} {kind_label}
 "Updated {updated_count} {kind_label}." = ""
 # placeholders: {updated}
@@ -2947,6 +2944,8 @@ translators = []
 "{requested_modloader} is not available for Minecraft {requested_game_version}." = ""
 # placeholders: {runtime}
 "{runtime} action worker disconnected." = ""
+# placeholders: {runtime} {release}
+"{runtime} is up to date ({release})." = ""
 # placeholders: {seconds}
 "{seconds}s ago" = ""
 # placeholders: {severity} {count}

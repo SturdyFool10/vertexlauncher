@@ -1897,6 +1897,11 @@ fn java_paths_body(
         } else {
             &tr!("Test Java")
         };
+        let update_label = if view.in_flight == Some(JavaActionKind::Update) {
+            tr!("Checking...")
+        } else {
+            tr!("Check for update")
+        };
         {
             let _row = kit.row(ui, kit::SPACE_SM);
             if kit.button(
@@ -1907,6 +1912,15 @@ fn java_paths_body(
                 !busy,
             ) {
                 java_actions::request_download(runtime);
+            }
+            if kit.button(
+                ui,
+                &format!("settings::java::{}::update", runtime.major()),
+                &update_label,
+                ButtonKind::Neutral,
+                !busy,
+            ) {
+                java_actions::request_update(runtime, current.clone());
             }
             if kit.button(
                 ui,
