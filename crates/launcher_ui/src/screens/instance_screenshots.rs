@@ -138,19 +138,8 @@ pub(super) fn refresh_instance_screenshots(
     let request_id = state.screenshot_scan_request_serial;
     state.screenshot_scan_in_flight = true;
     let instance_root = instance_root.to_path_buf();
-    tokio_runtime::spawn_detached(async move {
-        let screenshots = tokio_runtime::spawn_blocking(move || {
-            collect_instance_screenshots(instance_root.as_path())
-        })
-        .await;
-        let Ok(screenshots) = screenshots else {
-            tracing::error!(
-                target: "vertexlauncher/instance",
-                request_id,
-                "Failed to complete instance screenshot scan task."
-            );
-            return;
-        };
+    tokio_runtime::spawn_blocking_detached(move || {
+        let screenshots = collect_instance_screenshots(instance_root.as_path());
         if let Err(err) = tx.send((request_id, screenshots)) {
             tracing::error!(
                 target: "vertexlauncher/instance",
@@ -162,41 +151,28 @@ pub(super) fn refresh_instance_screenshots(
     });
 }
 
+/// Lists the screenshots newest first. Nothing is read from the files: a picture's size comes from the engine's asset manager when
+/// the gallery loads it.
 fn collect_instance_screenshots(instance_root: &Path) -> Vec<InstanceScreenshotEntry> {
     let screenshots_dir = instance_root.join("screenshots");
     let Ok(entries) = fs::read_dir(screenshots_dir) else {
         return Vec::new();
     };
-    let mut screenshots = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() || !is_supported_screenshot_path(path.as_path()) {
-            continue;
-        }
-        let Ok((width, height)) = image::image_dimensions(path.as_path()) else {
-            continue;
-        };
-        if width == 0 || height == 0 {
-            continue;
-        }
-        screenshots.push(InstanceScreenshotEntry {
-            file_name: entry.file_name().to_string_lossy().to_string(),
+    let mut screenshots: Vec<InstanceScreenshotEntry> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && is_supported_screenshot_path(path.as_path()))
+        .map(|path| InstanceScreenshotEntry {
+            file_name: path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
             modified_at_ms: modified_millis(path.as_path()),
             path,
-            width,
-            height,
-        });
-    }
-    screenshots.sort_by(|a, b| {
-        b.modified_at_ms
-            .unwrap_or(0)
-            .cmp(&a.modified_at_ms.unwrap_or(0))
-            .then_with(|| a.file_name.cmp(&b.file_name))
+        })
+        .collect();
+    screenshots.sort_by_cached_key(|entry| {
+        (std::cmp::Reverse(config::screenshot_sort_key(&entry.path, entry.modified_at_ms)), std::cmp::Reverse(entry.file_name.clone()))
     });
     screenshots
 }
-
-
 
 pub(super) fn screenshot_key(path: &Path) -> String {
     path.to_string_lossy().to_string()

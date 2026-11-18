@@ -69,8 +69,6 @@ impl InstanceScreenTab {
 pub struct InstanceScreenshotEntry {
     pub path: PathBuf,
     pub file_name: String,
-    pub width: u32,
-    pub height: u32,
     pub modified_at_ms: Option<u64>,
 }
 

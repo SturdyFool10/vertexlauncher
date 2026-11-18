@@ -191,6 +191,16 @@ pub fn screenshot_taken_at(path: &std::path::Path) -> Option<i64> {
         .or_else(|| std::fs::metadata(path).and_then(|meta| meta.modified()).ok().map(unix_seconds))
 }
 
+/// The time a gallery orders a screenshot by: the one [`screenshot_taken_at`] shows (the file name's, else the modified time), so the
+/// order always agrees with the "Taken at" card. `modified_ms` is the already-read modified time, to spare another file lookup.
+pub fn screenshot_sort_key(path: &std::path::Path, modified_ms: Option<u64>) -> i64 {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(taken_at_from_file_stem)
+        .or_else(|| modified_ms.and_then(|ms| i64::try_from(ms / 1000).ok()))
+        .unwrap_or(0)
+}
+
 fn taken_at_from_file_stem(stem: &str) -> Option<i64> {
     // `yyyy-mm-dd_hh.mm.ss`, optionally followed by `_1` for a second screenshot in the same second.
     let (date, rest) = stem.split_once('_')?;
@@ -496,5 +506,17 @@ mod tests {
         assert_eq!(utc().time_ago(then, then), "Just now");
         let zeros = DisplayedTime { relative_hide_zero: false, ..utc() };
         assert_eq!(zeros.time_ago(then, then + 3_604), "1 hour 0 minutes 4 seconds ago");
+    }
+
+    #[test]
+    fn gallery_order_follows_the_file_name_not_a_reset_modified_time() {
+        let old_name = std::path::Path::new("2026-10-29_21.15.30.png");
+        let new_name = std::path::Path::new("2026-11-17_09.00.00.png");
+        // The older screenshot was copied yesterday, so its modified time is newer than the other's.
+        let (old_key, new_key) = (screenshot_sort_key(old_name, Some(1_800_000_000_000)), screenshot_sort_key(new_name, Some(1_000_000_000_000)));
+        assert!(new_key > old_key);
+        // Without a Minecraft-style name the modified time decides.
+        assert_eq!(screenshot_sort_key(std::path::Path::new("shot.png"), Some(5_000)), 5);
+        assert_eq!(screenshot_sort_key(std::path::Path::new("shot.png"), None), 0);
     }
 }

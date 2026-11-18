@@ -576,16 +576,28 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
     let gap = f32::from(kit::SPACE_MD);
     let columns = kit::masonry_columns(width);
     let tile_width = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+    let tiles: Vec<(String, String, std::path::PathBuf)> = shots
+        .iter()
+        .enumerate()
+        .map(|(index, shot)| {
+            (
+                format!("home::shot::{index}"),
+                super::viewer::gallery_key(&shot.path, shot.modified_at_ms),
+                shot.path.clone(),
+            )
+        })
+        .collect();
+    super::viewer::request_in_order(ui, kit, SCROLL_ID, tile_width, &tiles);
+    let ratios: Vec<f32> = tiles.iter().map(|(_, key, _)| super::viewer::tile_ratio(kit, key)).collect();
     let mut heights = vec![0.0_f32; columns];
     let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); columns];
-    for (index, shot) in shots.iter().enumerate() {
+    for index in 0..shots.len() {
         let shortest = heights
             .iter()
             .enumerate()
             .min_by(|a, b| a.1.total_cmp(b.1))
             .map_or(0, |(column, _)| column);
-        heights[shortest] +=
-            tile_width * shot.height as f32 / shot.width.max(1) as f32 + gap;
+        heights[shortest] += tile_width * ratios[index] + gap;
         buckets[shortest].push(index);
     }
     let mut open = None;
@@ -608,9 +620,8 @@ fn screenshots(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
             );
             for &index in bucket {
                 let shot = &shots[index];
-                let tile_id = format!("home::shot::{index}");
-                let height = tile_width * shot.height as f32 / shot.width.max(1) as f32;
-                let key = format!("shot::{}::{:?}", shot.path.display(), shot.modified_at_ms);
+                let (tile_id, key) = (tiles[index].0.clone(), tiles[index].1.clone());
+                let height = tile_width * ratios[index];
                 if kit.near_viewport(ui, SCROLL_ID, &tile_id, 800.0) {
                     let path = shot.path.clone();
                     kit.image(

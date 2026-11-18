@@ -15,12 +15,7 @@ pub(crate) struct HomeState {
     pub(crate) last_screenshot_scan_at: Option<Instant>,
     pub(crate) scanned_screenshot_instance_count: usize,
     pub(crate) screenshot_scan_pending: bool,
-    pub(crate) screenshot_scan_ready: bool,
-    pub(crate) screenshot_tasks_total: usize,
-    pub(crate) screenshot_tasks_done: usize,
     pub(crate) screenshot_candidates: Vec<ScreenshotCandidate>,
-    pub(crate) screenshot_loaded_count: usize,
-    pub(crate) latest_requested_screenshot_scan_id: u64,
     pub(crate) screenshot_layout_revision: u64,
     /// File listings from the worker: (serial, instance count, forced, candidates).
     pub(crate) candidate_scans: launcher_runtime::WorkerChannel<(u64, usize, bool, Vec<ScreenshotCandidate>)>,

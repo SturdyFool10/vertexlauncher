@@ -69,7 +69,6 @@ const SERVER_PINGS_PER_SCAN: usize = 3;
 
 
 const SCREENSHOT_SCAN_INTERVAL: Duration = Duration::from_secs(10);
-const SCREENSHOT_PAGE_SIZE: usize = 30;
 
 
 
@@ -102,8 +101,7 @@ use self::home_screenshots::ScreenshotCandidate;
 use self::home_screenshots::ScreenshotEntry;
 use self::home_screenshots::ScreenshotViewerState;
 use self::home_screenshots::poll_delete_screenshot_results;
-use self::home_screenshots::poll_screenshot_results;
-use self::home_screenshots::{load_next_screenshot_page, poll_screenshot_candidates};
+use self::home_screenshots::poll_screenshot_candidates;
 use self::home_screenshots::refresh_screenshot_state;
 use self::home_server_ping::ServerEntry;
 use self::home_server_ping::ServerPingSnapshot;

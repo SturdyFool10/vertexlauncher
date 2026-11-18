@@ -2,7 +2,7 @@
 //! stick and triggers do the same.
 
 use vertex_i18n::tr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use config::DisplayedTime;
 use vertex_shell::sturdy::glam::Vec2;
@@ -10,7 +10,7 @@ use vertex_shell::sturdy::ui::{
     AttachPoint, Border, Clip, CornerRadius, Direction, ElementDesc, FloatTarget, Floating, Padding, Sizing, Ui,
 };
 
-use super::super::images::Picture;
+use super::super::images::{ImageSource, Picture};
 use super::super::kit::{self, Kit, TextRole};
 
 const MIN_ZOOM: f32 = 1.0;
@@ -18,6 +18,47 @@ const MAX_ZOOM: f32 = 8.0;
 const SCROLL_SENSITIVITY: f32 = 0.0015;
 /// Pixels one wheel notch counts as (the engine reports notches).
 const WHEEL_NOTCH_PIXELS: f32 = 40.0;
+
+/// Shape (height over width) a gallery tile has until the engine has the picture and knows its real one: the 16:9 of a default
+/// Minecraft window.
+const UNKNOWN_TILE_RATIO: f32 = 9.0 / 16.0;
+
+/// Pictures a gallery asks the engine for in one frame while it does not yet know where its tiles are (the first frame of a tab):
+/// the newest ones, not the whole folder.
+const FIRST_FRAME_LOADS: usize = 36;
+
+/// The image-cache key of a gallery picture; it changes when the file does.
+pub fn gallery_key(path: &Path, modified_at_ms: Option<u64>) -> String {
+    format!("shot::{}::{:?}", path.display(), modified_at_ms)
+}
+
+/// Height over width of the gallery picture `key`: the engine's, once it has had it showing, else [`UNKNOWN_TILE_RATIO`].
+pub fn tile_ratio(kit: &Kit, key: &str) -> f32 {
+    match kit.images.known_size(key) {
+        Some((width, height)) if width > 0 && height > 0 => height as f32 / width as f32,
+        _ => UNKNOWN_TILE_RATIO,
+    }
+}
+
+/// Asks the engine's asset manager for the pictures of a gallery that are on (or near) the screen, in list order: `tiles` is
+/// (tile id, image key, file) newest first, so the newest pictures are requested first, reading left to right and then down. The
+/// layout below lays them out in columns, which would otherwise be the order the pictures were first drawn, and so loaded, in.
+/// The engine decodes them off the render thread and hands back their size, which the layout takes the tile shapes from.
+pub fn request_in_order(ui: &mut Ui<'_>, kit: &mut Kit, scroll_id: &str, tile_width: f32, tiles: &[(String, String, PathBuf)]) {
+    let mut unplaced = 0;
+    for (tile_id, key, path) in tiles {
+        if ui.element_bounds(tile_id).is_none() {
+            unplaced += 1;
+            if unplaced > FIRST_FRAME_LOADS {
+                continue;
+            }
+        }
+        if kit.near_viewport(ui, scroll_id, tile_id, 800.0) {
+            let path = path.clone();
+            let _ = kit.images.get(&mut ui.engine(), key, || ImageSource::File(path), (tile_width * 2.0) as u32);
+        }
+    }
+}
 
 /// Zoom and pan of the picture being viewed. `pan` is the offset of the view centre from the picture centre, in
 /// fractions of the picture, and stays inside what the zoom can show.

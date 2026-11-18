@@ -63,8 +63,6 @@ pub struct ScreenshotView {
     pub path: PathBuf,
     pub file_name: String,
     pub instance_name: String,
-    pub width: u32,
-    pub height: u32,
     pub modified_at_ms: Option<u64>,
 }
 
@@ -174,9 +172,7 @@ impl HomeSession {
     pub fn tick_screenshots(&mut self, instances: &InstanceStore, config: &Config) -> bool {
         let state = &mut self.state;
         poll_delete_screenshot_results(state, instances, config);
-        poll_screenshot_results(state);
         poll_screenshot_candidates(state);
-        load_next_screenshot_page(state);
         let should_scan = state.last_screenshot_scan_at.is_none_or(|last| last.elapsed() >= SCREENSHOT_SCAN_INTERVAL)
             || state.scanned_screenshot_instance_count != instances.instances.len();
         if should_scan {
@@ -194,8 +190,6 @@ impl HomeSession {
                 path: shot.path.clone(),
                 file_name: shot.file_name.clone(),
                 instance_name: shot.instance_name.clone(),
-                width: shot.width,
-                height: shot.height,
                 modified_at_ms: shot.modified_at_ms,
             })
             .collect()
@@ -216,14 +210,11 @@ impl HomeSession {
 
     /// Drops the screenshot list (the tab was left) so it rescans next time.
     pub fn forget_screenshots(&mut self) {
-        self.state.latest_requested_screenshot_scan_id = self.state.latest_requested_screenshot_scan_id.saturating_add(1);
         self.state.screenshots.clear();
         self.state.last_screenshot_scan_at = None;
         self.state.scanned_screenshot_instance_count = 0;
         self.state.screenshot_scan_pending = false;
-        self.state.screenshot_scan_ready = false;
         self.state.screenshot_candidates.clear();
-        self.state.screenshot_loaded_count = 0;
     }
 }
 

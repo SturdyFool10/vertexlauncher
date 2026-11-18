@@ -63,6 +63,8 @@ pub struct ImageCache {
     failed_downloads: HashMap<String, DownloadFailure>,
     /// Keys whose picture the engine could not decode (as of the last `get`).
     undecodable: std::collections::HashSet<String>,
+    /// The size of each picture as of the last time the engine had it showing; a gallery lays itself out from these.
+    sizes: HashMap<String, (u32, u32)>,
     tx: mpsc::Sender<Downloaded>,
     rx: mpsc::Receiver<Downloaded>,
     limit_set: bool,
@@ -76,6 +78,7 @@ impl Default for ImageCache {
             downloading: HashMap::new(),
             failed_downloads: HashMap::new(),
             undecodable: std::collections::HashSet::new(),
+            sizes: HashMap::new(),
             tx,
             rx,
             limit_set: false,
@@ -177,11 +180,18 @@ impl ImageCache {
             return None;
         }
         let texture = assets.texture_handle(asset).ok()?;
+        self.sizes.insert(key.to_owned(), (progress.size.x, progress.size.y));
         Some(Picture {
             texture,
             width: progress.size.x,
             height: progress.size.y,
         })
+    }
+
+    /// The size (in pixels, of the texture the engine made; its aspect is the picture's) of `key` once the engine has had it
+    /// showing, without starting a load. Keeps its last value while the picture is released or reloading.
+    pub fn known_size(&self, key: &str) -> Option<(u32, u32)> {
+        self.sizes.get(key).copied()
     }
 
     /// Whether `key` failed to load (so the caller can draw a placeholder instead of waiting): the engine could not decode

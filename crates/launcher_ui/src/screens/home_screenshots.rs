@@ -20,12 +20,8 @@ mod screenshot_overlay_action;
 mod screenshot_overlay_button_result;
 #[path = "home_screenshots/screenshot_overlay_result.rs"]
 mod screenshot_overlay_result;
-#[path = "home_screenshots/screenshot_result_channel.rs"]
-mod screenshot_result_channel;
 #[path = "home_screenshots/screenshot_scan_instance.rs"]
 mod screenshot_scan_instance;
-#[path = "home_screenshots/screenshot_scan_message.rs"]
-mod screenshot_scan_message;
 #[path = "home_screenshots/screenshot_scan_request.rs"]
 mod screenshot_scan_request;
 #[path = "home_screenshots/screenshot_tile_action.rs"]
@@ -37,9 +33,7 @@ pub(super) use self::delete::*;
 pub(super) use self::scan::*;
 pub(super) use self::screenshot_candidate::ScreenshotCandidate;
 pub(super) use self::screenshot_entry::ScreenshotEntry;
-use self::screenshot_result_channel::ScreenshotResultChannel;
 pub(super) use self::screenshot_scan_instance::ScreenshotScanInstance;
-use self::screenshot_scan_message::ScreenshotScanMessage;
 pub(super) use self::screenshot_scan_request::ScreenshotScanRequest;
 pub(super) use self::screenshot_viewer_state::ScreenshotViewerState;
 
