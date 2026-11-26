@@ -74,7 +74,7 @@ pub fn render(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState) {
         }) {
             super::super::super::app_metadata::record_graphics_adapter(
                 &adapter.name,
-                &format!("{:?}", offer.backend),
+                &active_api_label(offer),
                 &adapter.vendor,
                 &offer.driver_version,
             );
@@ -1752,6 +1752,15 @@ fn supported_graphics_apis() -> &'static [GraphicsApiPreference] {
             GraphicsApiPreference::Vulkan,
             GraphicsApiPreference::WebGpu,
         ]
+    }
+}
+
+/// The Info row's graphics API. WebGPU names the native API it runs on top of ("WebGPU (Vulkan)"), which is worth showing.
+fn active_api_label(offer: &vertex_shell::sturdy::device::BackendOffer) -> String {
+    match offer.backend {
+        vertex_shell::sturdy::device::Backend::WebGpu if !offer.api_version.trim().is_empty() => offer.api_version.trim().to_owned(),
+        vertex_shell::sturdy::device::Backend::WebGpu => "WebGPU".to_owned(),
+        other => format!("{other:?}"),
     }
 }
 

@@ -11,7 +11,7 @@ use vertex_shell::sturdy::ui::{
 };
 use vertex_shell::sturdy::ui_kit::{self, PopupStyle};
 
-use super::icons::Icon;
+use super::icons::{self, Icon};
 use super::images::ImageSource;
 use super::kit::{self, Kit, MenuEntry, TextRole};
 use super::{AppState, Dialog, accounts, screens};
@@ -146,20 +146,21 @@ fn title_bar(ui: &mut Ui<'_>, kit: &mut Kit, state: &mut AppState, maximized: bo
         account_button(ui, kit, state);
         // Fullscreen, the window's own controls are hidden (F11 leaves fullscreen).
         if vertex_shell::fullscreen() == vertex_shell::Fullscreen::Off {
-            window_button(ui, kit, FULLSCREEN_ID, Some(Icon::ArrowsMaximize), false, 0.0);
+            window_button(ui, kit, FULLSCREEN_ID, Some((Icon::ArrowsMaximize, 0.0)), false, 0.0);
             let (minimize, maximize) = match state.config.window_controls_style() {
                 config::WindowControlsStyle::Windows => (
-                    Icon::Minus,
-                    if maximized { Icon::Restore } else { Icon::Browser },
+                    (Icon::Minus, 0.0),
+                    (if maximized { Icon::Restore } else { Icon::Browser }, 0.0),
                 ),
+                // The up chevron is the down chevron turned half way round.
                 config::WindowControlsStyle::Linux => (
-                    Icon::ChevronDown,
-                    if maximized { Icon::SquareRotated } else { Icon::ChevronUp },
+                    (Icon::ChevronDown, 0.0),
+                    if maximized { (Icon::SquareRotated, 0.0) } else { (Icon::ChevronDown, 180.0) },
                 ),
             };
             window_button(ui, kit, MINIMIZE_ID, Some(minimize), false, 0.0);
             window_button(ui, kit, MAXIMIZE_ID, Some(maximize), false, 0.0);
-            window_button(ui, kit, CLOSE_ID, Some(Icon::Close), true, radius);
+            window_button(ui, kit, CLOSE_ID, Some((Icon::Close, 0.0)), true, radius);
         }
     }
     // The controls only exist outside fullscreen; asking about them there would put invisible buttons in the keyboard
@@ -288,7 +289,7 @@ fn window_button(
     ui: &mut Ui<'_>,
     kit: &Kit,
     id: &str,
-    icon: Option<Icon>,
+    icon: Option<(Icon, f32)>,
     danger: bool,
     top_right_radius: f32,
 ) {
@@ -316,7 +317,7 @@ fn window_button(
         kit.palette.text
     };
     match icon {
-        Some(icon) => kit.icon(ui, icon, WINDOW_ICON_SIZE, color),
+        Some((icon, degrees)) => icons::draw_turned(ui, icon, degrees, WINDOW_ICON_SIZE, color, kit.svg_supersample),
         None => drop(
             ui.element(
                 &ElementDesc::new()

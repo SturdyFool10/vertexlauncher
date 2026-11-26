@@ -57,6 +57,13 @@ fn test_skin() -> RgbaImage {
 
 impl GameLogic for Probe {
     fn init(&mut self, engine: &mut Engine<'_>) -> Result<(), Error> {
+        if std::env::var("PROBE_WEBGPU").is_ok() {
+            for adapter in engine.available_adapters() {
+                for offer in adapter.backends.iter().filter(|offer| offer.active) {
+                    println!("[probe] active adapter: {} via {:?}", adapter.name, offer.backend);
+                }
+            }
+        }
         self.renderer = Some(PreviewRenderer::new(engine)?);
         self.session.set_preview_skin(test_skin(), SkinVariant::Classic);
         if self.cape {
