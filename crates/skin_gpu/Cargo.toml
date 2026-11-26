@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # Pinned by rev, like vertex_shell: the engine's CMake build lives in OUT_DIR.
-sturdy = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "911d04bf3149d6658a534baebc42520cadb36753", features = ["raw-window-handle", "webgpu", "prebuilt-deps"] }
+sturdy = { git = "https://github.com/sturdyfool10/sturdyengine5", rev = "5fbc6f019ec6b3ca576c770980f314f826c2957b", features = ["raw-window-handle", "webgpu", "prebuilt-deps"] }
 launcher_ui.workspace = true
 config.workspace = true
 image.workspace = true

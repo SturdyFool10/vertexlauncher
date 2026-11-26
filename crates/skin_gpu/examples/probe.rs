@@ -311,10 +311,10 @@ fn main() -> std::process::ExitCode {
             }
         }
         install_hook(out, rest.iter().any(|a| a == "layers"));
-        return sturdy::run(RuntimeConfig::new("skin preview probe").size(480, 460).visible(false), Idle);
+        return sturdy::run(probe_config(), Idle);
     }
     sturdy::run(
-        RuntimeConfig::new("skin preview probe").size(480, 460).visible(false),
+        probe_config(),
         Probe {
             session: SkinsSession::new(),
             renderer: None,
@@ -329,4 +329,14 @@ fn main() -> std::process::ExitCode {
             cached: None,
         },
     )
+}
+
+/// `PROBE_WEBGPU=1` runs the probe on the WebGPU (WGSL) backend, as the launcher does when set to WebGPU.
+fn probe_config() -> RuntimeConfig {
+    let config = RuntimeConfig::new("skin preview probe").size(480, 460).visible(false);
+    if std::env::var("PROBE_WEBGPU").is_ok() {
+        config.device_request(sturdy::device::DeviceRequest::new().backend(sturdy::device::Backend::WebGpu))
+    } else {
+        config
+    }
 }

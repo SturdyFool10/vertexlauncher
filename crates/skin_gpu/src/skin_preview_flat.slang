@@ -60,6 +60,10 @@ float alpha_cutoff;
 // 1: smooth the seams between texels ("texel boundary" anti-aliasing); 0: plain nearest texels. Set by the host.
 float texel_aa;
 
+// The size in texels of `base_color_texture`, set by the host. Not read with GetDimensions: on a combined Sampler2D the WebGPU
+// (WGSL) backend binds that call's outputs to the wrong variables ("cannot assign 'u32' to 'sampler'") and the shader fails.
+float4 texture_size;
+
 Sampler2D base_color_texture;
 
 static const float3 kLightDirection = normalize(float3(0.35, 1.0, 0.2));
@@ -120,10 +124,7 @@ float4 sampleTexelBoundaryAa(float2 uv, float4 uvBounds, float2 dims, float2 foo
 
 // The surface colour of a fragment, shared by the depth prepass and the G-buffer pass so both agree on what is drawn.
 float4 surfaceTexel(VertexOutput input) {
-    uint width;
-    uint height;
-    base_color_texture.GetDimensions(width, height);
-    float2 dims = float2(max(width, 1u), max(height, 1u));
+    float2 dims = max(texture_size.xy, float2(1.0));
     // Derivatives outside any branch: the sample positions must be the same for every pixel of a quad.
     float2 footprint = fwidth(input.uv * dims);
     float4 nearest = base_color_texture.Sample(input.uv);

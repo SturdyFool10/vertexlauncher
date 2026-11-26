@@ -49,6 +49,10 @@ struct Instance {
     geometry_hash: u64,
     /// The texel anti-aliasing value last written to the model's material.
     texel_aa: bool,
+    /// Whether it is drawn with the cape texture (otherwise the skin's).
+    uses_cape: bool,
+    /// The texture size last written to the model's material.
+    texture_size: [u32; 2],
 }
 
 /// One quad of the animated face. Its geometry is a fixed unit square; where the quad is, how big and how it is turned is the
@@ -104,6 +108,12 @@ fn canonical_quad(quad: &SceneQuad) -> CanonicalQuad {
 pub(crate) struct TextureSlot {
     pub(crate) asset: Asset,
     pub(crate) hash: u64,
+    pub(crate) size: [u32; 2],
+}
+
+/// Writes the texture's size into the model's material, which the shader needs for its texel maths.
+fn write_texture_size(engine: &mut Engine<'_>, model: Asset, size: [u32; 2]) {
+    let _ = engine.assets().set_model_vec4(model, 0, "texture_size", Vec4::new(size[0] as f32, size[1] as f32, 0.0, 0.0));
 }
 
 /// A part that could not be built, and when to try again: retrying every frame would repeat the same failure (and its log line)
@@ -226,7 +236,20 @@ impl PreviewRenderer {
     fn sync_textures(&mut self, engine: &mut Engine<'_>, frame: &GpuFrame) -> Result<(), sturdy::Error> {
         sync_texture(engine, &mut self.skin, Some((&frame.skin, frame.skin_hash)), "skin preview skin")?;
         let cape = frame.cape.as_ref().zip(frame.cape_hash);
-        sync_texture(engine, &mut self.cape, cape, "skin preview cape")
+        sync_texture(engine, &mut self.cape, cape, "skin preview cape")?;
+        // A replaced texture may have a new size: the models already drawing it must hear of it.
+        let skin_size = self.skin.as_ref().map(|slot| slot.size);
+        let cape_size = self.cape.as_ref().map(|slot| slot.size);
+        let instances = self.parts.values_mut().chain(self.face.iter_mut().flatten().map(|quad| &mut quad.instance));
+        for instance in instances {
+            if let Some(size) = if instance.uses_cape { cape_size } else { skin_size }
+                && instance.texture_size != size
+            {
+                write_texture_size(engine, instance.model, size);
+                instance.texture_size = size;
+            }
+        }
+        Ok(())
     }
 
     /// Creates, moves and removes the part entities. True when a part had to be skipped for want of its geometry.
@@ -425,11 +448,9 @@ impl PreviewRenderer {
         transform: [f32; 16],
         texel_aa: bool,
     ) -> Result<Instance, String> {
-        let texture = match quads.first().map(|quad| quad.texture) {
-            Some(SceneTexture::Cape) => self.cape.as_ref(),
-            _ => self.skin.as_ref(),
-        }
-        .ok_or_else(|| "its texture is not loaded".to_owned())?;
+        let uses_cape = matches!(quads.first().map(|quad| quad.texture), Some(SceneTexture::Cape));
+        let texture = (if uses_cape { self.cape.as_ref() } else { self.skin.as_ref() })
+            .ok_or_else(|| "its texture is not loaded".to_owned())?;
         let (vertices, indices) = mesh_of(quads);
         let primitive = ModelPrimitive::new(vertices, indices, self.shader)
             .with_texture("base_color_texture", texture.asset)
@@ -442,6 +463,8 @@ impl PreviewRenderer {
             .map_err(|err| format!("{err:?}"))?;
         let _ = engine.assets().set_model_float(model, 0, "alpha_cutoff", ALPHA_CUTOFF);
         let _ = engine.assets().set_model_float(model, 0, "texel_aa", if texel_aa { 1.0 } else { 0.0 });
+        let texture_size = texture.size;
+        write_texture_size(engine, model, texture_size);
         let entity = engine
             .ecs()
             .spawn_builder()
@@ -449,7 +472,7 @@ impl PreviewRenderer {
             .with(ModelRenderer::new(model).with_visibility_mask(self.layer))
             .build()
             .map_err(|err| format!("{err:?}"))?;
-        Ok(Instance { entity, model, geometry_hash, texel_aa })
+        Ok(Instance { entity, model, geometry_hash, texel_aa, uses_cape, texture_size })
     }
 
     /// Releases everything the renderer made.
@@ -533,6 +556,7 @@ pub(crate) fn sync_texture(
                 )
                 .map_err(sturdy::Error::new)?;
             current.hash = hash;
+            current.size = [width, height];
             Ok(())
         }
         None => {
@@ -553,7 +577,7 @@ pub(crate) fn sync_texture(
                     true,
                 )
                 .map_err(|err| sturdy::Error::new(format!("{err:?}")))?;
-            *slot = Some(TextureSlot { asset, hash });
+            *slot = Some(TextureSlot { asset, hash, size: [width, height] });
             Ok(())
         }
     }

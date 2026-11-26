@@ -875,7 +875,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2756,7 +2756,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3128,7 +3128,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "sturdy"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=911d04bf3149d6658a534baebc42520cadb36753#911d04bf3149d6658a534baebc42520cadb36753"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=5fbc6f019ec6b3ca576c770980f314f826c2957b#5fbc6f019ec6b3ca576c770980f314f826c2957b"
 dependencies = [
  "bytemuck",
  "cxx",
@@ -3144,7 +3144,7 @@ dependencies = [
 [[package]]
 name = "sturdy-macros"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=911d04bf3149d6658a534baebc42520cadb36753#911d04bf3149d6658a534baebc42520cadb36753"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=5fbc6f019ec6b3ca576c770980f314f826c2957b#5fbc6f019ec6b3ca576c770980f314f826c2957b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3154,12 +3154,12 @@ dependencies = [
 [[package]]
 name = "sturdy-net"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=911d04bf3149d6658a534baebc42520cadb36753#911d04bf3149d6658a534baebc42520cadb36753"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=5fbc6f019ec6b3ca576c770980f314f826c2957b#5fbc6f019ec6b3ca576c770980f314f826c2957b"
 
 [[package]]
 name = "sturdy-script"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=911d04bf3149d6658a534baebc42520cadb36753#911d04bf3149d6658a534baebc42520cadb36753"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=5fbc6f019ec6b3ca576c770980f314f826c2957b#5fbc6f019ec6b3ca576c770980f314f826c2957b"
 dependencies = [
  "sturdy-net",
 ]
@@ -3167,7 +3167,7 @@ dependencies = [
 [[package]]
 name = "sturdy-sys"
 version = "0.1.0"
-source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=911d04bf3149d6658a534baebc42520cadb36753#911d04bf3149d6658a534baebc42520cadb36753"
+source = "git+https://github.com/sturdyfool10/sturdyengine5?rev=5fbc6f019ec6b3ca576c770980f314f826c2957b#5fbc6f019ec6b3ca576c770980f314f826c2957b"
 dependencies = [
  "cxx",
  "cxx-gen",
@@ -3250,7 +3250,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4142,7 +4142,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
